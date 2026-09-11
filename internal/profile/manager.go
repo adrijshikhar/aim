@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,8 +51,36 @@ func (m *ProfileManager) EnsureProfile(name string) (string, error) {
 		return "", fmt.Errorf("failed to create profile directory: %w", err)
 	}
 	realHome := config.RealHomeDir()
-	_ = EnsureDotfiles(realHome, pDir)
+	var extraPaths []string
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && len(cfg.CustomBridgedPaths) > 0 {
+		extraPaths = cfg.CustomBridgedPaths
+	}
+	_ = EnsureDotfiles(realHome, pDir, extraPaths...)
 	return pDir, nil
+}
+
+// EnsureAllProfilesDotfiles ensures that all existing profiles on disk have up-to-date
+// bridged developer configurations, tools, and keychains.
+func (m *ProfileManager) EnsureAllProfilesDotfiles() error {
+	profiles, err := m.ListProfiles()
+	if err != nil {
+		return err
+	}
+	realHome := config.RealHomeDir()
+	var extraPaths []string
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && len(cfg.CustomBridgedPaths) > 0 {
+		extraPaths = cfg.CustomBridgedPaths
+	}
+	var errs []error
+	for _, p := range profiles {
+		pDir := m.ProfileDir(p)
+		if err := EnsureDotfiles(realHome, pDir, extraPaths...); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (m *ProfileManager) ListProfiles() ([]string, error) {
@@ -271,7 +300,11 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 
 	// Guarantee dotfiles are linked
 	realHome := config.RealHomeDir()
-	_ = EnsureDotfiles(realHome, dstDir)
+	var extraPaths []string
+	if cfg != nil && len(cfg.CustomBridgedPaths) > 0 {
+		extraPaths = cfg.CustomBridgedPaths
+	}
+	_ = EnsureDotfiles(realHome, dstDir, extraPaths...)
 
 	// Update config
 	srcAgents := cfg.GetProfileAgents(sourceProfile)

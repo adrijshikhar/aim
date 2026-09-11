@@ -30,9 +30,10 @@ func (p *ProfileConfig) UnmarshalJSON(data []byte) error {
 }
 
 type Config struct {
-	DefaultAgent   string                   `json:"default_agent"`
-	DefaultProfile string                   `json:"default_profile"`
-	Profiles       map[string]ProfileConfig `json:"profiles"`
+	DefaultAgent       string                   `json:"default_agent"`
+	DefaultProfile     string                   `json:"default_profile"`
+	CustomBridgedPaths []string                 `json:"custom_bridged_paths,omitempty"`
+	Profiles           map[string]ProfileConfig `json:"profiles"`
 }
 
 func RealHomeDir() string {

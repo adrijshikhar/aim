@@ -36,6 +36,9 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 	if reg == nil {
 		return
 	}
+	if pm != nil {
+		_ = pm.EnsureAllProfilesDotfiles()
+	}
 	cfg, _ := config.LoadConfig()
 
 	if agentName != "" {
