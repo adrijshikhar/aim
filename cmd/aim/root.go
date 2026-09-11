@@ -8,7 +8,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const Version = "0.1.0"
+var (
+	// Version is the current version of AIM, injected at build time via -ldflags.
+	Version = "0.1.0"
+	// Commit is the git commit hash at build time.
+	Commit = "none"
+	// Date is the build timestamp.
+	Date = "unknown"
+)
 
 // ExitError represents an explicit process exit code from command execution.
 type ExitError struct {

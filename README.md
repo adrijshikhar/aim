@@ -29,37 +29,32 @@ aim ui                    # open the interactive TUI dashboard
 
 ## Installation
 
-### Requirements
+### 1. Quick Install (macOS & Linux)
 
-- Go 1.22+
-- Any of: `agy` (Antigravity CLI), `gemini` (Gemini CLI) — only those you actually use
+```bash
+curl -fsSL https://raw.githubusercontent.com/adrijshikhar/aim/main/install.sh | sh
+```
 
-### Build and install
+This automatically detects your platform (`darwin`/`linux`, `arm64`/`amd64`), downloads the verified binary from GitHub Releases, checks SHA256 sums, and installs shell autocompletions for zsh, bash, and fish.
+
+### 2. Homebrew
+
+```bash
+brew install adrijshikhar/tap/aim
+```
+
+### 3. Pre-Compiled Binaries
+
+Download standalone archives for macOS and Linux from [GitHub Releases](https://github.com/adrijshikhar/aim/releases/latest).
+
+### 4. Build from Source
+
+Requires Go 1.23+:
 
 ```bash
 git clone https://github.com/adrijshikhar/aim
 cd aim
 make install
-```
-
-This installs the `aim` binary **and** shell completions for zsh, bash, and fish automatically.
-
-By default, everything goes under `~/.local`:
-
-| Artifact | Location |
-|---|---|
-| Binary | `~/.local/bin/aim` |
-| zsh completion | `~/.zsh/completions/_aim` |
-| bash completion | `~/.local/share/bash-completion/completions/aim` |
-| fish completion | `~/.config/fish/completions/aim.fish` |
-
-Override any path via Make variables:
-
-```bash
-make install PREFIX=/usr/local \
-             ZSH_COMPLETION_DIR=/usr/share/zsh/site-functions \
-             BASH_COMPLETION_DIR=/etc/bash_completion.d \
-             FISH_COMPLETION_DIR=/usr/share/fish/completions
 ```
 
 ### Activate completions after first install

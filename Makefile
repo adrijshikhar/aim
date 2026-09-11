@@ -6,7 +6,7 @@ ZSH_COMPLETION_DIR   ?= $(HOME)/.zsh/completions
 BASH_COMPLETION_DIR  ?= $(HOME)/.local/share/bash-completion/completions
 FISH_COMPLETION_DIR  ?= $(HOME)/.config/fish/completions
 
-.PHONY: all build test smoke install install-completions uninstall uninstall-completions clean
+.PHONY: all build test smoke install install-completions uninstall uninstall-completions clean release release-snapshot
 
 all: build
 
@@ -21,6 +21,14 @@ test:
 smoke: build
 	@echo "Running smoke tests..."
 	./test/smoke_test.sh
+
+release-snapshot:
+	@echo "Building local snapshot release with GoReleaser..."
+	goreleaser release --snapshot --clean
+
+release:
+	@echo "Publishing release with GoReleaser..."
+	goreleaser release --clean
 
 # ─── Install ────────────────────────────────────────────────────────────────
 
