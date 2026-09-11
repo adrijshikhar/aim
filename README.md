@@ -247,39 +247,9 @@ make install-completions
 
 ---
 
-## Adding a New Agent
+## Contributing
 
-1. Create `internal/agents/<name>/adapter.go` implementing the `AgentAdapter` interface:
-   ```go
-   type AgentAdapter interface {
-       Name() string
-       DisplayName() string
-       Aliases() []string
-       BinaryName() string
-       HasCredentials(profileDir string) bool
-       Login(ctx context.Context, profileName, profileDir string) error
-       PrepareEnv(profileName, profileDir string) (LaunchEnv, error)
-       Doctor(ctx context.Context, profileName, profileDir string) []DiagnosticResult
-       GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error)
-   }
-   ```
-2. Register it in `cmd/aim/main.go`:
-   ```go
-   reg.Register(myagent.NewAdapter())
-   ```
-
-Completions, TUI tabs, and CLI filtering all pick up the new agent automatically.
-
----
-
-## Development
-
-```bash
-make build      # compile binary to ./aim
-make test       # run unit tests (with -race)
-make smoke      # build + run integration smoke tests
-make clean      # remove ./aim binary
-```
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup, test suite instructions (`make test`, `make smoke`), and how to add support for new AI coding agents.
 
 ---
 
