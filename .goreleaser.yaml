@@ -57,3 +57,4 @@ homebrew_casks:
     homepage: "https://github.com/adrijshikhar/aim"
     description: "Isolated Profile Manager for AI Agents (Antigravity, Claude Code, Codex, Gemini)"
     directory: "Casks"
+    skip_upload: true
