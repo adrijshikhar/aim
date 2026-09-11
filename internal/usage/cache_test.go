@@ -162,6 +162,48 @@ func TestCacheStoreDelete(t *testing.T) {
 	}
 }
 
+func TestCacheStoreRename(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "aim-usage-rename-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	store := usage.NewCacheStore(tmpDir, time.Minute)
+	_ = store.Put(usage.Report{Agent: "agy", Profile: "p1", Status: usage.StatusOK})
+	_ = store.Put(usage.Report{Agent: "gemini", Profile: "p1", Status: usage.StatusOK})
+	_ = store.Put(usage.Report{Agent: "agy", Profile: "other", Status: usage.StatusOK})
+
+	store.Rename("p1", "p1-renamed")
+
+	if _, found := store.Get("agy", "p1"); found {
+		t.Errorf("expected agy:p1 to be removed after rename")
+	}
+	if _, found := store.Get("gemini", "p1"); found {
+		t.Errorf("expected gemini:p1 to be removed after rename")
+	}
+
+	repAgy, foundAgy := store.Get("agy", "p1-renamed")
+	if !foundAgy || repAgy.Profile != "p1-renamed" {
+		t.Errorf("expected agy:p1-renamed to exist with updated profile name")
+	}
+
+	repGem, foundGem := store.Get("gemini", "p1-renamed")
+	if !foundGem || repGem.Profile != "p1-renamed" {
+		t.Errorf("expected gemini:p1-renamed to exist with updated profile name")
+	}
+
+	if _, found := store.Get("agy", "other"); !found {
+		t.Errorf("expected agy:other to remain untouched")
+	}
+
+	// Verify persistence
+	store2 := usage.NewCacheStore(tmpDir, time.Minute)
+	if _, found := store2.Get("agy", "p1-renamed"); !found {
+		t.Errorf("expected agy:p1-renamed to persist on disk")
+	}
+}
+
 func TestRefreshAsync(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "aim-usage-engine-test-*")
 	if err != nil {

@@ -1172,3 +1172,199 @@ func TestTUI_DoctorDrawer_ConfigOverrides(t *testing.T) {
 		t.Errorf("expected doctor drawer to have config args result, got %v", results)
 	}
 }
+
+func TestTUI_RenameModal_TriggerAndCancel(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	// Press 'm' to open rename modal
+	mOpen, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m2 := mOpen.(Model)
+
+	if !m2.IsRenameModalActive() {
+		t.Fatalf("expected rename modal to be active after pressing 'm'")
+	}
+	if m2.RenameModalTarget() != "alpha" {
+		t.Errorf("expected target 'alpha', got %q", m2.RenameModalTarget())
+	}
+
+	// Press 'esc' to cancel
+	mCancel, _ := m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m3 := mCancel.(Model)
+
+	if m3.IsRenameModalActive() {
+		t.Errorf("expected rename modal to be closed after 'esc'")
+	}
+
+	// Test trigger with 'R'
+	mOpenR, _ := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	m4 := mOpenR.(Model)
+	if !m4.IsRenameModalActive() {
+		t.Fatalf("expected rename modal to be active after pressing 'R'")
+	}
+}
+
+func TestTUI_RenameModal_ValidationErrors(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	// Open modal
+	mOpen, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m2 := mOpen.(Model)
+
+	// Press Enter without typing anything
+	mEmpty, _ := m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := mEmpty.(Model)
+	if !m3.IsRenameModalActive() {
+		t.Fatalf("expected modal to remain active on empty input")
+	}
+	if m3.RenameModalError() != "Profile name cannot be empty" {
+		t.Errorf("expected empty error message, got %q", m3.RenameModalError())
+	}
+
+	// Type "alpha" (same name)
+	mTyping := m3
+	for _, r := range "alpha" {
+		up, _ := mTyping.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mTyping = up.(Model)
+	}
+	mSame, _ := mTyping.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m4 := mSame.(Model)
+	if !m4.IsRenameModalActive() {
+		t.Fatalf("expected modal to remain active on same name")
+	}
+	if m4.RenameModalError() != "New profile name must be different from current name" {
+		t.Errorf("expected same name error, got %q", m4.RenameModalError())
+	}
+}
+
+func TestTUI_RenameModal_Success(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	// Set mock reports for multiple agents in reports and cache
+	m.reports["agy:alpha"] = usage.Report{
+		Agent:   "agy",
+		Profile: "alpha",
+		Status:  usage.StatusOK,
+	}
+	m.reports["gemini:alpha"] = usage.Report{
+		Agent:   "gemini",
+		Profile: "alpha",
+		Status:  usage.StatusOK,
+	}
+	if m.cache != nil {
+		_ = m.cache.Put(usage.Report{
+			Agent:   "agy",
+			Profile: "alpha",
+			Status:  usage.StatusOK,
+		})
+		_ = m.cache.Put(usage.Report{
+			Agent:   "gemini",
+			Profile: "alpha",
+			Status:  usage.StatusOK,
+		})
+	}
+
+	// Open modal on "alpha"
+	mOpen, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	mCurrent := mOpen.(Model)
+
+	// Type "charlie"
+	for _, r := range "charlie" {
+		up, _ := mCurrent.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mCurrent = up.(Model)
+	}
+
+	if mCurrent.RenameModalInputValue() != "charlie" {
+		t.Fatalf("expected input value 'charlie', got %q", mCurrent.RenameModalInputValue())
+	}
+
+	// Press Enter to submit
+	mSubmit, _ := mCurrent.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mDone := mSubmit.(Model)
+
+	if mDone.IsRenameModalActive() {
+		t.Fatalf("expected modal to close after successful rename, err: %s", mDone.RenameModalError())
+	}
+
+	// Profiles should contain "beta" and "charlie", but not "alpha"
+	foundCharlie := false
+	foundAlpha := false
+	for _, p := range mDone.Profiles() {
+		if p == "charlie" {
+			foundCharlie = true
+		}
+		if p == "alpha" {
+			foundAlpha = true
+		}
+	}
+	if !foundCharlie || foundAlpha {
+		t.Errorf("expected profiles to contain 'charlie' and not 'alpha', got %v", mDone.Profiles())
+	}
+
+	// Cursor should point to "charlie"
+	if mDone.Profiles()[mDone.cursor] != "charlie" {
+		t.Errorf("expected cursor on 'charlie', got %q", mDone.Profiles()[mDone.cursor])
+	}
+
+	// Cache and reports should be updated to "charlie" for ALL agents
+	if _, ok := mDone.reports["agy:charlie"]; !ok {
+		t.Errorf("expected report for 'agy:charlie' to exist")
+	}
+	if _, ok := mDone.reports["agy:alpha"]; ok {
+		t.Errorf("expected old report for 'agy:alpha' to be deleted")
+	}
+	if _, ok := mDone.reports["gemini:charlie"]; !ok {
+		t.Errorf("expected report for 'gemini:charlie' to exist")
+	}
+	if _, ok := mDone.reports["gemini:alpha"]; ok {
+		t.Errorf("expected old report for 'gemini:alpha' to be deleted")
+	}
+	if mDone.cache != nil {
+		if _, found := mDone.cache.Get("agy", "charlie"); !found {
+			t.Errorf("expected cache entry for 'agy:charlie'")
+		}
+		if _, found := mDone.cache.Get("agy", "alpha"); found {
+			t.Errorf("expected cache entry for 'agy:alpha' to be deleted")
+		}
+		if _, found := mDone.cache.Get("gemini", "charlie"); !found {
+			t.Errorf("expected cache entry for 'gemini:charlie'")
+		}
+		if _, found := mDone.cache.Get("gemini", "alpha"); found {
+			t.Errorf("expected cache entry for 'gemini:alpha' to be deleted")
+		}
+	}
+}
+
+func TestTUI_RenameModal_EmptyList_NoOp(t *testing.T) {
+	m := newTestModel(t) // 0 profiles
+	mOpen, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m2 := mOpen.(Model)
+
+	if m2.IsRenameModalActive() {
+		t.Errorf("expected rename modal not to open on empty profile list")
+	}
+}
+
+func TestTUI_RenameModal_ViewRendering(t *testing.T) {
+	m := newTestModel(t, "alpha")
+
+	// Check footer hints in normal view
+	normalView := m.View()
+	if !strings.Contains(normalView, "[m]") || !strings.Contains(normalView, "Rename") {
+		t.Errorf("expected normal view to contain [m] Rename, got:\n%s", normalView)
+	}
+
+	// Open rename modal
+	mOpen, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	modalView := mOpen.(Model).View()
+
+	if !strings.Contains(modalView, "Rename Profile: alpha") {
+		t.Errorf("expected modal view to contain 'Rename Profile: alpha', got:\n%s", modalView)
+	}
+	if !strings.Contains(modalView, "Enter new name for profile:") {
+		t.Errorf("expected modal view to contain input prompt, got:\n%s", modalView)
+	}
+	if !strings.Contains(modalView, "[Enter] Confirm") || !strings.Contains(modalView, "[Esc] Cancel") {
+		t.Errorf("expected modal view to contain confirm/cancel hints, got:\n%s", modalView)
+	}
+}
+

@@ -144,6 +144,7 @@ Launching `aim` without arguments (or running `aim ui`) opens the terminal user 
   - `[s]`: Drop into an isolated subshell with the profile environment.
   - `[l]`: Launch browser OAuth login to authenticate the profile.
   - `[d]`: Open the embedded Doctor diagnostics drawer.
+  - `[m]` / `[R]`: Open the interactive profile rename modal.
   - `[x]`: Open the interactive profile deletion modal.
   - `[r]`: Bypass cache and force a live quota refresh.
   - `[q]`: Quit.

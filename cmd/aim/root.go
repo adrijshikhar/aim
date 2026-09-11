@@ -43,6 +43,7 @@ Primary Commands:
   doctor [agent]             Diagnose environment, tokens, and binaries
   remove [agent] <profile>   Delete profile credentials and state
   clone [agent] <src> <dst>  Duplicate profile settings without copying tokens
+  rename <old> <new>         Rename profile preserving all tokens and state
   whoami                     Show active profile, agent, session, and quota
   ui                         Open interactive TUI dashboard (default)
   completion <shell>         Generate shell completion script (zsh, bash, fish)
@@ -77,6 +78,7 @@ Flags:
 		newDoctorCmd(reg, pm),
 		newRemoveCmd(reg, pm),
 		newCloneCmd(reg, pm),
+		newRenameCmd(reg, pm),
 		newWhoamiCmd(reg, pm),
 		newUICmd(reg, pm),
 		newPrewarmCmd(reg, pm),
