@@ -81,12 +81,30 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
 # 5. Download Artifacts
 info "Downloading ${TARBALL_NAME}..."
-if ! curl -fSL --progress-bar "$DOWNLOAD_URL" -o "$TMP_DIR/$TARBALL_NAME"; then
-  error "Failed to download $DOWNLOAD_URL. Please verify your internet connection or target release."
+DOWNLOAD_SUCCESS=false
+
+if curl -fSL --progress-bar "$DOWNLOAD_URL" -o "$TMP_DIR/$TARBALL_NAME" 2>/dev/null; then
+  DOWNLOAD_SUCCESS=true
+elif [ -n "${GITHUB_TOKEN:-}" ] || [ -n "${GH_TOKEN:-}" ]; then
+  TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+  if curl -fSL -H "Authorization: token $TOKEN" "$DOWNLOAD_URL" -o "$TMP_DIR/$TARBALL_NAME" 2>/dev/null; then
+    DOWNLOAD_SUCCESS=true
+  fi
+fi
+
+if [ "$DOWNLOAD_SUCCESS" = "false" ] && command -v gh >/dev/null 2>&1; then
+  if gh release download "$VERSION" -R "$REPO" -p "$TARBALL_NAME" -D "$TMP_DIR" >/dev/null 2>&1; then
+    DOWNLOAD_SUCCESS=true
+    gh release download "$VERSION" -R "$REPO" -p "checksums.txt" -D "$TMP_DIR" >/dev/null 2>&1 || true
+  fi
+fi
+
+if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
+  error "Failed to download $DOWNLOAD_URL. Please verify your internet connection, release visibility, or GitHub token."
 fi
 
 # 6. Verify Checksum
-if curl -fsSL "$CHECKSUMS_URL" -o "$TMP_DIR/checksums.txt" 2>/dev/null; then
+if [ -f "$TMP_DIR/checksums.txt" ] || curl -fsSL "$CHECKSUMS_URL" -o "$TMP_DIR/checksums.txt" 2>/dev/null; then
   info "Verifying SHA256 checksum..."
   EXPECTED_SUM="$(grep "$TARBALL_NAME" "$TMP_DIR/checksums.txt" | awk '{print $1}' || echo '')"
   if [ -n "$EXPECTED_SUM" ]; then
