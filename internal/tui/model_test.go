@@ -304,6 +304,9 @@ func TestTUIModelViewRendering(t *testing.T) {
 	if !strings.Contains(view, "AIM — AI Multi-Agent Multiplexer") {
 		t.Errorf("expected title in view")
 	}
+	if !strings.Contains(view, "https://github.com/adrijshikhar/aim") {
+		t.Errorf("expected repo URL in view")
+	}
 	if !strings.Contains(view, "Antigravity (agy)") {
 		t.Errorf("expected Antigravity in view")
 	}

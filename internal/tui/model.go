@@ -729,9 +729,46 @@ func formatWindowsBadge(windows []usage.LimitWindow) string {
 	return "[" + strings.Join(parts, " | ") + "]"
 }
 
+func (m Model) renderHeader() string {
+	logoStyle := lipgloss.NewStyle().Bold(true).Foreground(StatusGreen)
+	urlStyle := lipgloss.NewStyle().Foreground(AccentPurple)
+	tagStyle := lipgloss.NewStyle().Foreground(StatusGreen)
+
+	logoLines := []string{
+		"    _    ___ __  __ ",
+		"   / \\  |_ _|  \\/  |",
+		"  / _ \\  | || |\\/| |",
+		" / ___ \\ | || |  | |",
+		"/_/   \\_\\___|_|  |_|",
+	}
+
+	var out strings.Builder
+	if m.width > 0 && m.width < 70 {
+		for _, l := range logoLines {
+			out.WriteString(logoStyle.Render(l) + "\n")
+		}
+		out.WriteString("  " + urlStyle.Render("https://github.com/adrijshikhar/aim") + "\n")
+		out.WriteString("  " + tagStyle.Render("AIM — AI Multi-Agent Multiplexer") + "\n\n")
+		return out.String()
+	}
+
+	for i, l := range logoLines {
+		renderedLogo := logoStyle.Render(l)
+		if i == 2 {
+			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, urlStyle.Render("https://github.com/adrijshikhar/aim")))
+		} else if i == 3 {
+			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, tagStyle.Render("AIM — AI Multi-Agent Multiplexer")))
+		} else {
+			out.WriteString(renderedLogo + "\n")
+		}
+	}
+	out.WriteString("\n")
+	return out.String()
+}
+
 func (m Model) View() string {
 	var s strings.Builder
-	s.WriteString(TitleStyle.Render("AIM — AI Multi-Agent Multiplexer") + "\n\n")
+	s.WriteString(m.renderHeader())
 
 	agyTab := TabInactiveStyle.Render("[1] Antigravity (agy)")
 	gemTab := TabInactiveStyle.Render("[2] Gemini")

@@ -1,3 +1,11 @@
+```text
+    _    ___ __  __ 
+   / \  |_ _|  \/  |
+  / _ \  | || |\/| |   https://github.com/adrijshikhar/aim
+ / ___ \ | || |  | |   AIM — AI Multi-Agent Multiplexer
+/_/   \_\___|_|  |_|
+```
+
 # aim — AI Multiplexer
 
 `aim` is a lightweight CLI and TUI for running multiple AI coding assistants (Antigravity, Gemini, Codex, Claude…) under fully isolated profiles. Each profile gets its own virtual home directory — separate config, credentials, history, and state — so you can have a `work` and a `personal` Antigravity account side-by-side without them ever interfering.
