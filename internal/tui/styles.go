@@ -83,27 +83,27 @@ var (
 			Foreground(StatusRed)
 
 	ModalBtnActiveStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(TextBright).
-			Background(StatusRed).
-			Padding(0, 1)
+				Bold(true).
+				Foreground(TextBright).
+				Background(StatusRed).
+				Padding(0, 1)
 
 	ModalBtnInactiveStyle = lipgloss.NewStyle().
-			Foreground(TextSecondary).
-			Background(BgTabActive).
-			Padding(0, 1)
+				Foreground(TextSecondary).
+				Background(BgTabActive).
+				Padding(0, 1)
 
 	ModalBtnCancelActiveStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(TextBright).
-			Background(AccentBlue).
-			Padding(0, 1)
+					Bold(true).
+					Foreground(TextBright).
+					Background(AccentBlue).
+					Padding(0, 1)
 
 	DoctorDrawerStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(AccentBlue).
-			Padding(1, 2).
-			MarginLeft(2)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(AccentBlue).
+				Padding(1, 2).
+				MarginLeft(2)
 )
 
 func GaugeStyleForStatus(st usage.Status) lipgloss.Style {

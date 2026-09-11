@@ -1453,4 +1453,3 @@ func TestTriggerPrewarmAsync(t *testing.T) {
 	// Second call should be throttled by lock
 	triggerPrewarmAsync(tempBase, "mock")
 }
-

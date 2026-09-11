@@ -1172,4 +1172,3 @@ func TestTUI_DoctorDrawer_ConfigOverrides(t *testing.T) {
 		t.Errorf("expected doctor drawer to have config args result, got %v", results)
 	}
 }
-

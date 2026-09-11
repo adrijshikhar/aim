@@ -214,7 +214,7 @@ func TestConfig_ProfileEnvAndArgs(t *testing.T) {
 		t.Errorf("expected nil args on nil *Config, got %v", args)
 	}
 	nilCfg.SetProfileEnv("work", map[string]string{"A": "B"}) // no panic
-	nilCfg.SetProfileArgs("work", []string{"--flag"})          // no panic
+	nilCfg.SetProfileArgs("work", []string{"--flag"})         // no panic
 
 	// 2. Nil profiles map initialization
 	cfg := &Config{Profiles: nil}

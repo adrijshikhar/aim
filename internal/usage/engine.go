@@ -44,7 +44,7 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
 
-		WorkLoop:
+	WorkLoop:
 		for _, target := range pending {
 			select {
 			case <-ctx.Done():
