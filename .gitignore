@@ -1,0 +1,14 @@
+# Binaries & build artifacts
+/aim
+*.tmp
+*.log
+.DS_Store
+
+# Agents, tooling, and local harness configs
+.agents/
+.catalyst/
+.claude/
+.superpowers/
+
+# Planning artifacts (specs, plans, roadmaps live in private `projects` repo)
+docs/
