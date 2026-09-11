@@ -1262,4 +1262,3 @@ func (m Model) renderRenameModal() string {
 	box := RenameModalBoxStyle.Render(b.String())
 	return "\n" + box + "\n"
 }
-

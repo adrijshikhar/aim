@@ -1367,4 +1367,3 @@ func TestTUI_RenameModal_ViewRendering(t *testing.T) {
 		t.Errorf("expected modal view to contain confirm/cancel hints, got:\n%s", modalView)
 	}
 }
-

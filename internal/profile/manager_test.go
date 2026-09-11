@@ -569,4 +569,3 @@ func TestProfileManager_RenameProfile_RollbackOnConfigError(t *testing.T) {
 		t.Errorf("expected 'dst' directory to NOT exist on disk after rollback")
 	}
 }
-
