@@ -2,7 +2,7 @@
     _    ___ __  __ 
    / \  |_ _|  \/  |
   / _ \  | || |\/| |   https://github.com/adrijshikhar/aim
- / ___ \ | || |  | |   AIM — AI Multi-Agent Multiplexer
+ / ___ \ | || |  | |   AIM — AI Multiplexer
 /_/   \_\___|_|  |_|
 ```
 

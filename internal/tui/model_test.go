@@ -301,7 +301,7 @@ func TestTUIModelViewRendering(t *testing.T) {
 	m := newTestModel(t, "default", "prod")
 	view := m.View()
 
-	if !strings.Contains(view, "AIM — AI Multi-Agent Multiplexer") {
+	if !strings.Contains(view, "AIM — AI Multiplexer") {
 		t.Errorf("expected title in view")
 	}
 	if !strings.Contains(view, "https://github.com/adrijshikhar/aim") {

@@ -748,7 +748,7 @@ func (m Model) renderHeader() string {
 			out.WriteString(logoStyle.Render(l) + "\n")
 		}
 		out.WriteString("  " + urlStyle.Render("https://github.com/adrijshikhar/aim") + "\n")
-		out.WriteString("  " + tagStyle.Render("AIM — AI Multi-Agent Multiplexer") + "\n\n")
+		out.WriteString("  " + tagStyle.Render("AIM — AI Multiplexer") + "\n\n")
 		return out.String()
 	}
 
@@ -757,7 +757,7 @@ func (m Model) renderHeader() string {
 		if i == 2 {
 			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, urlStyle.Render("https://github.com/adrijshikhar/aim")))
 		} else if i == 3 {
-			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, tagStyle.Render("AIM — AI Multi-Agent Multiplexer")))
+			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, tagStyle.Render("AIM — AI Multiplexer")))
 		} else {
 			out.WriteString(renderedLogo + "\n")
 		}

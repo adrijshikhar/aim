@@ -73,11 +73,49 @@ func (a *Adapter) TokenPath(profileDir string) string {
 func (a *Adapter) HasCredentials(profileDir string) bool {
 	p := a.TokenPath(profileDir)
 	data, err := os.ReadFile(p)
-	if err != nil || len(data) == 0 {
+	if err == nil && len(data) > 0 {
+		_, _ = validateAndRepairTokenJSON(p, data)
+		return true
+	}
+
+	// Check if Google Application Default Credentials (ADC) exist
+	adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
+	if fi, err := os.Stat(adcPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+		return true
+	}
+
+	return false
+}
+
+// SeedDefaultCredentials copies the host's existing Antigravity CLI token to a
+// "personal" or "default" profile if the profile doesn't have credentials yet.
+func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
+	if profileName != "personal" && profileName != "default" {
 		return false
 	}
-	_, _ = validateAndRepairTokenJSON(p, data)
-	return true
+	p := a.TokenPath(profileDir)
+	if fi, err := os.Stat(p); err == nil && fi.Size() > 0 {
+		return false
+	}
+	realHome := config.RealHomeDir()
+	realToken := filepath.Join(realHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	if filepath.Clean(realToken) == filepath.Clean(p) {
+		return false
+	}
+	realFi, err := os.Stat(realToken)
+	if err != nil || realFi.IsDir() {
+		return false
+	}
+	rData, err := os.ReadFile(realToken)
+	if err != nil || len(rData) == 0 {
+		return false
+	}
+	perm := realFi.Mode().Perm()
+	if perm == 0 {
+		perm = 0600
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0700)
+	return os.WriteFile(p, rData, perm) == nil
 }
 
 func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
@@ -128,6 +166,8 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 				return fmt.Errorf("OAuth client credentials not configured and '%s' binary not found in PATH", a.BinaryName())
 			}
 		}
+		realHome := config.RealHomeDir()
+		_ = bridgeSharedState(realHome, profileDir)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
 		cmd.Env = append(os.Environ(), "HOME="+profileDir, "AIM_AGENT="+a.Name(), "AIM_PROFILE="+profileName)
@@ -210,6 +250,18 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 
 	realHome := config.RealHomeDir()
 	_ = bridgeSharedState(realHome, profileDir)
+
+	// Auto-seed credentials for personal/default profile if missing in profileDir but available on host
+	_ = a.SeedDefaultCredentials(profileName, profileDir)
+
+	// Also copy settings.json from host if not present in profile
+	realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
+	destSettings := filepath.Join(tokenDir, "settings.json")
+	if _, err := os.Stat(destSettings); os.IsNotExist(err) {
+		if sData, err := os.ReadFile(realSettings); err == nil {
+			_ = os.WriteFile(destSettings, sData, 0644)
+		}
+	}
 
 	bin, err := exec.LookPath(a.BinaryName())
 	if err != nil {
@@ -385,13 +437,23 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 		})
 	}
 
+	_ = a.SeedDefaultCredentials(profileName, profileDir)
 	tokFile := a.TokenPath(profileDir)
 	if data, err := os.ReadFile(tokFile); err != nil {
-		results = append(results, agents.DiagnosticResult{
-			Category: "Token",
-			Status:   "FAIL",
-			Message:  fmt.Sprintf("Missing token file (run: aim login %s %s)", a.Name(), profileName),
-		})
+		adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
+		if adcFi, adcErr := os.Stat(adcPath); adcErr == nil && !adcFi.IsDir() && adcFi.Size() > 0 {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Token",
+				Status:   "OK",
+				Message:  "Google Cloud Application Default Credentials (ADC) active",
+			})
+		} else {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Token",
+				Status:   "FAIL",
+				Message:  fmt.Sprintf("Missing token file (run: aim login %s %s)", a.Name(), profileName),
+			})
+		}
 	} else {
 		cleanedData, valid := validateAndRepairTokenJSON(tokFile, data)
 		var tok struct {
@@ -545,6 +607,7 @@ func ParseUsageTSV(raw string) []usage.LimitWindow {
 }
 
 func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	_ = a.SeedDefaultCredentials(profileName, profileDir)
 	if !a.HasCredentials(profileDir) {
 		return &usage.Report{
 			Agent:     a.Name(),

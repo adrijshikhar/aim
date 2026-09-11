@@ -243,6 +243,55 @@ func TestAntigravityAdapter_HasCredentials(t *testing.T) {
 	if string(repairedContent) != "{\"access_token\":\"valid\"}\n" {
 		t.Errorf("expected file to be repaired on disk, got %q", string(repairedContent))
 	}
+
+	// 6. Google Application Default Credentials (ADC)
+	adcProfile := t.TempDir()
+	adcPath := filepath.Join(adcProfile, ".config", "gcloud", "application_default_credentials.json")
+	_ = os.MkdirAll(filepath.Dir(adcPath), 0755)
+	_ = os.WriteFile(adcPath, []byte(`{"client_id":"test","client_secret":"test"}`), 0600)
+	if !adapter.HasCredentials(adcProfile) {
+		t.Errorf("expected HasCredentials to be true when ADC exists")
+	}
+
+	// 7. Auto-seed personal profile from host token
+	fakeHome := t.TempDir()
+	t.Setenv("AIM_REAL_HOME", fakeHome)
+	hostTokenPath := filepath.Join(fakeHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	_ = os.MkdirAll(filepath.Dir(hostTokenPath), 0755)
+	_ = os.WriteFile(hostTokenPath, []byte(`{"token":{"access_token":"seeded_tok"}}`), 0600)
+
+	personalProfileDir := filepath.Join(t.TempDir(), "personal")
+	_ = os.MkdirAll(personalProfileDir, 0755)
+	if !adapter.SeedDefaultCredentials("personal", personalProfileDir) {
+		t.Errorf("expected SeedDefaultCredentials to return true")
+	}
+	if !adapter.HasCredentials(personalProfileDir) {
+		t.Errorf("expected HasCredentials to be true after seeding")
+	}
+	seededToken, sErr := os.ReadFile(adapter.TokenPath(personalProfileDir))
+	if sErr != nil || !strings.Contains(string(seededToken), "seeded_tok") {
+		t.Errorf("expected token to be seeded into personal profile, got err: %v, content: %s", sErr, string(seededToken))
+	}
+}
+
+func TestAntigravityAdapter_DoctorADC(t *testing.T) {
+	adapter := NewAdapter()
+	adcProfile := t.TempDir()
+	adcPath := filepath.Join(adcProfile, ".config", "gcloud", "application_default_credentials.json")
+	_ = os.MkdirAll(filepath.Dir(adcPath), 0755)
+	_ = os.WriteFile(adcPath, []byte(`{"client_id":"test"}`), 0600)
+
+	results := adapter.Doctor(context.Background(), "adc_prof", adcProfile)
+	foundADC := false
+	for _, r := range results {
+		if r.Category == "Token" && r.Status == "OK" && strings.Contains(r.Message, "ADC") {
+			foundADC = true
+			break
+		}
+	}
+	if !foundADC {
+		t.Errorf("expected Doctor to report OK for ADC credentials, got: %+v", results)
+	}
 }
 
 func TestAntigravityAdapterGetUsageNoCredentials(t *testing.T) {
