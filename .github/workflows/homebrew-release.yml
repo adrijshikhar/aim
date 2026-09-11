@@ -175,7 +175,7 @@ jobs:
           EOF
 
           # Ensure clean diff
-          git -C tap diff "$CASK_PATH"
+          git -C tap diff Casks/aim.rb
 
       - name: Run Brew Audit
         run: |
@@ -185,7 +185,7 @@ jobs:
 
       - name: Test Brew Install
         run: |
-          brew install --cask adrijshikhar/tap/aim
+          brew install --cask --force adrijshikhar/tap/aim
           aim -v
 
       - name: Commit and Push to Tap
