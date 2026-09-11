@@ -47,3 +47,13 @@ changelog:
       - "^chore:"
       - "Merge pull request"
       - "Merge branch"
+
+homebrew_casks:
+  - repository:
+      owner: adrijshikhar
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    name: aim
+    homepage: "https://github.com/adrijshikhar/aim"
+    description: "Isolated Profile Manager for AI Agents (Antigravity, Claude Code, Codex, Gemini)"
+    directory: "Casks"
