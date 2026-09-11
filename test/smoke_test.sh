@@ -59,7 +59,8 @@ if "$AIM_BIN" agy list 2>/dev/null; then
 fi
 
 # aim list gemini should NOT show smoke_profile
-if "$AIM_BIN" list gemini | grep -q "smoke_profile"; then
+LIST_GEMINI="$("$AIM_BIN" list gemini)"
+if echo "$LIST_GEMINI" | grep -q "smoke_profile"; then
   echo "Error: gemini list should not show smoke_profile before gemini is run"
   exit 1
 fi
@@ -110,7 +111,8 @@ echo "=== 6. Testing shell completion ==="
 "$AIM_BIN" __complete clone agy | grep "smoke_profile"
 
 # Shorthand completion rejected
-if "$AIM_BIN" __complete agy run | grep -q "smoke_profile"; then
+SHORTHAND_COMP="$("$AIM_BIN" __complete agy run 2>/dev/null || true)"
+if echo "$SHORTHAND_COMP" | grep -q "smoke_profile"; then
   echo "Error: shorthand completion 'aim __complete agy run' should not emit profiles"
   exit 1
 fi
@@ -142,7 +144,8 @@ echo "$JSON_OUT" | grep -q '"agent": "agy"' || { echo "FAIL: missing agent in us
 echo "$JSON_OUT" | grep -q '"profile": "smoke_profile"' || { echo "FAIL: missing profile in usage json"; exit 1; }
 
 echo "=== 10. Testing completion for usage ==="
-"$AIM_BIN" __complete usage | grep -q "agy" || { echo "FAIL: missing agy in usage completion"; exit 1; }
+USAGE_COMP="$("$AIM_BIN" __complete usage)"
+echo "$USAGE_COMP" | grep -q "agy" || { echo "FAIL: missing agy in usage completion: $USAGE_COMP"; exit 1; }
 
 echo "=== 11. Testing conversation bridging & continuation flags ==="
 
@@ -216,7 +219,8 @@ echo "Profile directory preserved after partial removal OK!"
 "$AIM_BIN" list agy | grep "smoke_profile"
 
 # Assert gemini no longer displays smoke_profile
-if "$AIM_BIN" list gemini | grep -q "smoke_profile"; then
+LIST_GEMINI_AFTER="$("$AIM_BIN" list gemini)"
+if echo "$LIST_GEMINI_AFTER" | grep -q "smoke_profile"; then
   echo "Error: gemini list should not show smoke_profile after gemini removal"
   exit 1
 fi
