@@ -143,6 +143,9 @@ fi
 mkdir -p "$DEST_DIR"
 cp "$TMP_DIR/aim" "$DEST_DIR/aim"
 chmod 755 "$DEST_DIR/aim"
+if [ "$OS" = "darwin" ] && command -v xattr >/dev/null 2>&1; then
+  xattr -dr com.apple.quarantine "$DEST_DIR/aim" 2>/dev/null || true
+fi
 success "Installed aim to ${DEST_DIR}/aim"
 
 # 9. Install Shell Completions (best effort)
