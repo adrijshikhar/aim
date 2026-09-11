@@ -1025,14 +1025,19 @@ func TestCLI_ExecuteRename(t *testing.T) {
 		t.Errorf("expected orig to be removed from usage cache")
 	}
 
-	// 6. Successful rename via dispatch with alias "mv"
-	code := dispatch([]string{"mv", "renamed-2arg", "renamed-mv"}, reg, pm)
-	if code != 0 {
-		t.Fatalf("expected dispatch exit code 0 for mv alias, got %d", code)
+	// 6. Verify "mv" is rejected (no alias) and test dispatch with "rename"
+	codeMv := dispatch([]string{"mv", "renamed-2arg", "renamed-mv"}, reg, pm)
+	if codeMv == 0 {
+		t.Errorf("expected dispatch exit code != 0 for unregistered 'mv' command, got %d", codeMv)
 	}
-	mvDir := pm.ProfileDir("renamed-mv")
-	if _, err := os.Stat(mvDir); err != nil {
-		t.Fatalf("expected renamed-mv dir to exist")
+
+	code := dispatch([]string{"rename", "renamed-2arg", "renamed-dispatch"}, reg, pm)
+	if code != 0 {
+		t.Fatalf("expected dispatch exit code 0 for rename, got %d", code)
+	}
+	dispatchDir := pm.ProfileDir("renamed-dispatch")
+	if _, err := os.Stat(dispatchDir); err != nil {
+		t.Fatalf("expected renamed-dispatch dir to exist")
 	}
 
 	// 7. Successful 3-argument rename with agent name: aim rename mock orig2 renamed-3arg

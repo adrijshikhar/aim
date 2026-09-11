@@ -13,10 +13,9 @@ import (
 
 func newRenameCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	return &cobra.Command{
-		Use:     "rename [agent] <old-profile> <new-profile>",
-		Aliases: []string{"mv"},
-		Short:   "Rename a profile preserving credentials, tokens, and state",
-		Args:    cobra.RangeArgs(2, 3),
+		Use:   "rename [agent] <old-profile> <new-profile>",
+		Short: "Rename a profile preserving credentials, tokens, and state",
+		Args:  cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			exitCode := executeRename(reg, pm, args)
 			if exitCode != 0 {

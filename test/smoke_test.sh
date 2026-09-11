@@ -209,11 +209,16 @@ echo "$DOCTOR_CLONE_OUT" | grep "1 custom launch arg(s) configured"
 [ ! -d "$TEST_AIM_HOME/profiles/clone_prof" ]
 echo "Profile clone and config overrides OK!"
 
-echo "=== 12b. Testing profile rename (aim rename / aim mv) ==="
+echo "=== 12b. Testing profile rename (aim rename) ==="
 # Test rename completion
 "$AIM_BIN" __complete rename | grep "agy"
 "$AIM_BIN" __complete rename agy | grep "smoke_profile"
-"$AIM_BIN" __complete mv | grep "agy"
+
+# Verify unregistered alias 'mv' fails
+if "$AIM_BIN" mv smoke_profile smoke_renamed 2>/dev/null; then
+  echo "Error: unregistered command 'aim mv' should fail"
+  exit 1
+fi
 
 # Create a sensitive token file in smoke_profile to test preservation
 mkdir -p "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli"
@@ -235,8 +240,8 @@ grep "keep_me" "$TEST_AIM_HOME/profiles/smoke_renamed/.gemini/antigravity-cli/to
 "$AIM_BIN" list agy | grep "smoke_renamed"
 "$AIM_BIN" list gemini | grep "smoke_renamed"
 
-# Test mv alias: rename back to smoke_profile
-"$AIM_BIN" mv smoke_renamed smoke_profile
+# Rename back to smoke_profile
+"$AIM_BIN" rename smoke_renamed smoke_profile
 [ ! -d "$TEST_AIM_HOME/profiles/smoke_renamed" ]
 [ -d "$TEST_AIM_HOME/profiles/smoke_profile" ]
 [ -f "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli/token.json" ]
