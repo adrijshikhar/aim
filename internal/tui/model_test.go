@@ -1430,3 +1430,18 @@ func TestTUI_NoProfiles_NoDefaultProfileLoaded(t *testing.T) {
 		t.Errorf("expected view to indicate no profiles configured, got:\n%s", view)
 	}
 }
+
+func TestTUI_FormatBadge_BottleneckWindow(t *testing.T) {
+	rep := usage.Report{
+		Status: usage.StatusWarning,
+		Windows: []usage.LimitWindow{
+			{Category: "Gemini", Name: "Five Hour", RemainingPct: 98},
+			{Category: "Claude", Name: "Five Hour", RemainingPct: 25},
+			{Category: "Gemini", Name: "Weekly", RemainingPct: 90},
+		},
+	}
+	badge := formatBadge(rep, false)
+	if badge != "[25%]" {
+		t.Errorf("expected badge to reflect bottleneck 25%%, got %s", badge)
+	}
+}

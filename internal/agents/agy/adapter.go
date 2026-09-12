@@ -800,11 +800,45 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 
 	// Build summary
 	var parts []string
-	if pw := report.PrimaryWindow(); pw != nil {
-		parts = append(parts, usage.FormatWindowSummary(pw))
-	}
-	if ww := report.WeeklyWindow(); ww != nil && (report.PrimaryWindow() == nil || ww.Name != report.PrimaryWindow().Name) {
-		parts = append(parts, usage.FormatWindowSummary(ww))
+	groups := report.ModelGroups()
+	if len(groups) > 1 {
+		for _, g := range groups {
+			catShort := g.Category
+			if strings.Contains(strings.ToLower(catShort), "claude") {
+				catShort = "Claude"
+			} else if strings.Contains(strings.ToLower(catShort), "gemini") {
+				catShort = "Gemini"
+			}
+			var gParts []string
+			for i := range g.Windows {
+				w := &g.Windows[i]
+				lower := strings.ToLower(w.Name)
+				if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") {
+					if s := usage.FormatWindowSummary(w); s != "" {
+						gParts = append(gParts, s)
+					}
+				}
+			}
+			for i := range g.Windows {
+				w := &g.Windows[i]
+				lower := strings.ToLower(w.Name)
+				if strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk") {
+					if s := usage.FormatWindowSummary(w); s != "" {
+						gParts = append(gParts, s)
+					}
+				}
+			}
+			if len(gParts) > 0 {
+				parts = append(parts, fmt.Sprintf("%s (%s)", catShort, strings.Join(gParts, ", ")))
+			}
+		}
+	} else {
+		if pw := report.PrimaryWindow(); pw != nil {
+			parts = append(parts, usage.FormatWindowSummary(pw))
+		}
+		if ww := report.WeeklyWindow(); ww != nil && (report.PrimaryWindow() == nil || ww.Name != report.PrimaryWindow().Name) {
+			parts = append(parts, usage.FormatWindowSummary(ww))
+		}
 	}
 	report.Summary = strings.Join(parts, ", ")
 	if len(report.Windows) == 0 && report.Summary == "" {

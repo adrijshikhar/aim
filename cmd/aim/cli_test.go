@@ -1563,3 +1563,75 @@ func TestDebug_ConfigEnablesDebug(t *testing.T) {
 		t.Errorf("expected debug to be enabled via config.Debug=true")
 	}
 }
+
+func TestCLI_Usage_AccountColumn(t *testing.T) {
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	pm := profile.NewProfileManager(tempBase)
+	_, _ = pm.EnsureProfile("userprof")
+
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("userprof", "mock")
+	_ = config.SaveConfig(cfg)
+
+	cache := usage.NewCacheStore(tempBase, usage.DefaultTTL)
+	_ = cache.Put(usage.Report{
+		Agent:        "mock",
+		Profile:      "userprof",
+		Status:       usage.StatusOK,
+		AccountEmail: "user@example.com",
+		Windows: []usage.LimitWindow{
+			{Name: "Five Hour", RemainingPct: 80},
+		},
+		FetchedAt: time.Now(),
+	})
+
+	reg := agents.NewRegistry()
+	mockAd := &mockAdapter{name: "mock"}
+	reg.Register(mockAd)
+
+	out, _ := captureOutput(t, func() {
+		_ = executeUsage(reg, pm, []string{"mock", "userprof"}, usageOptions{})
+	})
+
+	if !strings.Contains(out, "ACCOUNT") {
+		t.Errorf("expected table header to contain 'ACCOUNT', got:\n%s", out)
+	}
+	if !strings.Contains(out, "user@example.com") {
+		t.Errorf("expected table body to contain 'user@example.com', got:\n%s", out)
+	}
+}
+
+func TestCLI_List_MultiCategoryBadge(t *testing.T) {
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	pm := profile.NewProfileManager(tempBase)
+	_, _ = pm.EnsureProfile("multiprof")
+
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("multiprof", "agy")
+	_ = config.SaveConfig(cfg)
+
+	cache := usage.NewCacheStore(tempBase, usage.DefaultTTL)
+	_ = cache.Put(usage.Report{
+		Agent:   "agy",
+		Profile: "multiprof",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{
+			{Category: "Gemini", Name: "5h", RemainingPct: 90},
+			{Category: "Claude", Name: "5h", RemainingPct: 85},
+		},
+		FetchedAt: time.Now(),
+	})
+
+	reg := agents.DefaultRegistry()
+	out, _ := captureOutput(t, func() {
+		_ = runList(reg, pm, "agy")
+	})
+
+	if !strings.Contains(out, "gemini:") || !strings.Contains(out, "claude:") {
+		t.Errorf("expected multi-category list badge with gemini and claude, got:\n%s", out)
+	}
+}

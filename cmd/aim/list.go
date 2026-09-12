@@ -59,6 +59,44 @@ func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string)
 		return "[unknown]"
 	}
 
+	groups := rep.ModelGroups()
+	if len(groups) > 1 {
+		var groupParts []string
+		for _, g := range groups {
+			catShort := strings.ToLower(g.Category)
+			if strings.Contains(catShort, "claude") {
+				catShort = "claude"
+			} else if strings.Contains(catShort, "gemini") {
+				catShort = "gemini"
+			}
+			var gWindows []string
+			for i := range g.Windows {
+				w := &g.Windows[i]
+				lower := strings.ToLower(w.Name)
+				if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") {
+					if s := usage.FormatWindowSummary(w); s != "" {
+						gWindows = append(gWindows, s)
+					}
+				}
+			}
+			for i := range g.Windows {
+				w := &g.Windows[i]
+				lower := strings.ToLower(w.Name)
+				if strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk") {
+					if s := usage.FormatWindowSummary(w); s != "" {
+						gWindows = append(gWindows, s)
+					}
+				}
+			}
+			if len(gWindows) > 0 {
+				groupParts = append(groupParts, fmt.Sprintf("%s: %s", catShort, strings.Join(gWindows, ", ")))
+			}
+		}
+		if len(groupParts) > 0 {
+			return strings.Join(groupParts, " | ")
+		}
+	}
+
 	var parts []string
 	pw := rep.PrimaryWindow()
 	if pw != nil {
