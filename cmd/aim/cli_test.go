@@ -911,6 +911,19 @@ func TestCLI_ExecuteClone(t *testing.T) {
 	}
 }
 
+func TestCLI_RenameCommandNotRegistered(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	pm := profile.NewProfileManager(tempDir)
+	reg := agents.NewRegistry()
+
+	// Profile renaming is exclusively an interactive TUI action ([m] / [R])
+	code := dispatch([]string{"rename", "a", "b"}, reg, pm)
+	if code == 0 {
+		t.Errorf("expected dispatch to fail for unregistered 'rename' command, got %d", code)
+	}
+}
+
 func TestCLI_ExecuteLogin_UpdatesAgentTag(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("AIM_HOME", tmpDir)

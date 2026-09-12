@@ -209,6 +209,12 @@ echo "$DOCTOR_CLONE_OUT" | grep "1 custom launch arg(s) configured"
 [ ! -d "$TEST_AIM_HOME/profiles/clone_prof" ]
 echo "Profile clone and config overrides OK!"
 
+echo "=== 12b. Verifying rename is not a CLI command (TUI action only) ==="
+if "$AIM_BIN" rename smoke_profile smoke_renamed 2>/dev/null; then
+  echo "Error: 'aim rename' should not be a CLI command (TUI action only)"
+  exit 1
+fi
+
 echo "=== 13. Testing partial removal (gemini) ==="
 "$AIM_BIN" remove gemini smoke_profile
 # Assert directory still exists

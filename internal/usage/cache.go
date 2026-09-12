@@ -141,6 +141,25 @@ func (c *CacheStore) Delete(agent, profile string) {
 	_ = c.saveAtomic()
 }
 
+// Rename updates all cached reports for oldProfile to newProfile.
+func (c *CacheStore) Rename(oldProfile, newProfile string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.reports == nil {
+		return
+	}
+	for k, rep := range c.reports {
+		parts := strings.SplitN(k, ":", 2)
+		if len(parts) == 2 && parts[1] == oldProfile {
+			delete(c.reports, k)
+			rep.Profile = newProfile
+			c.reports[key(parts[0], newProfile)] = rep
+		}
+	}
+	_ = c.saveAtomic()
+}
+
 func (c *CacheStore) saveAtomic() error {
 	dir := filepath.Dir(c.filePath)
 	if err := os.MkdirAll(dir, 0700); err != nil {

@@ -335,3 +335,70 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 
 	return config.SaveConfig(cfg)
 }
+
+// RenameProfile renames an existing profile to a new name.
+// It moves the profile directory on disk, preserving all tokens, credentials,
+// session databases, custom env, and launch arguments, and updates config.json.
+func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Config) error {
+	if err := validateProfileName(oldName); err != nil {
+		return fmt.Errorf("invalid old profile name: %w", err)
+	}
+	if err := validateProfileName(newName); err != nil {
+		return fmt.Errorf("invalid new profile name: %w", err)
+	}
+	if oldName == newName {
+		return fmt.Errorf("source and destination profile names cannot be the same")
+	}
+
+	if cfg == nil {
+		var err error
+		cfg, err = config.LoadConfig()
+		if err != nil {
+			cfg = config.NewDefaultConfig()
+		}
+	}
+
+	oldDir := m.ProfileDir(oldName)
+	_, oldDirErr := os.Stat(oldDir)
+	oldDirExists := oldDirErr == nil
+	_, oldCfgExists := cfg.Profiles[oldName]
+	if !oldDirExists && !oldCfgExists {
+		return fmt.Errorf("profile '%s' does not exist", oldName)
+	}
+
+	newDir := m.ProfileDir(newName)
+	_, newDirErr := os.Stat(newDir)
+	newDirExists := newDirErr == nil
+	_, newCfgExists := cfg.Profiles[newName]
+	if newDirExists || newCfgExists {
+		return fmt.Errorf("profile '%s' already exists", newName)
+	}
+
+	// Rename directory on disk if it exists
+	if oldDirExists {
+		if err := os.Rename(oldDir, newDir); err != nil {
+			return fmt.Errorf("failed to rename profile directory: %w", err)
+		}
+	}
+
+	// Update config
+	cfg.RenameProfile(oldName, newName)
+	if err := config.SaveConfig(cfg); err != nil {
+		// Rollback directory rename and in-memory config if saving config fails
+		if oldDirExists {
+			_ = os.Rename(newDir, oldDir)
+		}
+		cfg.RenameProfile(newName, oldName)
+		return fmt.Errorf("failed to update config for renamed profile: %w", err)
+	}
+
+	// Ensure dotfile symlinks in new location are intact
+	realHome := config.RealHomeDir()
+	var extraPaths []string
+	if len(cfg.CustomBridgedPaths) > 0 {
+		extraPaths = cfg.CustomBridgedPaths
+	}
+	_ = EnsureDotfiles(realHome, newDir, extraPaths...)
+
+	return nil
+}

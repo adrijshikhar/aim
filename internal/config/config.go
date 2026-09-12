@@ -138,6 +138,21 @@ func (c *Config) DeleteProfile(profile string) {
 	delete(c.Profiles, profile)
 }
 
+func (c *Config) RenameProfile(oldProfile, newProfile string) {
+	if c == nil || c.Profiles == nil {
+		return
+	}
+	p, ok := c.Profiles[oldProfile]
+	if !ok {
+		return
+	}
+	delete(c.Profiles, oldProfile)
+	c.Profiles[newProfile] = p
+	if c.DefaultProfile == oldProfile {
+		c.DefaultProfile = newProfile
+	}
+}
+
 func (c *Config) GetProfileEnv(profile string) map[string]string {
 	if c == nil || c.Profiles == nil {
 		return nil

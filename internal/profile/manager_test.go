@@ -3,6 +3,7 @@ package profile
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -422,5 +423,149 @@ func TestProfileManager_CloneProfile(t *testing.T) {
 	cfg.SetProfileEnv("dst-with-env", clonedEnv)
 	if cfg.GetProfileEnv("src-work")["GIT_AUTHOR_EMAIL"] == "mutated@corp.internal" {
 		t.Errorf("mutating cloned profile env affected source profile")
+	}
+}
+
+func TestProfileManager_RenameProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	pm := NewProfileManager(tempDir)
+	cfg := config.NewDefaultConfig()
+	cfg.DefaultProfile = "alpha"
+
+	// 1. Setup source profile "alpha" with files, sensitive tokens, and config
+	srcDir, err := pm.EnsureProfile("alpha")
+	if err != nil {
+		t.Fatalf("failed to ensure profile: %v", err)
+	}
+
+	tokenDir := filepath.Join(srcDir, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(tokenDir, 0700); err != nil {
+		t.Fatalf("failed to create token dir: %v", err)
+	}
+	tokenFile := filepath.Join(tokenDir, "token.json")
+	if err := os.WriteFile(tokenFile, []byte(`{"access_token": "secret-token-123"}`), 0600); err != nil {
+		t.Fatalf("failed to write token file: %v", err)
+	}
+
+	settingsFile := filepath.Join(srcDir, "settings.json")
+	if err := os.WriteFile(settingsFile, []byte(`{"theme": "dark"}`), 0644); err != nil {
+		t.Fatalf("failed to write settings file: %v", err)
+	}
+
+	cfg.AddProfileAgent("alpha", "agy")
+	cfg.AddProfileAgent("alpha", "gemini")
+	cfg.SetProfileEnv("alpha", map[string]string{"ENV_KEY": "env_val"})
+	cfg.SetProfileArgs("alpha", []string{"--custom-flag"})
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	// 2. Successful rename: alpha -> beta
+	if err := pm.RenameProfile("alpha", "beta", cfg); err != nil {
+		t.Fatalf("RenameProfile failed: %v", err)
+	}
+
+	// Old directory should not exist
+	if _, err := os.Stat(pm.ProfileDir("alpha")); !os.IsNotExist(err) {
+		t.Errorf("expected old profile directory 'alpha' to no longer exist")
+	}
+
+	// New directory must exist
+	dstDir := pm.ProfileDir("beta")
+	if _, err := os.Stat(dstDir); err != nil {
+		t.Fatalf("expected new profile directory 'beta' to exist: %v", err)
+	}
+
+	// Sensitive tokens MUST be preserved on rename
+	dstToken := filepath.Join(dstDir, ".gemini", "antigravity-cli", "token.json")
+	data, err := os.ReadFile(dstToken)
+	if err != nil || !strings.Contains(string(data), "secret-token-123") {
+		t.Errorf("expected token.json to be preserved with credentials in renamed profile: %v, data=%s", err, string(data))
+	}
+
+	// Settings file must be preserved
+	dstSettings := filepath.Join(dstDir, "settings.json")
+	if data, err := os.ReadFile(dstSettings); err != nil || string(data) != `{"theme": "dark"}` {
+		t.Errorf("expected settings.json to be preserved: %v", err)
+	}
+
+	// Config checks
+	if cfg.HasAgent("alpha", "agy") || cfg.HasAgent("alpha", "gemini") {
+		t.Errorf("old profile 'alpha' should have no agents in config")
+	}
+	if !cfg.HasAgent("beta", "agy") || !cfg.HasAgent("beta", "gemini") {
+		t.Errorf("new profile 'beta' must have agy and gemini in config")
+	}
+	if cfg.GetProfileEnv("beta")["ENV_KEY"] != "env_val" {
+		t.Errorf("expected beta to inherit custom env")
+	}
+	if len(cfg.GetProfileArgs("beta")) != 1 || cfg.GetProfileArgs("beta")[0] != "--custom-flag" {
+		t.Errorf("expected beta to inherit custom launch args")
+	}
+	if cfg.DefaultProfile != "beta" {
+		t.Errorf("expected DefaultProfile to be updated to 'beta', got %q", cfg.DefaultProfile)
+	}
+
+	// 3. Error: same source and destination
+	if err := pm.RenameProfile("beta", "beta", cfg); err == nil {
+		t.Errorf("expected error renaming profile to itself")
+	}
+
+	// 4. Error: destination already exists
+	_, _ = pm.EnsureProfile("gamma")
+	if err := pm.RenameProfile("beta", "gamma", cfg); err == nil {
+		t.Errorf("expected error renaming to existing profile 'gamma'")
+	}
+
+	// 5. Error: source does not exist
+	if err := pm.RenameProfile("non-existent", "delta", cfg); err == nil {
+		t.Errorf("expected error renaming non-existent profile")
+	}
+
+	// 6. Error: path traversal in names
+	if err := pm.RenameProfile("beta", "../escaped", cfg); err == nil {
+		t.Errorf("expected error with path traversal in new name")
+	}
+	if err := pm.RenameProfile("../escaped", "delta", cfg); err == nil {
+		t.Errorf("expected error with path traversal in old name")
+	}
+}
+
+func TestProfileManager_RenameProfile_RollbackOnConfigError(t *testing.T) {
+	tempDir := t.TempDir()
+	pm := NewProfileManager(tempDir)
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("orig", "agy")
+	_, err := pm.EnsureProfile("orig")
+	if err != nil {
+		t.Fatalf("failed to create profile 'orig': %v", err)
+	}
+
+	// Create a regular file so MkdirAll fails when trying to create a directory under it
+	blocker := filepath.Join(tempDir, "blocker_file")
+	if err := os.WriteFile(blocker, []byte("file"), 0644); err != nil {
+		t.Fatalf("failed to create blocker file: %v", err)
+	}
+	t.Setenv("AIM_HOME", filepath.Join(blocker, "sub"))
+
+	err = pm.RenameProfile("orig", "dst", cfg)
+	if err == nil {
+		t.Fatalf("expected RenameProfile to fail when SaveConfig fails")
+	}
+
+	// Verify in-memory config was rolled back
+	if !cfg.HasAgent("orig", "agy") {
+		t.Errorf("expected 'orig' to still exist in in-memory config after rollback")
+	}
+	if cfg.HasAgent("dst", "agy") {
+		t.Errorf("expected 'dst' to be removed from in-memory config after rollback")
+	}
+
+	// Verify directory on disk was rolled back
+	if _, err := os.Stat(pm.ProfileDir("orig")); err != nil {
+		t.Errorf("expected 'orig' directory to still exist on disk after rollback: %v", err)
+	}
+	if _, err := os.Stat(pm.ProfileDir("dst")); !os.IsNotExist(err) {
+		t.Errorf("expected 'dst' directory to NOT exist on disk after rollback")
 	}
 }
