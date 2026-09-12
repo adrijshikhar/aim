@@ -943,9 +943,100 @@ func (m Model) View() string {
 		curProfile := m.profiles[m.cursor]
 		s.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextDim).Render("── Quota Details: "+curProfile+" ──") + "\n")
 		rep, hasReport := m.getReport(curProfile)
+		lblWidth := 14
+
+		// Resolve account info from credentials or report
+		var pDir string
+		if m.pm != nil {
+			pDir = m.pm.ProfileDir(curProfile)
+		}
+		accInfo := profile.GetProfileAccountInfo(pDir)
+		accountEmail := accInfo.Email
+		accountName := accInfo.Name
+		authMethod := accInfo.AuthMethod
+
+		if accountEmail == "" && hasReport && rep.AccountEmail != "" {
+			accountEmail = rep.AccountEmail
+			accountName = rep.AccountName
+			authMethod = rep.AuthMethod
+		}
+
+		hasCreds := false
+		if m.reg != nil && pDir != "" {
+			if ad, err := m.reg.Get(m.agent); err == nil {
+				hasCreds = ad.HasCredentials(pDir)
+			}
+		}
+
+		padAccount := 0
+		if lblWidth > len("Account:") {
+			padAccount = lblWidth - len("Account:")
+		}
+		styledAccount := lipgloss.NewStyle().Foreground(TextSecondary).Render("Account:") + strings.Repeat(" ", padAccount)
+
+		if accountEmail != "" {
+			accountStr := lipgloss.NewStyle().Foreground(AccentCyan).Bold(true).Render(accountEmail)
+			if accountName != "" {
+				accountStr += " " + lipgloss.NewStyle().Foreground(TextMuted).Render("("+accountName+")")
+			}
+			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
+		} else if hasCreds {
+			accountStr := lipgloss.NewStyle().Foreground(TextMuted).Render("active (local credentials)")
+			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
+		} else {
+			accountStr := lipgloss.NewStyle().Foreground(TextMuted).Render("[no credentials - press 'l' to log in]")
+			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
+		}
+
+		if authMethod != "" {
+			padAuth := 0
+			if lblWidth > len("Auth:") {
+				padAuth = lblWidth - len("Auth:")
+			}
+			styledAuth := lipgloss.NewStyle().Foreground(TextSecondary).Render("Auth:") + strings.Repeat(" ", padAuth)
+			s.WriteString(fmt.Sprintf("    %s %s\n", styledAuth, lipgloss.NewStyle().Foreground(TextDim).Render(authMethod)))
+		}
+
+		projectID := accInfo.ProjectID
+		if projectID == "" && hasReport && rep.ProjectID != "" {
+			projectID = rep.ProjectID
+		}
+		if projectID != "" {
+			padProj := 0
+			if lblWidth > len("Project:") {
+				padProj = lblWidth - len("Project:")
+			}
+			styledProj := lipgloss.NewStyle().Foreground(TextSecondary).Render("Project:") + strings.Repeat(" ", padProj)
+			s.WriteString(fmt.Sprintf("    %s %s\n", styledProj, lipgloss.NewStyle().Foreground(TextDim).Render(projectID)))
+		}
+
+		if m.cfg != nil {
+			agentsList := m.cfg.GetProfileAgents(curProfile)
+			if len(agentsList) > 1 {
+				padAgents := 0
+				if lblWidth > len("Agents:") {
+					padAgents = lblWidth - len("Agents:")
+				}
+				styledAgents := lipgloss.NewStyle().Foreground(TextSecondary).Render("Agents:") + strings.Repeat(" ", padAgents)
+				s.WriteString(fmt.Sprintf("    %s %s\n", styledAgents, lipgloss.NewStyle().Foreground(TextDim).Render(strings.Join(agentsList, ", "))))
+			}
+		}
+
+		if hasReport && rep.Error != "" {
+			padStatus := 0
+			if lblWidth > len("Status:") {
+				padStatus = lblWidth - len("Status:")
+			}
+			styledStatus := lipgloss.NewStyle().Foreground(TextSecondary).Render("Status:") + strings.Repeat(" ", padStatus)
+			statusMsg := rep.Summary
+			if statusMsg == "" {
+				statusMsg = rep.Error
+			}
+			s.WriteString(fmt.Sprintf("    %s %s\n", styledStatus, lipgloss.NewStyle().Foreground(StatusYellow).Render(statusMsg)))
+		}
+
 		if hasReport {
 			modelGroups := rep.ModelGroups()
-			lblWidth := 14
 			if len(modelGroups) > 1 {
 				for _, g := range modelGroups {
 					modelShort := g.Category

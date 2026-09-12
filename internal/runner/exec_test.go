@@ -160,3 +160,62 @@ func TestSetupSignalForwarding(t *testing.T) {
 	_ = cmd.Wait()
 	cleanup()
 }
+
+func TestRunnerExecute_SSHEnvFiltering(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not available")
+	}
+
+	// Simulate host having SSH connection environment variables
+	t.Setenv("SSH_CONNECTION", "192.168.1.100 54321 192.168.1.50 22")
+	t.Setenv("SSH_CLIENT", "192.168.1.100 54321 22")
+	t.Setenv("SSH_TTY", "/dev/ttys001")
+	t.Setenv("GEMINI_CLI_HOME", "/some/unwanted/dir")
+
+	r := NewRunner()
+
+	// Scenario 1: Unauthenticated session where SSH_CONNECTION is omitted to enable browser auto-open.
+	// Verify that host SSH variables are filtered out and not inherited by child process.
+	envUnauth := agents.LaunchEnv{
+		BinaryPath: sh,
+		Args:       []string{"-c"},
+		Env: map[string]string{
+			"HOME": t.TempDir(),
+		},
+	}
+	checkUnauthScript := `
+		if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] || [ -n "$GEMINI_CLI_HOME" ]; then
+			exit 1
+		fi
+		exit 0
+	`
+	code, err := r.Run(context.Background(), envUnauth, []string{checkUnauthScript})
+	if err != nil || code != 0 {
+		t.Fatalf("expected exit code 0 (SSH variables suppressed), got %d, err: %v", code, err)
+	}
+
+	// Scenario 2: Authenticated session where SSH_CONNECTION is explicitly provided in launch.Env for keyring bypass.
+	// Verify child process receives SSH_CONNECTION, but still suppresses SSH_CLIENT and SSH_TTY.
+	envAuth := agents.LaunchEnv{
+		BinaryPath: sh,
+		Args:       []string{"-c"},
+		Env: map[string]string{
+			"HOME":           t.TempDir(),
+			"SSH_CONNECTION": "127.0.0.1 50000 127.0.0.1 22",
+		},
+	}
+	checkAuthScript := `
+		if [ "$SSH_CONNECTION" != "127.0.0.1 50000 127.0.0.1 22" ]; then
+			exit 2
+		fi
+		if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] || [ -n "$GEMINI_CLI_HOME" ]; then
+			exit 3
+		fi
+		exit 0
+	`
+	codeAuth, err := r.Run(context.Background(), envAuth, []string{checkAuthScript})
+	if err != nil || codeAuth != 0 {
+		t.Fatalf("expected exit code 0 (SSH_CONNECTION preserved, others filtered), got %d, err: %v", codeAuth, err)
+	}
+}

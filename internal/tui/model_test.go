@@ -1,6 +1,10 @@
 package tui
 
 import (
+	"encoding/base64"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1367,5 +1371,62 @@ func TestTUI_RenameModal_ViewRendering(t *testing.T) {
 	}
 	if !strings.Contains(modalView, "[Enter] Confirm") || !strings.Contains(modalView, "[Esc] Cancel") {
 		t.Errorf("expected modal view to contain confirm/cancel hints, got:\n%s", modalView)
+	}
+}
+
+func TestTUI_QuotaDetails_AccountEmailDisplay(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+	pm := profile.NewProfileManager(tmpDir)
+	cfg := config.NewDefaultConfig()
+
+	pDir, err := pm.EnsureProfile("myprofile")
+	if err != nil {
+		t.Fatalf("EnsureProfile failed: %v", err)
+	}
+	cfg.AddProfileAgent("myprofile", "agy")
+
+	// Write token with mock JWT id_token containing email
+	claimsJSON := `{"email":"engineer@company.com","name":"Alice Engineer"}`
+	b64Claims := base64.RawURLEncoding.EncodeToString([]byte(claimsJSON))
+	mockToken := fmt.Sprintf(`{"token":{"access_token":"ya29.mock"},"auth_method":"consumer","id_token":"header.%s.sig"}`, b64Claims)
+	tokenFile := filepath.Join(pDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	_ = os.MkdirAll(filepath.Dir(tokenFile), 0700)
+	_ = os.WriteFile(tokenFile, []byte(mockToken), 0600)
+
+	reg := agents.DefaultRegistry()
+	m := NewModel(reg, pm, cfg)
+
+	view := m.View()
+	if !strings.Contains(view, "engineer@company.com") {
+		t.Errorf("expected view to display account email 'engineer@company.com', got:\n%s", view)
+	}
+	if !strings.Contains(view, "Alice Engineer") {
+		t.Errorf("expected view to display account name 'Alice Engineer', got:\n%s", view)
+	}
+	if !strings.Contains(view, "Google OAuth (consumer)") {
+		t.Errorf("expected view to display auth method, got:\n%s", view)
+	}
+}
+
+func TestTUI_NoProfiles_NoDefaultProfileLoaded(t *testing.T) {
+	emptyDir := t.TempDir()
+	t.Setenv("AIM_HOME", emptyDir)
+	pm := profile.NewProfileManager(emptyDir)
+	cfg := config.NewDefaultConfig()
+
+	reg := agents.DefaultRegistry()
+	m := NewModel(reg, pm, cfg)
+
+	if len(m.Profiles()) != 0 {
+		t.Errorf("expected 0 profiles when directory is empty, got %v", m.Profiles())
+	}
+
+	view := m.View()
+	if strings.Contains(view, "default") {
+		t.Errorf("expected view not to contain 'default' profile, got:\n%s", view)
+	}
+	if !strings.Contains(view, "no profiles configured for agy") {
+		t.Errorf("expected view to indicate no profiles configured, got:\n%s", view)
 	}
 }

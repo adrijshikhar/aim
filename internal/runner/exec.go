@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -31,7 +34,24 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	cmd.Env = os.Environ()
+	// Build clean environment by filtering out sensitive/managed variables
+	// (SSH variables, HOME, AIM_* variables) unless explicitly provided in launch.Env.
+	// This prevents the host environment from leaking SSH connection variables that would suppress browser auto-open.
+	cmd.Env = make([]string, 0, len(os.Environ())+len(launch.Env))
+	for _, env := range os.Environ() {
+		idx := strings.IndexByte(env, '=')
+		if idx == -1 {
+			continue
+		}
+		key := env[:idx]
+		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" {
+			continue
+		}
+		if _, overridden := launch.Env[key]; overridden {
+			continue
+		}
+		cmd.Env = append(cmd.Env, env)
+	}
 	for k, v := range launch.Env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
@@ -48,10 +68,60 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		if cfg != nil {
 			customServices = cfg.CustomIgnoredKeychains
 		}
-		_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
-		defer func() {
+
+		profileDir := launch.Env["HOME"]
+		// Check whether the profile already has credentials on disk (token file or ADC).
+		hasCreds := false
+		if profileDir != "" {
+			tokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+			if fi, err := os.Stat(tokenPath); err == nil && fi.Size() > 0 {
+				hasCreds = true
+			} else {
+				adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
+				if fi, err := os.Stat(adcPath); err == nil && fi.Size() > 0 {
+					hasCreds = true
+				}
+			}
+		}
+
+		// Only unauthenticated sessions interact with the macOS Keychain.
+		// Authenticated profiles run with SSH_CONNECTION (keyring bypass mode) and never touch the Keychain.
+		// Skipping purge for authenticated profiles prevents destroying active sessions or concurrent logins!
+		if !hasCreds {
 			_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
-		}()
+
+			// Start background watcher that harvests the token into the profile immediately
+			// once the user completes authentication in the browser, and immediately purges
+			// the token from the host Keychain so it never lingers or races with other profiles.
+			stopWatcher := make(chan struct{})
+			doneWatcher := make(chan struct{})
+			go func() {
+				defer close(doneWatcher)
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-stopWatcher:
+						return
+					case <-ticker.C:
+						if profile.HarvestKeychainTokenToProfile(agentName, profileDir) {
+							_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
+							logger.Debug("[runner] Successfully harvested token and purged host keychain during active session")
+							return
+						}
+					}
+				}
+			}()
+
+			defer func() {
+				close(stopWatcher)
+				<-doneWatcher
+				if profileDir != "" {
+					_ = profile.HarvestKeychainTokenToProfile(agentName, profileDir)
+				}
+				_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
+			}()
+		}
 	}
 
 	if err := cmd.Start(); err != nil {

@@ -123,11 +123,5 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 		}
 	}
 
-	// On macOS, when bridging Library/Keychains, ensure ignored agent credentials
-	// are scrubbed from the keychain to prevent cross-profile token contamination.
-	if runtime.GOOS == "darwin" {
-		_ = PurgeIgnoredKeychains("")
-	}
-
 	return errors.Join(errs...)
 }

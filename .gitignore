@@ -9,7 +9,11 @@
 .agents/
 .catalyst/
 .claude/
+.playwright-mcp/
 .superpowers/
 
 # Planning artifacts (specs, plans, roadmaps live in private `projects` repo)
 docs/
+
+# IDE files
+.idea/
