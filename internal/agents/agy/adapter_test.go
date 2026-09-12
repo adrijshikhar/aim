@@ -3,6 +3,7 @@ package agy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -671,5 +672,33 @@ exit 0
 	}
 	if !adapter.HasCredentials(existingProfDir) {
 		t.Errorf("expected HasCredentials to be true after login for existing profile")
+	}
+}
+
+func TestAgy_MultiCategoryReportSummary(t *testing.T) {
+	binDir := t.TempDir()
+	mockAgy := filepath.Join(binDir, "agy")
+	tsv := "Gemini Models\tFive Hour Limit Remaining\t95%\t2026-09-12T22:00:00Z\n" +
+		"Gemini Models\tWeekly Limit Remaining\t80%\t2026-09-18T22:00:00Z\n" +
+		"Claude and GPT models\tFive Hour Limit Remaining\t100%\t2026-09-12T22:00:00Z\n" +
+		"Claude and GPT models\tWeekly Limit Remaining\t50%\t2026-09-18T22:00:00Z\n"
+	mockScript := fmt.Sprintf("#!/bin/sh\nif [ \"$2\" = \"/usage\" ]; then\n  cat <<'EOF'\n%sEOF\nelif [ \"$2\" = \"/credits\" ]; then\n  printf 'Remaining\t100\n'\nfi\n", tsv)
+	if err := os.WriteFile(mockAgy, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	adapter := NewAdapter()
+	profDir := t.TempDir()
+	tokenFile := adapter.TokenPath(profDir)
+	_ = os.MkdirAll(filepath.Dir(tokenFile), 0700)
+	_ = os.WriteFile(tokenFile, []byte(`{"token":{"access_token":"mock"}}`), 0600)
+
+	rep, err := adapter.GetUsage(context.Background(), "multi_test", profDir)
+	if err != nil {
+		t.Fatalf("GetUsage failed: %v", err)
+	}
+	if !strings.Contains(rep.Summary, "Gemini") || !strings.Contains(rep.Summary, "Claude") {
+		t.Errorf("expected multi-category summary with Gemini and Claude, got: %q", rep.Summary)
 	}
 }

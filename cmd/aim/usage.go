@@ -214,8 +214,20 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		}
 	}
 
+	hasAccount := false
+	for _, r := range reports {
+		if r.AccountEmail != "" {
+			hasAccount = true
+			break
+		}
+	}
+
 	var headers []string
-	if hasCategory {
+	if hasAccount && hasCategory {
+		headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+	} else if hasAccount {
+		headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+	} else if hasCategory {
 		headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
 	} else {
 		headers = []string{"AGENT", "PROFILE", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
@@ -229,9 +241,18 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			checked = usage.FormatDuration(age) + " ago"
 		}
 
+		accStr := "—"
+		if r.AccountEmail != "" {
+			accStr = r.AccountEmail
+		}
+
 		if len(r.Windows) == 0 {
 			st := renderCLIStatus(r.Status, useColor)
-			if hasCategory {
+			if hasAccount && hasCategory {
+				rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", "—", "—", checked})
+			} else if hasAccount {
+				rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", "—", "—", checked})
+			} else if hasCategory {
 				rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", "—", "—", checked})
 			} else {
 				rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", "—", "—", checked})
@@ -281,7 +302,11 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			}
 
 			statusStr := renderCLIStatus(catStatus, useColor)
-			if hasCategory {
+			if hasAccount && hasCategory {
+				rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, pStr, pReset, wStr, wReset, checked})
+			} else if hasAccount {
+				rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, pStr, pReset, wStr, wReset, checked})
+			} else if hasCategory {
 				rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, pStr, pReset, wStr, wReset, checked})
 			} else {
 				rows = append(rows, []string{r.Agent, r.Profile, statusStr, pStr, pReset, wStr, wReset, checked})

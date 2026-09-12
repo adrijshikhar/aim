@@ -765,11 +765,20 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 		return ""
 	}
 
-	target := rep.PrimaryWindow()
-	if target == nil {
-		target = &rep.Windows[0]
+	// Always report the bottleneck / most constrained limit percentage so the
+	// displayed percentage is strictly consistent with the badge color/status.
+	minPct := 100
+	for _, w := range rep.Windows {
+		if w.RemainingPct < minPct {
+			minPct = w.RemainingPct
+		}
 	}
-	return fmt.Sprintf("[%d%%]", target.RemainingPct)
+	if minPct < 0 {
+		minPct = 0
+	} else if minPct > 100 {
+		minPct = 100
+	}
+	return fmt.Sprintf("[%d%%]", minPct)
 }
 
 func formatWindowsBadge(windows []usage.LimitWindow) string {
