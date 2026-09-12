@@ -1,7 +1,7 @@
 package usage
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -96,22 +96,22 @@ func FormatDuration(d time.Duration) string {
 		return "0m"
 	}
 	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
+		return strconv.Itoa(int(d.Minutes())) + "m"
 	}
 	if d < 24*time.Hour {
 		hours := int(d.Hours())
 		mins := int(d.Minutes()) % 60
 		if mins == 0 {
-			return fmt.Sprintf("%dh", hours)
+			return strconv.Itoa(hours) + "h"
 		}
-		return fmt.Sprintf("%dh %dm", hours, mins)
+		return strconv.Itoa(hours) + "h " + strconv.Itoa(mins) + "m"
 	}
 	days := int(d.Hours()) / 24
 	hours := int(d.Hours()) % 24
 	if hours == 0 {
-		return fmt.Sprintf("%dd", days)
+		return strconv.Itoa(days) + "d"
 	}
-	return fmt.Sprintf("%dd %dh", days, hours)
+	return strconv.Itoa(days) + "d " + strconv.Itoa(hours) + "h"
 }
 
 func FormatWindowSummary(w *LimitWindow) string {
@@ -133,13 +133,14 @@ func FormatWindowSummary(w *LimitWindow) string {
 		pct = 100
 	}
 
+	pctStr := strconv.Itoa(pct)
 	if pct >= 100 {
-		return fmt.Sprintf("%s: 100%%", label)
+		return label + ": 100%"
 	}
 	if w.ResetsIn > 0 {
-		return fmt.Sprintf("%s: %d%% [%s]", label, pct, FormatDuration(w.ResetsIn))
+		return label + ": " + pctStr + "% [" + FormatDuration(w.ResetsIn) + "]"
 	}
-	return fmt.Sprintf("%s: %d%%", label, pct)
+	return label + ": " + pctStr + "%"
 }
 
 func RenderBar(remainingPct int, width int) string {
@@ -194,19 +195,21 @@ func (r *Report) ModelGroups() []ModelGroup {
 	}
 
 	var groups []ModelGroup
-	catIdx := make(map[string]int)
-
 	for _, w := range r.Windows {
 		cleaned := CleanModelCategory(w.Category)
-		idx, exists := catIdx[cleaned]
-		if !exists {
-			catIdx[cleaned] = len(groups)
+		found := false
+		for i := range groups {
+			if groups[i].Category == cleaned {
+				groups[i].Windows = append(groups[i].Windows, w)
+				found = true
+				break
+			}
+		}
+		if !found {
 			groups = append(groups, ModelGroup{
 				Category: cleaned,
 				Windows:  []LimitWindow{w},
 			})
-		} else {
-			groups[idx].Windows = append(groups[idx].Windows, w)
 		}
 	}
 	return groups

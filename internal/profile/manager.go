@@ -11,15 +11,18 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
-	"github.com/otiai10/copy"
 )
 
 type ProfileManager struct {
-	BaseDir string
+	BaseDir      string
+	profilesRoot string
 }
 
 func NewProfileManager(baseDir string) *ProfileManager {
-	return &ProfileManager{BaseDir: baseDir}
+	return &ProfileManager{
+		BaseDir:      baseDir,
+		profilesRoot: filepath.Join(baseDir, "profiles"),
+	}
 }
 
 func validateProfileName(name string) error {
@@ -36,11 +39,37 @@ func validateProfileName(name string) error {
 }
 
 func (m *ProfileManager) ProfilesRoot() string {
+	if m == nil {
+		return ""
+	}
+	if m.profilesRoot != "" {
+		return m.profilesRoot
+	}
 	return filepath.Join(m.BaseDir, "profiles")
 }
 
 func (m *ProfileManager) ProfileDir(name string) string {
-	return filepath.Join(m.ProfilesRoot(), name)
+	if m == nil {
+		return ""
+	}
+	root := m.profilesRoot
+	if root == "" {
+		root = m.ProfilesRoot()
+	}
+	return filepath.Join(root, name)
+}
+
+// ResolveProfile validates the profile name and returns the resolved profile directory path.
+func (m *ProfileManager) ResolveProfile(name string) (string, error) {
+	if err := validateProfileName(name); err != nil {
+		return "", err
+	}
+	return m.ProfileDir(name), nil
+}
+
+// EnsureProfileHome ensures the profile directory and dotfiles exist, acting as an alias for EnsureProfile.
+func (m *ProfileManager) EnsureProfileHome(name string) (string, error) {
+	return m.EnsureProfile(name)
 }
 
 func (m *ProfileManager) EnsureProfile(name string) (string, error) {
@@ -287,17 +316,9 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 
 	// If source directory exists, copy non-sensitive files and symlinks
 	if srcDirExists {
-		opt := copy.Options{
-			Skip: func(srcinfo os.FileInfo, src, dest string) (bool, error) {
-				return isSensitiveProfileFile(filepath.Base(src)), nil
-			},
-			OnSymlink: func(src string) copy.SymlinkAction {
-				return copy.Shallow
-			},
-			PreserveTimes: true,
-			PreserveOwner: true,
+		if err := cloneDirectory(srcDir, dstDir); err != nil {
+			return fmt.Errorf("failed to clone profile files: %w", err)
 		}
-		_ = copy.Copy(srcDir, dstDir, opt)
 	}
 
 	// Guarantee dotfiles are linked

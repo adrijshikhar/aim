@@ -124,10 +124,14 @@ func (c *Config) RemoveProfileAgent(profile, agent string) {
 }
 
 func (c *Config) HasAgent(profile, agent string) bool {
-	if c == nil {
+	if c == nil || c.Profiles == nil {
 		return false
 	}
-	for _, a := range c.GetProfileAgents(profile) {
+	p, ok := c.Profiles[profile]
+	if !ok {
+		return false
+	}
+	for _, a := range p.Agents {
 		if a == agent {
 			return true
 		}

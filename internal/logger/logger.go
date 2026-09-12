@@ -34,6 +34,9 @@ func Init(baseDir string) {
 		logFile = nil
 	}
 	logFilePath = targetPath
+	if !isDebugLocked() {
+		return
+	}
 	_ = os.MkdirAll(baseDir, 0755)
 	f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err == nil {
@@ -69,19 +72,10 @@ func SetConsoleOutput(enabled bool) {
 	consoleOutput = enabled
 }
 
-// IsDebug returns whether debug logging is currently enabled.
-// Priority:
-// 1. Explicitly set via SetDebug(true/false) (e.g. CLI --debug flag or config)
-// 2. Environment variable AIM_DEBUG (e.g. "1", "true", "yes", "on", "debug")
-func IsDebug() bool {
-	mu.RLock()
-	explicit := debugExplicit
-	mu.RUnlock()
-
-	if explicit != nil {
-		return *explicit
+func isDebugLocked() bool {
+	if debugExplicit != nil {
+		return *debugExplicit
 	}
-
 	env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))
 	switch env {
 	case "1", "true", "yes", "on", "debug":
@@ -91,6 +85,16 @@ func IsDebug() bool {
 	default:
 		return len(env) > 0
 	}
+}
+
+// IsDebug returns whether debug logging is currently enabled.
+// Priority:
+// 1. Explicitly set via SetDebug(true/false) (e.g. CLI --debug flag or config)
+// 2. Environment variable AIM_DEBUG (e.g. "1", "true", "yes", "on", "debug")
+func IsDebug() bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	return isDebugLocked()
 }
 
 // Debug logs a debug-level message if debug mode is active.
@@ -111,6 +115,13 @@ func Debug(format string, args ...any) {
 	}
 
 	// Persistent file output
+	if logFile == nil && logFilePath != "" {
+		_ = os.MkdirAll(filepath.Dir(logFilePath), 0755)
+		f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err == nil {
+			logFile = f
+		}
+	}
 	if logFile != nil {
 		timeStr := now.Format("2006-01-02 15:04:05.000")
 		fmt.Fprintf(logFile, "%s [DEBUG] %s\n", timeStr, msg)
