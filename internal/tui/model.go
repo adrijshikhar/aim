@@ -950,7 +950,7 @@ func (m Model) View() string {
 	// Bottom inspector section when a profile is highlighted
 	if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
 		curProfile := m.profiles[m.cursor]
-		s.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextDim).Render("── Quota Details: "+curProfile+" ──") + "\n")
+		s.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextDim).Render("── Profile Details: "+curProfile+" ──") + "\n")
 		rep, hasReport := m.getReport(curProfile)
 		lblWidth := 14
 

@@ -406,8 +406,8 @@ func TestTUIUsageUpdateAndKeybinding(t *testing.T) {
 	if !strings.Contains(view, "[40%]") {
 		t.Errorf("expected minimal quota badge [40%%] in wide view, got:\n%s", view)
 	}
-	if !strings.Contains(view, "Quota Details: default") {
-		t.Errorf("expected quota details header for highlighted profile 'default', got:\n%s", view)
+	if !strings.Contains(view, "Profile Details: default") {
+		t.Errorf("expected profile details header for highlighted profile 'default', got:\n%s", view)
 	}
 	if !strings.Contains(view, "Primary Limit:") {
 		t.Errorf("expected inspector to contain 'Primary Limit:', got:\n%s", view)
@@ -1374,7 +1374,7 @@ func TestTUI_RenameModal_ViewRendering(t *testing.T) {
 	}
 }
 
-func TestTUI_QuotaDetails_AccountEmailDisplay(t *testing.T) {
+func TestTUI_ProfileDetails_AccountEmailDisplay(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("AIM_HOME", tmpDir)
 	pm := profile.NewProfileManager(tmpDir)
@@ -1398,6 +1398,9 @@ func TestTUI_QuotaDetails_AccountEmailDisplay(t *testing.T) {
 	m := NewModel(reg, pm, cfg)
 
 	view := m.View()
+	if !strings.Contains(view, "Profile Details: myprofile") {
+		t.Errorf("expected view to display 'Profile Details: myprofile', got:\n%s", view)
+	}
 	if !strings.Contains(view, "engineer@company.com") {
 		t.Errorf("expected view to display account email 'engineer@company.com', got:\n%s", view)
 	}
