@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -47,8 +48,8 @@ func TestAgyPrepareEnv(t *testing.T) {
 	if launchEnv.Env["HOME"] != tempDir {
 		t.Errorf("expected HOME to be %s, got %s", tempDir, launchEnv.Env["HOME"])
 	}
-	if _, exists := launchEnv.Env["SSH_CONNECTION"]; exists {
-		t.Errorf("expected SSH_CONNECTION to be deleted from launch environment")
+	if launchEnv.Env["SSH_CONNECTION"] != "127.0.0.1 50000 127.0.0.1 22" {
+		t.Errorf("expected SSH_CONNECTION to be set to force keyring bypass, got %s", launchEnv.Env["SSH_CONNECTION"])
 	}
 	if _, exists := launchEnv.Env["SSH_CLIENT"]; exists {
 		t.Errorf("expected SSH_CLIENT to be deleted from launch environment")
@@ -263,7 +264,7 @@ func TestAntigravityAdapter_HasCredentials(t *testing.T) {
 	personalProfileDir := filepath.Join(t.TempDir(), "personal")
 	_ = os.MkdirAll(personalProfileDir, 0755)
 	if !adapter.SeedDefaultCredentials("personal", personalProfileDir) {
-		t.Errorf("expected SeedDefaultCredentials to return true")
+		t.Errorf("expected SeedDefaultCredentials to return true for 'personal'")
 	}
 	if !adapter.HasCredentials(personalProfileDir) {
 		t.Errorf("expected HasCredentials to be true after seeding")
@@ -272,6 +273,45 @@ func TestAntigravityAdapter_HasCredentials(t *testing.T) {
 	if sErr != nil || !strings.Contains(string(seededToken), "seeded_tok") {
 		t.Errorf("expected token to be seeded into personal profile, got err: %v, content: %s", sErr, string(seededToken))
 	}
+
+	// 8. Auto-seed shorthand "p" profile via direct HasCredentials call
+	pProfileDir := filepath.Join(t.TempDir(), "p")
+	_ = os.MkdirAll(pProfileDir, 0755)
+	if !adapter.HasCredentials(pProfileDir) {
+		t.Errorf("expected HasCredentials to auto-seed and return true for 'p' profile")
+	}
+	pToken, pErr := os.ReadFile(adapter.TokenPath(pProfileDir))
+	if pErr != nil || !strings.Contains(string(pToken), "seeded_tok") {
+		t.Errorf("expected token to be seeded into 'p' profile, got err: %v, content: %s", pErr, string(pToken))
+	}
+
+	// 9. Profile not eligible for auto-seeding when multiple profiles exist
+	fakeAimHome := t.TempDir()
+	t.Setenv("AIM_HOME", fakeAimHome)
+	multiCfg := config.NewDefaultConfig()
+	multiCfg.Profiles["p"] = config.ProfileConfig{}
+	multiCfg.Profiles["rs"] = config.ProfileConfig{}
+	multiCfg.DefaultProfile = "p"
+	_ = config.SaveConfig(multiCfg)
+
+	rsProfileDir := filepath.Join(t.TempDir(), "rs")
+	_ = os.MkdirAll(rsProfileDir, 0755)
+	if adapter.SeedDefaultCredentials("rs", rsProfileDir) {
+		t.Errorf("expected SeedDefaultCredentials to return false for non-default profile 'rs'")
+	}
+	if adapter.HasCredentials(rsProfileDir) {
+		t.Errorf("expected HasCredentials to be false for unauthenticated 'rs' profile")
+	}
+
+	// 10. Auto-seeding from macOS Keychain when host token file is missing
+	noFileHome := t.TempDir()
+	t.Setenv("AIM_REAL_HOME", noFileHome)
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	keychainProfileDir := filepath.Join(t.TempDir(), "personal")
+	_ = os.MkdirAll(keychainProfileDir, 0755)
+
+	// Harvest will fail without keychain mock, but adapter shouldn't crash
+	_ = adapter.SeedDefaultCredentials("personal", keychainProfileDir)
 }
 
 func TestAntigravityAdapter_DoctorADC(t *testing.T) {

@@ -1,14 +1,15 @@
 package profile
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/agents"
-	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/usage"
 )
 
 func TestProfileManager(t *testing.T) {
@@ -154,7 +155,8 @@ func TestProfileManager_ListProfilesForAgent(t *testing.T) {
 	_ = os.WriteFile(agyToken, []byte("token"), 0600)
 
 	reg := agents.NewRegistry()
-	reg.Register(agy.NewAdapter())
+	reg.Register(&mockAgentAdapter{name: "agy"})
+	reg.Register(&mockAgentAdapter{name: "claude"})
 
 	// 1. List for agy: should return "bot" (detected) and "work" (config)
 	agyProfiles, err := pm.ListProfilesForAgent("agy", cfg, reg)
@@ -572,4 +574,33 @@ func TestProfileManager_RenameProfile_RollbackOnConfigError(t *testing.T) {
 	if _, err := os.Stat(pm.ProfileDir("dst")); !os.IsNotExist(err) {
 		t.Errorf("expected 'dst' directory to NOT exist on disk after rollback")
 	}
+}
+
+type mockAgentAdapter struct {
+	name string
+}
+
+func (m *mockAgentAdapter) Name() string        { return m.name }
+func (m *mockAgentAdapter) DisplayName() string { return m.name }
+func (m *mockAgentAdapter) Aliases() []string   { return nil }
+func (m *mockAgentAdapter) BinaryName() string  { return m.name }
+func (m *mockAgentAdapter) HasCredentials(profileDir string) bool {
+	if m.name != "agy" {
+		return false
+	}
+	p := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	fi, err := os.Stat(p)
+	return err == nil && fi.Size() > 0
+}
+func (m *mockAgentAdapter) Login(ctx context.Context, profileName, profileDir string) error {
+	return nil
+}
+func (m *mockAgentAdapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+	return agents.LaunchEnv{}, nil
+}
+func (m *mockAgentAdapter) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {
+	return nil
+}
+func (m *mockAgentAdapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	return nil, nil
 }

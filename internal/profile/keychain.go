@@ -2,9 +2,13 @@ package profile
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -224,4 +228,109 @@ func FindIgnoredKeychains(agent string, customServices ...string) []IgnoredKeych
 		cancel()
 	}
 	return found
+}
+
+var getGenericPasswordFn = getGenericPasswordReal
+
+func getGenericPasswordReal(service, account string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	args := []string{"find-generic-password", "-s", service}
+	if account != "" {
+		args = append(args, "-a", account)
+	}
+	args = append(args, "-w")
+
+	cmd := exec.CommandContext(ctx, "security", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// DecodeKeychainPassword parses a raw keychain password string, decoding any
+// go-keyring-base64: prefixes if present and ensuring valid JSON.
+func DecodeKeychainPassword(raw string) []byte {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	const prefix = "go-keyring-base64:"
+	if strings.HasPrefix(raw, prefix) {
+		encoded := strings.TrimPrefix(raw, prefix)
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err == nil && len(decoded) > 0 {
+			var js json.RawMessage
+			if json.Unmarshal(decoded, &js) == nil {
+				return decoded
+			}
+		}
+		return nil
+	}
+	var js json.RawMessage
+	if json.Unmarshal([]byte(raw), &js) == nil {
+		return []byte(raw)
+	}
+	return nil
+}
+
+// GetAgentKeychainToken searches the macOS Keychain for any credentials
+// belonging to the specified agent and returns the decoded token JSON.
+func GetAgentKeychainToken(agent string) ([]byte, error) {
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
+		return nil, errors.New("keychain is only supported on darwin")
+	}
+
+	entries := GetIgnoredKeychainEntries()
+	for _, entry := range entries {
+		if entry.Agent != agent {
+			continue
+		}
+		raw, err := getGenericPasswordFn(entry.Service, entry.Account)
+		if err != nil || raw == "" {
+			continue
+		}
+		data := DecodeKeychainPassword(raw)
+		if len(data) > 0 {
+			logger.Debug("[keychain] Found valid keychain token for agent %q (service=%q, account=%q)", agent, entry.Service, entry.Account)
+			return data, nil
+		}
+	}
+	return nil, fmt.Errorf("no keychain credentials found for agent %q", agent)
+}
+
+// HarvestKeychainTokenToProfile extracts any existing agent credentials from the macOS
+// Keychain and saves them into the isolated profile directory if the profile doesn't
+// already have credentials on disk.
+func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
+		return false
+	}
+	var destTokenPath string
+	switch agent {
+	case "agy":
+		destTokenPath = filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	default:
+		return false
+	}
+
+	if fi, err := os.Stat(destTokenPath); err == nil && fi.Size() > 0 {
+		return true
+	}
+
+	tokData, err := GetAgentKeychainToken(agent)
+	if err != nil || len(tokData) == 0 {
+		return false
+	}
+
+	if err := os.MkdirAll(filepath.Dir(destTokenPath), 0700); err != nil {
+		return false
+	}
+	if err := os.WriteFile(destTokenPath, tokData, 0600); err != nil {
+		return false
+	}
+	logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
+	return true
 }
