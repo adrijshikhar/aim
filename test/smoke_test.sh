@@ -209,44 +209,11 @@ echo "$DOCTOR_CLONE_OUT" | grep "1 custom launch arg(s) configured"
 [ ! -d "$TEST_AIM_HOME/profiles/clone_prof" ]
 echo "Profile clone and config overrides OK!"
 
-echo "=== 12b. Testing profile rename (aim rename) ==="
-# Test rename completion
-"$AIM_BIN" __complete rename | grep "agy"
-"$AIM_BIN" __complete rename agy | grep "smoke_profile"
-
-# Verify unregistered alias 'mv' fails
-if "$AIM_BIN" mv smoke_profile smoke_renamed 2>/dev/null; then
-  echo "Error: unregistered command 'aim mv' should fail"
+echo "=== 12b. Verifying rename is not a CLI command (TUI action only) ==="
+if "$AIM_BIN" rename smoke_profile smoke_renamed 2>/dev/null; then
+  echo "Error: 'aim rename' should not be a CLI command (TUI action only)"
   exit 1
 fi
-
-# Create a sensitive token file in smoke_profile to test preservation
-mkdir -p "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli"
-echo '{"token":"keep_me"}' > "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli/token.json"
-
-# Rename smoke_profile to smoke_renamed
-"$AIM_BIN" rename smoke_profile smoke_renamed
-
-# Old directory should NOT exist, new directory should exist
-[ ! -d "$TEST_AIM_HOME/profiles/smoke_profile" ]
-[ -d "$TEST_AIM_HOME/profiles/smoke_renamed" ]
-
-# Token and dotfile symlink MUST be preserved
-[ -f "$TEST_AIM_HOME/profiles/smoke_renamed/.gemini/antigravity-cli/token.json" ]
-[ -L "$TEST_AIM_HOME/profiles/smoke_renamed/.gitconfig" ]
-grep "keep_me" "$TEST_AIM_HOME/profiles/smoke_renamed/.gemini/antigravity-cli/token.json"
-
-# Listing reflects new name for both agents
-"$AIM_BIN" list agy | grep "smoke_renamed"
-"$AIM_BIN" list gemini | grep "smoke_renamed"
-
-# Rename back to smoke_profile
-"$AIM_BIN" rename smoke_renamed smoke_profile
-[ ! -d "$TEST_AIM_HOME/profiles/smoke_renamed" ]
-[ -d "$TEST_AIM_HOME/profiles/smoke_profile" ]
-[ -f "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli/token.json" ]
-rm -f "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli/token.json"
-echo "Profile rename and token preservation OK!"
 
 echo "=== 13. Testing partial removal (gemini) ==="
 "$AIM_BIN" remove gemini smoke_profile

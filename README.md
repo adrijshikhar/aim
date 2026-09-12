@@ -90,7 +90,6 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim doctor [agent]` | Check environment, binary paths, tokens, and ADC status |
 | `aim shell <agent> <profile>` | Launch an isolated subshell with profile environment |
 | `aim clone <agent> <src> <dst>` | Duplicate profile settings without copying tokens |
-| `aim rename [agent] <old> <new>` | Rename profile preserving all credentials, tokens, and state |
 | `aim remove [agent] <profile>` | Unlink agent from profile (deletes dir if empty) |
 | `aim completion <shell>` | Generate shell completions (`zsh`, `bash`, `fish`) |
 
