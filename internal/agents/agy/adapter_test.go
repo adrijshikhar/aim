@@ -48,8 +48,21 @@ func TestAgyPrepareEnv(t *testing.T) {
 	if launchEnv.Env["HOME"] != tempDir {
 		t.Errorf("expected HOME to be %s, got %s", tempDir, launchEnv.Env["HOME"])
 	}
-	if launchEnv.Env["SSH_CONNECTION"] != "127.0.0.1 50000 127.0.0.1 22" {
-		t.Errorf("expected SSH_CONNECTION to be set to force keyring bypass, got %s", launchEnv.Env["SSH_CONNECTION"])
+	if _, exists := launchEnv.Env["SSH_CONNECTION"]; exists {
+		t.Errorf("expected SSH_CONNECTION to be omitted when credentials missing to enable browser auto-open")
+	}
+
+	// Now write token into tempDir and verify SSH_CONNECTION is set
+	tokenFile := filepath.Join(tempDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	_ = os.MkdirAll(filepath.Dir(tokenFile), 0700)
+	_ = os.WriteFile(tokenFile, []byte(`{"token":{"access_token":"mock"}}`), 0600)
+
+	launchEnvWithCreds, err := adapter.PrepareEnv("work", tempDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv with creds failed: %v", err)
+	}
+	if launchEnvWithCreds.Env["SSH_CONNECTION"] != "127.0.0.1 50000 127.0.0.1 22" {
+		t.Errorf("expected SSH_CONNECTION to be set when credentials exist, got %s", launchEnvWithCreds.Env["SSH_CONNECTION"])
 	}
 	if _, exists := launchEnv.Env["SSH_CLIENT"]; exists {
 		t.Errorf("expected SSH_CLIENT to be deleted from launch environment")
@@ -606,3 +619,58 @@ func TestAgyPrepareEnv_AIMHome(t *testing.T) {
 		t.Errorf("expected AIM_HOME to be %s, got %s", tempHome, env.Env["AIM_HOME"])
 	}
 }
+
+func TestAgyLogin_NewProfileAndExistingProfile(t *testing.T) {
+	// Create mock agy script
+	binDir := t.TempDir()
+	mockAgy := filepath.Join(binDir, "agy")
+	mockScript := `#!/bin/sh
+# Verify SSH variables are stripped so agy auto-opens the browser
+if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] || [ -n "$GEMINI_CLI_HOME" ]; then
+    echo "ERROR: SSH variable present" >&2
+    exit 1
+fi
+if [ -z "$HOME" ] || [ -z "$AIM_AGENT" ] || [ -z "$AIM_PROFILE" ]; then
+    echo "ERROR: required AIM env variable missing" >&2
+    exit 2
+fi
+
+# Simulate successful login by writing mock token to profile directory
+mkdir -p "$HOME/.gemini/antigravity-cli"
+echo '{"token":{"access_token":"mock_login_access_token"}}' > "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+exit 0
+`
+	if err := os.WriteFile(mockAgy, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	// Simulate host having SSH environment variables
+	t.Setenv("SSH_CONNECTION", "192.168.1.100 54321 192.168.1.50 22")
+	t.Setenv("SSH_CLIENT", "192.168.1.100 54321 22")
+	t.Setenv("SSH_TTY", "/dev/ttys002")
+
+	adapter := NewAdapter()
+
+	// Scenario 1: Login for a brand new profile directory
+	newProfDir := filepath.Join(t.TempDir(), "brand_new")
+	if err := adapter.Login(context.Background(), "brand_new", newProfDir); err != nil {
+		t.Fatalf("Login failed for brand new profile: %v", err)
+	}
+	if !adapter.HasCredentials(newProfDir) {
+		t.Errorf("expected HasCredentials to be true after successful login for brand new profile")
+	}
+
+	// Scenario 2: Login for an existing profile directory where credentials were missing
+	existingProfDir := t.TempDir()
+	if adapter.HasCredentials(existingProfDir) {
+		t.Fatalf("expected existing profile to have no credentials initially")
+	}
+	if err := adapter.Login(context.Background(), "existing_prof", existingProfDir); err != nil {
+		t.Fatalf("Login failed for existing profile with missing creds: %v", err)
+	}
+	if !adapter.HasCredentials(existingProfDir) {
+		t.Errorf("expected HasCredentials to be true after login for existing profile")
+	}
+}
+

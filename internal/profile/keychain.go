@@ -302,8 +302,7 @@ func GetAgentKeychainToken(agent string) ([]byte, error) {
 }
 
 // HarvestKeychainTokenToProfile extracts any existing agent credentials from the macOS
-// Keychain and saves them into the isolated profile directory if the profile doesn't
-// already have credentials on disk.
+// Keychain and saves them into the isolated profile directory.
 func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
 		return false
@@ -316,21 +315,23 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 		return false
 	}
 
+	tokData, err := GetAgentKeychainToken(agent)
+	if err == nil && len(tokData) > 0 {
+		if err := os.MkdirAll(filepath.Dir(destTokenPath), 0700); err != nil {
+			logger.Debug("[keychain] Failed to create directory for token %s: %v", destTokenPath, err)
+			return false
+		}
+		if err := os.WriteFile(destTokenPath, tokData, 0600); err != nil {
+			logger.Debug("[keychain] Failed to write token to %s: %v", destTokenPath, err)
+			return false
+		}
+		logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
+		return true
+	}
+
 	if fi, err := os.Stat(destTokenPath); err == nil && fi.Size() > 0 {
 		return true
 	}
 
-	tokData, err := GetAgentKeychainToken(agent)
-	if err != nil || len(tokData) == 0 {
-		return false
-	}
-
-	if err := os.MkdirAll(filepath.Dir(destTokenPath), 0700); err != nil {
-		return false
-	}
-	if err := os.WriteFile(destTokenPath, tokData, 0600); err != nil {
-		return false
-	}
-	logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
-	return true
+	return false
 }

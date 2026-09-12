@@ -223,11 +223,23 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		_ = bridgeSharedState(realHome, profileDir)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
-		cmd.Env = append(os.Environ(),
+		cleanEnv := make([]string, 0, len(os.Environ())+4)
+		for _, env := range os.Environ() {
+			idx := strings.IndexByte(env, '=')
+			if idx == -1 {
+				continue
+			}
+			key := env[:idx]
+			if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" {
+				continue
+			}
+			cleanEnv = append(cleanEnv, env)
+		}
+		cmd.Env = append(cleanEnv,
 			"HOME="+profileDir,
 			"AIM_AGENT="+a.Name(),
 			"AIM_PROFILE="+profileName,
-			"SSH_CONNECTION=127.0.0.1 50000 127.0.0.1 22",
+			"AIM_HOME="+config.BaseDir(),
 		)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
@@ -341,7 +353,13 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}
 
 	envMap["HOME"] = profileDir
-	envMap["SSH_CONNECTION"] = "127.0.0.1 50000 127.0.0.1 22"
+	// Only set SSH_CONNECTION if profile already has credentials on disk,
+	// to isolate file-based token reads without suppressing browser auto-open during login.
+	if a.HasCredentials(profileDir) {
+		envMap["SSH_CONNECTION"] = "127.0.0.1 50000 127.0.0.1 22"
+	} else {
+		delete(envMap, "SSH_CONNECTION")
+	}
 	delete(envMap, "SSH_CLIENT")
 	delete(envMap, "SSH_TTY")
 	envMap["AIM_AGENT"] = a.Name()

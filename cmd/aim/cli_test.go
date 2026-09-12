@@ -213,30 +213,71 @@ func TestCLIExecuteRun(t *testing.T) {
 }
 
 func TestCLIExecuteLogin(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "aim-cli-test-*")
-	if err != nil {
-		t.Fatalf("temp dir error: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
 
 	pm := profile.NewProfileManager(tempDir)
 	reg := agents.NewRegistry()
 
-	// Unknown agent
+	// 1. Unknown agent should fail with exit code 1
 	if code := executeLogin(reg, pm, "unknown", "work"); code != 1 {
-		t.Fatalf("expected 1, got %d", code)
+		t.Fatalf("expected code 1 for unknown agent, got %d", code)
 	}
 
-	// Mock successful login
 	reg.Register(&mockAdapter{name: "mock"})
-	if code := executeLogin(reg, pm, "mock", "work"); code != 0 {
-		t.Fatalf("expected 0, got %d", code)
+
+	// 2. Creating a brand new profile via login
+	newProfName := "brand_new_profile"
+	newProfDir := pm.ProfileDir(newProfName)
+	if _, err := os.Stat(newProfDir); !os.IsNotExist(err) {
+		t.Fatalf("expected new profile dir to not exist before login")
 	}
 
-	cfg, _ := config.LoadConfig()
-	if !cfg.HasAgent("work", "mock") {
-		t.Fatalf("expected profile 'work' to have agent 'mock' in config after login")
+	if code := executeLogin(reg, pm, "mock", newProfName); code != 0 {
+		t.Fatalf("expected login code 0 when creating new profile, got %d", code)
+	}
+
+	if fi, err := os.Stat(newProfDir); err != nil || !fi.IsDir() {
+		t.Fatalf("expected profile dir %s to be created as directory", newProfDir)
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if !cfg.HasAgent(newProfName, "mock") {
+		t.Fatalf("expected new profile %q to have agent 'mock' in config after login", newProfName)
+	}
+
+	// 3. Logging in an existing profile where creds are missing
+	existingProfName := "existing_no_creds"
+	existingProfDir, err := pm.EnsureProfile(existingProfName)
+	if err != nil {
+		t.Fatalf("failed to pre-create existing profile: %v", err)
+	}
+	if fi, err := os.Stat(existingProfDir); err != nil || !fi.IsDir() {
+		t.Fatalf("expected existing profile dir to exist")
+	}
+
+	if code := executeLogin(reg, pm, "mock", existingProfName); code != 0 {
+		t.Fatalf("expected login code 0 for existing profile, got %d", code)
+	}
+
+	cfgReload, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("failed to reload config: %v", err)
+	}
+	if !cfgReload.HasAgent(existingProfName, "mock") {
+		t.Fatalf("expected existing profile %q to have agent 'mock' tagged in config", existingProfName)
+	}
+
+	// 4. Login with agent alias "m" tags canonical name "mock"
+	if code := executeLogin(reg, pm, "m", "alias_prof"); code != 0 {
+		t.Fatalf("expected login code 0 with alias 'm', got %d", code)
+	}
+	cfgAlias, _ := config.LoadConfig()
+	if !cfgAlias.HasAgent("alias_prof", "mock") {
+		t.Fatalf("expected canonical agent 'mock' to be tagged for alias 'm'")
 	}
 }
 
@@ -925,36 +966,6 @@ func TestCLI_RenameCommandNotRegistered(t *testing.T) {
 	}
 }
 
-func TestCLI_ExecuteLogin_UpdatesAgentTag(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("AIM_HOME", tmpDir)
-	pm := profile.NewProfileManager(tmpDir)
-	reg := agents.NewRegistry()
-	reg.Register(&mockAdapter{name: "mock"})
-
-	code := executeLogin(reg, pm, "mock", "newprof")
-	if code != 0 {
-		t.Fatalf("expected login code 0, got %d", code)
-	}
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-	if !cfg.HasAgent("newprof", "mock") {
-		t.Errorf("expected 'mock' to be tagged on 'newprof'")
-	}
-
-	// Login with alias "m" tags canonical name "mock"
-	codeAlias := executeLogin(reg, pm, "m", "aliasprof")
-	if codeAlias != 0 {
-		t.Fatalf("expected login code 0 with alias, got %d", codeAlias)
-	}
-	cfgReload, _ := config.LoadConfig()
-	if !cfgReload.HasAgent("aliasprof", "mock") {
-		t.Errorf("expected canonical agent 'mock' to be tagged on 'aliasprof'")
-	}
-}
 
 func TestCLI_ExecuteRun_UpdatesAgentTag(t *testing.T) {
 	tmpDir := t.TempDir()
