@@ -334,4 +334,3 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 	logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
 	return true
 }
-

@@ -604,4 +604,3 @@ func (m *mockAgentAdapter) Doctor(ctx context.Context, profileName, profileDir s
 func (m *mockAgentAdapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
 	return nil, nil
 }
-

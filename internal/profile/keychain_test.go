@@ -137,4 +137,3 @@ func TestHarvestKeychainTokenToProfile(t *testing.T) {
 		t.Errorf("expected second harvest to return true")
 	}
 }
-
