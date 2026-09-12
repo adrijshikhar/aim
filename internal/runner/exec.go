@@ -94,7 +94,9 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 			// once the user completes authentication in the browser, and immediately purges
 			// the token from the host Keychain so it never lingers or races with other profiles.
 			stopWatcher := make(chan struct{})
+			doneWatcher := make(chan struct{})
 			go func() {
+				defer close(doneWatcher)
 				ticker := time.NewTicker(1 * time.Second)
 				defer ticker.Stop()
 				for {
@@ -113,6 +115,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 
 			defer func() {
 				close(stopWatcher)
+				<-doneWatcher
 				if profileDir != "" {
 					_ = profile.HarvestKeychainTokenToProfile(agentName, profileDir)
 				}
