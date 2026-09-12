@@ -39,11 +39,27 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 
 ## Installation
 
-### Homebrew (macOS & Linux)
+### Homebrew (Recommended for macOS & Linux)
+
+The easiest way to install and stay up to date:
 
 ```bash
-brew install adrijshikhar/tap/aim
+brew tap adrijshikhar/homebrew-tap
+brew install --cask aim
 ```
+
+*Or via single command:*
+```bash
+brew install --cask adrijshikhar/tap/aim
+```
+
+To update to future releases:
+```bash
+brew update && brew upgrade adrijshikhar/tap/aim
+```
+
+> [!TIP]
+> **macOS Gatekeeper Safe**: Installing via Homebrew automatically manages permissions and clears the quarantine flag (`com.apple.quarantine`), so `aim` runs without "unidentified developer" security warnings.
 
 ### Quick Install (Script)
 
@@ -56,6 +72,8 @@ Download standalone archives from [GitHub Releases](https://github.com/adrijshik
 ```bash
 git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 ```
+
+*(If downloading standalone archives directly in a macOS web browser, run `xattr -d com.apple.quarantine $(which aim)` to clear Gatekeeper warnings).*
 
 ---
 
