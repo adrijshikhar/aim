@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -103,7 +102,7 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 
 func isProfileEligibleForSeeding(profileName string) bool {
 	switch profileName {
-	case "personal", "default", "p", "me", "main":
+	case "personal", "p", "me", "main":
 		return true
 	}
 
@@ -112,8 +111,12 @@ func isProfileEligibleForSeeding(profileName string) bool {
 		if cfg.DefaultProfile != "" && cfg.DefaultProfile == profileName {
 			return true
 		}
-		if len(cfg.Profiles) <= 1 {
-			return true
+		if len(cfg.Profiles) == 1 {
+			for p := range cfg.Profiles {
+				if p == profileName {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -685,13 +688,18 @@ func ParseUsageTSV(raw string) []usage.LimitWindow {
 
 func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
 	_ = a.SeedDefaultCredentials(profileName, profileDir)
+	acc := profile.GetProfileAccountInfo(profileDir)
 	if !a.HasCredentials(profileDir) {
 		return &usage.Report{
-			Agent:     a.Name(),
-			Profile:   profileName,
-			Status:    usage.StatusUnknown,
-			FetchedAt: time.Now(),
-			Error:     "no credentials",
+			Agent:        a.Name(),
+			Profile:      profileName,
+			Status:       usage.StatusUnknown,
+			FetchedAt:    time.Now(),
+			Error:        "no credentials",
+			AccountEmail: acc.Email,
+			AccountName:  acc.Name,
+			AuthMethod:   acc.AuthMethod,
+			ProjectID:    acc.ProjectID,
 		}, nil
 	}
 
@@ -706,11 +714,15 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 	}
 	if err != nil {
 		return &usage.Report{
-			Agent:     a.Name(),
-			Profile:   profileName,
-			Status:    usage.StatusUnknown,
-			FetchedAt: time.Now(),
-			Error:     "binary not found",
+			Agent:        a.Name(),
+			Profile:      profileName,
+			Status:       usage.StatusUnknown,
+			FetchedAt:    time.Now(),
+			Error:        "binary not found",
+			AccountEmail: acc.Email,
+			AccountName:  acc.Name,
+			AuthMethod:   acc.AuthMethod,
+			ProjectID:    acc.ProjectID,
 		}, nil
 	}
 
@@ -726,41 +738,37 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		usageErr   error
 		creditsOut []byte
 		creditsErr error
-		wg         sync.WaitGroup
 	)
 
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		cmd := exec.CommandContext(ctx, bin, "-p", "/usage")
-		cmd.Env = env
-		usageOut, usageErr = cmd.Output()
-	}()
+	cmdUsage := exec.CommandContext(ctx, bin, "--print", "/usage")
+	cmdUsage.Dir = profileDir
+	cmdUsage.Env = env
+	usageOut, usageErr = cmdUsage.Output()
 
-	go func() {
-		defer wg.Done()
-		cmd := exec.CommandContext(ctx, bin, "-p", "/credits")
-		cmd.Env = env
-		creditsOut, creditsErr = cmd.Output()
-	}()
-
-	wg.Wait()
+	cmdCredits := exec.CommandContext(ctx, bin, "--print", "/credits")
+	cmdCredits.Dir = profileDir
+	cmdCredits.Env = env
+	creditsOut, creditsErr = cmdCredits.Output()
 
 	if usageErr != nil {
-		// Fallback: check if local conversation db exists
-		dbPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "conversation_summaries.db")
-		summary := "Offline"
-		if fi, sErr := os.Stat(dbPath); sErr == nil && fi.Size() > 0 {
-			summary = "Offline (local session cache present)"
+		report := &usage.Report{
+			Agent:        a.Name(),
+			Profile:      profileName,
+			Status:       usage.StatusUnknown,
+			FetchedAt:    time.Now(),
+			Error:        usageErr.Error(),
+			AccountEmail: acc.Email,
+			AccountName:  acc.Name,
+			AuthMethod:   acc.AuthMethod,
+			ProjectID:    acc.ProjectID,
 		}
-		return &usage.Report{
-			Agent:     a.Name(),
-			Profile:   profileName,
-			Status:    usage.StatusUnknown,
-			Summary:   summary,
-			FetchedAt: time.Now(),
-			Error:     usageErr.Error(),
-		}, nil
+		dbPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "conversation_summaries.db")
+		if _, statErr := os.Stat(dbPath); statErr == nil {
+			report.Summary = "Offline (local session cache present)"
+		} else {
+			report.Summary = "Offline"
+		}
+		return report, nil
 	}
 
 	windows := ParseUsageTSV(string(usageOut))
@@ -778,12 +786,16 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 	}
 
 	report := &usage.Report{
-		Agent:     a.Name(),
-		Profile:   profileName,
-		Status:    status,
-		Windows:   windows,
-		Credits:   credits,
-		FetchedAt: time.Now(),
+		Agent:        a.Name(),
+		Profile:      profileName,
+		Status:       status,
+		Windows:      windows,
+		Credits:      credits,
+		AccountEmail: acc.Email,
+		AccountName:  acc.Name,
+		AuthMethod:   acc.AuthMethod,
+		ProjectID:    acc.ProjectID,
+		FetchedAt:    time.Now(),
 	}
 
 	// Build summary

@@ -72,7 +72,7 @@ func ConfigFilePath() string {
 func NewDefaultConfig() *Config {
 	return &Config{
 		DefaultAgent:   "agy",
-		DefaultProfile: "default",
+		DefaultProfile: "",
 		Profiles:       make(map[string]ProfileConfig),
 	}
 }
@@ -140,6 +140,9 @@ func (c *Config) DeleteProfile(profile string) {
 		return
 	}
 	delete(c.Profiles, profile)
+	if c.DefaultProfile == profile {
+		c.DefaultProfile = ""
+	}
 }
 
 func (c *Config) RenameProfile(oldProfile, newProfile string) {
@@ -233,6 +236,9 @@ func LoadConfig() (*Config, error) {
 	}
 	if cfg.Profiles == nil {
 		cfg.Profiles = make(map[string]ProfileConfig)
+	}
+	if len(cfg.Profiles) == 0 && cfg.DefaultProfile == "default" {
+		cfg.DefaultProfile = ""
 	}
 	if cfg.Debug {
 		env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))

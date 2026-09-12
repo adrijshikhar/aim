@@ -25,15 +25,19 @@ type LimitWindow struct {
 }
 
 type Report struct {
-	Agent     string        `json:"agent"`
-	Profile   string        `json:"profile"`
-	Status    Status        `json:"status"`
-	Windows   []LimitWindow `json:"windows"`
-	Credits   string        `json:"credits,omitempty"`
-	Summary   string        `json:"summary"`
-	FetchedAt time.Time     `json:"fetched_at"`
-	FromCache bool          `json:"from_cache"`
-	Error     string        `json:"error,omitempty"`
+	Agent        string        `json:"agent"`
+	Profile      string        `json:"profile"`
+	Status       Status        `json:"status"`
+	Windows      []LimitWindow `json:"windows"`
+	Credits      string        `json:"credits,omitempty"`
+	Summary      string        `json:"summary"`
+	AccountEmail string        `json:"account_email,omitempty"`
+	AccountName  string        `json:"account_name,omitempty"`
+	AuthMethod   string        `json:"auth_method,omitempty"`
+	ProjectID    string        `json:"project_id,omitempty"`
+	FetchedAt    time.Time     `json:"fetched_at"`
+	FromCache    bool          `json:"from_cache"`
+	Error        string        `json:"error,omitempty"`
 }
 
 func (r *Report) PrimaryWindow() *LimitWindow {

@@ -966,7 +966,6 @@ func TestCLI_RenameCommandNotRegistered(t *testing.T) {
 	}
 }
 
-
 func TestCLI_ExecuteRun_UpdatesAgentTag(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("AIM_HOME", tmpDir)

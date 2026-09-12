@@ -673,4 +673,3 @@ exit 0
 		t.Errorf("expected HasCredentials to be true after login for existing profile")
 	}
 }
-

@@ -126,6 +126,22 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 	fmt.Println(divider)
 	fmt.Printf("%s %s\n", labelStyle.Render("Profile:"), valStyle.Render(profileName))
 	fmt.Printf("%s %s\n", labelStyle.Render("Agent:"), valStyle.Render(agentName))
+
+	accInfo := profile.GetProfileAccountInfo(profileDir)
+	if accInfo.Email != "" {
+		accStr := accInfo.Email
+		if accInfo.Name != "" {
+			accStr += " (" + accInfo.Name + ")"
+		}
+		fmt.Printf("%s %s\n", labelStyle.Render("Account:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Bold(true).Render(accStr))
+	}
+	if accInfo.AuthMethod != "" {
+		fmt.Printf("%s %s\n", labelStyle.Render("Auth Method:"), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(accInfo.AuthMethod))
+	}
+	if accInfo.ProjectID != "" {
+		fmt.Printf("%s %s\n", labelStyle.Render("Project ID:"), lipgloss.NewStyle().Foreground(tui.TextDim).Render(accInfo.ProjectID))
+	}
+
 	fmt.Printf("%s %s\n", labelStyle.Render("Profile Home:"), lipgloss.NewStyle().Render(profileDir))
 
 	if convID != "" {
