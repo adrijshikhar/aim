@@ -1,6 +1,9 @@
 package profile
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -66,3 +69,72 @@ func TestFindIgnoredKeychains_NonDarwin(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeKeychainPassword(t *testing.T) {
+	// 1. go-keyring-base64 encoded JSON
+	originalJSON := `{"token":{"access_token":"ya29.test","refresh_token":"1//test"}}`
+	b64Encoded := "go-keyring-base64:eyJ0b2tlbiI6eyJhY2Nlc3NfdG9rZW4iOiJ5YTI5LnRlc3QiLCJyZWZyZXNoX3Rva2VuIjoiMS8vdGVzdCJ9fQ=="
+	decoded := DecodeKeychainPassword(b64Encoded)
+	if string(decoded) != originalJSON {
+		t.Errorf("expected %s, got %s", originalJSON, string(decoded))
+	}
+
+	// 2. Plain JSON
+	plainJSON := `{"token":"plain_test"}`
+	decodedPlain := DecodeKeychainPassword(plainJSON)
+	if string(decodedPlain) != plainJSON {
+		t.Errorf("expected %s, got %s", plainJSON, string(decodedPlain))
+	}
+
+	// 3. Empty string
+	if DecodeKeychainPassword("") != nil {
+		t.Errorf("expected nil for empty string")
+	}
+
+	// 4. Whitespace
+	if DecodeKeychainPassword("   \n\t") != nil {
+		t.Errorf("expected nil for whitespace")
+	}
+}
+
+func TestHarvestKeychainTokenToProfile(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	origFn := getGenericPasswordFn
+	defer func() { getGenericPasswordFn = origFn }()
+
+	mockTokenJSON := `{"token":{"access_token":"mock_harvested_token"}}`
+	getGenericPasswordFn = func(service, account string) (string, error) {
+		if service == "gemini" && account == "antigravity" {
+			return "go-keyring-base64:eyJ0b2tlbiI6eyJhY2Nlc3NfdG9rZW4iOiJtb2NrX2hhcnZlc3RlZF90b2tlbiJ9fQ==", nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+
+	targetProfile := t.TempDir()
+	if !HarvestKeychainTokenToProfile("agy", targetProfile) {
+		t.Fatalf("expected HarvestKeychainTokenToProfile to return true")
+	}
+
+	destFile := filepath.Join(targetProfile, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	data, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("failed to read harvested token file: %v", err)
+	}
+	if string(data) != mockTokenJSON {
+		t.Errorf("expected token content %s, got %s", mockTokenJSON, string(data))
+	}
+
+	fi, err := os.Stat(destFile)
+	if err != nil {
+		t.Fatalf("failed to stat harvested token file: %v", err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("expected file permissions 0600, got %#o", fi.Mode().Perm())
+	}
+
+	// Harvesting again should return true without re-reading
+	if !HarvestKeychainTokenToProfile("agy", targetProfile) {
+		t.Errorf("expected second harvest to return true")
+	}
+}
+

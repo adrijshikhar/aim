@@ -17,6 +17,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/oauth"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/otiai10/copy"
 )
@@ -87,14 +88,52 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 		return true
 	}
 
+	// Auto-seed credentials if eligible profile doesn't have credentials yet
+	profileName := filepath.Base(profileDir)
+	if a.SeedDefaultCredentials(profileName, profileDir) {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			logger.Debug("[agy] HasCredentials: true (auto-seeded token at %s)", p)
+			return true
+		}
+	}
+
 	logger.Debug("[agy] HasCredentials: false (no token at %s or ADC at %s)", p, adcPath)
 	return false
 }
 
-// SeedDefaultCredentials copies the host's existing Antigravity CLI token to a
-// "personal" or "default" profile if the profile doesn't have credentials yet.
+func isProfileEligibleForSeeding(profileName string) bool {
+	switch profileName {
+	case "personal", "default", "p", "me", "main":
+		return true
+	}
+
+	cfg, err := config.LoadConfig()
+	if err == nil && cfg != nil {
+		if cfg.DefaultProfile != "" && cfg.DefaultProfile == profileName {
+			return true
+		}
+		if len(cfg.Profiles) <= 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func copyHostSettings(realHome, tokenDir string) {
+	realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
+	destSettings := filepath.Join(tokenDir, "settings.json")
+	if _, err := os.Stat(destSettings); os.IsNotExist(err) {
+		if sData, err := os.ReadFile(realSettings); err == nil {
+			_ = os.WriteFile(destSettings, sData, 0644)
+		}
+	}
+}
+
+// SeedDefaultCredentials copies the host's existing Antigravity CLI token to an
+// eligible profile (such as "personal", "default", "p", or the configured default profile)
+// if the profile doesn't have credentials yet.
 func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
-	if profileName != "personal" && profileName != "default" {
+	if !isProfileEligibleForSeeding(profileName) {
 		return false
 	}
 	p := a.TokenPath(profileDir)
@@ -103,23 +142,33 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	}
 	realHome := config.RealHomeDir()
 	realToken := filepath.Join(realHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-	if filepath.Clean(realToken) == filepath.Clean(p) {
-		return false
+
+	// 1. Try copying token from host filesystem
+	if filepath.Clean(realToken) != filepath.Clean(p) {
+		if realFi, err := os.Stat(realToken); err == nil && !realFi.IsDir() {
+			if rData, err := os.ReadFile(realToken); err == nil && len(rData) > 0 {
+				perm := realFi.Mode().Perm()
+				if perm == 0 {
+					perm = 0600
+				}
+				_ = os.MkdirAll(filepath.Dir(p), 0700)
+				if err := os.WriteFile(p, rData, perm); err == nil {
+					logger.Debug("[agy] Seeded profile %q from host token file %s", profileName, realToken)
+					copyHostSettings(realHome, filepath.Dir(p))
+					return true
+				}
+			}
+		}
 	}
-	realFi, err := os.Stat(realToken)
-	if err != nil || realFi.IsDir() {
-		return false
+
+	// 2. Try harvesting token from host macOS Keychain
+	if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
+		logger.Debug("[agy] Seeded profile %q from host macOS Keychain", profileName)
+		copyHostSettings(realHome, filepath.Dir(p))
+		return true
 	}
-	rData, err := os.ReadFile(realToken)
-	if err != nil || len(rData) == 0 {
-		return false
-	}
-	perm := realFi.Mode().Perm()
-	if perm == 0 {
-		perm = 0600
-	}
-	_ = os.MkdirAll(filepath.Dir(p), 0700)
-	return os.WriteFile(p, rData, perm) == nil
+
+	return false
 }
 
 func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
@@ -174,11 +223,20 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		_ = bridgeSharedState(realHome, profileDir)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
-		cmd.Env = append(os.Environ(), "HOME="+profileDir, "AIM_AGENT="+a.Name(), "AIM_PROFILE="+profileName)
+		cmd.Env = append(os.Environ(),
+			"HOME="+profileDir,
+			"AIM_AGENT="+a.Name(),
+			"AIM_PROFILE="+profileName,
+			"SSH_CONNECTION=127.0.0.1 50000 127.0.0.1 22",
+		)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		return cmd.Run()
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+		_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
+		return nil
 	}
 	cfg := oauth.ProviderConfig{
 		ClientID:     clientID,
@@ -259,13 +317,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	_ = a.SeedDefaultCredentials(profileName, profileDir)
 
 	// Also copy settings.json from host if not present in profile
-	realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
-	destSettings := filepath.Join(tokenDir, "settings.json")
-	if _, err := os.Stat(destSettings); os.IsNotExist(err) {
-		if sData, err := os.ReadFile(realSettings); err == nil {
-			_ = os.WriteFile(destSettings, sData, 0644)
-		}
-	}
+	copyHostSettings(realHome, tokenDir)
 
 	bin, err := exec.LookPath(a.BinaryName())
 	if err != nil {
@@ -289,7 +341,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}
 
 	envMap["HOME"] = profileDir
-	delete(envMap, "SSH_CONNECTION")
+	envMap["SSH_CONNECTION"] = "127.0.0.1 50000 127.0.0.1 22"
 	delete(envMap, "SSH_CLIENT")
 	delete(envMap, "SSH_TTY")
 	envMap["AIM_AGENT"] = a.Name()

@@ -56,6 +56,7 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 	}
 	_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
 	defer func() {
+		_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
 		_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
 	}()
 
