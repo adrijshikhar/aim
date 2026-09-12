@@ -2,7 +2,6 @@ package usage
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,7 +36,7 @@ func NewCacheStore(baseDir string, ttl time.Duration) *CacheStore {
 }
 
 func key(agent, profile string) string {
-	return fmt.Sprintf("%s:%s", agent, profile)
+	return agent + ":" + profile
 }
 
 func (c *CacheStore) load() {
@@ -172,7 +171,7 @@ func (c *CacheStore) saveAtomic() error {
 		Reports:   c.reports,
 	}
 
-	data, err := json.MarshalIndent(d, "", "  ")
+	data, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
@@ -206,8 +205,6 @@ func (c *CacheStore) IsStale(agent, profile string, maxAge time.Duration) bool {
 // Otherwise, it updates the lock file timestamp and returns true.
 func CanPrewarm(baseDir string, cooldown time.Duration) bool {
 	lockFile := filepath.Join(baseDir, "cache", ".prewarm.lock")
-	dir := filepath.Dir(lockFile)
-	_ = os.MkdirAll(dir, 0700)
 
 	if cooldown > 0 {
 		fi, err := os.Stat(lockFile)
@@ -217,6 +214,9 @@ func CanPrewarm(baseDir string, cooldown time.Duration) bool {
 			}
 		}
 	}
+
+	dir := filepath.Dir(lockFile)
+	_ = os.MkdirAll(dir, 0700)
 
 	// Touch/update lock file
 	now := time.Now()

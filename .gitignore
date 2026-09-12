@@ -3,6 +3,8 @@
 /dist/
 *.tmp
 *.log
+*.test
+*.pprof
 .DS_Store
 
 # Agents, tooling, and local harness configs

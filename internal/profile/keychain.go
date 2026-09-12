@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/logger"
@@ -128,20 +129,34 @@ func PurgeIgnoredKeychains(agent string, customServices ...string) error {
 	}
 
 	entries := GetIgnoredKeychainEntries(customServices...)
-	var errs []error
+	var (
+		mu   sync.Mutex
+		errs []error
+		wg   sync.WaitGroup
+	)
 
 	for _, entry := range entries {
 		if agent != "" && entry.Agent != "" && entry.Agent != agent && entry.Agent != "custom" {
 			continue
 		}
 
-		if err := deleteGenericPassword(entry.Service, entry.Account); err != nil {
-			errs = append(errs, err)
-		}
-		if err := deleteInternetPassword(entry.Service, entry.Account); err != nil {
-			errs = append(errs, err)
-		}
+		ent := entry
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := deleteGenericPassword(ent.Service, ent.Account); err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
+			if err := deleteInternetPassword(ent.Service, ent.Account); err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
+		}()
 	}
+	wg.Wait()
 
 	if len(errs) > 0 {
 		return errors.Join(errs...)

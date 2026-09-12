@@ -34,27 +34,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Build clean environment by filtering out sensitive/managed variables
-	// (SSH variables, HOME, AIM_* variables) unless explicitly provided in launch.Env.
-	// This prevents the host environment from leaking SSH connection variables that would suppress browser auto-open.
-	cmd.Env = make([]string, 0, len(os.Environ())+len(launch.Env))
-	for _, env := range os.Environ() {
-		idx := strings.IndexByte(env, '=')
-		if idx == -1 {
-			continue
-		}
-		key := env[:idx]
-		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" {
-			continue
-		}
-		if _, overridden := launch.Env[key]; overridden {
-			continue
-		}
-		cmd.Env = append(cmd.Env, env)
-	}
-	for k, v := range launch.Env {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-	}
+	cmd.Env = BuildEnv(os.Environ(), launch.Env)
 
 	profileName := launch.Env["AIM_PROFILE"]
 	agentName := launch.Env["AIM_AGENT"]
@@ -163,4 +143,29 @@ func (r *Runner) RunShell(ctx context.Context, launch agents.LaunchEnv) (int, er
 	launch.Env["PS1"] = fmt.Sprintf("[aim:%s:%s] $ ", agentName, profileName)
 	logger.Debug("[runner] Launching interactive shell %s for profile %q", shell, profileName)
 	return r.Run(ctx, launch, nil)
+}
+
+// BuildEnv constructs the execution environment by filtering out sensitive/managed variables
+// (SSH variables, HOME, AIM_* variables) unless explicitly provided in launchEnv, and applying overrides.
+// This prevents the host environment from leaking SSH connection variables that would suppress browser auto-open.
+func BuildEnv(environ []string, launchEnv map[string]string) []string {
+	env := make([]string, 0, len(environ)+len(launchEnv))
+	for _, e := range environ {
+		idx := strings.IndexByte(e, '=')
+		if idx == -1 {
+			continue
+		}
+		key := e[:idx]
+		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" {
+			continue
+		}
+		if _, overridden := launchEnv[key]; overridden {
+			continue
+		}
+		env = append(env, e)
+	}
+	for k, v := range launchEnv {
+		env = append(env, k+"="+v)
+	}
+	return env
 }

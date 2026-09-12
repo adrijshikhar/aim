@@ -49,23 +49,31 @@ var defaultBridgedPaths = []string{
 // bridgedDotfiles provides backwards compatibility with existing references.
 var bridgedDotfiles = defaultBridgedPaths
 
+var baseBridgedPaths = func() []string {
+	paths := make([]string, len(defaultBridgedPaths), len(defaultBridgedPaths)+1)
+	copy(paths, defaultBridgedPaths)
+	if runtime.GOOS == "darwin" {
+		paths = append(paths, filepath.Join("Library", "Keychains"))
+	}
+	return paths
+}()
+
 // GetBridgedPaths returns the full list of paths to bridge from the host home directory.
 // On macOS (darwin), it mounts ~/Library/Keychains so native tools like GitHub CLI (gh)
 // and git-credential-osxkeychain can access system keychains.
 func GetBridgedPaths(extraPaths ...string) []string {
-	paths := make([]string, 0, len(defaultBridgedPaths)+1+len(extraPaths))
-	paths = append(paths, defaultBridgedPaths...)
-	if runtime.GOOS == "darwin" {
-		paths = append(paths, filepath.Join("Library", "Keychains"))
+	if len(extraPaths) == 0 {
+		return baseBridgedPaths
 	}
+	paths := make([]string, 0, len(baseBridgedPaths)+len(extraPaths))
+	paths = append(paths, baseBridgedPaths...)
 	paths = append(paths, extraPaths...)
 	return paths
 }
 
 // isAllowedBridgedPath validates that the path does not escape the profile
 // directory and does not bridge internal AIM or agent credential stores.
-func isAllowedBridgedPath(name string) bool {
-	clean := filepath.Clean(filepath.FromSlash(name))
+func isAllowedBridgedPath(clean string) bool {
 	if !filepath.IsLocal(clean) {
 		return false
 	}
@@ -97,12 +105,13 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 	logger.Debug("[symlink] Ensuring dotfiles for profile at %s (host: %s)", profileDir, realHome)
 	paths := GetBridgedPaths(extraPaths...)
 	var errs []error
+
 	for _, name := range paths {
-		if !isAllowedBridgedPath(name) {
+		cleanName := filepath.Clean(filepath.FromSlash(name))
+		if !isAllowedBridgedPath(cleanName) {
 			logger.Debug("[symlink] Skipping disallowed path: %s", name)
 			continue
 		}
-		cleanName := filepath.Clean(filepath.FromSlash(name))
 		src := filepath.Join(realHome, cleanName)
 		if _, err := os.Lstat(src); err != nil {
 			continue

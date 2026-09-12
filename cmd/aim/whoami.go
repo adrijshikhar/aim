@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -209,33 +210,56 @@ func isValidConversationID(id string) bool {
 	return true
 }
 
+var (
+	sqliteBinOnce   sync.Once
+	cachedSqliteBin string
+)
+
+func getSqliteBin() string {
+	sqliteBinOnce.Do(func() {
+		if bin, err := exec.LookPath("sqlite3"); err == nil {
+			cachedSqliteBin = bin
+		}
+	})
+	return cachedSqliteBin
+}
+
 func getConversationTitle(profileDir, convID string) string {
 	if !isValidConversationID(convID) {
 		return ""
 	}
-	dbPaths := []string{
+	dbPaths := [2]string{
 		filepath.Join(profileDir, ".gemini", "antigravity-cli", "conversation_summaries.db"),
 		filepath.Join(config.RealHomeDir(), ".gemini", "antigravity-cli", "conversation_summaries.db"),
 	}
-	sqliteBin, err := exec.LookPath("sqlite3")
-	if err != nil {
-		return ""
-	}
+
+	var activeDB string
 	for _, db := range dbPaths {
 		if fi, err := os.Stat(db); err == nil && fi.Size() > 0 {
-			cmd := exec.Command(sqliteBin, db, fmt.Sprintf("SELECT title, preview FROM conversation_summaries WHERE conversation_id = '%s' LIMIT 1;", convID))
-			out, err := cmd.Output()
-			if err == nil && len(out) > 0 {
-				parts := strings.Split(strings.TrimSpace(string(out)), "|")
-				if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
-					return strings.TrimSpace(parts[0])
-				}
-				if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
-					preview := strings.TrimSpace(parts[1])
-					lines := strings.Split(preview, "\n")
-					return strings.TrimSpace(lines[0])
-				}
-			}
+			activeDB = db
+			break
+		}
+	}
+	if activeDB == "" {
+		return ""
+	}
+
+	sqliteBin := getSqliteBin()
+	if sqliteBin == "" {
+		return ""
+	}
+
+	cmd := exec.Command(sqliteBin, activeDB, fmt.Sprintf("SELECT title, preview FROM conversation_summaries WHERE conversation_id = '%s' LIMIT 1;", convID))
+	out, err := cmd.Output()
+	if err == nil && len(out) > 0 {
+		parts := strings.Split(strings.TrimSpace(string(out)), "|")
+		if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+			return strings.TrimSpace(parts[0])
+		}
+		if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+			preview := strings.TrimSpace(parts[1])
+			lines := strings.Split(preview, "\n")
+			return strings.TrimSpace(lines[0])
 		}
 	}
 	return ""
