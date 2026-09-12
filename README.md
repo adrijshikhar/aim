@@ -29,11 +29,13 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 | **Profile isolation** | Full virtual-home sandbox per profile — separate `~`, config, tokens, history |
 | **Agent-aware profiles** | Profiles are tagged per agent; `aim list agy` shows only Antigravity profiles |
 | **Multi-agent support** | Antigravity CLI (`agy`), Gemini CLI (`gemini`) out of the box; easily extensible |
+| **Keychain isolation** | System keychains mounted for developer tools (`gh`, `git`); agent tokens explicitly purged |
+| **Debug logging** | Opt-in tracing via `--debug`, `AIM_DEBUG=1`, or config file with dual console/file logs |
 | **Usage & quota tracking** | Live capacity gauges, 5h & weekly limits, reset countdowns, and instant caching |
 | **OAuth PKCE login** | `aim login agy work` completes OAuth in browser and isolates the token |
 | **Interactive TUI** | Bubble Tea dashboard with real-time capacity gauges, tabs, and one-key launch |
 | **Shell completions** | Tab-complete agents, profiles, and subcommands in zsh, bash, and fish |
-| **Doctor command** | Diagnoses missing binaries, tokens, and misconfigurations per agent |
+| **Doctor command** | Diagnoses missing binaries, tokens, ADC status, and keychain isolation |
 
 ---
 
@@ -87,11 +89,12 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim list [agent]` | List all configured profiles and inline quota badges |
 | `aim login <agent> <profile>` | Authenticate a new account via OAuth PKCE |
 | `aim whoami` | Show active profile, agent, session ID, and quota info |
-| `aim doctor [agent]` | Check environment, binary paths, tokens, and ADC status |
+| `aim doctor [agent]` | Check environment, binary paths, tokens, ADC status, and keychain isolation |
 | `aim shell <agent> <profile>` | Launch an isolated subshell with profile environment |
 | `aim clone <agent> <src> <dst>` | Duplicate profile settings without copying tokens |
 | `aim remove [agent] <profile>` | Unlink agent from profile (deletes dir if empty) |
 | `aim completion <shell>` | Generate shell completions (`zsh`, `bash`, `fish`) |
+| `aim --debug <command>` | Run any command with verbose debug tracing |
 
 ---
 

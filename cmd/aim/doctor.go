@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/spf13/cobra"
 )
@@ -32,6 +34,7 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 }
 
 func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName string) {
+	logger.Debug("[doctor] Running diagnostics (agent=%q)", agentName)
 	fmt.Println("=== AIM Doctor Diagnostics ===")
 	if reg == nil {
 		return
@@ -48,11 +51,41 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 			return
 		}
 		diagnoseAdapter(adapter, pm, cfg, reg)
+		diagnosePlatform(agentName, cfg)
 		return
 	}
 
 	for _, adapter := range reg.All() {
 		diagnoseAdapter(adapter, pm, cfg, reg)
+	}
+	diagnosePlatform("", cfg)
+}
+
+func diagnosePlatform(agentName string, cfg *config.Config) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+
+	fmt.Println("\n[Platform Diagnostics (macOS)]")
+	var customServices []string
+	if cfg != nil {
+		customServices = cfg.CustomIgnoredKeychains
+	}
+
+	lingering := profile.FindIgnoredKeychains(agentName, customServices...)
+	if len(lingering) > 0 {
+		fmt.Printf("  [WARN] Keychain: %d agent token(s) detected in macOS Keychain (potential profile isolation risk):\n", len(lingering))
+		for _, entry := range lingering {
+			fmt.Printf("         - %s (service: %q)\n", entry.Description, entry.Service)
+		}
+		fmt.Println("         Auto-purging ignored agent keychains to enforce profile isolation...")
+		if err := profile.PurgeIgnoredKeychains(agentName, customServices...); err != nil {
+			fmt.Printf("  [WARN] Keychain: Could not purge some entries: %v\n", err)
+		} else {
+			fmt.Println("  [OK]   Keychain: Agent credentials successfully purged from macOS Keychain.")
+		}
+	} else {
+		fmt.Println("  [OK]   Keychain: No lingering agent tokens in macOS Keychain (clean isolation).")
 	}
 }
 

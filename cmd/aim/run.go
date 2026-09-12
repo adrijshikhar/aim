@@ -7,6 +7,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
 	"github.com/spf13/cobra"
@@ -47,16 +48,20 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 }
 
 func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string, extraArgs []string) int {
+	logger.Debug("[run] Executing agent %q with profile %q (extraArgs=%v)", agentName, profileName, extraArgs)
 	adapter, err := reg.Get(agentName)
 	if err != nil {
+		logger.Debug("[run] Failed to get adapter for agent %q: %v", agentName, err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 	pDir, err := pm.EnsureProfile(profileName)
 	if err != nil {
+		logger.Debug("[run] Failed to ensure profile %q: %v", profileName, err)
 		fmt.Fprintf(os.Stderr, "Error preparing profile: %v\n", err)
 		return 1
 	}
+	logger.Debug("[run] Profile %q directory: %s", profileName, pDir)
 
 	cfg, _ := config.LoadConfig()
 	if cfg != nil {
@@ -66,9 +71,11 @@ func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, pro
 
 	launchEnv, err := adapter.PrepareEnv(profileName, pDir)
 	if err != nil {
+		logger.Debug("[run] PrepareEnv failed for %q: %v", profileName, err)
 		fmt.Fprintf(os.Stderr, "Error preparing launch environment: %v\n", err)
 		return 1
 	}
+	logger.Debug("[run] LaunchEnv: binary=%s, workingDir=%s, args=%v, envVars=%d", launchEnv.BinaryPath, launchEnv.WorkingDir, launchEnv.Args, len(launchEnv.Env))
 
 	// Apply profile configuration overrides (custom environment variables & launch arguments)
 	if cfg != nil {
@@ -79,18 +86,23 @@ func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, pro
 			for k, v := range profEnv {
 				launchEnv.Env[k] = v
 			}
+			logger.Debug("[run] Applied %d profile env overrides", len(profEnv))
 		}
 		if profArgs := cfg.GetProfileArgs(profileName); len(profArgs) > 0 {
 			launchEnv.Args = append(launchEnv.Args, profArgs...)
+			logger.Debug("[run] Applied %d profile arg overrides", len(profArgs))
 		}
 	}
 
 	r := runner.NewRunner()
+	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", extraArgs)
 	code, err := r.Run(context.Background(), launchEnv, extraArgs)
 	if err != nil {
+		logger.Debug("[run] Runner.Run returned error: %v", err)
 		fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)
 		return 1
 	}
+	logger.Debug("[run] Process finished with exit code %d", code)
 
 	// Trigger asynchronous cache pre-warming upon session exit so quotas reflect recent usage
 	triggerPrewarmAsync(config.BaseDir(), adapter.Name())

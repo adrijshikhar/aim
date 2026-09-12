@@ -15,6 +15,7 @@ import (
 func newTestModel(t *testing.T, profileNames ...string) Model {
 	t.Helper()
 	baseDir := t.TempDir()
+	t.Setenv("AIM_HOME", baseDir)
 	pm := profile.NewProfileManager(baseDir)
 	cfg := config.NewDefaultConfig()
 	for _, p := range profileNames {
@@ -902,6 +903,7 @@ func TestTUI_DeleteModal_SingleAgent_QuickConfirmY(t *testing.T) {
 
 func TestTUI_DeleteModal_SharedProfile_UnlinkAndEntireDelete(t *testing.T) {
 	baseDir := t.TempDir()
+	t.Setenv("AIM_HOME", baseDir)
 	pm := profile.NewProfileManager(baseDir)
 	_, _ = pm.EnsureProfile("shared")
 

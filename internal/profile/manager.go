@@ -10,6 +10,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/otiai10/copy"
 )
 
@@ -47,6 +48,7 @@ func (m *ProfileManager) EnsureProfile(name string) (string, error) {
 		return "", err
 	}
 	pDir := m.ProfileDir(name)
+	logger.Debug("[profile] Ensuring profile %q at %s", name, pDir)
 	if err := os.MkdirAll(pDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create profile directory: %w", err)
 	}

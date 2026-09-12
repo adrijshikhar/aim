@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/aim-cli/aim/internal/logger"
 )
 
 type ProfileConfig struct {
@@ -30,10 +32,12 @@ func (p *ProfileConfig) UnmarshalJSON(data []byte) error {
 }
 
 type Config struct {
-	DefaultAgent       string                   `json:"default_agent"`
-	DefaultProfile     string                   `json:"default_profile"`
-	CustomBridgedPaths []string                 `json:"custom_bridged_paths,omitempty"`
-	Profiles           map[string]ProfileConfig `json:"profiles"`
+	DefaultAgent           string                   `json:"default_agent"`
+	DefaultProfile         string                   `json:"default_profile"`
+	CustomBridgedPaths     []string                 `json:"custom_bridged_paths,omitempty"`
+	CustomIgnoredKeychains []string                 `json:"custom_ignored_keychains,omitempty"`
+	Debug                  bool                     `json:"debug,omitempty"`
+	Profiles               map[string]ProfileConfig `json:"profiles"`
 }
 
 func RealHomeDir() string {
@@ -229,6 +233,12 @@ func LoadConfig() (*Config, error) {
 	}
 	if cfg.Profiles == nil {
 		cfg.Profiles = make(map[string]ProfileConfig)
+	}
+	if cfg.Debug {
+		env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))
+		if env != "0" && env != "false" && env != "no" && env != "off" {
+			logger.SetDebug(true)
+		}
 	}
 	return cfg, nil
 }

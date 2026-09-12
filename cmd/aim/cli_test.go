@@ -14,6 +14,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
@@ -1465,4 +1466,90 @@ func TestTriggerPrewarmAsync(t *testing.T) {
 	triggerPrewarmAsync(tempBase, "mock")
 	// Second call should be throttled by lock
 	triggerPrewarmAsync(tempBase, "mock")
+}
+
+func TestDebug_DefaultOff(t *testing.T) {
+	logger.Reset()
+	t.Setenv("AIM_DEBUG", "")
+
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+
+	code := dispatch([]string{"whoami"}, reg, pm)
+	if code != 0 {
+		t.Fatalf("dispatch whoami failed: %d", code)
+	}
+
+	if logger.IsDebug() {
+		t.Errorf("expected debug to be off by default")
+	}
+}
+
+func TestDebug_FlagEnablesDebug(t *testing.T) {
+	logger.Reset()
+	t.Setenv("AIM_DEBUG", "")
+
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+
+	code := dispatch([]string{"--debug", "whoami"}, reg, pm)
+	if code != 0 {
+		t.Fatalf("dispatch --debug whoami failed: %d", code)
+	}
+
+	if !logger.IsDebug() {
+		t.Errorf("expected debug to be enabled via --debug flag")
+	}
+}
+
+func TestDebug_EnvVarEnablesDebug(t *testing.T) {
+	logger.Reset()
+	t.Setenv("AIM_DEBUG", "1")
+
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+
+	code := dispatch([]string{"whoami"}, reg, pm)
+	if code != 0 {
+		t.Fatalf("dispatch whoami failed: %d", code)
+	}
+
+	if !logger.IsDebug() {
+		t.Errorf("expected debug to be enabled via AIM_DEBUG=1")
+	}
+}
+
+func TestDebug_ConfigEnablesDebug(t *testing.T) {
+	logger.Reset()
+	t.Setenv("AIM_DEBUG", "")
+
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Debug = true
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+
+	code := dispatch([]string{"whoami"}, reg, pm)
+	if code != 0 {
+		t.Fatalf("dispatch whoami failed: %d", code)
+	}
+
+	if !logger.IsDebug() {
+		t.Errorf("expected debug to be enabled via config.Debug=true")
+	}
 }

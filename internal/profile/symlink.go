@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/aim-cli/aim/internal/logger"
 )
 
 var defaultBridgedPaths = []string{
@@ -48,8 +50,8 @@ var defaultBridgedPaths = []string{
 var bridgedDotfiles = defaultBridgedPaths
 
 // GetBridgedPaths returns the full list of paths to bridge from the host home directory.
-// On macOS (darwin), it includes ~/Library/Keychains so native tools like GitHub CLI (gh)
-// and git-credential-osxkeychain can access keychain-stored credentials.
+// On macOS (darwin), it mounts ~/Library/Keychains so native tools like GitHub CLI (gh)
+// and git-credential-osxkeychain can access system keychains.
 func GetBridgedPaths(extraPaths ...string) []string {
 	paths := make([]string, 0, len(defaultBridgedPaths)+1+len(extraPaths))
 	paths = append(paths, defaultBridgedPaths...)
@@ -92,10 +94,12 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 		return fmt.Errorf("profile directory does not exist: %w", err)
 	}
 
+	logger.Debug("[symlink] Ensuring dotfiles for profile at %s (host: %s)", profileDir, realHome)
 	paths := GetBridgedPaths(extraPaths...)
 	var errs []error
 	for _, name := range paths {
 		if !isAllowedBridgedPath(name) {
+			logger.Debug("[symlink] Skipping disallowed path: %s", name)
 			continue
 		}
 		cleanName := filepath.Clean(filepath.FromSlash(name))
@@ -112,8 +116,18 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 			continue
 		}
 		if err := os.Symlink(src, dest); err != nil {
+			logger.Debug("[symlink] Failed to bridge %s -> %s: %v", src, dest, err)
 			errs = append(errs, err)
+		} else {
+			logger.Debug("[symlink] Bridged: %s -> %s", cleanName, src)
 		}
 	}
+
+	// On macOS, when bridging Library/Keychains, ensure ignored agent credentials
+	// are scrubbed from the keychain to prevent cross-profile token contamination.
+	if runtime.GOOS == "darwin" {
+		_ = PurgeIgnoredKeychains("")
+	}
+
 	return errors.Join(errs...)
 }

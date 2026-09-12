@@ -12,6 +12,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
@@ -62,6 +63,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 	if len(args) > 1 {
 		targetProfile = args[1]
 	}
+	logger.Debug("[usage] Querying usage (agent=%q, profile=%q, refresh=%t, json=%t)", targetAgent, targetProfile, opts.refresh, opts.jsonOutput)
 
 	if pm == nil {
 		if opts.jsonOutput {
