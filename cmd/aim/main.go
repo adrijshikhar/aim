@@ -4,15 +4,28 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/agents/gemini"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
 func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) int {
+	logger.Init(config.BaseDir())
+	defer logger.Close()
+
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && cfg.Debug {
+		env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))
+		if env != "0" && env != "false" && env != "no" && env != "off" {
+			logger.SetDebug(true)
+		}
+	}
+
 	rootCmd := newRootCmd(reg, pm)
 
 	normalizedArgs := args

@@ -7,6 +7,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/spf13/cobra"
@@ -91,6 +92,7 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 	if pm == nil {
 		return nil
 	}
+	logger.Debug("[list] Listing profiles (agent=%q)", agentName)
 	cfg, _ := config.LoadConfig()
 	baseDir := config.BaseDir()
 	if pm != nil && pm.BaseDir != "" {

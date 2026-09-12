@@ -8,6 +8,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -143,5 +144,10 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 }
 
 func runTUI(reg *agents.Registry, pm *profile.ProfileManager) int {
-	return tuiRunner(reg, pm)
+	logger.SetConsoleOutput(false)
+	defer logger.SetConsoleOutput(true)
+	logger.Debug("[tui] Launching interactive TUI dashboard")
+	code := tuiRunner(reg, pm)
+	logger.Debug("[tui] TUI exited with code %d", code)
+	return code
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/otiai10/copy"
@@ -75,15 +76,18 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 	data, err := os.ReadFile(p)
 	if err == nil && len(data) > 0 {
 		_, _ = validateAndRepairTokenJSON(p, data)
+		logger.Debug("[agy] HasCredentials: true (valid token at %s)", p)
 		return true
 	}
 
 	// Check if Google Application Default Credentials (ADC) exist
 	adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
 	if fi, err := os.Stat(adcPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+		logger.Debug("[agy] HasCredentials: true (ADC at %s)", adcPath)
 		return true
 	}
 
+	logger.Debug("[agy] HasCredentials: false (no token at %s or ADC at %s)", p, adcPath)
 	return false
 }
 
@@ -272,6 +276,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 			bin = a.BinaryName()
 		}
 	}
+	logger.Debug("[agy] Resolved binary: %s", bin)
 
 	envMap := make(map[string]string)
 	for _, e := range os.Environ() {
@@ -291,6 +296,8 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	envMap["AIM_PROFILE"] = profileName
 	envMap["AIM_HOME"] = config.BaseDir()
 	delete(envMap, "GEMINI_CLI_HOME")
+
+	logger.Debug("[agy] Launch env: HOME=%s, AIM_AGENT=%s, AIM_PROFILE=%s, AIM_HOME=%s", profileDir, a.Name(), profileName, config.BaseDir())
 
 	cwd, _ := os.Getwd()
 	return agents.LaunchEnv{

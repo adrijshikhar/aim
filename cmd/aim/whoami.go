@@ -11,6 +11,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
@@ -53,6 +54,8 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 			profileName = ""
 		}
 	}
+
+	logger.Debug("[whoami] Inferred profileName=%q, agentName=%q (HOME=%s, profilesDir=%s)", profileName, agentName, homeDir, profilesDir)
 
 	cfg, _ := config.LoadConfig()
 

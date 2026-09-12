@@ -7,6 +7,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +31,7 @@ func newLoginCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 }
 
 func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string) int {
+	logger.Debug("[login] Starting login for agent=%q, profile=%q", agentName, profileName)
 	adapter, err := reg.Get(agentName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -41,15 +43,27 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		return 1
 	}
 
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg == nil {
+		cfg = config.NewDefaultConfig()
+	}
+
+	// Purge ignored agent keychains before and after login to ensure OAuth tokens
+	// are stored strictly in the profile directory rather than macOS Keychain.
+	var customServices []string
+	if cfg != nil {
+		customServices = cfg.CustomIgnoredKeychains
+	}
+	_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
+	defer func() {
+		_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
+	}()
+
 	if err := adapter.Login(context.Background(), profileName, pDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		return 1
 	}
 
-	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
-		cfg = config.NewDefaultConfig()
-	}
 	cfg.AddProfileAgent(profileName, adapter.Name())
 	_ = config.SaveConfig(cfg)
 	return 0

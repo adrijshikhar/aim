@@ -138,6 +138,7 @@ func TestProfileManager_ValidationAndTraversal(t *testing.T) {
 
 func TestProfileManager_ListProfilesForAgent(t *testing.T) {
 	baseDir := t.TempDir()
+	t.Setenv("AIM_HOME", baseDir)
 	pm := NewProfileManager(baseDir)
 	_, _ = pm.EnsureProfile("work")
 	_, _ = pm.EnsureProfile("personal")
@@ -231,6 +232,7 @@ func TestProfileManager_ListProfilesForAgent(t *testing.T) {
 
 func TestProfileManager_DeleteProfileAndRemoveAgent(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
 	pm := NewProfileManager(tempDir)
 	cfg := config.NewDefaultConfig()
 
@@ -313,6 +315,7 @@ func TestProfileManager_DeleteProfileAndRemoveAgent(t *testing.T) {
 
 func TestProfileManager_CloneProfile(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
 	pm := NewProfileManager(tempDir)
 	cfg := config.NewDefaultConfig()
 
@@ -428,6 +431,7 @@ func TestProfileManager_CloneProfile(t *testing.T) {
 
 func TestProfileManager_RenameProfile(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
 	pm := NewProfileManager(tempDir)
 	cfg := config.NewDefaultConfig()
 	cfg.DefaultProfile = "alpha"

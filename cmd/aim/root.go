@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/spf13/cobra"
 )
@@ -15,6 +16,8 @@ var (
 	Commit = "none"
 	// Date is the build timestamp.
 	Date = "unknown"
+
+	debugFlag bool
 )
 
 // ExitError represents an explicit process exit code from command execution.
@@ -49,10 +52,16 @@ Primary Commands:
 
 Flags:
   -v, --version              Show AIM version
-  -h, --help                 Show help documentation`,
+  -h, --help                 Show help documentation
+      --debug                Enable verbose debug logging`,
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if debugFlag {
+				logger.SetDebug(true)
+			}
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				code := runTUI(reg, pm)
@@ -66,6 +75,7 @@ Flags:
 	}
 
 	rootCmd.SetVersionTemplate(fmt.Sprintf("aim version %s\n", Version))
+	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Enable verbose debug logging")
 
 	// Add subcommands
 	rootCmd.AddCommand(
