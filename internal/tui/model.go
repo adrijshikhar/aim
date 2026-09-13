@@ -1017,7 +1017,7 @@ func (m Model) View() string {
 
 	isNarrow := m.width > 0 && m.width < 85
 
-	s.WriteString(fmt.Sprintf("  PROFILES (%s):\n", m.agent))
+	s.WriteString("  PROFILES:\n")
 	if len(m.profiles) == 0 {
 		s.WriteString(fmt.Sprintf("    (no profiles configured for %s - press 'l' to log in)\n", m.agent))
 	} else {
@@ -1031,14 +1031,8 @@ func (m Model) View() string {
 			label := p
 			if m.cfg != nil {
 				agentsList := m.cfg.GetProfileAgents(p)
-				var otherAgents []string
-				for _, ag := range agentsList {
-					if ag != m.agent {
-						otherAgents = append(otherAgents, ag)
-					}
-				}
-				if len(otherAgents) > 0 {
-					label = fmt.Sprintf("%s [%s]", p, strings.Join(otherAgents, ", "))
+				if len(agentsList) > 1 {
+					label = fmt.Sprintf("%s [%s]", p, strings.Join(agentsList, ", "))
 				}
 			}
 

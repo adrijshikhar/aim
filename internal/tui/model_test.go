@@ -73,11 +73,8 @@ func TestTUI_MultiAgentBadge(t *testing.T) {
 	m := NewModel(nil, pm, cfg)
 	view := m.View()
 
-	if !strings.Contains(view, "multi [claude]") {
-		t.Errorf("expected view to contain multi-agent badge 'multi [claude]', got:\n%s", view)
-	}
-	if strings.Contains(view, "multi [agy") {
-		t.Errorf("expected active agent 'agy' to be omitted from badge, got:\n%s", view)
+	if !strings.Contains(view, "multi [agy, claude]") {
+		t.Errorf("expected view to contain multi-agent badge 'multi [agy, claude]', got:\n%s", view)
 	}
 	if strings.Contains(view, "single [") {
 		t.Errorf("expected single-agent profile not to have badge, got:\n%s", view)
@@ -251,8 +248,11 @@ func TestTUI_MultiAgentTabBarRendering(t *testing.T) {
 		t.Errorf("expected selected agent 'codex', got %q", codexModel.SelectedAgent())
 	}
 	codexView := codexModel.View()
-	if !strings.Contains(codexView, "PROFILES (codex):") {
-		t.Errorf("expected view to show PROFILES (codex), got:\n%s", codexView)
+	if !strings.Contains(codexView, "PROFILES:") {
+		t.Errorf("expected view to show PROFILES:, got:\n%s", codexView)
+	}
+	if strings.Contains(codexView, "PROFILES (") {
+		t.Errorf("expected view not to contain agent in parentheses in PROFILES: header, got:\n%s", codexView)
 	}
 }
 
@@ -1569,7 +1569,7 @@ func TestTUI_Header_VersionDisplay(t *testing.T) {
 	}
 }
 
-func TestTUI_ProfileList_OmitsActiveAgentInBrackets(t *testing.T) {
+func TestTUI_ProfilesHeader_NoAgentParentheses(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
 	pm := profile.NewProfileManager(tempDir)
@@ -1588,27 +1588,38 @@ func TestTUI_ProfileList_OmitsActiveAgentInBrackets(t *testing.T) {
 	mAgy.width = 100
 	mAgyView := mAgy.View()
 
+	// Header should just be "PROFILES:" without "(agy):"
+	if !strings.Contains(mAgyView, "PROFILES:") {
+		t.Errorf("expected 'PROFILES:' in view, got:\n%s", mAgyView)
+	}
+	if strings.Contains(mAgyView, "PROFILES (") {
+		t.Errorf("expected no agent parentheses in PROFILES: header, got:\n%s", mAgyView)
+	}
+
 	// bby only has agy, so it should not have brackets
 	if strings.Contains(mAgyView, "bby [") {
 		t.Errorf("expected 'bby' to have no bracket, got:\n%s", mAgyView)
 	}
-	// rs is shared by agy and codex. On the agy tab, it should show [codex] and NOT [agy
-	if !strings.Contains(mAgyView, "rs [codex]") {
-		t.Errorf("expected 'rs [codex]' on agy tab, got:\n%s", mAgyView)
-	}
-	if strings.Contains(mAgyView, "rs [agy") {
-		t.Errorf("did not expect 'agy' in rs brackets on agy tab, got:\n%s", mAgyView)
+	// rs is shared by agy and codex: should show [agy, codex]
+	if !strings.Contains(mAgyView, "rs [agy, codex]") {
+		t.Errorf("expected 'rs [agy, codex]' on agy tab, got:\n%s", mAgyView)
 	}
 
 	// Switch to codex tab
 	mCodex, _ := mAgy.switchAgent("codex")
 	mCodex.width = 100
 	mCodexView := mCodex.View()
-	// On codex tab, rs should show [agy] and NOT [codex
-	if !strings.Contains(mCodexView, "rs [agy]") {
-		t.Errorf("expected 'rs [agy]' on codex tab, got:\n%s", mCodexView)
+
+	// Header should also be "PROFILES:" without "(codex):"
+	if !strings.Contains(mCodexView, "PROFILES:") {
+		t.Errorf("expected 'PROFILES:' in codex view, got:\n%s", mCodexView)
 	}
-	if strings.Contains(mCodexView, "rs [codex") {
-		t.Errorf("did not expect 'codex' in rs brackets on codex tab, got:\n%s", mCodexView)
+	if strings.Contains(mCodexView, "PROFILES (") {
+		t.Errorf("expected no agent parentheses in PROFILES: header on codex tab, got:\n%s", mCodexView)
+	}
+
+	// On codex tab, rs is still shared across agy and codex, so it shows [agy, codex]
+	if !strings.Contains(mCodexView, "rs [agy, codex]") {
+		t.Errorf("expected 'rs [agy, codex]' on codex tab, got:\n%s", mCodexView)
 	}
 }
