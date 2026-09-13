@@ -61,6 +61,7 @@ type Model struct {
 	renameModal  renameModalState
 	doctorDrawer doctorDrawerState
 	helpModal    helpModalState
+	filter       filterState
 	keys         KeyMap
 }
 
@@ -88,6 +89,7 @@ func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Conf
 		loading:     false,
 		spinner:     s,
 		keys:        DefaultKeyMap(),
+		filter:      newFilterState(),
 	}
 	m = m.refreshProfiles()
 	m = m.loadCachedReports()
@@ -156,6 +158,11 @@ func (m Model) Profiles() []string {
 // IsHelpActive reports whether the help cheatsheet overlay is currently active.
 func (m Model) IsHelpActive() bool {
 	return m.helpModal.active
+}
+
+// IsFilterActive reports whether the profile filter bar is currently active.
+func (m Model) IsFilterActive() bool {
+	return m.filter.active
 }
 
 // WithVersion sets the version string displayed in the header and returns the updated model.
@@ -450,6 +457,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHelpOverlay(msg)
 		}
 
+		if m.filter.active {
+			return m.updateFilter(msg)
+		}
+
 		keys := m.keys
 		if len(keys.Quit.Keys()) == 0 {
 			keys = DefaultKeyMap()
@@ -457,14 +468,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, keys.Quit):
+			if m.filter.input.Value() != "" && msg.String() == "esc" {
+				m.filter.input.SetValue("")
+				if m.cursor >= len(m.profiles) {
+					if len(m.profiles) > 0 {
+						m.cursor = len(m.profiles) - 1
+					} else {
+						m.cursor = 0
+					}
+				}
+				return m, nil
+			}
 			m.cancelStream()
 			return m, tea.Quit
 		case key.Matches(msg, keys.Up):
+			filtered := m.filteredProfiles()
+			if m.cursor >= len(filtered) && len(filtered) > 0 {
+				m.cursor = len(filtered) - 1
+			}
 			if m.cursor > 0 {
 				m.cursor--
 			}
 		case key.Matches(msg, keys.Down):
-			if m.cursor < len(m.profiles)-1 {
+			filtered := m.filteredProfiles()
+			if m.cursor < len(filtered)-1 {
 				m.cursor++
 			}
 		case msg.String() == "1":
@@ -481,15 +508,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, tea.Batch(m.triggerRefreshCmd(true), m.spinTickCmd())
 		case key.Matches(msg, keys.Run):
-			if len(m.profiles) > 0 {
-				m.selected = m.profiles[m.cursor]
+			filtered := m.filteredProfiles()
+			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
+				m.selected = filtered[m.cursor]
 				m.outcome = ActionRun
 				m.cancelStream()
 				return m, tea.Quit
 			}
 		case key.Matches(msg, keys.Shell):
-			if len(m.profiles) > 0 {
-				m.selected = m.profiles[m.cursor]
+			filtered := m.filteredProfiles()
+			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
+				m.selected = filtered[m.cursor]
 				m.outcome = ActionShell
 				m.cancelStream()
 				return m, tea.Quit
@@ -504,6 +533,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openRenameModal()
 		case key.Matches(msg, keys.Delete):
 			return m.openDeleteModal()
+		case key.Matches(msg, keys.Filter), msg.String() == "/":
+			return m.openFilter()
 		case key.Matches(msg, keys.Help), msg.String() == "?":
 			return m.openHelpOverlay()
 		}
@@ -511,6 +542,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		if m.renameModal.active {
 			return m.updateRenameModal(msg)
+		}
+		if m.filter.active {
+			return m.updateFilter(msg)
 		}
 	}
 	return m, nil
@@ -521,13 +555,22 @@ func (m Model) View() string {
 	s.WriteString(m.renderHeader())
 	s.WriteString(m.renderTabBar())
 
+	if m.filter.active || m.filter.input.Value() != "" {
+		s.WriteString(m.renderFilterBar())
+	}
+
 	isNarrow := m.width > 0 && m.width < 85
 
 	s.WriteString("  PROFILES:\n")
-	if len(m.profiles) == 0 {
-		s.WriteString(fmt.Sprintf("    (no profiles configured for %s - press 'l' to log in)\n", m.agent))
+	filtered := m.filteredProfiles()
+	if len(filtered) == 0 {
+		if m.filter.input.Value() != "" {
+			s.WriteString(fmt.Sprintf("    (no profiles matching %q)\n", m.filter.input.Value()))
+		} else {
+			s.WriteString(fmt.Sprintf("    (no profiles configured for %s - press 'l' to log in)\n", m.agent))
+		}
 	} else {
-		for i, p := range m.profiles {
+		for i, p := range filtered {
 			prefix := "    "
 			style := NormalRowStyle
 			if i == m.cursor {
@@ -576,8 +619,8 @@ func (m Model) View() string {
 	}
 
 	// Bottom inspector section when a profile is highlighted
-	if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
-		curProfile := m.profiles[m.cursor]
+	if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
+		curProfile := filtered[m.cursor]
 		s.WriteString(m.renderInspector(curProfile))
 	}
 
@@ -595,6 +638,7 @@ func (m Model) View() string {
 		HintKeyStyle.Render("[d]") + " " + HintLabelStyle.Render("Doctor  ") +
 		HintKeyStyle.Render("[m]") + " " + HintLabelStyle.Render("Rename  ") +
 		HintKeyStyle.Render("[x]") + " " + HintLabelStyle.Render("Delete  ") +
+		HintKeyStyle.Render("[/]") + " " + HintLabelStyle.Render("Filter  ") +
 		refreshHint +
 		HintKeyStyle.Render("[?]") + " " + HintLabelStyle.Render("Help  ") +
 		HintKeyStyle.Render("[q]") + " " + HintLabelStyle.Render("Quit") + "\n")
