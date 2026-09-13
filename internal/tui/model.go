@@ -10,6 +10,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -83,6 +84,7 @@ type Model struct {
 	deleteModal  deleteModalState
 	renameModal  renameModalState
 	doctorDrawer doctorDrawerState
+	keys         KeyMap
 }
 
 func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config) Model {
@@ -108,6 +110,7 @@ func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Conf
 		usageStream: &usageStream{},
 		loading:     false,
 		spinner:     s,
+		keys:        DefaultKeyMap(),
 	}
 	m = m.refreshProfiles()
 	m = m.loadCachedReports()
@@ -163,6 +166,10 @@ func (m Model) SelectedProfile() string {
 
 func (m Model) SelectedAgent() string {
 	return m.agent
+}
+
+func (m Model) KeyMap() KeyMap {
+	return m.keys
 }
 
 func (m Model) getRegisteredAgentNames() []string {
@@ -239,51 +246,6 @@ func (m Model) selectAgentByIndex(index int) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) renderTabBar() string {
-	agents := m.getRegisteredAgentNames()
-	var tabs []string
-
-	for i, ag := range agents {
-		num := i + 1
-		var label string
-		switch ag {
-		case "agy":
-			label = fmt.Sprintf("[%d] Antigravity (agy)", num)
-		case "gemini":
-			label = fmt.Sprintf("[%d] Gemini", num)
-		case "codex":
-			label = fmt.Sprintf("[%d] Codex", num)
-		default:
-			disp := ag
-			if m.reg != nil {
-				if ad, err := m.reg.Get(ag); err == nil && ad != nil {
-					disp = ad.DisplayName()
-				}
-			}
-			label = fmt.Sprintf("[%d] %s", num, disp)
-		}
-
-		if m.agent == ag {
-			tabs = append(tabs, TabActiveStyle.Render(label))
-		} else {
-			tabs = append(tabs, TabInactiveStyle.Render(label))
-		}
-	}
-
-	hasClaude := false
-	for _, ag := range agents {
-		if ag == "claude" {
-			hasClaude = true
-			break
-		}
-	}
-	if !hasClaude {
-		tabs = append(tabs, TabInactiveStyle.Render(fmt.Sprintf("[%d] Claude", len(agents)+1)))
-	}
-
-	return fmt.Sprintf("  %s\n\n", strings.Join(tabs, "   "))
-}
-
 func (m Model) Profiles() []string {
 	return m.profiles
 }
@@ -345,17 +307,6 @@ func (m Model) Version() string {
 		return m.version
 	}
 	return Version
-}
-
-func (m Model) formatVersionTag() string {
-	v := m.Version()
-	if v == "" {
-		return ""
-	}
-	if !strings.HasPrefix(v, "v") {
-		return "v" + v
-	}
-	return v
 }
 
 func (m Model) fetchDoctorDiagnostics() Model {
@@ -717,53 +668,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		keys := m.keys
+		if len(keys.Quit.Keys()) == 0 {
+			keys = DefaultKeyMap()
+		}
+
+		switch {
+		case key.Matches(msg, keys.Quit):
 			m.cancelStream()
 			return m, tea.Quit
-		case "up", "k":
+		case key.Matches(msg, keys.Up):
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case "down", "j":
+		case key.Matches(msg, keys.Down):
 			if m.cursor < len(m.profiles)-1 {
 				m.cursor++
 			}
-		case "1":
+		case msg.String() == "1":
 			return m.selectAgentByIndex(0)
-		case "2":
+		case msg.String() == "2":
 			return m.selectAgentByIndex(1)
-		case "3":
+		case msg.String() == "3":
 			return m.selectAgentByIndex(2)
-		case "tab":
+		case key.Matches(msg, keys.Tab):
 			return m.cycleAgent(true)
-		case "shift+tab":
+		case msg.String() == "shift+tab":
 			return m.cycleAgent(false)
-		case "r":
+		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.triggerRefreshCmd(true), m.spinTickCmd())
-		case "enter":
+		case key.Matches(msg, keys.Run):
 			if len(m.profiles) > 0 {
 				m.selected = m.profiles[m.cursor]
 				m.outcome = ActionRun
 				m.cancelStream()
 				return m, tea.Quit
 			}
-		case "s":
+		case key.Matches(msg, keys.Shell):
 			if len(m.profiles) > 0 {
 				m.selected = m.profiles[m.cursor]
 				m.outcome = ActionShell
 				m.cancelStream()
 				return m, tea.Quit
 			}
-		case "l":
+		case key.Matches(msg, keys.Login):
 			m.outcome = ActionLogin
 			m.cancelStream()
 			return m, tea.Quit
-		case "d":
+		case key.Matches(msg, keys.Doctor):
 			m = m.fetchDoctorDiagnostics()
 			return m, nil
-		case "m", "R":
+		case key.Matches(msg, keys.Rename):
 			if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
 				target := m.profiles[m.cursor]
 				ti := textinput.New()
@@ -778,7 +734,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, cmd
 			}
-		case "x", "delete":
+		case key.Matches(msg, keys.Delete):
 			if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
 				target := m.profiles[m.cursor]
 				var agentsList []string
@@ -953,49 +909,6 @@ func formatWindowsBadge(windows []usage.LimitWindow) string {
 	return "[" + strings.Join(parts, " | ") + "]"
 }
 
-func (m Model) renderHeader() string {
-	logoStyle := lipgloss.NewStyle().Bold(true).Foreground(StatusGreen)
-	urlStyle := lipgloss.NewStyle().Foreground(AccentPurple)
-	tagStyle := lipgloss.NewStyle().Foreground(StatusGreen)
-	versionStyle := lipgloss.NewStyle().Foreground(TextSecondary)
-
-	logoLines := []string{
-		"    _    ___ __  __ ",
-		"   / \\  |_ _|  \\/  |",
-		"  / _ \\  | || |\\/| |",
-		" / ___ \\ | || |  | |",
-		"/_/   \\_\\___|_|  |_|",
-	}
-
-	tagLine := tagStyle.Render("AIM — AI Multiplexer")
-	if v := m.formatVersionTag(); v != "" {
-		tagLine += " " + versionStyle.Render(v)
-	}
-
-	var out strings.Builder
-	if m.width > 0 && m.width < 70 {
-		for _, l := range logoLines {
-			out.WriteString(logoStyle.Render(l) + "\n")
-		}
-		out.WriteString("  " + urlStyle.Render("https://github.com/adrijshikhar/aim") + "\n")
-		out.WriteString("  " + tagLine + "\n\n")
-		return out.String()
-	}
-
-	for i, l := range logoLines {
-		renderedLogo := logoStyle.Render(l)
-		if i == 2 {
-			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, urlStyle.Render("https://github.com/adrijshikhar/aim")))
-		} else if i == 3 {
-			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, tagLine))
-		} else {
-			out.WriteString(renderedLogo + "\n")
-		}
-	}
-	out.WriteString("\n")
-	return out.String()
-}
-
 func (m Model) View() string {
 	var s strings.Builder
 	s.WriteString(m.renderHeader())
@@ -1053,181 +966,7 @@ func (m Model) View() string {
 	// Bottom inspector section when a profile is highlighted
 	if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
 		curProfile := m.profiles[m.cursor]
-		s.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextDim).Render("── Profile Details: "+curProfile+" ──") + "\n")
-		rep, hasReport := m.getReport(curProfile)
-		lblStyle := lipgloss.NewStyle().Width(14).Foreground(TextSecondary)
-
-		// Resolve account info from credentials or report
-		var pDir string
-		if m.pm != nil {
-			pDir = m.pm.ProfileDir(curProfile)
-		}
-		accInfo := profile.GetProfileAccountInfoForAgent(pDir, m.agent)
-		accountEmail := accInfo.Email
-		accountName := accInfo.Name
-		authMethod := accInfo.AuthMethod
-
-		if accountEmail == "" && hasReport && rep.AccountEmail != "" {
-			accountEmail = rep.AccountEmail
-			accountName = rep.AccountName
-			authMethod = rep.AuthMethod
-		}
-
-		hasCreds := false
-		if m.reg != nil && pDir != "" {
-			if ad, err := m.reg.Get(m.agent); err == nil {
-				hasCreds = ad.HasCredentials(pDir)
-			}
-		}
-
-		if accountEmail != "" {
-			accountStr := lipgloss.NewStyle().Foreground(AccentCyan).Bold(true).Render(accountEmail)
-			if accountName != "" {
-				accountStr += " " + lipgloss.NewStyle().Foreground(TextMuted).Render("("+accountName+")")
-			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Account:"), accountStr))
-		} else if hasCreds {
-			accountStr := lipgloss.NewStyle().Foreground(TextMuted).Render("active (local credentials)")
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Account:"), accountStr))
-		} else {
-			accountStr := lipgloss.NewStyle().Foreground(TextMuted).Render("[no credentials - press 'l' to log in]")
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Account:"), accountStr))
-		}
-
-		if authMethod != "" {
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Auth:"), lipgloss.NewStyle().Foreground(TextDim).Render(authMethod)))
-		}
-
-		projectID := accInfo.ProjectID
-		if projectID == "" && hasReport && rep.ProjectID != "" {
-			projectID = rep.ProjectID
-		}
-		if projectID != "" {
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Project:"), lipgloss.NewStyle().Foreground(TextDim).Render(projectID)))
-		}
-
-		agentsList := []string{m.agent}
-		if m.cfg != nil {
-			if list := m.cfg.GetProfileAgents(curProfile); len(list) > 0 {
-				agentsList = list
-			}
-		}
-		s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Agents:"), lipgloss.NewStyle().Foreground(TextDim).Render(strings.Join(agentsList, ", "))))
-
-		if hasReport && rep.Error != "" {
-			statusMsg := rep.Summary
-			if statusMsg == "" {
-				statusMsg = rep.Error
-			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Status:"), lipgloss.NewStyle().Foreground(StatusYellow).Render(statusMsg)))
-		}
-
-		if hasReport {
-			modelGroups := rep.ModelGroups()
-			if len(modelGroups) > 0 {
-				for _, g := range modelGroups {
-					modelShort := usage.CleanModelCategory(g.Category)
-
-					var win5h, winWk *usage.LimitWindow
-					for i := range g.Windows {
-						w := &g.Windows[i]
-						if w.IsHourly() {
-							win5h = w
-						} else if w.IsWeekly() {
-							winWk = w
-						}
-					}
-
-					formatWin := func(w usage.LimitWindow, label string) string {
-						bar := usage.RenderBar(w.RemainingPct, 10)
-						winStatus := usage.CalculateStatus([]usage.LimitWindow{w})
-						gaugeStyle := GaugeStyleForStatus(winStatus)
-
-						resetInfo := ""
-						if w.RemainingPct < 100 && w.ResetsIn > 0 {
-							resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (%s)", usage.FormatDuration(w.ResetsIn)))
-						}
-						prefix := ""
-						if label != "" {
-							prefix = lipgloss.NewStyle().Foreground(TextDim).Render(label + ": ")
-						}
-						return fmt.Sprintf("%s%s %s%s",
-							prefix,
-							gaugeStyle.Render(bar),
-							gaugeStyle.Render(fmt.Sprintf("%d%%", w.RemainingPct)),
-							resetInfo,
-						)
-					}
-
-					var lineContent string
-					if win5h != nil && winWk != nil {
-						str5h := formatWin(*win5h, "5h")
-						strWk := formatWin(*winWk, "Wk")
-						lineContent = lipgloss.NewStyle().Width(33).Render(str5h) + strWk
-					} else if win5h != nil {
-						lineContent = formatWin(*win5h, "5h")
-					} else if winWk != nil {
-						lineContent = formatWin(*winWk, "Wk")
-					} else {
-						var parts []string
-						for _, w := range g.Windows {
-							parts = append(parts, formatWin(w, w.Name))
-						}
-						lineContent = strings.Join(parts, "   ")
-					}
-
-					s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render(modelShort+":"), lineContent))
-				}
-			} else if len(rep.Windows) > 0 {
-				for _, w := range rep.Windows {
-					bar := usage.RenderBar(w.RemainingPct, 10)
-					winStatus := usage.CalculateStatus([]usage.LimitWindow{w})
-					gaugeStyle := GaugeStyleForStatus(winStatus)
-					resetInfo := ""
-					if w.RemainingPct < 100 && w.ResetsIn > 0 {
-						resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (resets in %s)", usage.FormatDuration(w.ResetsIn)))
-					}
-					primaryStr := fmt.Sprintf("%s %s%s", gaugeStyle.Render(bar), gaugeStyle.Render(fmt.Sprintf("%d%%", w.RemainingPct)), resetInfo)
-					s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render(w.Name+":"), primaryStr))
-				}
-			}
-
-			// Resets At
-			resetsAtStr := "None"
-			var soonestReset time.Time
-			for _, w := range rep.Windows {
-				if !w.ResetsAt.IsZero() {
-					if soonestReset.IsZero() || (w.ResetsAt.After(time.Now()) && (soonestReset.Before(time.Now()) || w.ResetsAt.Before(soonestReset))) {
-						soonestReset = w.ResetsAt
-					}
-				}
-			}
-			if !soonestReset.IsZero() {
-				resetsAtStr = soonestReset.Local().Format("2006-01-02 15:04:05")
-			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Resets At:"), lipgloss.NewStyle().Foreground(TextMuted).Render(resetsAtStr)))
-
-			// Credits
-			creditsStr := "0"
-			if rep.Credits != "" {
-				creditsStr = rep.Credits
-			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Credits:"), creditsStr))
-
-			// Refreshed
-			refreshedStr := "just now"
-			if !rep.FetchedAt.IsZero() {
-				age := time.Since(rep.FetchedAt)
-				if age >= time.Second {
-					refreshedStr = usage.FormatDuration(age) + " ago"
-				}
-			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Refreshed:"), lipgloss.NewStyle().Foreground(TextMuted).Render(refreshedStr)))
-		} else if m.loading {
-			s.WriteString("    " + lipgloss.NewStyle().Foreground(TextMuted).Render("(fetching quota...)") + "\n")
-		} else {
-			s.WriteString("    (no quota data available - press 'r' to refresh)\n")
-		}
+		s.WriteString(m.renderInspector(curProfile))
 	}
 
 	refreshHint := HintKeyStyle.Render("[r]") + " " + HintLabelStyle.Render("Refresh Quota  ")

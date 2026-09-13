@@ -1628,3 +1628,51 @@ func TestTUI_ProfilesHeader_NoAgentParentheses(t *testing.T) {
 		t.Errorf("expected 'Agents:' line with 'agy' for single-agent profile, got:\n%s", mAgyView)
 	}
 }
+
+func TestTUI_DecomposedComponents(t *testing.T) {
+	// 1. Keys
+	km := DefaultKeyMap()
+	if len(km.Up.Keys()) == 0 || len(km.Down.Keys()) == 0 || len(km.Quit.Keys()) == 0 {
+		t.Fatalf("expected non-empty keybindings in DefaultKeyMap")
+	}
+	if len(km.ShortHelp()) == 0 || len(km.FullHelp()) == 0 {
+		t.Fatalf("expected non-empty ShortHelp and FullHelp in KeyMap")
+	}
+
+	m := newTestModel(t, "test-prof")
+	if len(m.KeyMap().Quit.Keys()) == 0 {
+		t.Errorf("expected m.KeyMap() to return initialized KeyMap")
+	}
+
+	// 2. Header and TabBar
+	hdr := m.renderHeader()
+	if !strings.Contains(hdr, "AIM — AI Multiplexer") {
+		t.Errorf("expected header to contain 'AIM — AI Multiplexer', got:\n%s", hdr)
+	}
+	tabBar := m.renderTabBar()
+	if !strings.Contains(tabBar, "Antigravity (agy)") {
+		t.Errorf("expected tab bar to contain 'Antigravity (agy)', got:\n%s", tabBar)
+	}
+	if tag := m.formatVersionTag(); tag == "" || !strings.HasPrefix(tag, "v") {
+		t.Errorf("expected version tag starting with 'v', got %q", tag)
+	}
+
+	// 3. Inspector and formatWin
+	w := usage.LimitWindow{
+		Name:         "test-win",
+		RemainingPct: 80,
+		ResetsIn:     time.Hour,
+	}
+	winFormatted := formatWin(w, "5h")
+	if !strings.Contains(winFormatted, "80%") || !strings.Contains(winFormatted, "5h:") {
+		t.Errorf("expected formatWin to contain '80%%' and '5h:', got %q", winFormatted)
+	}
+
+	insp := m.renderInspector("test-prof")
+	if !strings.Contains(insp, "Profile Details: test-prof") {
+		t.Errorf("expected inspector to contain 'Profile Details: test-prof', got:\n%s", insp)
+	}
+	if empty := m.renderInspector(""); empty != "" {
+		t.Errorf("expected empty string for empty profile, got %q", empty)
+	}
+}
