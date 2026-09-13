@@ -14,6 +14,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -166,7 +167,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 					mu.Lock()
 					txt := statusText
 					mu.Unlock()
-					spinner := lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render(spinnerFrames[frameIdx%len(spinnerFrames)])
+					spinner := lipgloss.NewStyle().Foreground(tui.AccentPurple).Render(spinnerFrames[frameIdx%len(spinnerFrames)])
 					fmt.Fprintf(os.Stderr, "\r\033[K%s %s", spinner, txt)
 					frameIdx++
 				}
@@ -435,16 +436,16 @@ func renderCLIBar(pct int, width int, st usage.Status, useColor bool) string {
 	filled := (clamped * width) / 100
 	empty := width - filled
 
-	fillColor := "2" // Green
+	fillColor := tui.StatusGreen
 	if clamped <= 15 {
-		fillColor = "1" // Red
+		fillColor = tui.StatusRed
 	} else if clamped <= 50 {
-		fillColor = "3" // Yellow
+		fillColor = tui.StatusYellow
 	}
 
-	fillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(fillColor))
-	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	bracketStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	fillStyle := lipgloss.NewStyle().Foreground(fillColor)
+	emptyStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
+	bracketStyle := lipgloss.NewStyle().Foreground(tui.TextDim)
 
 	bar := bracketStyle.Render("[") +
 		fillStyle.Render(strings.Repeat("█", filled)) +
@@ -459,16 +460,7 @@ func renderCLIStatus(st usage.Status, useColor bool) string {
 	if !useColor {
 		return str
 	}
-	switch st {
-	case usage.StatusOK:
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2")).Render(str)
-	case usage.StatusWarning:
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3")).Render(str)
-	case usage.StatusCritical, usage.StatusExhausted:
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1")).Render(str)
-	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(str)
-	}
+	return tui.GaugeStyleForStatus(st).Render(str)
 }
 
 func printTable(headers []string, rows [][]string, useColor bool) {
@@ -480,9 +472,9 @@ func printTable(headers []string, rows [][]string, useColor bool) {
 	if useColor {
 		t.StyleFunc(func(row, col int) lipgloss.Style {
 			if row == 0 {
-				return lipgloss.NewStyle().Bold(true)
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 			}
-			return lipgloss.NewStyle()
+			return lipgloss.NewStyle().Foreground(tui.TextPrimary)
 		})
 	}
 	fmt.Println(t.Render())

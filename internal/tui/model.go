@@ -1355,11 +1355,11 @@ func (m Model) renderDoctorDrawer() string {
 			badgeStyle = GaugeDimStyle
 		}
 
-		badge := badgeStyle.Render(fmt.Sprintf("[%s]", r.Status))
-		cat := lipgloss.NewStyle().Bold(true).Foreground(TextPrimary).Render(r.Category + ":")
+		badge := badgeStyle.Width(8).Render(fmt.Sprintf("[%s]", r.Status))
+		cat := lipgloss.NewStyle().Bold(true).Foreground(TextPrimary).Width(14).Render(r.Category + ":")
 		msg := lipgloss.NewStyle().Foreground(TextSecondary).Render(r.Message)
 
-		b.WriteString(fmt.Sprintf("  %-8s %-14s %s\n", badge, cat, msg))
+		b.WriteString(fmt.Sprintf("  %s %s %s\n", badge, cat, msg))
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(

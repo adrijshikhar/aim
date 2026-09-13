@@ -9,6 +9,8 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +37,7 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 
 func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName string) {
 	logger.Debug("[doctor] Running diagnostics (agent=%q)", agentName)
-	fmt.Println("=== AIM Doctor Diagnostics ===")
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Doctor Diagnostics ==="))
 	if reg == nil {
 		return
 	}
@@ -47,7 +49,8 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 	if agentName != "" {
 		adapter, err := reg.Get(agentName)
 		if err != nil {
-			fmt.Printf("[FAIL] Unknown agent: %s\n", agentName)
+			failBadge := tui.GaugeRedStyle.Width(8).Render("[FAIL]")
+			fmt.Printf("%s Unknown agent: %s\n", failBadge, agentName)
 			return
 		}
 		diagnoseAdapter(adapter, pm, cfg, reg)
@@ -66,7 +69,7 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 		return
 	}
 
-	fmt.Println("\n[Platform Diagnostics (macOS)]")
+	fmt.Printf("\n%s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Platform Diagnostics (macOS)]"))
 	var customServices []string
 	if cfg != nil {
 		customServices = cfg.CustomIgnoredKeychains
@@ -74,30 +77,47 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 
 	lingering := profile.FindIgnoredKeychains(agentName, customServices...)
 	if len(lingering) > 0 {
-		fmt.Printf("  [WARN] Keychain: %d agent token(s) detected in macOS Keychain (potential profile isolation risk):\n", len(lingering))
+		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
+		fmt.Printf("  %s %s: %d agent token(s) detected in macOS Keychain (potential profile isolation risk):\n",
+			warnBadge,
+			lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain"),
+			len(lingering),
+		)
 		for _, entry := range lingering {
 			fmt.Printf("         - %s (service: %q)\n", entry.Description, entry.Service)
 		}
 		fmt.Println("         Auto-purging ignored agent keychains to enforce profile isolation...")
 		if err := profile.PurgeIgnoredKeychains(agentName, customServices...); err != nil {
-			fmt.Printf("  [WARN] Keychain: Could not purge some entries: %v\n", err)
+			fmt.Printf("  %s %s: Could not purge some entries: %v\n",
+				warnBadge,
+				lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain"),
+				err,
+			)
 		} else {
-			fmt.Println("  [OK]   Keychain: Agent credentials successfully purged from macOS Keychain.")
+			okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
+			fmt.Printf("  %s %s: Agent credentials successfully purged from macOS Keychain.\n",
+				okBadge,
+				lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain"),
+			)
 		}
 	} else {
-		fmt.Println("  [OK]   Keychain: No lingering agent tokens in macOS Keychain (clean isolation).")
+		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
+		fmt.Printf("  %s %s: No lingering agent tokens in macOS Keychain (clean isolation).\n",
+			okBadge,
+			lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain"),
+		)
 	}
 }
 
 func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry) {
-	fmt.Printf("\n[%s (%s)]\n", adapter.DisplayName(), adapter.Name())
+	fmt.Printf("\n%s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render(fmt.Sprintf("[%s (%s)]", adapter.DisplayName(), adapter.Name())))
 	profiles, _ := pm.ListProfilesForAgent(adapter.Name(), cfg, reg)
 	if len(profiles) == 0 {
-		fmt.Printf("  No profiles configured for agent %q. Run: aim login %s <profile>\n", adapter.Name(), adapter.Name())
+		fmt.Printf("  %s\n", lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
 		return
 	}
 	for _, p := range profiles {
-		fmt.Printf("\nProfile: %s\n", p)
+		fmt.Printf("\nProfile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
 		results := adapter.Doctor(context.Background(), p, pm.ProfileDir(p))
 		if cfg != nil {
 			if env := cfg.GetProfileEnv(p); len(env) > 0 {
@@ -116,7 +136,21 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 			}
 		}
 		for _, r := range results {
-			fmt.Printf("  [%s] %s: %s\n", r.Status, r.Category, r.Message)
+			var badgeStyle lipgloss.Style
+			switch r.Status {
+			case "OK":
+				badgeStyle = tui.GaugeGreenStyle
+			case "WARN":
+				badgeStyle = tui.GaugeYellowStyle
+			case "FAIL":
+				badgeStyle = tui.GaugeRedStyle
+			default:
+				badgeStyle = tui.GaugeDimStyle
+			}
+			badge := badgeStyle.Width(8).Render(fmt.Sprintf("[%s]", r.Status))
+			cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render(r.Category + ":")
+			msg := lipgloss.NewStyle().Foreground(tui.TextSecondary).Render(r.Message)
+			fmt.Printf("  %s %s %s\n", badge, cat, msg)
 		}
 	}
 }

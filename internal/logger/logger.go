@@ -7,14 +7,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	mu            sync.RWMutex
-	debugExplicit *bool
-	consoleOutput = true
-	logFile       *os.File
-	logFilePath   string
+	mu             sync.RWMutex
+	debugExplicit  *bool
+	consoleOutput  = true
+	logFile        *os.File
+	logFilePath    string
+	debugTagStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#c678dd")).Faint(true)
+	debugTimeStyle = lipgloss.NewStyle().Faint(true)
 )
 
 // Init initializes the logger with the base directory where aim-debug.log should be stored.
@@ -111,7 +115,7 @@ func Debug(format string, args ...any) {
 	// Console output to stderr
 	if consoleOutput {
 		timeStr := now.Format("15:04:05.000")
-		fmt.Fprintf(os.Stderr, "\033[2;35m[AIM DEBUG]\033[0m \033[2m%s\033[0m %s\n", timeStr, msg)
+		fmt.Fprintf(os.Stderr, "%s %s %s\n", debugTagStyle.Render("[AIM DEBUG]"), debugTimeStyle.Render(timeStr), msg)
 	}
 
 	// Persistent file output
