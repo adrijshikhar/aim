@@ -1288,20 +1288,20 @@ func (m Model) View() string {
 			styledCredits := lipgloss.NewStyle().Foreground(TextSecondary).Render("Credits:") + strings.Repeat(" ", padCredits)
 			s.WriteString(fmt.Sprintf("    %s %s\n", styledCredits, creditsStr))
 
-			// Cache Age
-			cacheAgeStr := "just now"
+			// Refreshed
+			refreshedStr := "just now"
 			if !rep.FetchedAt.IsZero() {
 				age := time.Since(rep.FetchedAt)
 				if age >= time.Second {
-					cacheAgeStr = usage.FormatDuration(age) + " ago"
+					refreshedStr = usage.FormatDuration(age) + " ago"
 				}
 			}
-			padAge := 0
-			if len("Cache Age:") < lblWidth {
-				padAge = lblWidth - len("Cache Age:")
+			padRefreshed := 0
+			if len("Refreshed:") < lblWidth {
+				padRefreshed = lblWidth - len("Refreshed:")
 			}
-			styledAge := lipgloss.NewStyle().Foreground(TextSecondary).Render("Cache Age:") + strings.Repeat(" ", padAge)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAge, lipgloss.NewStyle().Foreground(TextMuted).Render(cacheAgeStr)))
+			styledRefreshed := lipgloss.NewStyle().Foreground(TextSecondary).Render("Refreshed:") + strings.Repeat(" ", padRefreshed)
+			s.WriteString(fmt.Sprintf("    %s %s\n", styledRefreshed, lipgloss.NewStyle().Foreground(TextMuted).Render(refreshedStr)))
 		} else if m.loading {
 			s.WriteString("    " + lipgloss.NewStyle().Foreground(TextMuted).Render("(fetching quota...)") + "\n")
 		} else {

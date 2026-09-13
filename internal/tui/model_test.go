@@ -471,8 +471,8 @@ func TestTUIUsageUpdateAndKeybinding(t *testing.T) {
 	if !strings.Contains(view, "Credits:") || !strings.Contains(view, "$25.00") {
 		t.Errorf("expected inspector to contain Credits $25.00, got:\n%s", view)
 	}
-	if !strings.Contains(view, "Cache Age:") || !strings.Contains(view, "5m ago") {
-		t.Errorf("expected inspector to contain Cache Age 5m ago, got:\n%s", view)
+	if !strings.Contains(view, "Refreshed:") || !strings.Contains(view, "5m ago") {
+		t.Errorf("expected inspector to contain Refreshed 5m ago, got:\n%s", view)
 	}
 	if !strings.Contains(view, "[r]") || !strings.Contains(view, "Refresh Quota") {
 		t.Errorf("expected hotkey hints to contain [r] Refresh Quota, got:\n%s", view)
