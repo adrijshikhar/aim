@@ -1622,4 +1622,9 @@ func TestTUI_ProfilesHeader_NoAgentParentheses(t *testing.T) {
 	if !strings.Contains(mCodexView, "rs [agy, codex]") {
 		t.Errorf("expected 'rs [agy, codex]' on codex tab, got:\n%s", mCodexView)
 	}
+
+	// Agents line is rendered even for single-agent profiles (bby)
+	if !strings.Contains(mAgyView, "Agents:") || !strings.Contains(mAgyView, "agy") {
+		t.Errorf("expected 'Agents:' line with 'agy' for single-agent profile, got:\n%s", mAgyView)
+	}
 }

@@ -1120,12 +1120,13 @@ func (m Model) View() string {
 			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Project:"), lipgloss.NewStyle().Foreground(TextDim).Render(projectID)))
 		}
 
+		agentsList := []string{m.agent}
 		if m.cfg != nil {
-			agentsList := m.cfg.GetProfileAgents(curProfile)
-			if len(agentsList) > 1 {
-				s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Agents:"), lipgloss.NewStyle().Foreground(TextDim).Render(strings.Join(agentsList, ", "))))
+			if list := m.cfg.GetProfileAgents(curProfile); len(list) > 0 {
+				agentsList = list
 			}
 		}
+		s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Agents:"), lipgloss.NewStyle().Foreground(TextDim).Render(strings.Join(agentsList, ", "))))
 
 		if hasReport && rep.Error != "" {
 			statusMsg := rep.Summary
