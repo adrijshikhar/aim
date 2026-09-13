@@ -188,6 +188,13 @@ func TestTUIModelTabSwitching(t *testing.T) {
 		t.Errorf("expected cursor reset to 0, got %d", m.cursor)
 	}
 
+	// Press 'tab' again -> codex
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = newM.(Model)
+	if m.SelectedAgent() != "codex" {
+		t.Errorf("expected agent 'codex', got '%s'", m.SelectedAgent())
+	}
+
 	// Press 'tab' again -> agy
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = newM.(Model)
@@ -195,11 +202,54 @@ func TestTUIModelTabSwitching(t *testing.T) {
 		t.Errorf("expected agent 'agy', got '%s'", m.SelectedAgent())
 	}
 
+	// Press '3' -> codex
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = newM.(Model)
+	if m.SelectedAgent() != "codex" {
+		t.Errorf("expected agent 'codex', got '%s'", m.SelectedAgent())
+	}
+
+	// Press 'shift+tab' -> gemini
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = newM.(Model)
+	if m.SelectedAgent() != "gemini" {
+		t.Errorf("expected agent 'gemini' via shift+tab, got '%s'", m.SelectedAgent())
+	}
+
 	// Press '1' -> agy
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	m = newM.(Model)
 	if m.SelectedAgent() != "agy" {
 		t.Errorf("expected agent 'agy', got '%s'", m.SelectedAgent())
+	}
+}
+
+func TestTUI_MultiAgentTabBarRendering(t *testing.T) {
+	m := newTestModel(t, "alpha")
+	view := m.View()
+
+	if !strings.Contains(view, "[1] Antigravity (agy)") {
+		t.Errorf("expected view to contain [1] Antigravity (agy), got:\n%s", view)
+	}
+	if !strings.Contains(view, "[2] Gemini") {
+		t.Errorf("expected view to contain [2] Gemini, got:\n%s", view)
+	}
+	if !strings.Contains(view, "[3] Codex") {
+		t.Errorf("expected view to contain [3] Codex, got:\n%s", view)
+	}
+	if !strings.Contains(view, "[4] Claude") {
+		t.Errorf("expected view to contain [4] Claude, got:\n%s", view)
+	}
+
+	// Switch to codex and verify active tab
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	codexModel := newM.(Model)
+	if codexModel.SelectedAgent() != "codex" {
+		t.Errorf("expected selected agent 'codex', got %q", codexModel.SelectedAgent())
+	}
+	codexView := codexModel.View()
+	if !strings.Contains(codexView, "PROFILES (codex):") {
+		t.Errorf("expected view to show PROFILES (codex), got:\n%s", codexView)
 	}
 }
 

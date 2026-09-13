@@ -30,6 +30,16 @@ echo "mock gemini executed with args: $@"
 MOCK
 chmod +x "$MOCK_BIN/gemini"
 
+cat << 'MOCK' > "$MOCK_BIN/codex"
+#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "codex-cli 0.154.0"
+  exit 0
+fi
+echo "mock codex executed with args: $@"
+MOCK
+chmod +x "$MOCK_BIN/codex"
+
 export PATH="$MOCK_BIN:$PATH"
 
 echo "=== 1. Testing help & version ==="
@@ -39,6 +49,7 @@ echo "=== 1. Testing help & version ==="
 echo "=== 2. Testing initial empty listing ==="
 "$AIM_BIN" list agy | grep "No profiles found"
 "$AIM_BIN" list gemini | grep "No profiles found"
+"$AIM_BIN" list codex | grep "No profiles found"
 
 echo "=== 3. Testing dotfile isolation & running agy ==="
 mkdir -p "$TEST_AIM_HOME/fake_home/.agents/skills"
@@ -76,18 +87,27 @@ echo "=== 5. Testing multi-agent attachment ==="
 # Run gemini with smoke_profile
 "$AIM_BIN" run gemini smoke_profile -- echo "gemini running"
 
-# Both agy and gemini list should now show smoke_profile
+# Run codex with smoke_profile
+"$AIM_BIN" run codex smoke_profile -- echo "codex running"
+[ -d "$TEST_AIM_HOME/profiles/smoke_profile/.codex" ]
+
+# agy, gemini, and codex list should now show smoke_profile
 "$AIM_BIN" list agy | grep "smoke_profile"
 "$AIM_BIN" list gemini | grep "smoke_profile"
+"$AIM_BIN" list codex | grep "smoke_profile"
 
 # Verify agent-first shorthand is rejected
 if "$AIM_BIN" gemini list 2>/dev/null; then
   echo "Error: agent-first shorthand 'aim gemini list' should fail"
   exit 1
 fi
+if "$AIM_BIN" codex list 2>/dev/null; then
+  echo "Error: agent-first shorthand 'aim codex list' should fail"
+  exit 1
+fi
 
-# aim list (all) displays smoke_profile [agy, gemini]
-"$AIM_BIN" list | grep -E "smoke_profile \[agy, gemini\]"
+# aim list (all) displays smoke_profile [agy, gemini, codex]
+"$AIM_BIN" list | grep -E "smoke_profile \[agy, gemini, codex\]"
 echo "Multi-agent tag display OK!"
 
 echo "=== 6. Testing shell completion ==="
@@ -105,16 +125,20 @@ echo "=== 6. Testing shell completion ==="
 "$AIM_BIN" __complete | grep "^completion"
 "$AIM_BIN" __complete | grep "^run"
 
-# 5. aim __complete run emits agy and gemini
+# 5. aim __complete run emits agy, gemini, and codex
 "$AIM_BIN" __complete run | grep "agy"
 "$AIM_BIN" __complete run | grep "gemini"
+"$AIM_BIN" __complete run | grep "codex"
 "$AIM_BIN" __complete clone | grep "agy"
 "$AIM_BIN" __complete clone | grep "gemini"
+"$AIM_BIN" __complete clone | grep "codex"
 
-# 6. aim __complete run agy emits configured agy profiles (e.g. smoke_profile)
+# 6. aim __complete run emits configured profiles (e.g. smoke_profile)
 "$AIM_BIN" __complete run agy | grep "smoke_profile"
 "$AIM_BIN" __complete run gemini | grep "smoke_profile"
+"$AIM_BIN" __complete run codex | grep "smoke_profile"
 "$AIM_BIN" __complete clone agy | grep "smoke_profile"
+"$AIM_BIN" __complete clone codex | grep "smoke_profile"
 
 # Shorthand completion rejected
 SHORTHAND_COMP="$("$AIM_BIN" __complete agy run 2>/dev/null || true)"
@@ -131,6 +155,11 @@ echo "$DOCTOR_OUT" | grep "AIM Doctor Diagnostics"
 echo "$DOCTOR_OUT" | grep "Profile: smoke_profile"
 echo "$DOCTOR_OUT" | grep "Binary: Found agy"
 echo "$DOCTOR_OUT" | grep "Gemini adapter registered"
+echo "$DOCTOR_OUT" | grep "Codex installed"
+
+# aim doctor codex specifically checks codex
+"$AIM_BIN" doctor codex | grep "Codex installed"
+! "$AIM_BIN" doctor codex | grep -i "Gemini"
 
 # aim doctor agy specifically checks agy
 "$AIM_BIN" doctor agy | grep "Binary: Found agy"
@@ -221,14 +250,15 @@ if "$AIM_BIN" rename smoke_profile smoke_renamed 2>/dev/null; then
   exit 1
 fi
 
-echo "=== 13. Testing partial removal (gemini) ==="
+echo "=== 13. Testing partial removal (gemini and codex) ==="
 "$AIM_BIN" remove gemini smoke_profile
 # Assert directory still exists
 [ -d "$TEST_AIM_HOME/profiles/smoke_profile" ]
 echo "Profile directory preserved after partial removal OK!"
 
-# Assert agy still shows smoke_profile
+# Assert agy and codex still show smoke_profile
 "$AIM_BIN" list agy | grep "smoke_profile"
+"$AIM_BIN" list codex | grep "smoke_profile"
 
 # Assert gemini no longer displays smoke_profile
 LIST_GEMINI_AFTER="$("$AIM_BIN" list gemini)"
@@ -237,6 +267,14 @@ if echo "$LIST_GEMINI_AFTER" | grep -q "smoke_profile"; then
   exit 1
 fi
 "$AIM_BIN" list gemini | grep "No profiles found"
+
+# Assert aim list shows smoke_profile [agy, codex]
+"$AIM_BIN" list | grep -E "smoke_profile \[agy, codex\]"
+
+# Now remove codex as well
+"$AIM_BIN" remove codex smoke_profile
+[ -d "$TEST_AIM_HOME/profiles/smoke_profile" ]
+"$AIM_BIN" list codex | grep "No profiles found"
 
 # Assert aim list shows smoke_profile [agy]
 "$AIM_BIN" list | grep -E "smoke_profile \[agy\]"
@@ -255,5 +293,6 @@ echo "Profile directory deleted after full removal OK!"
 DOCTOR_EMPTY="$("$AIM_BIN" doctor)"
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"agy\""
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"gemini\""
+echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"codex\""
 
 echo "ALL SMOKE TESTS PASSED!"

@@ -85,3 +85,74 @@ func TestGetProfileAccountInfo_EmptyOrMissing(t *testing.T) {
 		t.Errorf("expected empty AccountInfo for empty profile, got %+v", infoEmpty)
 	}
 }
+
+func TestParseCodexAuthAccountInfo_JWT(t *testing.T) {
+	claimsJSON := `{
+		"email": "codex-user@example.com",
+		"name": "Codex Engineer",
+		"https://api.openai.com/auth": {
+			"chatgpt_plan_type": "pro",
+			"user_id": "user-12345"
+		}
+	}`
+	encodedPayload := base64.RawURLEncoding.EncodeToString([]byte(claimsJSON))
+	mockJWT := "eyJhbGciOiJSUzI1NiJ9." + encodedPayload + ".mockSignature"
+
+	authJSON := `{
+		"tokens": {
+			"id_token": "` + mockJWT + `",
+			"access_token": "mock-access-token"
+		}
+	}`
+
+	info := ParseCodexAuthAccountInfo([]byte(authJSON))
+	if info.Email != "codex-user@example.com" {
+		t.Errorf("expected email 'codex-user@example.com', got %q", info.Email)
+	}
+	if info.Name != "Codex Engineer" {
+		t.Errorf("expected name 'Codex Engineer', got %q", info.Name)
+	}
+	if info.AuthMethod != "ChatGPT Pro" {
+		t.Errorf("expected auth method 'ChatGPT Pro', got %q", info.AuthMethod)
+	}
+}
+
+func TestParseCodexAuthAccountInfo_APIKey(t *testing.T) {
+	authJSON := `{
+		"openai_api_key": "sk-mock-123456789"
+	}`
+
+	info := ParseCodexAuthAccountInfo([]byte(authJSON))
+	if info.AuthMethod != "OpenAI API Key" {
+		t.Errorf("expected auth method 'OpenAI API Key', got %q", info.AuthMethod)
+	}
+}
+
+func TestGetProfileAccountInfo_Codex(t *testing.T) {
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+
+	claimsJSON := `{"email":"codex@test.io","name":"Codex Pro","https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}`
+	encodedPayload := base64.RawURLEncoding.EncodeToString([]byte(claimsJSON))
+	mockJWT := "eyJhbGciOiJSUzI1NiJ9." + encodedPayload + ".sig"
+
+	authJSON := `{"tokens":{"id_token":"` + mockJWT + `"}}`
+	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(authJSON), 0600)
+
+	// General extraction
+	info := GetProfileAccountInfo(tmpDir)
+	if info.Email != "codex@test.io" {
+		t.Errorf("expected email 'codex@test.io', got %q", info.Email)
+	}
+	if info.AuthMethod != "ChatGPT Plus" {
+		t.Errorf("expected auth method 'ChatGPT Plus', got %q", info.AuthMethod)
+	}
+
+	// Agent-specific extraction
+	agentInfo := GetProfileAccountInfoForAgent(tmpDir, "codex")
+	if agentInfo.Email != "codex@test.io" {
+		t.Errorf("expected agent email 'codex@test.io', got %q", agentInfo.Email)
+	}
+}
+

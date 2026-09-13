@@ -165,6 +165,125 @@ func (m Model) SelectedAgent() string {
 	return m.agent
 }
 
+func (m Model) getRegisteredAgentNames() []string {
+	preferred := []string{"agy", "gemini", "codex"}
+	if m.reg == nil {
+		return preferred
+	}
+	var res []string
+	seen := make(map[string]bool)
+	for _, name := range preferred {
+		if _, err := m.reg.Get(name); err == nil {
+			res = append(res, name)
+			seen[name] = true
+		}
+	}
+	for _, a := range m.reg.All() {
+		if !seen[a.Name()] {
+			res = append(res, a.Name())
+			seen[a.Name()] = true
+		}
+	}
+	if len(res) == 0 {
+		return preferred
+	}
+	return res
+}
+
+func (m Model) switchAgent(targetAgent string) (Model, tea.Cmd) {
+	m.agent = targetAgent
+	m.cursor = 0
+	m = m.refreshProfiles()
+	m = m.loadCachedReports()
+	if m.doctorDrawer.active {
+		m = m.fetchDoctorDiagnostics()
+	}
+	m.loading = true
+	return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
+}
+
+func (m Model) cycleAgent(forward bool) (Model, tea.Cmd) {
+	agents := m.getRegisteredAgentNames()
+	if len(agents) == 0 {
+		return m, nil
+	}
+	curIdx := -1
+	for i, a := range agents {
+		if a == m.agent {
+			curIdx = i
+			break
+		}
+	}
+	var nextIdx int
+	if forward {
+		if curIdx == -1 || curIdx+1 >= len(agents) {
+			nextIdx = 0
+		} else {
+			nextIdx = curIdx + 1
+		}
+	} else {
+		if curIdx <= 0 {
+			nextIdx = len(agents) - 1
+		} else {
+			nextIdx = curIdx - 1
+		}
+	}
+	return m.switchAgent(agents[nextIdx])
+}
+
+func (m Model) selectAgentByIndex(index int) (Model, tea.Cmd) {
+	agents := m.getRegisteredAgentNames()
+	if index >= 0 && index < len(agents) {
+		return m.switchAgent(agents[index])
+	}
+	return m, nil
+}
+
+func (m Model) renderTabBar() string {
+	agents := m.getRegisteredAgentNames()
+	var tabs []string
+
+	for i, ag := range agents {
+		num := i + 1
+		var label string
+		switch ag {
+		case "agy":
+			label = fmt.Sprintf("[%d] Antigravity (agy)", num)
+		case "gemini":
+			label = fmt.Sprintf("[%d] Gemini", num)
+		case "codex":
+			label = fmt.Sprintf("[%d] Codex", num)
+		default:
+			disp := ag
+			if m.reg != nil {
+				if ad, err := m.reg.Get(ag); err == nil && ad != nil {
+					disp = ad.DisplayName()
+				}
+			}
+			label = fmt.Sprintf("[%d] %s", num, disp)
+		}
+
+		if m.agent == ag {
+			tabs = append(tabs, TabActiveStyle.Render(label))
+		} else {
+			tabs = append(tabs, TabInactiveStyle.Render(label))
+		}
+	}
+
+	hasClaude := false
+	for _, ag := range agents {
+		if ag == "claude" {
+			hasClaude = true
+			break
+		}
+	}
+	if !hasClaude {
+		tabs = append(tabs, TabInactiveStyle.Render(fmt.Sprintf("[%d] Claude", len(agents)+1)))
+	}
+
+	return fmt.Sprintf("  %s\n\n", strings.Join(tabs, "   "))
+}
+
 func (m Model) Profiles() []string {
 	return m.profiles
 }
@@ -581,33 +700,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "1":
-				m.agent = "agy"
-				m.cursor = 0
-				m = m.refreshProfiles()
-				m = m.loadCachedReports()
-				m = m.fetchDoctorDiagnostics()
-				m.loading = true
-				return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
+				return m.selectAgentByIndex(0)
 			case "2":
-				m.agent = "gemini"
-				m.cursor = 0
-				m = m.refreshProfiles()
-				m = m.loadCachedReports()
-				m = m.fetchDoctorDiagnostics()
-				m.loading = true
-				return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
+				return m.selectAgentByIndex(1)
+			case "3":
+				return m.selectAgentByIndex(2)
 			case "tab":
-				if m.agent == "agy" {
-					m.agent = "gemini"
-				} else {
-					m.agent = "agy"
-				}
-				m.cursor = 0
-				m = m.refreshProfiles()
-				m = m.loadCachedReports()
-				m = m.fetchDoctorDiagnostics()
-				m.loading = true
-				return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
+				return m.cycleAgent(true)
+			case "shift+tab":
+				return m.cycleAgent(false)
 			}
 			return m, nil
 		}
@@ -625,30 +726,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case "1":
-			m.agent = "agy"
-			m.cursor = 0
-			m = m.refreshProfiles()
-			m = m.loadCachedReports()
-			m.loading = true
-			return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
+			return m.selectAgentByIndex(0)
 		case "2":
-			m.agent = "gemini"
-			m.cursor = 0
-			m = m.refreshProfiles()
-			m = m.loadCachedReports()
-			m.loading = true
-			return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
+			return m.selectAgentByIndex(1)
+		case "3":
+			return m.selectAgentByIndex(2)
 		case "tab":
-			if m.agent == "agy" {
-				m.agent = "gemini"
-			} else {
-				m.agent = "agy"
-			}
-			m.cursor = 0
-			m = m.refreshProfiles()
-			m = m.loadCachedReports()
-			m.loading = true
-			return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
+			return m.cycleAgent(true)
+		case "shift+tab":
+			return m.cycleAgent(false)
 		case "r":
 			m.loading = true
 			return m, tea.Batch(m.triggerRefreshCmd(true), m.spinTickCmd())
@@ -923,21 +1009,7 @@ func (m Model) renderHeader() string {
 func (m Model) View() string {
 	var s strings.Builder
 	s.WriteString(m.renderHeader())
-
-	agyTab := TabInactiveStyle.Render("[1] Antigravity (agy)")
-	gemTab := TabInactiveStyle.Render("[2] Gemini")
-	if m.agent == "agy" {
-		agyTab = TabActiveStyle.Render("[1] Antigravity (agy)")
-	} else if m.agent == "gemini" {
-		gemTab = TabActiveStyle.Render("[2] Gemini")
-	}
-
-	s.WriteString(fmt.Sprintf("  %s   %s   %s   %s\n\n",
-		agyTab,
-		gemTab,
-		TabInactiveStyle.Render("[3] Codex"),
-		TabInactiveStyle.Render("[4] Claude"),
-	))
+	s.WriteString(m.renderTabBar())
 
 	isNarrow := m.width > 0 && m.width < 85
 
@@ -1000,7 +1072,7 @@ func (m Model) View() string {
 		if m.pm != nil {
 			pDir = m.pm.ProfileDir(curProfile)
 		}
-		accInfo := profile.GetProfileAccountInfo(pDir)
+		accInfo := profile.GetProfileAccountInfoForAgent(pDir, m.agent)
 		accountEmail := accInfo.Email
 		accountName := accInfo.Name
 		authMethod := accInfo.AuthMethod

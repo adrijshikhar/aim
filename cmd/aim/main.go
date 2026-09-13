@@ -8,6 +8,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
+	"github.com/aim-cli/aim/internal/agents/codex"
 	"github.com/aim-cli/aim/internal/agents/gemini"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
@@ -69,6 +70,7 @@ func main() {
 	reg := agents.NewRegistry()
 	reg.Register(agy.NewAdapter())
 	reg.Register(gemini.NewAdapter())
+	reg.Register(codex.NewAdapter())
 
 	pm := profile.NewProfileManager(config.BaseDir())
 
