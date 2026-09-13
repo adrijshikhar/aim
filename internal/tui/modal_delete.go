@@ -133,9 +133,10 @@ func (m Model) executeDeleteChoice(idx int) (Model, tea.Cmd) {
 	delete(m.reports, target)
 
 	m = m.refreshProfiles()
-	if m.cursor >= len(m.profiles) {
-		if len(m.profiles) > 0 {
-			m.cursor = len(m.profiles) - 1
+	filtered := m.filteredProfiles()
+	if m.cursor >= len(filtered) {
+		if len(filtered) > 0 {
+			m.cursor = len(filtered) - 1
 		} else {
 			m.cursor = 0
 		}

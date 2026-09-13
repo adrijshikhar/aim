@@ -119,10 +119,14 @@ func CacheDir() string {
 		_ = os.MkdirAll(p, 0700)
 		return p
 	}
-	if p, err := xdg.CacheFile("aim"); err == nil {
-		return p
+	if p, err := xdg.CacheFile(filepath.Join("aim", "cache.lock")); err == nil {
+		dir := filepath.Dir(p)
+		_ = os.MkdirAll(dir, 0700)
+		return dir
 	}
-	return filepath.Join(xdg.CacheHome, "aim")
+	dir := filepath.Join(xdg.CacheHome, "aim")
+	_ = os.MkdirAll(dir, 0700)
+	return dir
 }
 
 // StateDir returns the state/logs directory:

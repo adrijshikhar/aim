@@ -100,14 +100,25 @@ func (m Model) updateFilter(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			return m, nil
 		case "esc":
+			prevSelected := ""
+			filtered := m.filteredProfiles()
+			if m.cursor >= 0 && m.cursor < len(filtered) {
+				prevSelected = filtered[m.cursor]
+			}
 			m.filter.active = false
 			m.filter.input.Blur()
 			m.filter.input.SetValue("")
-			if m.cursor >= len(m.profiles) {
+			m.cursor = 0
+			if prevSelected != "" {
+				for idx, p := range m.profiles {
+					if p == prevSelected {
+						m.cursor = idx
+						break
+					}
+				}
+			} else if m.cursor >= len(m.profiles) {
 				if len(m.profiles) > 0 {
 					m.cursor = len(m.profiles) - 1
-				} else {
-					m.cursor = 0
 				}
 			}
 			return m, nil

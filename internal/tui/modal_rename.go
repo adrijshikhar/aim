@@ -114,7 +114,9 @@ func (m Model) executeRename() (Model, tea.Cmd) {
 	}
 	m.renameModal = renameModalState{}
 	m = m.refreshProfiles()
-	for idx, p := range m.profiles {
+	filtered := m.filteredProfiles()
+	m.cursor = 0
+	for idx, p := range filtered {
 		if p == newName {
 			m.cursor = idx
 			break
