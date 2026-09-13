@@ -892,18 +892,7 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 
 	// Always report the bottleneck / most constrained limit percentage so the
 	// displayed percentage is strictly consistent with the badge color/status.
-	minPct := 100
-	for _, w := range rep.Windows {
-		if w.RemainingPct < minPct {
-			minPct = w.RemainingPct
-		}
-	}
-	if minPct < 0 {
-		minPct = 0
-	} else if minPct > 100 {
-		minPct = 100
-	}
-	return fmt.Sprintf("[%d%%]", minPct)
+	return fmt.Sprintf("[%d%%]", rep.BottleneckPct())
 }
 
 func formatWindowsBadge(windows []usage.LimitWindow) string {
@@ -915,10 +904,9 @@ func formatWindowsBadge(windows []usage.LimitWindow) string {
 			return ""
 		}
 		label := "limit"
-		lower := strings.ToLower(w.Name)
-		if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") || strings.Contains(lower, "5-h") {
+		if w.IsHourly() {
 			label = "5h"
-		} else if strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk") {
+		} else if w.IsWeekly() {
 			label = "wk"
 		} else if w.Name != "" {
 			label = w.Name
@@ -931,18 +919,16 @@ func formatWindowsBadge(windows []usage.LimitWindow) string {
 
 	var pw, ww *usage.LimitWindow
 	for i := range windows {
-		lower := strings.ToLower(windows[i].Name)
-		if pw == nil && (strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") || strings.Contains(lower, "5-h")) {
+		if pw == nil && windows[i].IsHourly() {
 			pw = &windows[i]
 		}
-		if ww == nil && (strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk")) {
+		if ww == nil && windows[i].IsWeekly() {
 			ww = &windows[i]
 		}
 	}
 
 	if pw != nil && ww != nil && (pw == ww || pw.Name == ww.Name) {
-		name := strings.ToLower(pw.Name)
-		if !strings.Contains(name, "five") && !strings.Contains(name, "5h") && !strings.Contains(name, "5 hour") && !strings.Contains(name, "5-hour") {
+		if !pw.IsHourly() {
 			pw = nil
 		} else {
 			ww = nil
@@ -1145,10 +1131,9 @@ func (m Model) View() string {
 					var win5h, winWk *usage.LimitWindow
 					for i := range g.Windows {
 						w := &g.Windows[i]
-						lower := strings.ToLower(w.Name)
-						if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") || strings.Contains(lower, "hour") {
+						if w.IsHourly() {
 							win5h = w
-						} else if strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk") {
+						} else if w.IsWeekly() {
 							winWk = w
 						}
 					}

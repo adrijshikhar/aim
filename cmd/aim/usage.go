@@ -225,9 +225,8 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 
 	has5h := false
 	for _, r := range reports {
-		for _, w := range r.Windows {
-			lower := strings.ToLower(w.Name)
-			if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") || strings.Contains(lower, "hour") {
+		for i := range r.Windows {
+			if r.Windows[i].IsHourly() {
 				has5h = true
 				break
 			}
@@ -401,11 +400,10 @@ func findCategoryWindows(windows []usage.LimitWindow) (*usage.LimitWindow, *usag
 	var weekly *usage.LimitWindow
 
 	for i := range windows {
-		name := strings.ToLower(windows[i].Name)
-		if primary == nil && (strings.Contains(name, "five") || strings.Contains(name, "5h") || strings.Contains(name, "5 hour") || strings.Contains(name, "5-hour") || strings.Contains(name, "hour")) {
+		if primary == nil && windows[i].IsHourly() {
 			primary = &windows[i]
 		}
-		if weekly == nil && (strings.Contains(name, "week") || strings.Contains(name, "7d")) {
+		if weekly == nil && windows[i].IsWeekly() {
 			weekly = &windows[i]
 		}
 	}
