@@ -136,7 +136,7 @@ func (a *Adapter) ResolveBinary() string {
 
 func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) error {
 	codexDir := filepath.Join(profileDir, ".codex")
-	if err := os.MkdirAll(codexDir, 0755); err != nil {
+	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		return err
 	}
 
@@ -177,7 +177,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 
 func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
 	codexDir := filepath.Join(profileDir, ".codex")
-	if err := os.MkdirAll(codexDir, 0755); err != nil {
+	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		return agents.LaunchEnv{}, err
 	}
 
@@ -369,6 +369,8 @@ func parseLatestSessionRateLimits(sessionsDir string) string {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
 	var lastRateLimitSummary string
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -384,6 +386,9 @@ func parseLatestSessionRateLimits(sessionsDir string) string {
 				lastRateLimitSummary = fmt.Sprintf("%d%% rate limit used", msg.RateLimits.Primary.UsedPercent)
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Debug("[codex] scanner error reading session file %s: %v", latestFile, err)
 	}
 
 	return lastRateLimitSummary

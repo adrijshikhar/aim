@@ -1290,6 +1290,18 @@ func TestTUI_RenameModal_ValidationErrors(t *testing.T) {
 	if m4.RenameModalError() != "New profile name must be different from current name" {
 		t.Errorf("expected same name error, got %q", m4.RenameModalError())
 	}
+
+	// Type "../invalid" (path traversal)
+	mTyping = m4
+	mTyping.renameModal.input.SetValue("../invalid")
+	mTrav, _ := mTyping.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m5 := mTrav.(Model)
+	if !m5.IsRenameModalActive() {
+		t.Fatalf("expected modal to remain active on traversal input")
+	}
+	if !strings.Contains(m5.RenameModalError(), "cannot contain slashes") {
+		t.Errorf("expected slash validation error, got %q", m5.RenameModalError())
+	}
 }
 
 func TestTUI_RenameModal_Success(t *testing.T) {

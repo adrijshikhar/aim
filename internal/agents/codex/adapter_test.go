@@ -65,6 +65,8 @@ func TestCodexAdapter_PrepareEnv(t *testing.T) {
 	codexDir := filepath.Join(profileDir, ".codex")
 	if fi, err := os.Stat(codexDir); err != nil || !fi.IsDir() {
 		t.Errorf("expected .codex directory to be created in profileDir")
+	} else if fi.Mode().Perm() != 0700 {
+		t.Errorf("expected .codex directory permissions 0700, got %v", fi.Mode().Perm())
 	}
 
 	if launchEnv.Env["HOME"] != profileDir {

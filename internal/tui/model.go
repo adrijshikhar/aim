@@ -639,6 +639,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.renameModal.err = "New profile name must be different from current name"
 					return m, nil
 				}
+				if strings.ContainsAny(newName, "/\\") || strings.Contains(newName, "..") {
+					m.renameModal.err = "Profile name cannot contain slashes or '..'"
+					return m, nil
+				}
 				if m.pm != nil {
 					if err := m.pm.RenameProfile(m.renameModal.targetProfile, newName, m.cfg); err != nil {
 						m.renameModal.err = err.Error()
