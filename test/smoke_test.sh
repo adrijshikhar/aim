@@ -41,12 +41,18 @@ echo "=== 2. Testing initial empty listing ==="
 "$AIM_BIN" list gemini | grep "No profiles found"
 
 echo "=== 3. Testing dotfile isolation & running agy ==="
-mkdir -p "$TEST_AIM_HOME/fake_home"
+mkdir -p "$TEST_AIM_HOME/fake_home/.agents/skills"
 echo "[user] name = SmokeTest" > "$TEST_AIM_HOME/fake_home/.gitconfig"
+mkdir -p "$TEST_AIM_HOME/fake_home/.gemini/config/plugins/test-plugin"
+echo '{"name":"test-plugin"}' > "$TEST_AIM_HOME/fake_home/.gemini/config/plugins/test-plugin/plugin.json"
+echo '{"imports":[{"name":"test-plugin"}]}' > "$TEST_AIM_HOME/fake_home/.gemini/config/import_manifest.json"
 HOME="$TEST_AIM_HOME/fake_home" "$AIM_BIN" run agy smoke_profile -- echo "isolated"
 
 [ -L "$TEST_AIM_HOME/profiles/smoke_profile/.gitconfig" ]
-echo "Dotfile symlink OK!"
+[ -L "$TEST_AIM_HOME/profiles/smoke_profile/.agents" ]
+[ -L "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/config/plugins" ]
+[ -L "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/config/import_manifest.json" ]
+echo "Dotfile symlink and plugin bridging OK!"
 
 echo "=== 4. Testing agent association after run ==="
 # aim list agy should show smoke_profile

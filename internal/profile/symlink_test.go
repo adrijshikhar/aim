@@ -150,6 +150,15 @@ func TestEnsureDotfiles_ComprehensiveDeveloperTools(t *testing.T) {
 		t.Fatalf("write cargo config failed: %v", err)
 	}
 
+	// AI agent skills
+	agentsDir := filepath.Join(fakeHome, ".agents", "skills")
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		t.Fatalf("mkdir .agents/skills failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsDir, "test.md"), []byte("# Skill"), 0644); err != nil {
+		t.Fatalf("write skill failed: %v", err)
+	}
+
 	// Run EnsureDotfiles with an extra custom path
 	customFile := filepath.Join(fakeHome, ".custom-dev-token")
 	if err := os.WriteFile(customFile, []byte("token"), 0600); err != nil {
@@ -198,6 +207,16 @@ func TestEnsureDotfiles_ComprehensiveDeveloperTools(t *testing.T) {
 	}
 	if fiCargo.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("expected .cargo/config.toml to be a symlink")
+	}
+
+	// Verify .agents symlink
+	targetAgents := filepath.Join(profileDir, ".agents")
+	fiAgents, err := os.Lstat(targetAgents)
+	if err != nil {
+		t.Fatalf("expected .agents to exist: %v", err)
+	}
+	if fiAgents.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected .agents to be a symlink")
 	}
 
 	// Verify custom path symlink
