@@ -1676,3 +1676,49 @@ func TestTUI_DecomposedComponents(t *testing.T) {
 		t.Errorf("expected empty string for empty profile, got %q", empty)
 	}
 }
+
+func TestTUI_DecomposedModalsAndDrawers(t *testing.T) {
+	m := newTestModel(t, "test-prof")
+
+	// 1. Delete Modal decomposition
+	mDel, _ := m.openDeleteModal()
+	if !mDel.IsDeleteModalActive() {
+		t.Fatalf("expected delete modal to be active after openDeleteModal()")
+	}
+	delView := mDel.renderDeleteModal()
+	if !strings.Contains(delView, "Confirm Deletion: test-prof") {
+		t.Errorf("expected delete modal view to contain 'Confirm Deletion: test-prof', got:\n%s", delView)
+	}
+	mDelClosed, _ := mDel.updateDeleteModal(tea.KeyMsg{Type: tea.KeyEsc})
+	if mDelClosed.IsDeleteModalActive() {
+		t.Errorf("expected delete modal to be closed after updateDeleteModal(Esc)")
+	}
+
+	// 2. Rename Modal decomposition
+	mRen, _ := m.openRenameModal()
+	if !mRen.IsRenameModalActive() {
+		t.Fatalf("expected rename modal to be active after openRenameModal()")
+	}
+	renView := mRen.renderRenameModal()
+	if !strings.Contains(renView, "Rename Profile: test-prof") {
+		t.Errorf("expected rename modal view to contain 'Rename Profile: test-prof', got:\n%s", renView)
+	}
+	mRenClosed, _ := mRen.updateRenameModal(tea.KeyMsg{Type: tea.KeyEsc})
+	if mRenClosed.IsRenameModalActive() {
+		t.Errorf("expected rename modal to be closed after updateRenameModal(Esc)")
+	}
+
+	// 3. Doctor Drawer decomposition
+	mDoc, _ := m.openDoctorDrawer()
+	if !mDoc.IsDoctorDrawerActive() {
+		t.Fatalf("expected doctor drawer to be active after openDoctorDrawer()")
+	}
+	docView := mDoc.renderDoctorDrawer()
+	if !strings.Contains(docView, "Diagnostics") {
+		t.Errorf("expected doctor drawer view to contain 'Diagnostics', got:\n%s", docView)
+	}
+	mDocClosed, _ := mDoc.updateDoctorDrawer(tea.KeyMsg{Type: tea.KeyEsc})
+	if mDocClosed.IsDoctorDrawerActive() {
+		t.Errorf("expected doctor drawer to be closed after updateDoctorDrawer(Esc)")
+	}
+}

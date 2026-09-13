@@ -12,9 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type ActionOutcome int
@@ -33,28 +31,6 @@ type usageBatchMsg []usage.Report
 type usageStream struct {
 	ch     <-chan usage.Report
 	cancel context.CancelFunc
-}
-
-type deleteModalState struct {
-	active        bool
-	targetProfile string
-	isShared      bool
-	agents        []string
-	focusedIndex  int
-}
-
-type renameModalState struct {
-	active        bool
-	targetProfile string
-	input         textinput.Model
-	err           string
-}
-
-type doctorDrawerState struct {
-	active        bool
-	targetProfile string
-	targetAgent   string
-	results       []agents.DiagnosticResult
 }
 
 // Version is the package-level version string shown in the TUI header.
@@ -172,6 +148,29 @@ func (m Model) KeyMap() KeyMap {
 	return m.keys
 }
 
+func (m Model) Profiles() []string {
+	return m.profiles
+}
+
+// WithVersion sets the version string displayed in the header and returns the updated model.
+func (m Model) WithVersion(v string) Model {
+	m.version = v
+	return m
+}
+
+// SetVersion sets the version string displayed in the header on the model pointer.
+func (m *Model) SetVersion(v string) {
+	m.version = v
+}
+
+// Version returns the version displayed in the header, falling back to package Version.
+func (m Model) Version() string {
+	if m.version != "" {
+		return m.version
+	}
+	return Version
+}
+
 func (m Model) getRegisteredAgentNames() []string {
 	preferred := []string{"agy", "gemini", "codex"}
 	if m.reg == nil {
@@ -244,139 +243,6 @@ func (m Model) selectAgentByIndex(index int) (Model, tea.Cmd) {
 		return m.switchAgent(agents[index])
 	}
 	return m, nil
-}
-
-func (m Model) Profiles() []string {
-	return m.profiles
-}
-
-func (m Model) IsDeleteModalActive() bool {
-	return m.deleteModal.active
-}
-
-func (m Model) DeleteModalTarget() string {
-	return m.deleteModal.targetProfile
-}
-
-func (m Model) DeleteModalFocusedIndex() int {
-	return m.deleteModal.focusedIndex
-}
-
-func (m Model) IsRenameModalActive() bool {
-	return m.renameModal.active
-}
-
-func (m Model) RenameModalTarget() string {
-	return m.renameModal.targetProfile
-}
-
-func (m Model) RenameModalInputValue() string {
-	return m.renameModal.input.Value()
-}
-
-func (m Model) RenameModalError() string {
-	return m.renameModal.err
-}
-
-func (m Model) IsDoctorDrawerActive() bool {
-	return m.doctorDrawer.active
-}
-
-func (m Model) DoctorDrawerResults() []agents.DiagnosticResult {
-	return m.doctorDrawer.results
-}
-
-func (m Model) DoctorDrawerTargetProfile() string {
-	return m.doctorDrawer.targetProfile
-}
-
-// WithVersion sets the version string displayed in the header and returns the updated model.
-func (m Model) WithVersion(v string) Model {
-	m.version = v
-	return m
-}
-
-// SetVersion sets the version string displayed in the header on the model pointer.
-func (m *Model) SetVersion(v string) {
-	m.version = v
-}
-
-// Version returns the version displayed in the header, falling back to package Version.
-func (m Model) Version() string {
-	if m.version != "" {
-		return m.version
-	}
-	return Version
-}
-
-func (m Model) fetchDoctorDiagnostics() Model {
-	reg := m.reg
-	if reg == nil {
-		reg = agents.DefaultRegistry()
-	}
-
-	if len(m.profiles) == 0 || m.cursor < 0 || m.cursor >= len(m.profiles) {
-		var results []agents.DiagnosticResult
-		results = append(results, agents.DiagnosticResult{
-			Category: "Profile",
-			Status:   "WARN",
-			Message:  fmt.Sprintf("No profiles configured for %s", m.agent),
-		})
-		if reg != nil {
-			if ad, err := reg.Get(m.agent); err == nil && ad != nil {
-				results = append(results, ad.Doctor(context.Background(), "", "")...)
-			}
-		}
-		m.doctorDrawer = doctorDrawerState{
-			active:        true,
-			targetAgent:   m.agent,
-			targetProfile: "(none)",
-			results:       results,
-		}
-		return m
-	}
-
-	p := m.profiles[m.cursor]
-	pDir := ""
-	if m.pm != nil {
-		pDir = m.pm.ProfileDir(p)
-	}
-
-	var results []agents.DiagnosticResult
-	if reg != nil {
-		if ad, err := reg.Get(m.agent); err == nil && ad != nil {
-			results = ad.Doctor(context.Background(), p, pDir)
-		}
-	}
-	if len(results) == 0 {
-		results = []agents.DiagnosticResult{
-			{Category: "Status", Status: "OK", Message: "All checks passed"},
-		}
-	}
-	if m.cfg != nil {
-		if env := m.cfg.GetProfileEnv(p); len(env) > 0 {
-			results = append(results, agents.DiagnosticResult{
-				Category: "Config",
-				Status:   "OK",
-				Message:  fmt.Sprintf("%d custom env var(s) configured", len(env)),
-			})
-		}
-		if args := m.cfg.GetProfileArgs(p); len(args) > 0 {
-			results = append(results, agents.DiagnosticResult{
-				Category: "Config",
-				Status:   "OK",
-				Message:  fmt.Sprintf("%d custom launch arg(s) configured", len(args)),
-			})
-		}
-	}
-
-	m.doctorDrawer = doctorDrawerState{
-		active:        true,
-		targetProfile: p,
-		targetAgent:   m.agent,
-		results:       results,
-	}
-	return m
 }
 
 func (m Model) getReport(prof string) (usage.Report, bool) {
@@ -461,6 +327,43 @@ func tickEvery(d time.Duration) tea.Cmd {
 	})
 }
 
+func (m Model) cancelStream() {
+	if m.usageStream != nil && m.usageStream.cancel != nil {
+		m.usageStream.cancel()
+		m.usageStream.cancel = nil
+	}
+}
+
+func formatBadge(rep usage.Report, isNarrow bool) string {
+	if rep.Error != "" || rep.Status == usage.StatusUnknown {
+		errLower := strings.ToLower(rep.Error)
+		summaryLower := strings.ToLower(rep.Summary)
+		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
+			return "[no credentials]"
+		}
+		if strings.Contains(errLower, "offline") || strings.Contains(summaryLower, "offline") ||
+			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") ||
+			strings.Contains(errLower, "timeout") {
+			return "[offline]"
+		}
+		if rep.Error != "" {
+			return fmt.Sprintf("[%s]", strings.ToLower(rep.Error))
+		}
+		if rep.Status != "" {
+			return fmt.Sprintf("[%s]", strings.ToLower(string(rep.Status)))
+		}
+		return ""
+	}
+
+	if len(rep.Windows) == 0 {
+		return ""
+	}
+
+	// Always report the bottleneck / most constrained limit percentage so the
+	// displayed percentage is strictly consistent with the badge color/status.
+	return fmt.Sprintf("[%d%%]", rep.BottleneckPct())
+}
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), tickEvery(5*time.Minute))
 }
@@ -526,146 +429,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.deleteModal.active {
-			switch msg.String() {
-			case "ctrl+c":
-				m.cancelStream()
-				return m, tea.Quit
-			case "esc", "q", "n":
-				m.deleteModal = deleteModalState{}
-				return m, nil
-			case "left", "h":
-				numOpts := 2
-				if m.deleteModal.isShared {
-					numOpts = 3
-				}
-				m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex - 1 + numOpts) % numOpts
-				return m, nil
-			case "right", "l", "tab":
-				numOpts := 2
-				if m.deleteModal.isShared {
-					numOpts = 3
-				}
-				m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex + 1) % numOpts
-				return m, nil
-			case "shift+tab":
-				numOpts := 2
-				if m.deleteModal.isShared {
-					numOpts = 3
-				}
-				m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex - 1 + numOpts) % numOpts
-				return m, nil
-			case "1":
-				if m.deleteModal.isShared {
-					return m.executeDeleteChoice(0)
-				}
-			case "2":
-				if m.deleteModal.isShared {
-					return m.executeDeleteChoice(1)
-				}
-			case "y":
-				if !m.deleteModal.isShared {
-					return m.executeDeleteChoice(0)
-				}
-			case "enter":
-				return m.executeDeleteChoice(m.deleteModal.focusedIndex)
-			}
-			return m, nil
+			return m.updateDeleteModal(msg)
 		}
 
 		if m.renameModal.active {
-			switch msg.String() {
-			case "ctrl+c":
-				m.cancelStream()
-				return m, tea.Quit
-			case "esc":
-				m.renameModal = renameModalState{}
-				return m, nil
-			case "enter":
-				newName := strings.TrimSpace(m.renameModal.input.Value())
-				if newName == "" {
-					m.renameModal.err = "Profile name cannot be empty"
-					return m, nil
-				}
-				if newName == m.renameModal.targetProfile {
-					m.renameModal.err = "New profile name must be different from current name"
-					return m, nil
-				}
-				if strings.ContainsAny(newName, "/\\") || strings.Contains(newName, "..") {
-					m.renameModal.err = "Profile name cannot contain slashes or '..'"
-					return m, nil
-				}
-				if m.pm != nil {
-					if err := m.pm.RenameProfile(m.renameModal.targetProfile, newName, m.cfg); err != nil {
-						m.renameModal.err = err.Error()
-						return m, nil
-					}
-				}
-				if m.cache != nil {
-					m.cache.Rename(m.renameModal.targetProfile, newName)
-				}
-				targetProfile := m.renameModal.targetProfile
-				if m.reports != nil {
-					for k, rep := range m.reports {
-						parts := strings.SplitN(k, ":", 2)
-						if len(parts) == 2 && parts[1] == targetProfile {
-							delete(m.reports, k)
-							rep.Profile = newName
-							m.reports[fmt.Sprintf("%s:%s", parts[0], newName)] = rep
-						} else if k == targetProfile {
-							delete(m.reports, k)
-							rep.Profile = newName
-							m.reports[newName] = rep
-						}
-					}
-				}
-				m.renameModal = renameModalState{}
-				m = m.refreshProfiles()
-				for idx, p := range m.profiles {
-					if p == newName {
-						m.cursor = idx
-						break
-					}
-				}
-				return m, nil
-			default:
-				var cmd tea.Cmd
-				m.renameModal.input, cmd = m.renameModal.input.Update(msg)
-				return m, cmd
-			}
+			return m.updateRenameModal(msg)
 		}
 
 		if m.doctorDrawer.active {
-			switch msg.String() {
-			case "ctrl+c":
-				m.cancelStream()
-				return m, tea.Quit
-			case "d", "esc", "q":
-				m.doctorDrawer = doctorDrawerState{}
-				return m, nil
-			case "up", "k":
-				if m.cursor > 0 {
-					m.cursor--
-					m = m.fetchDoctorDiagnostics()
-				}
-				return m, nil
-			case "down", "j":
-				if m.cursor < len(m.profiles)-1 {
-					m.cursor++
-					m = m.fetchDoctorDiagnostics()
-				}
-				return m, nil
-			case "1":
-				return m.selectAgentByIndex(0)
-			case "2":
-				return m.selectAgentByIndex(1)
-			case "3":
-				return m.selectAgentByIndex(2)
-			case "tab":
-				return m.cycleAgent(true)
-			case "shift+tab":
-				return m.cycleAgent(false)
-			}
-			return m, nil
+			return m.updateDoctorDrawer(msg)
 		}
 
 		keys := m.keys
@@ -717,196 +489,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelStream()
 			return m, tea.Quit
 		case key.Matches(msg, keys.Doctor):
-			m = m.fetchDoctorDiagnostics()
-			return m, nil
+			return m.openDoctorDrawer()
 		case key.Matches(msg, keys.Rename):
-			if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
-				target := m.profiles[m.cursor]
-				ti := textinput.New()
-				ti.Placeholder = target
-				ti.CharLimit = 64
-				ti.Width = 30
-				cmd := ti.Focus()
-				m.renameModal = renameModalState{
-					active:        true,
-					targetProfile: target,
-					input:         ti,
-				}
-				return m, cmd
-			}
+			return m.openRenameModal()
 		case key.Matches(msg, keys.Delete):
-			if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
-				target := m.profiles[m.cursor]
-				var agentsList []string
-				if m.cfg != nil {
-					agentsList = m.cfg.GetProfileAgents(target)
-				}
-				isShared := len(agentsList) > 1
-				defaultFocus := 1
-				if isShared {
-					defaultFocus = 2
-				}
-				m.deleteModal = deleteModalState{
-					active:        true,
-					targetProfile: target,
-					isShared:      isShared,
-					agents:        agentsList,
-					focusedIndex:  defaultFocus,
-				}
-				return m, nil
-			}
+			return m.openDeleteModal()
 		}
+
 	default:
 		if m.renameModal.active {
-			var cmd tea.Cmd
-			m.renameModal.input, cmd = m.renameModal.input.Update(msg)
-			return m, cmd
+			return m.updateRenameModal(msg)
 		}
 	}
 	return m, nil
-}
-
-func (m Model) executeDeleteChoice(idx int) (tea.Model, tea.Cmd) {
-	target := m.deleteModal.targetProfile
-	isShared := m.deleteModal.isShared
-	m.deleteModal = deleteModalState{}
-
-	if !isShared {
-		if idx == 1 {
-			return m, nil
-		}
-		if m.pm != nil {
-			_ = m.pm.DeleteProfile(target, m.cfg)
-		}
-	} else {
-		if idx == 2 {
-			return m, nil
-		}
-		if idx == 0 {
-			if m.pm != nil {
-				_, _ = m.pm.RemoveAgent(target, m.agent, m.cfg)
-			}
-		} else if idx == 1 {
-			if m.pm != nil {
-				_ = m.pm.DeleteProfile(target, m.cfg)
-			}
-		}
-	}
-
-	if m.cache != nil {
-		m.cache.Delete(m.agent, target)
-	}
-	delete(m.reports, fmt.Sprintf("%s:%s", m.agent, target))
-	delete(m.reports, target)
-
-	m = m.refreshProfiles()
-	if m.cursor >= len(m.profiles) {
-		if len(m.profiles) > 0 {
-			m.cursor = len(m.profiles) - 1
-		} else {
-			m.cursor = 0
-		}
-	}
-
-	if len(m.profiles) > 0 {
-		return m, m.triggerRefreshCmd()
-	}
-	return m, nil
-}
-
-func (m Model) cancelStream() {
-	if m.usageStream != nil && m.usageStream.cancel != nil {
-		m.usageStream.cancel()
-		m.usageStream.cancel = nil
-	}
-}
-
-func formatBadge(rep usage.Report, isNarrow bool) string {
-	if rep.Error != "" || rep.Status == usage.StatusUnknown {
-		errLower := strings.ToLower(rep.Error)
-		summaryLower := strings.ToLower(rep.Summary)
-		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
-			return "[no credentials]"
-		}
-		if strings.Contains(errLower, "offline") || strings.Contains(summaryLower, "offline") ||
-			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") ||
-			strings.Contains(errLower, "timeout") {
-			return "[offline]"
-		}
-		if rep.Error != "" {
-			return fmt.Sprintf("[%s]", strings.ToLower(rep.Error))
-		}
-		if rep.Status != "" {
-			return fmt.Sprintf("[%s]", strings.ToLower(string(rep.Status)))
-		}
-		return ""
-	}
-
-	if len(rep.Windows) == 0 {
-		return ""
-	}
-
-	// Always report the bottleneck / most constrained limit percentage so the
-	// displayed percentage is strictly consistent with the badge color/status.
-	return fmt.Sprintf("[%d%%]", rep.BottleneckPct())
-}
-
-func formatWindowsBadge(windows []usage.LimitWindow) string {
-	if len(windows) == 0 {
-		return ""
-	}
-	formatWindow := func(w *usage.LimitWindow) string {
-		if w == nil {
-			return ""
-		}
-		label := "limit"
-		if w.IsHourly() {
-			label = "5h"
-		} else if w.IsWeekly() {
-			label = "wk"
-		} else if w.Name != "" {
-			label = w.Name
-		}
-		if w.RemainingPct < 100 && w.ResetsIn > 0 {
-			return fmt.Sprintf("%s: %d%% (%s)", label, w.RemainingPct, usage.FormatDuration(w.ResetsIn))
-		}
-		return fmt.Sprintf("%s: %d%%", label, w.RemainingPct)
-	}
-
-	var pw, ww *usage.LimitWindow
-	for i := range windows {
-		if pw == nil && windows[i].IsHourly() {
-			pw = &windows[i]
-		}
-		if ww == nil && windows[i].IsWeekly() {
-			ww = &windows[i]
-		}
-	}
-
-	if pw != nil && ww != nil && (pw == ww || pw.Name == ww.Name) {
-		if !pw.IsHourly() {
-			pw = nil
-		} else {
-			ww = nil
-		}
-	}
-
-	var parts []string
-	if pw != nil {
-		parts = append(parts, formatWindow(pw))
-	}
-	if ww != nil {
-		parts = append(parts, formatWindow(ww))
-	}
-	if len(parts) == 0 {
-		for i := range windows {
-			parts = append(parts, formatWindow(&windows[i]))
-		}
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "[" + strings.Join(parts, " | ") + "]"
 }
 
 func (m Model) View() string {
@@ -987,136 +582,4 @@ func (m Model) View() string {
 		HintKeyStyle.Render("[q]") + " " + HintLabelStyle.Render("Quit") + "\n")
 
 	return s.String()
-}
-
-func (m Model) renderDeleteModal() string {
-	var b strings.Builder
-	pName := m.deleteModal.targetProfile
-
-	title := ModalTitleStyle.Render("[!] Confirm Deletion: " + pName)
-	b.WriteString(title + "\n\n")
-
-	if m.deleteModal.isShared {
-		agentsStr := strings.Join(m.deleteModal.agents, ", ")
-		b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(
-			fmt.Sprintf("Profile %q is shared across: %s", pName, agentsStr),
-		) + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			fmt.Sprintf("Do you want to unlink '%s' or delete the entire profile?", m.agent),
-		) + "\n\n")
-
-		btn0Style := ModalBtnInactiveStyle
-		btn1Style := ModalBtnInactiveStyle
-		btn2Style := ModalBtnInactiveStyle
-
-		if m.deleteModal.focusedIndex == 0 {
-			btn0Style = ModalBtnActiveStyle
-		} else if m.deleteModal.focusedIndex == 1 {
-			btn1Style = ModalBtnActiveStyle
-		} else if m.deleteModal.focusedIndex == 2 {
-			btn2Style = ModalBtnCancelActiveStyle
-		}
-
-		btn0 := btn0Style.Render(fmt.Sprintf("[1] Remove '%s' Only", m.agent))
-		btn1 := btn1Style.Render("[2] Delete Entire Profile")
-		btn2 := btn2Style.Render("[Cancel]")
-
-		b.WriteString(fmt.Sprintf("  %s    %s    %s\n\n", btn0, btn1, btn2))
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"  [←/→/Tab] Select  •  [Enter] Confirm  •  [Esc] Cancel",
-		))
-	} else {
-		b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(
-			fmt.Sprintf("Are you sure you want to permanently delete profile %q?", pName),
-		) + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"This will permanently delete all stored credentials and isolated state.",
-		) + "\n\n")
-
-		btn0Style := ModalBtnInactiveStyle
-		btn1Style := ModalBtnInactiveStyle
-
-		if m.deleteModal.focusedIndex == 0 {
-			btn0Style = ModalBtnActiveStyle
-		} else if m.deleteModal.focusedIndex == 1 {
-			btn1Style = ModalBtnCancelActiveStyle
-		}
-
-		btn0 := btn0Style.Render("[ Delete Profile ]")
-		btn1 := btn1Style.Render("[ Cancel ]")
-
-		b.WriteString(fmt.Sprintf("      %s      %s\n\n", btn0, btn1))
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"  [←/→/Tab] Select  •  [Enter/y] Confirm  •  [Esc] Cancel",
-		))
-	}
-
-	box := ModalBoxStyle.Render(b.String())
-	return "\n" + box + "\n"
-}
-
-func (m Model) renderDoctorDrawer() string {
-	var b strings.Builder
-	target := m.doctorDrawer.targetProfile
-	if target == "" {
-		target = "(none)"
-	}
-	title := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Render(
-		fmt.Sprintf("🩺  Diagnostics: %s / %s", m.doctorDrawer.targetAgent, target),
-	)
-	b.WriteString(title + "\n\n")
-
-	for _, r := range m.doctorDrawer.results {
-		var badgeStyle lipgloss.Style
-		switch r.Status {
-		case "OK":
-			badgeStyle = GaugeGreenStyle
-		case "WARN":
-			badgeStyle = GaugeYellowStyle
-		case "FAIL":
-			badgeStyle = GaugeRedStyle
-		default:
-			badgeStyle = GaugeDimStyle
-		}
-
-		badge := badgeStyle.Width(8).Render(fmt.Sprintf("[%s]", r.Status))
-		cat := lipgloss.NewStyle().Bold(true).Foreground(TextPrimary).Width(14).Render(r.Category + ":")
-		msg := lipgloss.NewStyle().Foreground(TextSecondary).Render(r.Message)
-
-		b.WriteString(fmt.Sprintf("  %s %s %s\n", badge, cat, msg))
-	}
-
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [↑/↓] Inspect Profile  •  [Tab] Switch Agent  •  [d/Esc/q] Close Drawer",
-	))
-
-	box := DoctorDrawerStyle.Render(b.String())
-	return "\n" + box + "\n"
-}
-
-func (m Model) renderRenameModal() string {
-	var b strings.Builder
-	pName := m.renameModal.targetProfile
-
-	title := RenameModalTitleStyle.Render("✎ Rename Profile: " + pName)
-	b.WriteString(title + "\n\n")
-
-	b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(
-		"Enter new name for profile:",
-	) + "\n\n")
-
-	b.WriteString("  " + m.renameModal.input.View() + "\n\n")
-
-	if m.renameModal.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(StatusRed).Bold(true).Render(
-			"  ✕ "+m.renameModal.err,
-		) + "\n\n")
-	}
-
-	b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [Enter] Confirm  •  [Esc] Cancel",
-	))
-
-	box := RenameModalBoxStyle.Render(b.String())
-	return "\n" + box + "\n"
 }
