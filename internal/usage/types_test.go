@@ -244,3 +244,106 @@ func TestModelGroups(t *testing.T) {
 		t.Errorf("expected 0 model groups for un-categorized report, got %d", len(emptyRep.ModelGroups()))
 	}
 }
+
+func TestLimitWindow_Classifications(t *testing.T) {
+	w5h := usage.LimitWindow{Name: "5-hour limit", RemainingPct: 40}
+	if !w5h.IsHourly() {
+		t.Errorf("expected w5h to be classified as hourly")
+	}
+	if w5h.IsWeekly() {
+		t.Errorf("expected w5h not to be weekly")
+	}
+
+	wwk := usage.LimitWindow{Name: "7d rolling limit", RemainingPct: 90}
+	if !wwk.IsWeekly() {
+		t.Errorf("expected wwk to be classified as weekly")
+	}
+	if wwk.IsHourly() {
+		t.Errorf("expected wwk not to be hourly")
+	}
+
+	// Comprehensive variations for hourly
+	hourlyNames := []string{
+		"five hour", "FIVE", "5h window", "5-hour rolling", "5-h quota", "1 hour limit",
+	}
+	for _, name := range hourlyNames {
+		w := usage.LimitWindow{Name: name}
+		if !w.IsHourly() {
+			t.Errorf("expected %q to be classified as hourly", name)
+		}
+	}
+
+	// Comprehensive variations for weekly
+	weeklyNames := []string{
+		"weekly limit", "WEEK", "7d rolling", "7D", "wk quota", "WK",
+	}
+	for _, name := range weeklyNames {
+		w := usage.LimitWindow{Name: name}
+		if !w.IsWeekly() {
+			t.Errorf("expected %q to be classified as weekly", name)
+		}
+	}
+
+	// Nil receiver tests
+	var nilWindow *usage.LimitWindow
+	if nilWindow.IsHourly() {
+		t.Errorf("nil window IsHourly() should return false")
+	}
+	if nilWindow.IsWeekly() {
+		t.Errorf("nil window IsWeekly() should return false")
+	}
+
+	// Non-matching window
+	other := usage.LimitWindow{Name: "Monthly Quota"}
+	if other.IsHourly() {
+		t.Errorf("expected Monthly Quota not to be hourly")
+	}
+	if other.IsWeekly() {
+		t.Errorf("expected Monthly Quota not to be weekly")
+	}
+}
+
+func TestReport_BottleneckPct(t *testing.T) {
+	rep := usage.Report{
+		Windows: []usage.LimitWindow{
+			{Name: "5h", RemainingPct: 85},
+			{Name: "wk", RemainingPct: 30},
+		},
+	}
+	if got := rep.BottleneckPct(); got != 30 {
+		t.Fatalf("expected bottleneck 30, got %d", got)
+	}
+
+	// Empty windows defaults to 100
+	emptyRep := usage.Report{}
+	if got := emptyRep.BottleneckPct(); got != 100 {
+		t.Errorf("expected empty report bottleneck to be 100, got %d", got)
+	}
+
+	// Nil report receiver defaults to 100
+	var nilRep *usage.Report
+	if got := nilRep.BottleneckPct(); got != 100 {
+		t.Errorf("expected nil report bottleneck to be 100, got %d", got)
+	}
+
+	// Clamped below 0
+	underRep := usage.Report{
+		Windows: []usage.LimitWindow{
+			{Name: "5h", RemainingPct: -15},
+		},
+	}
+	if got := underRep.BottleneckPct(); got != 0 {
+		t.Errorf("expected clamped bottleneck 0, got %d", got)
+	}
+
+	// Clamped above 100
+	overRep := usage.Report{
+		Windows: []usage.LimitWindow{
+			{Name: "5h", RemainingPct: 150},
+		},
+	}
+	if got := overRep.BottleneckPct(); got != 100 {
+		t.Errorf("expected clamped bottleneck 100, got %d", got)
+	}
+}
+
