@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/adrijshikhar/aim/compare/v0.3.3...v0.4.0) (2026-09-13)
+
+
+### Features
+
+* **codex:** add Codex CLI adapter and dynamic multi-agent tab bar ([553c770](https://github.com/adrijshikhar/aim/commit/553c770c5b43adc063844b507b5bfcd479867ed6))
+
+
+### Bug Fixes
+
+* **codex:** enforce 0700 permissions, buffer large session lines, and validate rename paths ([b779609](https://github.com/adrijshikhar/aim/commit/b7796098df07116cc790e2a3d8b46a07d22449fa))
+
 ## [0.3.3](https://github.com/adrijshikhar/aim/compare/v0.3.2...v0.3.3) (2026-09-13)
 
 
