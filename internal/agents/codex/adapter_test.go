@@ -3,9 +3,11 @@ package codex
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/aim-cli/aim/internal/usage"
 )
@@ -179,11 +181,10 @@ func TestCodexAdapter_GetUsage(t *testing.T) {
 	// sessions/YYYY/MM/DD/rollout-*.jsonl with payload.rate_limits
 	nestedDir := filepath.Join(sessionsDir, "2026", "09", "13")
 	_ = os.MkdirAll(nestedDir, 0755)
-	futureReset := 1789316216
-	codexDefaultEvent := `{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":21.0,"window_minutes":10080,"resets_at":1789822170}}}}` + "\n"
-	sparkEvent := `{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex_spark","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":10.5,"window_minutes":300,"resets_at":` +
-		"1789316216" + `},"secondary":{"used_percent":5.0,"window_minutes":10080,"resets_at":` +
-		"1789903016" + `},"credits":{"has_credits":true,"unlimited":false,"balance":"$15.00"}}}}` + "\n"
+	futureReset := time.Now().Add(2 * time.Hour).Unix()
+	futureWeeklyReset := time.Now().Add(7 * 24 * time.Hour).Unix()
+	codexDefaultEvent := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":21.0,"window_minutes":10080,"resets_at":%d}}}}`+"\n", futureWeeklyReset)
+	sparkEvent := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex_spark","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":10.5,"window_minutes":300,"resets_at":%d},"secondary":{"used_percent":5.0,"window_minutes":10080,"resets_at":%d},"credits":{"has_credits":true,"unlimited":false,"balance":"$15.00"}}}}`+"\n", futureReset, futureWeeklyReset)
 	_ = os.WriteFile(filepath.Join(nestedDir, "rollout-2026-09-13T13-05-43-test.jsonl"), []byte(codexDefaultEvent+sparkEvent), 0644)
 
 	repNested, err := a.GetUsage(context.Background(), "usage-test", profileDir)
