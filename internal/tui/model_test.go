@@ -1612,4 +1612,3 @@ func TestTUI_ProfileList_OmitsActiveAgentInBrackets(t *testing.T) {
 		t.Errorf("did not expect 'codex' in rs brackets on codex tab, got:\n%s", mCodexView)
 	}
 }
-
