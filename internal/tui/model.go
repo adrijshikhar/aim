@@ -56,6 +56,9 @@ type doctorDrawerState struct {
 	results       []agents.DiagnosticResult
 }
 
+// Version is the package-level version string shown in the TUI header.
+var Version = "0.1.0"
+
 type Model struct {
 	reg      *agents.Registry
 	pm       *profile.ProfileManager
@@ -75,6 +78,7 @@ type Model struct {
 	loading    bool
 	spinner    spinner.Model
 	spinnerIdx int
+	version    string
 
 	deleteModal  deleteModalState
 	renameModal  renameModalState
@@ -98,6 +102,7 @@ func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Conf
 		pm:          pm,
 		cfg:         cfg,
 		agent:       "agy",
+		version:     Version,
 		reports:     make(map[string]usage.Report),
 		cache:       usage.NewCacheStore(baseDir, usage.DefaultTTL),
 		usageStream: &usageStream{},
@@ -202,6 +207,36 @@ func (m Model) DoctorDrawerResults() []agents.DiagnosticResult {
 
 func (m Model) DoctorDrawerTargetProfile() string {
 	return m.doctorDrawer.targetProfile
+}
+
+// WithVersion sets the version string displayed in the header and returns the updated model.
+func (m Model) WithVersion(v string) Model {
+	m.version = v
+	return m
+}
+
+// SetVersion sets the version string displayed in the header on the model pointer.
+func (m *Model) SetVersion(v string) {
+	m.version = v
+}
+
+// Version returns the version displayed in the header, falling back to package Version.
+func (m Model) Version() string {
+	if m.version != "" {
+		return m.version
+	}
+	return Version
+}
+
+func (m Model) formatVersionTag() string {
+	v := m.Version()
+	if v == "" {
+		return ""
+	}
+	if !strings.HasPrefix(v, "v") {
+		return "v" + v
+	}
+	return v
 }
 
 func (m Model) fetchDoctorDiagnostics() Model {
@@ -846,6 +881,7 @@ func (m Model) renderHeader() string {
 	logoStyle := lipgloss.NewStyle().Bold(true).Foreground(StatusGreen)
 	urlStyle := lipgloss.NewStyle().Foreground(AccentPurple)
 	tagStyle := lipgloss.NewStyle().Foreground(StatusGreen)
+	versionStyle := lipgloss.NewStyle().Foreground(TextSecondary)
 
 	logoLines := []string{
 		"    _    ___ __  __ ",
@@ -855,13 +891,18 @@ func (m Model) renderHeader() string {
 		"/_/   \\_\\___|_|  |_|",
 	}
 
+	tagLine := tagStyle.Render("AIM — AI Multiplexer")
+	if v := m.formatVersionTag(); v != "" {
+		tagLine += " " + versionStyle.Render(v)
+	}
+
 	var out strings.Builder
 	if m.width > 0 && m.width < 70 {
 		for _, l := range logoLines {
 			out.WriteString(logoStyle.Render(l) + "\n")
 		}
 		out.WriteString("  " + urlStyle.Render("https://github.com/adrijshikhar/aim") + "\n")
-		out.WriteString("  " + tagStyle.Render("AIM — AI Multiplexer") + "\n\n")
+		out.WriteString("  " + tagLine + "\n\n")
 		return out.String()
 	}
 
@@ -870,7 +911,7 @@ func (m Model) renderHeader() string {
 		if i == 2 {
 			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, urlStyle.Render("https://github.com/adrijshikhar/aim")))
 		} else if i == 3 {
-			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, tagStyle.Render("AIM — AI Multiplexer")))
+			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, tagLine))
 		} else {
 			out.WriteString(renderedLogo + "\n")
 		}
