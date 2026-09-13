@@ -1448,3 +1448,58 @@ func TestTUI_FormatBadge_BottleneckWindow(t *testing.T) {
 		t.Errorf("expected badge to reflect bottleneck 25%%, got %s", badge)
 	}
 }
+
+func TestTUI_Header_VersionDisplay(t *testing.T) {
+	baseDir := t.TempDir()
+	pm := profile.NewProfileManager(baseDir)
+	cfg := config.NewDefaultConfig()
+	reg := agents.DefaultRegistry()
+
+	// Default model inherits package Version
+	m := NewModel(reg, pm, cfg)
+	if m.Version() != Version {
+		t.Errorf("expected default model version to be %q, got %q", Version, m.Version())
+	}
+	view := m.View()
+	if !strings.Contains(view, "AIM — AI Multiplexer") {
+		t.Errorf("expected 'AIM — AI Multiplexer' in view")
+	}
+	if !strings.Contains(view, "v"+Version) {
+		t.Errorf("expected 'v%s' in view, got:\n%s", Version, view)
+	}
+
+	// Custom version without 'v' prefix
+	m2 := NewModel(reg, pm, cfg).WithVersion("0.3.1")
+	if m2.Version() != "0.3.1" {
+		t.Errorf("expected version '0.3.1', got %q", m2.Version())
+	}
+	view2 := m2.View()
+	if !strings.Contains(view2, "AIM — AI Multiplexer") || !strings.Contains(view2, "v0.3.1") {
+		t.Errorf("expected 'AIM — AI Multiplexer' and 'v0.3.1' in view, got:\n%s", view2)
+	}
+
+	// Custom version with 'v' prefix
+	m3 := NewModel(reg, pm, cfg).WithVersion("v1.2.0")
+	view3 := m3.View()
+	if !strings.Contains(view3, "v1.2.0") {
+		t.Errorf("expected 'v1.2.0' in view, got:\n%s", view3)
+	}
+
+	// Narrow layout (<70 width)
+	mNarrow := NewModel(reg, pm, cfg).WithVersion("0.3.1")
+	mNarrow.width = 60
+	viewNarrow := mNarrow.View()
+	if !strings.Contains(viewNarrow, "AIM — AI Multiplexer") || !strings.Contains(viewNarrow, "v0.3.1") {
+		t.Errorf("expected version in narrow view, got:\n%s", viewNarrow)
+	}
+
+	// SetVersion pointer method
+	m4 := NewModel(reg, pm, cfg)
+	m4.SetVersion("2.0.0")
+	if m4.Version() != "2.0.0" {
+		t.Errorf("expected version '2.0.0', got %q", m4.Version())
+	}
+	if !strings.Contains(m4.View(), "v2.0.0") {
+		t.Errorf("expected 'v2.0.0' in view after SetVersion")
+	}
+}

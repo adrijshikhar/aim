@@ -116,7 +116,7 @@ func promptProfileName(agent, defaultProfile string) string {
 
 var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 	cfg, _ := config.LoadConfig()
-	m := tui.NewModel(reg, pm, cfg)
+	m := tui.NewModel(reg, pm, cfg).WithVersion(Version)
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {

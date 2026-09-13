@@ -6,6 +6,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +20,10 @@ var (
 
 	debugFlag bool
 )
+
+func init() {
+	tui.Version = Version
+}
 
 // ExitError represents an explicit process exit code from command execution.
 type ExitError struct {
