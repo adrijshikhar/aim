@@ -349,22 +349,36 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		summary = accInfo.AuthMethod
 	}
 
-	rl := getLatestCodexRateLimits(profileName, profileDir)
+	rateLimitsList := getAllLatestCodexRateLimits(profileName, profileDir)
 	var windows []usage.LimitWindow
 	var credits string
 
-	if rl != nil {
-		if rl.Secondary != nil {
+	for _, rl := range rateLimitsList {
+		if rl == nil {
+			continue
+		}
+
+		cat := "Codex"
+		if rl.LimitName != "" {
+			cat = rl.LimitName
+		} else if rl.LimitID != "" && rl.LimitID != "codex" {
+			cat = rl.LimitID
+		}
+
+		makeWindow := func(w *codexRateLimitWindow, defaultName string) *usage.LimitWindow {
+			if w == nil {
+				return nil
+			}
 			var resetsAt time.Time
 			var resetsIn time.Duration
-			if rl.Secondary.ResetsAt > 0 {
-				resetsAt = time.Unix(rl.Secondary.ResetsAt, 0)
+			if w.ResetsAt > 0 {
+				resetsAt = time.Unix(w.ResetsAt, 0)
 				resetsIn = time.Until(resetsAt)
 				if resetsIn < 0 {
 					resetsIn = 0
 				}
 			}
-			remaining := int(math.Round(100.0 - rl.Secondary.UsedPercent))
+			remaining := int(math.Round(100.0 - w.UsedPercent))
 			if remaining < 0 {
 				remaining = 0
 			} else if remaining > 100 {
@@ -375,31 +389,50 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 				resetsIn = 0
 			}
 
-			cat := "Codex Spark"
-			if rl.LimitName != "" {
-				cat = rl.LimitName
-			}
-
-			name := "Weekly Limit"
-			if rl.Secondary.WindowMinutes > 0 {
-				wm := formatWindowMinutes(rl.Secondary.WindowMinutes)
-				if strings.Contains(strings.ToLower(wm), "week") || strings.Contains(strings.ToLower(wm), "7d") {
+			name := defaultName
+			if w.WindowMinutes > 0 {
+				wm := formatWindowMinutes(w.WindowMinutes)
+				if strings.Contains(strings.ToLower(wm), "5h") || strings.Contains(strings.ToLower(wm), "hour") {
+					name = "5h Limit"
+				} else if strings.Contains(strings.ToLower(wm), "week") || strings.Contains(strings.ToLower(wm), "7d") {
 					name = "Weekly Limit"
 				} else {
 					name = fmt.Sprintf("%s Limit", wm)
 				}
 			}
 
-			windows = append(windows, usage.LimitWindow{
+			return &usage.LimitWindow{
 				Category:     cat,
 				Name:         name,
 				RemainingPct: remaining,
 				ResetsAt:     resetsAt,
 				ResetsIn:     resetsIn,
-			})
+			}
 		}
 
-		if rl.Credits != nil {
+		seenNames := make(map[string]bool)
+		addWin := func(w *codexRateLimitWindow, defaultName string) {
+			if win := makeWindow(w, defaultName); win != nil {
+				if !seenNames[win.Name] {
+					seenNames[win.Name] = true
+					windows = append(windows, *win)
+				}
+			}
+		}
+
+		if rl.Primary != nil {
+			defaultName := "5h Limit"
+			if rl.Primary.WindowMinutes >= 10080 {
+				defaultName = "Weekly Limit"
+			}
+			addWin(rl.Primary, defaultName)
+		}
+
+		if rl.Secondary != nil {
+			addWin(rl.Secondary, "Weekly Limit")
+		}
+
+		if rl.Credits != nil && credits == "" {
 			if rl.Credits.Unlimited {
 				credits = "Unlimited"
 			} else if rl.Credits.Balance != "" {
@@ -480,7 +513,7 @@ func findRecentSessionFiles(dir string) []sessionFileInfo {
 	return files
 }
 
-func parseSessionFileRateLimits(filePath string) *codexRateLimits {
+func parseSessionFileAllRateLimits(filePath string) map[string]*codexRateLimits {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil
@@ -490,7 +523,7 @@ func parseSessionFileRateLimits(filePath string) *codexRateLimits {
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 64*1024)
 	scanner.Buffer(buf, 10*1024*1024)
-	var latest *codexRateLimits
+	limits := make(map[string]*codexRateLimits)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if !strings.Contains(string(line), "rate_limits") && !strings.Contains(string(line), "rateLimits") {
@@ -506,36 +539,82 @@ func parseSessionFileRateLimits(filePath string) *codexRateLimits {
 				rl = msg.RateLimitsCamel
 			}
 			if rl != nil {
-				latest = rl
+				key := rl.LimitName
+				if key == "" {
+					key = rl.LimitID
+				}
+				if key == "" {
+					key = "codex"
+				}
+				limits[key] = rl
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		logger.Debug("[codex] scanner error reading session file %s: %v", filePath, err)
 	}
-	return latest
+	return limits
 }
 
-func getLatestCodexRateLimits(profileName, profileDir string) *codexRateLimits {
+func getAllLatestCodexRateLimits(profileName, profileDir string) []*codexRateLimits {
 	// 1. Check profileDir/.codex/sessions
 	profileSessionsDir := filepath.Join(profileDir, ".codex", "sessions")
 	files := findRecentSessionFiles(profileSessionsDir)
 
-	// 2. If no session files found in profile, and profile is eligible for seeding (e.g. primary profile),
-	// fall back to host ~/.codex/sessions
-	if len(files) == 0 && isProfileEligibleForSeeding(profileName) {
-		hostSessionsDir := filepath.Join(config.RealHomeDir(), ".codex", "sessions")
-		files = findRecentSessionFiles(hostSessionsDir)
+	collected := make(map[string]*codexRateLimits)
+	maxCheck := 20
+	limit := maxCheck
+	if len(files) < limit {
+		limit = len(files)
 	}
-
-	maxCheck := 5
-	if len(files) < maxCheck {
-		maxCheck = len(files)
-	}
-	for i := 0; i < maxCheck; i++ {
-		if rl := parseSessionFileRateLimits(files[i].path); rl != nil {
-			return rl
+	for i := 0; i < limit; i++ {
+		fileLimits := parseSessionFileAllRateLimits(files[i].path)
+		for k, rl := range fileLimits {
+			if _, exists := collected[k]; !exists {
+				collected[k] = rl
+			}
+		}
+		if len(collected) >= 2 {
+			break
 		}
 	}
-	return nil
+
+	// 2. If fewer than 2 models found, and profile is eligible for seeding (e.g. primary profile),
+	// also check host ~/.codex/sessions
+	if len(collected) < 2 && isProfileEligibleForSeeding(profileName) {
+		hostSessionsDir := filepath.Join(config.RealHomeDir(), ".codex", "sessions")
+		hostFiles := findRecentSessionFiles(hostSessionsDir)
+		hostLimit := maxCheck
+		if len(hostFiles) < hostLimit {
+			hostLimit = len(hostFiles)
+		}
+		for i := 0; i < hostLimit; i++ {
+			fileLimits := parseSessionFileAllRateLimits(hostFiles[i].path)
+			for k, rl := range fileLimits {
+				if _, exists := collected[k]; !exists {
+					collected[k] = rl
+				}
+			}
+			if len(collected) >= 2 {
+				break
+			}
+		}
+	}
+
+	var results []*codexRateLimits
+	// Guarantee stable ordering: "codex" (default) first, then Spark / others
+	if codexRL, ok := collected["codex"]; ok {
+		results = append(results, codexRL)
+	}
+	var otherKeys []string
+	for k := range collected {
+		if k != "codex" {
+			otherKeys = append(otherKeys, k)
+		}
+	}
+	sort.Strings(otherKeys)
+	for _, k := range otherKeys {
+		results = append(results, collected[k])
+	}
+	return results
 }

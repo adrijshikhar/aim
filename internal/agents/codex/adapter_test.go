@@ -180,24 +180,41 @@ func TestCodexAdapter_GetUsage(t *testing.T) {
 	nestedDir := filepath.Join(sessionsDir, "2026", "09", "13")
 	_ = os.MkdirAll(nestedDir, 0755)
 	futureReset := 1789316216
-	realCodexEvent := `{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex_spark","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":10.5,"window_minutes":300,"resets_at":` +
+	codexDefaultEvent := `{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":21.0,"window_minutes":10080,"resets_at":1789822170}}}}` + "\n"
+	sparkEvent := `{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex_spark","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":10.5,"window_minutes":300,"resets_at":` +
 		"1789316216" + `},"secondary":{"used_percent":5.0,"window_minutes":10080,"resets_at":` +
 		"1789903016" + `},"credits":{"has_credits":true,"unlimited":false,"balance":"$15.00"}}}}` + "\n"
-	_ = os.WriteFile(filepath.Join(nestedDir, "rollout-2026-09-13T13-05-43-test.jsonl"), []byte(realCodexEvent), 0644)
+	_ = os.WriteFile(filepath.Join(nestedDir, "rollout-2026-09-13T13-05-43-test.jsonl"), []byte(codexDefaultEvent+sparkEvent), 0644)
 
 	repNested, err := a.GetUsage(context.Background(), "usage-test", profileDir)
 	if err != nil {
 		t.Fatalf("unexpected error with nested session: %v", err)
 	}
-	if len(repNested.Windows) != 1 {
-		t.Fatalf("expected 1 window (Codex Spark weekly limit), got %d", len(repNested.Windows))
+	if len(repNested.Windows) != 3 {
+		t.Fatalf("expected 3 windows (Codex weekly, Spark 5h, Spark weekly), got %d: %+v", len(repNested.Windows), repNested.Windows)
 	}
-	ww := repNested.WeeklyWindow()
-	if ww == nil {
-		t.Fatalf("expected weekly window, got nil")
+
+	// Verify Codex default weekly window
+	var codexWeekly, spark5h, sparkWeekly *usage.LimitWindow
+	for i := range repNested.Windows {
+		w := &repNested.Windows[i]
+		if w.Category == "Codex" && w.Name == "Weekly Limit" {
+			codexWeekly = w
+		} else if w.Category == "GPT-5.3-Codex-Spark" && w.Name == "5h Limit" {
+			spark5h = w
+		} else if w.Category == "GPT-5.3-Codex-Spark" && w.Name == "Weekly Limit" {
+			sparkWeekly = w
+		}
 	}
-	if ww.RemainingPct != 95 { // 100 - round(5.0) = 95
-		t.Errorf("expected weekly remaining 95%%, got %d%%", ww.RemainingPct)
+
+	if codexWeekly == nil || codexWeekly.RemainingPct != 79 {
+		t.Errorf("expected Codex weekly remaining 79%%, got %v", codexWeekly)
+	}
+	if spark5h == nil || spark5h.RemainingPct != 90 {
+		t.Errorf("expected Spark 5h remaining 90%%, got %v", spark5h)
+	}
+	if sparkWeekly == nil || sparkWeekly.RemainingPct != 95 {
+		t.Errorf("expected Spark weekly remaining 95%%, got %v", sparkWeekly)
 	}
 	if repNested.Credits != "$15.00" {
 		t.Errorf("expected credits '$15.00', got %q", repNested.Credits)

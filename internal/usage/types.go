@@ -120,7 +120,7 @@ func FormatWindowSummary(w *LimitWindow) string {
 	}
 	label := "limit"
 	lower := strings.ToLower(w.Name)
-	if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") {
+	if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "hour") {
 		label = "5h"
 	} else if strings.Contains(lower, "week") || strings.Contains(lower, "7d") {
 		label = "wk"

@@ -1171,7 +1171,7 @@ func (m Model) View() string {
 					for i := range g.Windows {
 						w := &g.Windows[i]
 						lower := strings.ToLower(w.Name)
-						if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") {
+						if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") || strings.Contains(lower, "hour") {
 							win5h = w
 						} else if strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk") {
 							winWk = w
@@ -1219,10 +1219,10 @@ func (m Model) View() string {
 						}
 						lineContent = str5h + strings.Repeat(" ", pad) + strWk
 					} else if win5h != nil {
-						str5h, _ := formatWin(*win5h, "")
+						str5h, _ := formatWin(*win5h, "5h")
 						lineContent = str5h
 					} else if winWk != nil {
-						strWk, _ := formatWin(*winWk, "")
+						strWk, _ := formatWin(*winWk, "Wk")
 						lineContent = strWk
 					} else {
 						var parts []string
