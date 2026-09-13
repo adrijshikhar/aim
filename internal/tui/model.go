@@ -1274,7 +1274,12 @@ func (m Model) View() string {
 			if !soonestReset.IsZero() {
 				resetsAtStr = soonestReset.Local().Format("2006-01-02 15:04:05")
 			}
-			s.WriteString(fmt.Sprintf("    %-14s %s\n", lipgloss.NewStyle().Foreground(TextSecondary).Render("Resets At:"), lipgloss.NewStyle().Foreground(TextMuted).Render(resetsAtStr)))
+			padResets := 0
+			if len("Resets At:") < lblWidth {
+				padResets = lblWidth - len("Resets At:")
+			}
+			styledResets := lipgloss.NewStyle().Foreground(TextSecondary).Render("Resets At:") + strings.Repeat(" ", padResets)
+			s.WriteString(fmt.Sprintf("    %s %s\n", styledResets, lipgloss.NewStyle().Foreground(TextMuted).Render(resetsAtStr)))
 
 			// Credits
 			creditsStr := "0"
