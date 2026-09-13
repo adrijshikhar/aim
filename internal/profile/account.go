@@ -267,4 +267,3 @@ func ParseCodexAuthAccountInfo(data []byte) AccountInfo {
 		AuthMethod: authMethod,
 	}
 }
-

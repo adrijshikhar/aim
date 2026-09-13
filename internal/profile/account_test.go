@@ -155,4 +155,3 @@ func TestGetProfileAccountInfo_Codex(t *testing.T) {
 		t.Errorf("expected agent email 'codex@test.io', got %q", agentInfo.Email)
 	}
 }
-

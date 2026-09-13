@@ -1693,4 +1693,3 @@ func TestCLI_CodexIntegration(t *testing.T) {
 		t.Errorf("expected cloned profile to have codex agent")
 	}
 }
-
