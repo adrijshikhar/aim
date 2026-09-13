@@ -73,8 +73,11 @@ func TestTUI_MultiAgentBadge(t *testing.T) {
 	m := NewModel(nil, pm, cfg)
 	view := m.View()
 
-	if !strings.Contains(view, "multi [agy, claude]") {
-		t.Errorf("expected view to contain multi-agent badge 'multi [agy, claude]', got:\n%s", view)
+	if !strings.Contains(view, "multi [claude]") {
+		t.Errorf("expected view to contain multi-agent badge 'multi [claude]', got:\n%s", view)
+	}
+	if strings.Contains(view, "multi [agy") {
+		t.Errorf("expected active agent 'agy' to be omitted from badge, got:\n%s", view)
 	}
 	if strings.Contains(view, "single [") {
 		t.Errorf("expected single-agent profile not to have badge, got:\n%s", view)
@@ -1565,3 +1568,48 @@ func TestTUI_Header_VersionDisplay(t *testing.T) {
 		t.Errorf("expected 'v2.0.0' in view after SetVersion")
 	}
 }
+
+func TestTUI_ProfileList_OmitsActiveAgentInBrackets(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("rs")
+	_, _ = pm.EnsureProfile("bby")
+
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("rs", "agy")
+	cfg.AddProfileAgent("rs", "codex")
+	cfg.AddProfileAgent("bby", "agy")
+
+	reg := agents.DefaultRegistry()
+
+	// Tab: agy
+	mAgy := NewModel(reg, pm, cfg)
+	mAgy.width = 100
+	mAgyView := mAgy.View()
+
+	// bby only has agy, so it should not have brackets
+	if strings.Contains(mAgyView, "bby [") {
+		t.Errorf("expected 'bby' to have no bracket, got:\n%s", mAgyView)
+	}
+	// rs is shared by agy and codex. On the agy tab, it should show [codex] and NOT [agy
+	if !strings.Contains(mAgyView, "rs [codex]") {
+		t.Errorf("expected 'rs [codex]' on agy tab, got:\n%s", mAgyView)
+	}
+	if strings.Contains(mAgyView, "rs [agy") {
+		t.Errorf("did not expect 'agy' in rs brackets on agy tab, got:\n%s", mAgyView)
+	}
+
+	// Switch to codex tab
+	mCodex, _ := mAgy.switchAgent("codex")
+	mCodex.width = 100
+	mCodexView := mCodex.View()
+	// On codex tab, rs should show [agy] and NOT [codex
+	if !strings.Contains(mCodexView, "rs [agy]") {
+		t.Errorf("expected 'rs [agy]' on codex tab, got:\n%s", mCodexView)
+	}
+	if strings.Contains(mCodexView, "rs [codex") {
+		t.Errorf("did not expect 'codex' in rs brackets on codex tab, got:\n%s", mCodexView)
+	}
+}
+

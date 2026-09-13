@@ -1031,8 +1031,14 @@ func (m Model) View() string {
 			label := p
 			if m.cfg != nil {
 				agentsList := m.cfg.GetProfileAgents(p)
-				if len(agentsList) > 1 {
-					label = fmt.Sprintf("%s [%s]", p, strings.Join(agentsList, ", "))
+				var otherAgents []string
+				for _, ag := range agentsList {
+					if ag != m.agent {
+						otherAgents = append(otherAgents, ag)
+					}
+				}
+				if len(otherAgents) > 0 {
+					label = fmt.Sprintf("%s [%s]", p, strings.Join(otherAgents, ", "))
 				}
 			}
 
