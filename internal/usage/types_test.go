@@ -346,4 +346,3 @@ func TestReport_BottleneckPct(t *testing.T) {
 		t.Errorf("expected clamped bottleneck 100, got %d", got)
 	}
 }
-
