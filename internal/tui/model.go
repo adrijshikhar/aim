@@ -1153,7 +1153,7 @@ func (m Model) View() string {
 						}
 					}
 
-					formatWin := func(w usage.LimitWindow, label string) (string, int) {
+					formatWin := func(w usage.LimitWindow, label string) string {
 						bar := usage.RenderBar(w.RemainingPct, 10)
 						winStatus := usage.CalculateStatus([]usage.LimitWindow{w})
 						gaugeStyle := GaugeStyleForStatus(winStatus)
@@ -1166,44 +1166,27 @@ func (m Model) View() string {
 						if label != "" {
 							prefix = lipgloss.NewStyle().Foreground(TextDim).Render(label + ": ")
 						}
-						rendered := fmt.Sprintf("%s%s %s%s",
+						return fmt.Sprintf("%s%s %s%s",
 							prefix,
 							gaugeStyle.Render(bar),
 							gaugeStyle.Render(fmt.Sprintf("%d%%", w.RemainingPct)),
 							resetInfo,
 						)
-						plainLen := len(label)
-						if label != "" {
-							plainLen += 2
-						}
-						plainLen += 12 + 1 + len(fmt.Sprintf("%d%%", w.RemainingPct))
-						if w.RemainingPct < 100 && w.ResetsIn > 0 {
-							plainLen += 3 + len(usage.FormatDuration(w.ResetsIn))
-						}
-						return rendered, plainLen
 					}
 
 					var lineContent string
 					if win5h != nil && winWk != nil {
-						str5h, len5h := formatWin(*win5h, "5h")
-						strWk, _ := formatWin(*winWk, "Wk")
-						targetCol := 33
-						pad := 3
-						if targetCol > len5h {
-							pad = targetCol - len5h
-						}
-						lineContent = str5h + strings.Repeat(" ", pad) + strWk
+						str5h := formatWin(*win5h, "5h")
+						strWk := formatWin(*winWk, "Wk")
+						lineContent = lipgloss.NewStyle().Width(33).Render(str5h) + strWk
 					} else if win5h != nil {
-						str5h, _ := formatWin(*win5h, "5h")
-						lineContent = str5h
+						lineContent = formatWin(*win5h, "5h")
 					} else if winWk != nil {
-						strWk, _ := formatWin(*winWk, "Wk")
-						lineContent = strWk
+						lineContent = formatWin(*winWk, "Wk")
 					} else {
 						var parts []string
 						for _, w := range g.Windows {
-							str, _ := formatWin(w, w.Name)
-							parts = append(parts, str)
+							parts = append(parts, formatWin(w, w.Name))
 						}
 						lineContent = strings.Join(parts, "   ")
 					}
