@@ -148,7 +148,7 @@ func TestCodexAdapter_GetUsage(t *testing.T) {
 	// Create sessions dir with rate limit jsonl
 	sessionsDir := filepath.Join(codexDir, "sessions")
 	_ = os.MkdirAll(sessionsDir, 0755)
-	sessionLine := `{"rateLimits":{"primary":{"used_percent":25}}}` + "\n"
+	sessionLine := `{"rateLimits":{"secondary":{"used_percent":25}}}` + "\n"
 	_ = os.WriteFile(filepath.Join(sessionsDir, "session1.jsonl"), []byte(sessionLine), 0644)
 
 	repWithAuth, err := a.GetUsage(context.Background(), "usage-test", profileDir)
@@ -167,11 +167,11 @@ func TestCodexAdapter_GetUsage(t *testing.T) {
 	if len(repWithAuth.Windows) == 0 {
 		t.Errorf("expected windows to be populated, got 0")
 	} else {
-		pw := repWithAuth.PrimaryWindow()
-		if pw == nil {
-			t.Errorf("expected PrimaryWindow not to be nil")
-		} else if pw.RemainingPct != 75 {
-			t.Errorf("expected primary remaining 75%%, got %d%%", pw.RemainingPct)
+		ww := repWithAuth.WeeklyWindow()
+		if ww == nil {
+			t.Errorf("expected WeeklyWindow not to be nil")
+		} else if ww.RemainingPct != 75 {
+			t.Errorf("expected weekly remaining 75%%, got %d%%", ww.RemainingPct)
 		}
 	}
 
@@ -189,15 +189,8 @@ func TestCodexAdapter_GetUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error with nested session: %v", err)
 	}
-	if len(repNested.Windows) != 2 {
-		t.Fatalf("expected 2 windows (primary and secondary), got %d", len(repNested.Windows))
-	}
-	pw := repNested.PrimaryWindow()
-	if pw == nil {
-		t.Fatalf("expected primary window, got nil")
-	}
-	if pw.RemainingPct != 90 { // 100 - round(10.5) = 100 - 10 = 90
-		t.Errorf("expected primary remaining 90%%, got %d%%", pw.RemainingPct)
+	if len(repNested.Windows) != 1 {
+		t.Fatalf("expected 1 window (Codex Spark weekly limit), got %d", len(repNested.Windows))
 	}
 	ww := repNested.WeeklyWindow()
 	if ww == nil {

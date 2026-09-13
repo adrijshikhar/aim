@@ -1163,14 +1163,9 @@ func (m Model) View() string {
 
 		if hasReport {
 			modelGroups := rep.ModelGroups()
-			if len(modelGroups) > 1 {
+			if len(modelGroups) > 0 {
 				for _, g := range modelGroups {
-					modelShort := g.Category
-					if strings.Contains(strings.ToLower(modelShort), "claude") || strings.Contains(strings.ToLower(modelShort), "gpt") {
-						modelShort = "Claude & GPT"
-					} else if strings.Contains(strings.ToLower(modelShort), "gemini") {
-						modelShort = "Gemini"
-					}
+					modelShort := usage.CleanModelCategory(g.Category)
 
 					var win5h, winWk *usage.LimitWindow
 					for i := range g.Windows {
@@ -1192,13 +1187,21 @@ func (m Model) View() string {
 						if w.RemainingPct < 100 && w.ResetsIn > 0 {
 							resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (%s)", usage.FormatDuration(w.ResetsIn)))
 						}
+						prefix := ""
+						if label != "" {
+							prefix = lipgloss.NewStyle().Foreground(TextDim).Render(label + ": ")
+						}
 						rendered := fmt.Sprintf("%s%s %s%s",
-							lipgloss.NewStyle().Foreground(TextDim).Render(label+": "),
+							prefix,
 							gaugeStyle.Render(bar),
 							gaugeStyle.Render(fmt.Sprintf("%d%%", w.RemainingPct)),
 							resetInfo,
 						)
-						plainLen := len(label) + 2 + 12 + 1 + len(fmt.Sprintf("%d%%", w.RemainingPct))
+						plainLen := len(label)
+						if label != "" {
+							plainLen += 2
+						}
+						plainLen += 12 + 1 + len(fmt.Sprintf("%d%%", w.RemainingPct))
 						if w.RemainingPct < 100 && w.ResetsIn > 0 {
 							plainLen += 3 + len(usage.FormatDuration(w.ResetsIn))
 						}
@@ -1216,10 +1219,10 @@ func (m Model) View() string {
 						}
 						lineContent = str5h + strings.Repeat(" ", pad) + strWk
 					} else if win5h != nil {
-						str5h, _ := formatWin(*win5h, "5h")
+						str5h, _ := formatWin(*win5h, "")
 						lineContent = str5h
 					} else if winWk != nil {
-						strWk, _ := formatWin(*winWk, "Wk")
+						strWk, _ := formatWin(*winWk, "")
 						lineContent = strWk
 					} else {
 						var parts []string
@@ -1238,62 +1241,40 @@ func (m Model) View() string {
 					styledLbl := lipgloss.NewStyle().Foreground(TextSecondary).Render(lbl) + strings.Repeat(" ", pad)
 					s.WriteString(fmt.Sprintf("    %s %s\n", styledLbl, lineContent))
 				}
-			} else {
-				pw := rep.PrimaryWindow()
-				ww := rep.WeeklyWindow()
-				if pw != nil && ww != nil && (pw == ww || pw.Name == ww.Name) {
-					name := strings.ToLower(pw.Name)
-					if !strings.Contains(name, "five") && !strings.Contains(name, "5h") && !strings.Contains(name, "5 hour") && !strings.Contains(name, "5-hour") && !strings.Contains(name, "5-h") {
-						pw = nil
-					} else {
-						ww = nil
-					}
-				}
-
-				// Primary Limit
-				primaryStr := lipgloss.NewStyle().Foreground(TextMuted).Render("None")
-				if pw != nil {
-					bar := usage.RenderBar(pw.RemainingPct, 10)
-					winStatus := usage.CalculateStatus([]usage.LimitWindow{*pw})
+			} else if len(rep.Windows) > 0 {
+				for _, w := range rep.Windows {
+					bar := usage.RenderBar(w.RemainingPct, 10)
+					winStatus := usage.CalculateStatus([]usage.LimitWindow{w})
 					gaugeStyle := GaugeStyleForStatus(winStatus)
 					resetInfo := ""
-					if pw.RemainingPct < 100 && pw.ResetsIn > 0 {
-						resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (resets in %s)", usage.FormatDuration(pw.ResetsIn)))
+					if w.RemainingPct < 100 && w.ResetsIn > 0 {
+						resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (resets in %s)", usage.FormatDuration(w.ResetsIn)))
 					}
-					primaryStr = fmt.Sprintf("%s %s%s", gaugeStyle.Render(bar), gaugeStyle.Render(fmt.Sprintf("%d%%", pw.RemainingPct)), resetInfo)
-				}
-				s.WriteString(fmt.Sprintf("    %-14s %s\n", lipgloss.NewStyle().Foreground(TextSecondary).Render("Primary Limit:"), primaryStr))
-
-				// Weekly Limit
-				weeklyStr := lipgloss.NewStyle().Foreground(TextMuted).Render("None")
-				if ww != nil {
-					bar := usage.RenderBar(ww.RemainingPct, 10)
-					winStatus := usage.CalculateStatus([]usage.LimitWindow{*ww})
-					gaugeStyle := GaugeStyleForStatus(winStatus)
-					resetInfo := ""
-					if ww.RemainingPct < 100 && ww.ResetsIn > 0 {
-						resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (resets in %s)", usage.FormatDuration(ww.ResetsIn)))
+					primaryStr := fmt.Sprintf("%s %s%s", gaugeStyle.Render(bar), gaugeStyle.Render(fmt.Sprintf("%d%%", w.RemainingPct)), resetInfo)
+					lbl := w.Name + ":"
+					pad := 0
+					if len(lbl) < lblWidth {
+						pad = lblWidth - len(lbl)
 					}
-					weeklyStr = fmt.Sprintf("%s %s%s", gaugeStyle.Render(bar), gaugeStyle.Render(fmt.Sprintf("%d%%", ww.RemainingPct)), resetInfo)
+					styledLbl := lipgloss.NewStyle().Foreground(TextSecondary).Render(lbl) + strings.Repeat(" ", pad)
+					s.WriteString(fmt.Sprintf("    %s %s\n", styledLbl, primaryStr))
 				}
-				s.WriteString(fmt.Sprintf("    %-14s %s\n", lipgloss.NewStyle().Foreground(TextSecondary).Render("Weekly Limit:"), weeklyStr))
-
-				// Resets At
-				resetsAtStr := "None"
-				if pw != nil && !pw.ResetsAt.IsZero() {
-					resetsAtStr = pw.ResetsAt.Local().Format("2006-01-02 15:04:05")
-				} else if ww != nil && !ww.ResetsAt.IsZero() {
-					resetsAtStr = ww.ResetsAt.Local().Format("2006-01-02 15:04:05")
-				} else {
-					for _, w := range rep.Windows {
-						if !w.ResetsAt.IsZero() {
-							resetsAtStr = w.ResetsAt.Local().Format("2006-01-02 15:04:05")
-							break
-						}
-					}
-				}
-				s.WriteString(fmt.Sprintf("    %-14s %s\n", lipgloss.NewStyle().Foreground(TextSecondary).Render("Resets At:"), lipgloss.NewStyle().Foreground(TextMuted).Render(resetsAtStr)))
 			}
+
+			// Resets At
+			resetsAtStr := "None"
+			var soonestReset time.Time
+			for _, w := range rep.Windows {
+				if !w.ResetsAt.IsZero() {
+					if soonestReset.IsZero() || (w.ResetsAt.After(time.Now()) && (soonestReset.Before(time.Now()) || w.ResetsAt.Before(soonestReset))) {
+						soonestReset = w.ResetsAt
+					}
+				}
+			}
+			if !soonestReset.IsZero() {
+				resetsAtStr = soonestReset.Local().Format("2006-01-02 15:04:05")
+			}
+			s.WriteString(fmt.Sprintf("    %-14s %s\n", lipgloss.NewStyle().Foreground(TextSecondary).Render("Resets At:"), lipgloss.NewStyle().Foreground(TextMuted).Render(resetsAtStr)))
 
 			// Credits
 			creditsStr := "0"

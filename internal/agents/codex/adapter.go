@@ -354,51 +354,6 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 	var credits string
 
 	if rl != nil {
-		cat := rl.LimitName
-		if cat == "" {
-			cat = "Codex"
-		}
-
-		if rl.Primary != nil {
-			var resetsAt time.Time
-			var resetsIn time.Duration
-			if rl.Primary.ResetsAt > 0 {
-				resetsAt = time.Unix(rl.Primary.ResetsAt, 0)
-				resetsIn = time.Until(resetsAt)
-				if resetsIn < 0 {
-					resetsIn = 0
-				}
-			}
-			remaining := int(math.Round(100.0 - rl.Primary.UsedPercent))
-			if remaining < 0 {
-				remaining = 0
-			} else if remaining > 100 {
-				remaining = 100
-			}
-			if !resetsAt.IsZero() && time.Now().After(resetsAt) {
-				remaining = 100
-				resetsIn = 0
-			}
-
-			name := "5h (Primary)"
-			if rl.Primary.WindowMinutes > 0 {
-				wm := formatWindowMinutes(rl.Primary.WindowMinutes)
-				if strings.Contains(strings.ToLower(wm), "5h") {
-					name = "5h (Primary)"
-				} else {
-					name = fmt.Sprintf("%s (Primary)", wm)
-				}
-			}
-
-			windows = append(windows, usage.LimitWindow{
-				Category:     cat,
-				Name:         name,
-				RemainingPct: remaining,
-				ResetsAt:     resetsAt,
-				ResetsIn:     resetsIn,
-			})
-		}
-
 		if rl.Secondary != nil {
 			var resetsAt time.Time
 			var resetsIn time.Duration
@@ -420,13 +375,18 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 				resetsIn = 0
 			}
 
-			name := "Weekly (Secondary)"
+			cat := "Codex Spark"
+			if rl.LimitName != "" {
+				cat = rl.LimitName
+			}
+
+			name := "Weekly Limit"
 			if rl.Secondary.WindowMinutes > 0 {
 				wm := formatWindowMinutes(rl.Secondary.WindowMinutes)
 				if strings.Contains(strings.ToLower(wm), "week") || strings.Contains(strings.ToLower(wm), "7d") {
-					name = "Weekly (Secondary)"
+					name = "Weekly Limit"
 				} else {
-					name = fmt.Sprintf("%s (Secondary)", wm)
+					name = fmt.Sprintf("%s Limit", wm)
 				}
 			}
 

@@ -169,8 +169,13 @@ func CleanModelCategory(cat string) string {
 		return "—"
 	}
 	lower := strings.ToLower(c)
+	if strings.Contains(lower, "spark") {
+		return "Codex Spark"
+	}
 	if strings.Contains(lower, "claude") || strings.Contains(lower, "gpt") {
-		return "Claude & GPT"
+		if !strings.Contains(lower, "codex") {
+			return "Claude & GPT"
+		}
 	}
 	if strings.Contains(lower, "gemini") {
 		return "Gemini"

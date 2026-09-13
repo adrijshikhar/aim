@@ -222,15 +222,41 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		}
 	}
 
+	has5h := false
+	for _, r := range reports {
+		for _, w := range r.Windows {
+			lower := strings.ToLower(w.Name)
+			if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") {
+				has5h = true
+				break
+			}
+		}
+		if has5h {
+			break
+		}
+	}
+
 	var headers []string
-	if hasAccount && hasCategory {
-		headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-	} else if hasAccount {
-		headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-	} else if hasCategory {
-		headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+	if has5h {
+		if hasAccount && hasCategory {
+			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else if hasAccount {
+			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else if hasCategory {
+			headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else {
+			headers = []string{"AGENT", "PROFILE", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		}
 	} else {
-		headers = []string{"AGENT", "PROFILE", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		if hasAccount && hasCategory {
+			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else if hasAccount {
+			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else if hasCategory {
+			headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else {
+			headers = []string{"AGENT", "PROFILE", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		}
 	}
 
 	var rows [][]string
@@ -248,14 +274,26 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 
 		if len(r.Windows) == 0 {
 			st := renderCLIStatus(r.Status, useColor)
-			if hasAccount && hasCategory {
-				rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", "—", "—", checked})
-			} else if hasAccount {
-				rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", "—", "—", checked})
-			} else if hasCategory {
-				rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", "—", "—", checked})
+			if has5h {
+				if hasAccount && hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", "—", "—", checked})
+				} else if hasAccount {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", "—", "—", checked})
+				} else if hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", "—", "—", checked})
+				} else {
+					rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", "—", "—", checked})
+				}
 			} else {
-				rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", "—", "—", checked})
+				if hasAccount && hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", checked})
+				} else if hasAccount {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", checked})
+				} else if hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", checked})
+				} else {
+					rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", checked})
+				}
 			}
 			continue
 		}
@@ -302,14 +340,26 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			}
 
 			statusStr := renderCLIStatus(catStatus, useColor)
-			if hasAccount && hasCategory {
-				rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, pStr, pReset, wStr, wReset, checked})
-			} else if hasAccount {
-				rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, pStr, pReset, wStr, wReset, checked})
-			} else if hasCategory {
-				rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, pStr, pReset, wStr, wReset, checked})
+			if has5h {
+				if hasAccount && hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, pStr, pReset, wStr, wReset, checked})
+				} else if hasAccount {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, pStr, pReset, wStr, wReset, checked})
+				} else if hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, pStr, pReset, wStr, wReset, checked})
+				} else {
+					rows = append(rows, []string{r.Agent, r.Profile, statusStr, pStr, pReset, wStr, wReset, checked})
+				}
 			} else {
-				rows = append(rows, []string{r.Agent, r.Profile, statusStr, pStr, pReset, wStr, wReset, checked})
+				if hasAccount && hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, wStr, wReset, checked})
+				} else if hasAccount {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, wStr, wReset, checked})
+				} else if hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, wStr, wReset, checked})
+				} else {
+					rows = append(rows, []string{r.Agent, r.Profile, statusStr, wStr, wReset, checked})
+				}
 			}
 		}
 	}
@@ -328,8 +378,13 @@ func isTerminal() bool {
 func cleanModelCategory(cat string) string {
 	c := strings.TrimSpace(cat)
 	lower := strings.ToLower(c)
-	if strings.Contains(lower, "claude") {
-		return "Claude & GPT"
+	if strings.Contains(lower, "spark") {
+		return "Codex Spark"
+	}
+	if strings.Contains(lower, "claude") || strings.Contains(lower, "gpt") {
+		if !strings.Contains(lower, "codex") {
+			return "Claude & GPT"
+		}
 	}
 	if strings.Contains(lower, "gemini") {
 		return "Gemini"

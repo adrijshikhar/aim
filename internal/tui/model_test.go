@@ -459,11 +459,11 @@ func TestTUIUsageUpdateAndKeybinding(t *testing.T) {
 	if !strings.Contains(view, "Profile Details: default") {
 		t.Errorf("expected profile details header for highlighted profile 'default', got:\n%s", view)
 	}
-	if !strings.Contains(view, "Primary Limit:") {
-		t.Errorf("expected inspector to contain 'Primary Limit:', got:\n%s", view)
+	if !strings.Contains(view, "5-hour limit:") {
+		t.Errorf("expected inspector to contain '5-hour limit:', got:\n%s", view)
 	}
-	if !strings.Contains(view, "Weekly Limit:") {
-		t.Errorf("expected inspector to contain 'Weekly Limit:', got:\n%s", view)
+	if !strings.Contains(view, "Weekly limit:") {
+		t.Errorf("expected inspector to contain 'Weekly limit:', got:\n%s", view)
 	}
 	if !strings.Contains(view, "Resets At:") {
 		t.Errorf("expected inspector to contain 'Resets At:', got:\n%s", view)
@@ -549,11 +549,11 @@ func TestTUIUsage_SingleWindowBadge(t *testing.T) {
 	if !strings.Contains(view, "[75%]") {
 		t.Errorf("expected single window badge '[75%%]', got:\n%s", view)
 	}
-	// Verify inspector deduplication: for weekly-only profile, Primary Limit should be None and Weekly Limit populated
-	if !strings.Contains(view, "Primary Limit: None") {
-		t.Errorf("expected inspector Primary Limit to be 'None' for single weekly window profile, got:\n%s", view)
+	// Verify inspector: for weekly-only profile, Primary Limit is omitted and Weekly limit is populated
+	if strings.Contains(view, "Primary Limit") {
+		t.Errorf("expected inspector not to contain 'Primary Limit' for single weekly window profile, got:\n%s", view)
 	}
-	if !strings.Contains(view, "Weekly Limit:  [███████░░░] 75% (resets in 3d 8h)") {
+	if !strings.Contains(view, "Weekly limit:  [███████░░░] 75% (resets in 3d 8h)") {
 		t.Errorf("expected inspector Weekly Limit to show weekly quota, got:\n%s", view)
 	}
 }
@@ -598,7 +598,7 @@ func TestTUIUsage_FullCapacityOmitResetCountdown(t *testing.T) {
 	if !strings.Contains(wideView, "[100%]") {
 		t.Errorf("expected minimal badge without countdown '[100%%]', got:\n%s", wideView)
 	}
-	if !strings.Contains(wideView, "Primary Limit: [██████████] 100%") {
+	if !strings.Contains(wideView, "5h limit:      [██████████] 100%") {
 		t.Errorf("expected inspector to omit countdown at 100%% capacity, got:\n%s", wideView)
 	}
 	if strings.Contains(wideView, "(2h)") || strings.Contains(wideView, "(5d)") {
