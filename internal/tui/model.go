@@ -60,6 +60,7 @@ type Model struct {
 	deleteModal  deleteModalState
 	renameModal  renameModalState
 	doctorDrawer doctorDrawerState
+	helpModal    helpModalState
 	keys         KeyMap
 }
 
@@ -150,6 +151,11 @@ func (m Model) KeyMap() KeyMap {
 
 func (m Model) Profiles() []string {
 	return m.profiles
+}
+
+// IsHelpActive reports whether the help cheatsheet overlay is currently active.
+func (m Model) IsHelpActive() bool {
+	return m.helpModal.active
 }
 
 // WithVersion sets the version string displayed in the header and returns the updated model.
@@ -440,6 +446,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDoctorDrawer(msg)
 		}
 
+		if m.helpModal.active {
+			return m.updateHelpOverlay(msg)
+		}
+
 		keys := m.keys
 		if len(keys.Quit.Keys()) == 0 {
 			keys = DefaultKeyMap()
@@ -494,6 +504,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openRenameModal()
 		case key.Matches(msg, keys.Delete):
 			return m.openDeleteModal()
+		case key.Matches(msg, keys.Help), msg.String() == "?":
+			return m.openHelpOverlay()
 		}
 
 	default:
@@ -558,6 +570,11 @@ func (m Model) View() string {
 		return s.String()
 	}
 
+	if m.helpModal.active {
+		s.WriteString(m.renderHelpOverlay())
+		return s.String()
+	}
+
 	// Bottom inspector section when a profile is highlighted
 	if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
 		curProfile := m.profiles[m.cursor]
@@ -579,6 +596,7 @@ func (m Model) View() string {
 		HintKeyStyle.Render("[m]") + " " + HintLabelStyle.Render("Rename  ") +
 		HintKeyStyle.Render("[x]") + " " + HintLabelStyle.Render("Delete  ") +
 		refreshHint +
+		HintKeyStyle.Render("[?]") + " " + HintLabelStyle.Render("Help  ") +
 		HintKeyStyle.Render("[q]") + " " + HintLabelStyle.Render("Quit") + "\n")
 
 	return s.String()

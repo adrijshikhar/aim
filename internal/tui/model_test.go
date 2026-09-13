@@ -1721,4 +1721,100 @@ func TestTUI_DecomposedModalsAndDrawers(t *testing.T) {
 	if mDocClosed.IsDoctorDrawerActive() {
 		t.Errorf("expected doctor drawer to be closed after updateDoctorDrawer(Esc)")
 	}
+
+	// 4. Help Overlay decomposition
+	mHelp, _ := m.openHelpOverlay()
+	if !mHelp.IsHelpActive() {
+		t.Fatalf("expected help overlay to be active after openHelpOverlay()")
+	}
+	helpView := mHelp.renderHelpOverlay()
+	if !strings.Contains(helpView, "Keyboard Shortcuts") {
+		t.Errorf("expected help overlay view to contain 'Keyboard Shortcuts', got:\n%s", helpView)
+	}
+	mHelpClosed, _ := mHelp.updateHelpOverlay(tea.KeyMsg{Type: tea.KeyEsc})
+	if mHelpClosed.IsHelpActive() {
+		t.Errorf("expected help overlay to be closed after updateHelpOverlay(Esc)")
+	}
+}
+
+func TestTUI_HelpOverlayToggle(t *testing.T) {
+	m := newTestModel(t, "test-prof")
+
+	// Initially help overlay is inactive
+	if m.IsHelpActive() {
+		t.Fatalf("expected help overlay to be initially inactive")
+	}
+
+	// Normal view should have [?] Help hint
+	normalView := m.View()
+	if !strings.Contains(normalView, "[?]") || !strings.Contains(normalView, "Help") {
+		t.Errorf("expected footer to contain [?] Help hint, got:\n%s", normalView)
+	}
+
+	// Press '?' to toggle open help overlay
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mHelp := updated.(Model)
+	if !mHelp.IsHelpActive() {
+		t.Fatalf("expected help overlay to be active after pressing '?'")
+	}
+
+	// Help overlay view contains cheatsheet content
+	view := mHelp.View()
+	if !strings.Contains(view, "Keyboard Shortcuts") {
+		t.Errorf("expected help overlay view to contain 'Keyboard Shortcuts', got:\n%s", view)
+	}
+	if !strings.Contains(view, "Navigation & Tabs") || !strings.Contains(view, "Actions & Commands") {
+		t.Errorf("expected help overlay view to contain cheatsheet categories, got:\n%s", view)
+	}
+
+	// Press 'Esc' to close help overlay
+	closed, _ := mHelp.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mClosed := closed.(Model)
+	if mClosed.IsHelpActive() {
+		t.Errorf("expected help overlay to close after pressing Esc")
+	}
+
+	// Press '?' to open again, then '?' to toggle close
+	reopened, _ := mClosed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mReopened := reopened.(Model)
+	if !mReopened.IsHelpActive() {
+		t.Fatalf("expected help overlay to be active after second '?'")
+	}
+	reclosed, _ := mReopened.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mReclosed := reclosed.(Model)
+	if mReclosed.IsHelpActive() {
+		t.Errorf("expected help overlay to toggle closed after pressing '?' again")
+	}
+
+	// Press '?' to open again, then 'q' to close
+	openForQ, _ := mReclosed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mOpenForQ := openForQ.(Model)
+	if !mOpenForQ.IsHelpActive() {
+		t.Fatalf("expected help overlay to be active before testing 'q' close")
+	}
+	closedByQ, _ := mOpenForQ.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	mClosedByQ := closedByQ.(Model)
+	if mClosedByQ.IsHelpActive() {
+		t.Errorf("expected help overlay to close after pressing 'q'")
+	}
+
+	// Non-closing keys should not close help overlay or trigger background actions
+	openAgain, _ := mClosedByQ.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mOpenAgain := openAgain.(Model)
+	unhandled, cmd := mOpenAgain.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	mUnhandled := unhandled.(Model)
+	if !mUnhandled.IsHelpActive() {
+		t.Errorf("expected help overlay to remain active on unhandled key")
+	}
+	if cmd != nil {
+		t.Errorf("expected nil cmd for unhandled key in help overlay")
+	}
+
+	// Narrow view layout check (< 70 width)
+	mNarrow := mOpenAgain
+	mNarrow.width = 60
+	narrowView := mNarrow.View()
+	if !strings.Contains(narrowView, "Keyboard Shortcuts") {
+		t.Errorf("expected narrow help view to contain 'Keyboard Shortcuts', got:\n%s", narrowView)
+	}
 }
