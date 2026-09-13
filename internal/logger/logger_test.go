@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aim-cli/aim/internal/config"
 )
 
 func TestIsDebug_EnvVar(t *testing.T) {
@@ -97,5 +99,64 @@ func TestDebug_DisabledDoesNotWrite(t *testing.T) {
 	logPath := filepath.Join(dir, "aim-debug.log")
 	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 0 {
 		t.Errorf("expected empty log file when debug disabled, got size %d", fi.Size())
+	}
+}
+
+func TestInit_DefaultStateDir(t *testing.T) {
+	defer Reset()
+
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	Init("")
+	expectedPath := filepath.Join(tempDir, "aim-debug.log")
+	if got := LogFilePath(); got != expectedPath {
+		t.Errorf("LogFilePath() = %q, want %q", got, expectedPath)
+	}
+
+	// Calling with config.BaseDir() should also map cleanly to StateDir
+	Init(config.BaseDir())
+	if got := LogFilePath(); got != expectedPath {
+		t.Errorf("LogFilePath() with BaseDir = %q, want %q", got, expectedPath)
+	}
+}
+
+func TestDebug_UninitializedDefaultStateDir(t *testing.T) {
+	defer Reset()
+
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	SetDebug(true)
+	SetConsoleOutput(false)
+
+	Debug("uninitialized debug message: %s", "hello")
+	Close()
+
+	expectedPath := filepath.Join(tempDir, "aim-debug.log")
+	data, err := os.ReadFile(expectedPath)
+	if err != nil {
+		t.Fatalf("failed to read expected log file at %s: %v", expectedPath, err)
+	}
+	if !strings.Contains(string(data), "[DEBUG] uninitialized debug message: hello") {
+		t.Errorf("log file did not contain expected message: %s", string(data))
+	}
+}
+
+func TestInit_XDGStateDir(t *testing.T) {
+	defer Reset()
+
+	cleanHome := t.TempDir()
+	t.Setenv("AIM_HOME", "")
+	t.Setenv("AIM_REAL_HOME", cleanHome)
+
+	stateDir := filepath.Join(cleanHome, "xdg-state")
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	config.ReloadXDG()
+
+	Init("")
+	expectedPath := filepath.Join(stateDir, "aim", "aim-debug.log")
+	if got := LogFilePath(); got != expectedPath {
+		t.Errorf("LogFilePath() = %q, want %q", got, expectedPath)
 	}
 }

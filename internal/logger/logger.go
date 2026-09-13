@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -21,15 +22,27 @@ var (
 	debugTimeStyle = lipgloss.NewStyle().Faint(true)
 )
 
+// LogFilePath returns the current or default path for aim-debug.log.
+func LogFilePath() string {
+	mu.RLock()
+	defer mu.RUnlock()
+	if logFilePath != "" {
+		return logFilePath
+	}
+	return filepath.Join(config.StateDir(), "aim-debug.log")
+}
+
 // Init initializes the logger with the base directory where aim-debug.log should be stored.
-func Init(baseDir string) {
+// If dir is empty or matches config.BaseDir(), it defaults to config.StateDir() so logs adhere to the XDG state standard.
+// If an explicit custom dir is provided, it is respected.
+func Init(dir string) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if baseDir == "" {
-		return
+	if dir == "" || dir == config.BaseDir() {
+		dir = config.StateDir()
 	}
-	targetPath := filepath.Join(baseDir, "aim-debug.log")
+	targetPath := filepath.Join(dir, "aim-debug.log")
 	if logFilePath == targetPath && logFile != nil {
 		return
 	}
@@ -41,7 +54,7 @@ func Init(baseDir string) {
 	if !isDebugLocked() {
 		return
 	}
-	_ = os.MkdirAll(baseDir, 0755)
+	_ = os.MkdirAll(dir, 0755)
 	f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err == nil {
 		logFile = f
@@ -119,7 +132,10 @@ func Debug(format string, args ...any) {
 	}
 
 	// Persistent file output
-	if logFile == nil && logFilePath != "" {
+	if logFile == nil {
+		if logFilePath == "" {
+			logFilePath = filepath.Join(config.StateDir(), "aim-debug.log")
+		}
 		_ = os.MkdirAll(filepath.Dir(logFilePath), 0755)
 		f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err == nil {
