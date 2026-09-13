@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/aim-cli/aim/internal/logger"
+	"github.com/adrg/xdg"
 )
 
 type ProfileConfig struct {
@@ -58,15 +58,111 @@ func RealHomeDir() string {
 	return home
 }
 
-func BaseDir() string {
+func isLegacy() bool {
+	if custom := os.Getenv("AIM_HOME"); custom != "" {
+		return true
+	}
+	legacyDir := filepath.Join(RealHomeDir(), ".aim")
+	_, err := os.Stat(legacyDir)
+	return err == nil
+}
+
+func legacyBaseDir() string {
 	if custom := os.Getenv("AIM_HOME"); custom != "" {
 		return custom
 	}
 	return filepath.Join(RealHomeDir(), ".aim")
 }
 
+// ConfigDir returns the configuration directory:
+// $XDG_CONFIG_HOME/aim or ~/.config/aim (fallback ~/.aim if legacy installation or AIM_HOME is set).
+func ConfigDir() string {
+	if isLegacy() {
+		return legacyBaseDir()
+	}
+	if custom := os.Getenv("XDG_CONFIG_HOME"); custom != "" {
+		p := filepath.Join(custom, "aim")
+		_ = os.MkdirAll(p, 0700)
+		return p
+	}
+	if p, err := xdg.ConfigFile(filepath.Join("aim", "config.json")); err == nil {
+		return filepath.Dir(p)
+	}
+	return filepath.Join(xdg.ConfigHome, "aim")
+}
+
+// DataDir returns the data directory for profiles and state:
+// $XDG_DATA_HOME/aim or ~/.local/share/aim (fallback ~/.aim if legacy installation or AIM_HOME is set).
+func DataDir() string {
+	if isLegacy() {
+		return legacyBaseDir()
+	}
+	if custom := os.Getenv("XDG_DATA_HOME"); custom != "" {
+		p := filepath.Join(custom, "aim")
+		_ = os.MkdirAll(p, 0700)
+		return p
+	}
+	if p, err := xdg.DataFile(filepath.Join("aim", "profiles")); err == nil {
+		return filepath.Dir(p)
+	}
+	return filepath.Join(xdg.DataHome, "aim")
+}
+
+// CacheDir returns the cache directory:
+// $XDG_CACHE_HOME/aim or ~/.cache/aim (fallback ~/.aim/cache if legacy installation or AIM_HOME is set).
+func CacheDir() string {
+	if isLegacy() {
+		return filepath.Join(legacyBaseDir(), "cache")
+	}
+	if custom := os.Getenv("XDG_CACHE_HOME"); custom != "" {
+		p := filepath.Join(custom, "aim")
+		_ = os.MkdirAll(p, 0700)
+		return p
+	}
+	if p, err := xdg.CacheFile(filepath.Join("aim", "cache.lock")); err == nil {
+		dir := filepath.Dir(p)
+		_ = os.MkdirAll(dir, 0700)
+		return dir
+	}
+	dir := filepath.Join(xdg.CacheHome, "aim")
+	_ = os.MkdirAll(dir, 0700)
+	return dir
+}
+
+// StateDir returns the state/logs directory:
+// $XDG_STATE_HOME/aim or ~/.local/state/aim (fallback ~/.aim if legacy installation or AIM_HOME is set).
+func StateDir() string {
+	if isLegacy() {
+		return legacyBaseDir()
+	}
+	if custom := os.Getenv("XDG_STATE_HOME"); custom != "" {
+		p := filepath.Join(custom, "aim")
+		_ = os.MkdirAll(p, 0700)
+		return p
+	}
+	if p, err := xdg.StateFile(filepath.Join("aim", "aim-debug.log")); err == nil {
+		return filepath.Dir(p)
+	}
+	return filepath.Join(xdg.StateHome, "aim")
+}
+
+// BaseDir returns the backward-compatible base directory prioritizing ~/.aim if it exists or AIM_HOME is set.
+// On fresh installations adhering to XDG, it returns DataDir().
+func BaseDir() string {
+	if isLegacy() {
+		return legacyBaseDir()
+	}
+	return DataDir()
+}
+
+// ConfigFilePath returns the path to config.json within ConfigDir().
 func ConfigFilePath() string {
-	return filepath.Join(BaseDir(), "config.json")
+	return filepath.Join(ConfigDir(), "config.json")
+}
+
+// ReloadXDG reloads XDG environment variables. Useful for tests.
+func ReloadXDG() {
+	xdg.Reload()
 }
 
 func NewDefaultConfig() *Config {
@@ -244,12 +340,6 @@ func LoadConfig() (*Config, error) {
 	if len(cfg.Profiles) == 0 && cfg.DefaultProfile == "default" {
 		cfg.DefaultProfile = ""
 	}
-	if cfg.Debug {
-		env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))
-		if env != "0" && env != "false" && env != "no" && env != "off" {
-			logger.SetDebug(true)
-		}
-	}
 	return cfg, nil
 }
 
@@ -257,15 +347,15 @@ func SaveConfig(cfg *Config) error {
 	if cfg == nil {
 		return errors.New("cannot save nil config")
 	}
-	base := BaseDir()
-	if err := os.MkdirAll(base, 0755); err != nil {
+	dir := ConfigDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmpFile := filepath.Join(base, "config.json.tmp")
+	tmpFile := filepath.Join(dir, "config.json.tmp")
 	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
 		return err
 	}

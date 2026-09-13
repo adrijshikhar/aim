@@ -10,10 +10,9 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type ActionOutcome int
@@ -32,28 +31,6 @@ type usageBatchMsg []usage.Report
 type usageStream struct {
 	ch     <-chan usage.Report
 	cancel context.CancelFunc
-}
-
-type deleteModalState struct {
-	active        bool
-	targetProfile string
-	isShared      bool
-	agents        []string
-	focusedIndex  int
-}
-
-type renameModalState struct {
-	active        bool
-	targetProfile string
-	input         textinput.Model
-	err           string
-}
-
-type doctorDrawerState struct {
-	active        bool
-	targetProfile string
-	targetAgent   string
-	results       []agents.DiagnosticResult
 }
 
 // Version is the package-level version string shown in the TUI header.
@@ -83,6 +60,9 @@ type Model struct {
 	deleteModal  deleteModalState
 	renameModal  renameModalState
 	doctorDrawer doctorDrawerState
+	helpModal    helpModalState
+	filter       filterState
+	keys         KeyMap
 }
 
 func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config) Model {
@@ -108,6 +88,8 @@ func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Conf
 		usageStream: &usageStream{},
 		loading:     false,
 		spinner:     s,
+		keys:        DefaultKeyMap(),
+		filter:      newFilterState(),
 	}
 	m = m.refreshProfiles()
 	m = m.loadCachedReports()
@@ -165,48 +147,22 @@ func (m Model) SelectedAgent() string {
 	return m.agent
 }
 
+func (m Model) KeyMap() KeyMap {
+	return m.keys
+}
+
 func (m Model) Profiles() []string {
 	return m.profiles
 }
 
-func (m Model) IsDeleteModalActive() bool {
-	return m.deleteModal.active
+// IsHelpActive reports whether the help cheatsheet overlay is currently active.
+func (m Model) IsHelpActive() bool {
+	return m.helpModal.active
 }
 
-func (m Model) DeleteModalTarget() string {
-	return m.deleteModal.targetProfile
-}
-
-func (m Model) DeleteModalFocusedIndex() int {
-	return m.deleteModal.focusedIndex
-}
-
-func (m Model) IsRenameModalActive() bool {
-	return m.renameModal.active
-}
-
-func (m Model) RenameModalTarget() string {
-	return m.renameModal.targetProfile
-}
-
-func (m Model) RenameModalInputValue() string {
-	return m.renameModal.input.Value()
-}
-
-func (m Model) RenameModalError() string {
-	return m.renameModal.err
-}
-
-func (m Model) IsDoctorDrawerActive() bool {
-	return m.doctorDrawer.active
-}
-
-func (m Model) DoctorDrawerResults() []agents.DiagnosticResult {
-	return m.doctorDrawer.results
-}
-
-func (m Model) DoctorDrawerTargetProfile() string {
-	return m.doctorDrawer.targetProfile
+// IsFilterActive reports whether the profile filter bar is currently active.
+func (m Model) IsFilterActive() bool {
+	return m.filter.active
 }
 
 // WithVersion sets the version string displayed in the header and returns the updated model.
@@ -228,85 +184,78 @@ func (m Model) Version() string {
 	return Version
 }
 
-func (m Model) formatVersionTag() string {
-	v := m.Version()
-	if v == "" {
-		return ""
+func (m Model) getRegisteredAgentNames() []string {
+	preferred := []string{"agy", "gemini", "codex"}
+	if m.reg == nil {
+		return preferred
 	}
-	if !strings.HasPrefix(v, "v") {
-		return "v" + v
+	var res []string
+	seen := make(map[string]bool)
+	for _, name := range preferred {
+		if _, err := m.reg.Get(name); err == nil {
+			res = append(res, name)
+			seen[name] = true
+		}
 	}
-	return v
+	for _, a := range m.reg.All() {
+		if !seen[a.Name()] {
+			res = append(res, a.Name())
+			seen[a.Name()] = true
+		}
+	}
+	if len(res) == 0 {
+		return preferred
+	}
+	return res
 }
 
-func (m Model) fetchDoctorDiagnostics() Model {
-	reg := m.reg
-	if reg == nil {
-		reg = agents.DefaultRegistry()
+func (m Model) switchAgent(targetAgent string) (Model, tea.Cmd) {
+	m.agent = targetAgent
+	m.cursor = 0
+	m = m.refreshProfiles()
+	m = m.loadCachedReports()
+	if m.doctorDrawer.active {
+		m = m.fetchDoctorDiagnostics()
 	}
+	m.loading = true
+	return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
+}
 
-	if len(m.profiles) == 0 || m.cursor < 0 || m.cursor >= len(m.profiles) {
-		var results []agents.DiagnosticResult
-		results = append(results, agents.DiagnosticResult{
-			Category: "Profile",
-			Status:   "WARN",
-			Message:  fmt.Sprintf("No profiles configured for %s", m.agent),
-		})
-		if reg != nil {
-			if ad, err := reg.Get(m.agent); err == nil && ad != nil {
-				results = append(results, ad.Doctor(context.Background(), "", "")...)
-			}
-		}
-		m.doctorDrawer = doctorDrawerState{
-			active:        true,
-			targetAgent:   m.agent,
-			targetProfile: "(none)",
-			results:       results,
-		}
-		return m
+func (m Model) cycleAgent(forward bool) (Model, tea.Cmd) {
+	agents := m.getRegisteredAgentNames()
+	if len(agents) == 0 {
+		return m, nil
 	}
+	curIdx := -1
+	for i, a := range agents {
+		if a == m.agent {
+			curIdx = i
+			break
+		}
+	}
+	var nextIdx int
+	if forward {
+		if curIdx == -1 || curIdx+1 >= len(agents) {
+			nextIdx = 0
+		} else {
+			nextIdx = curIdx + 1
+		}
+	} else {
+		if curIdx <= 0 {
+			nextIdx = len(agents) - 1
+		} else {
+			nextIdx = curIdx - 1
+		}
+	}
+	return m.switchAgent(agents[nextIdx])
+}
 
-	p := m.profiles[m.cursor]
-	pDir := ""
-	if m.pm != nil {
-		pDir = m.pm.ProfileDir(p)
+func (m Model) selectAgentByIndex(index int) (Model, tea.Cmd) {
+	agents := m.getRegisteredAgentNames()
+	if index >= 0 && index < len(agents) {
+		return m.switchAgent(agents[index])
 	}
-
-	var results []agents.DiagnosticResult
-	if reg != nil {
-		if ad, err := reg.Get(m.agent); err == nil && ad != nil {
-			results = ad.Doctor(context.Background(), p, pDir)
-		}
-	}
-	if len(results) == 0 {
-		results = []agents.DiagnosticResult{
-			{Category: "Status", Status: "OK", Message: "All checks passed"},
-		}
-	}
-	if m.cfg != nil {
-		if env := m.cfg.GetProfileEnv(p); len(env) > 0 {
-			results = append(results, agents.DiagnosticResult{
-				Category: "Config",
-				Status:   "OK",
-				Message:  fmt.Sprintf("%d custom env var(s) configured", len(env)),
-			})
-		}
-		if args := m.cfg.GetProfileArgs(p); len(args) > 0 {
-			results = append(results, agents.DiagnosticResult{
-				Category: "Config",
-				Status:   "OK",
-				Message:  fmt.Sprintf("%d custom launch arg(s) configured", len(args)),
-			})
-		}
-	}
-
-	m.doctorDrawer = doctorDrawerState{
-		active:        true,
-		targetProfile: p,
-		targetAgent:   m.agent,
-		results:       results,
-	}
-	return m
+	return m, nil
 }
 
 func (m Model) getReport(prof string) (usage.Report, bool) {
@@ -391,6 +340,43 @@ func tickEvery(d time.Duration) tea.Cmd {
 	})
 }
 
+func (m Model) cancelStream() {
+	if m.usageStream != nil && m.usageStream.cancel != nil {
+		m.usageStream.cancel()
+		m.usageStream.cancel = nil
+	}
+}
+
+func formatBadge(rep usage.Report, isNarrow bool) string {
+	if rep.Error != "" || rep.Status == usage.StatusUnknown {
+		errLower := strings.ToLower(rep.Error)
+		summaryLower := strings.ToLower(rep.Summary)
+		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
+			return "[no credentials]"
+		}
+		if strings.Contains(errLower, "offline") || strings.Contains(summaryLower, "offline") ||
+			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") ||
+			strings.Contains(errLower, "timeout") {
+			return "[offline]"
+		}
+		if rep.Error != "" {
+			return fmt.Sprintf("[%s]", strings.ToLower(rep.Error))
+		}
+		if rep.Status != "" {
+			return fmt.Sprintf("[%s]", strings.ToLower(string(rep.Status)))
+		}
+		return ""
+	}
+
+	if len(rep.Windows) == 0 {
+		return ""
+	}
+
+	// Always report the bottleneck / most constrained limit percentage so the
+	// displayed percentage is strictly consistent with the badge color/status.
+	return fmt.Sprintf("[%d%%]", rep.BottleneckPct())
+}
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), tickEvery(5*time.Minute))
 }
@@ -456,496 +442,146 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.deleteModal.active {
-			switch msg.String() {
-			case "ctrl+c":
-				m.cancelStream()
-				return m, tea.Quit
-			case "esc", "q", "n":
-				m.deleteModal = deleteModalState{}
-				return m, nil
-			case "left", "h":
-				numOpts := 2
-				if m.deleteModal.isShared {
-					numOpts = 3
-				}
-				m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex - 1 + numOpts) % numOpts
-				return m, nil
-			case "right", "l", "tab":
-				numOpts := 2
-				if m.deleteModal.isShared {
-					numOpts = 3
-				}
-				m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex + 1) % numOpts
-				return m, nil
-			case "shift+tab":
-				numOpts := 2
-				if m.deleteModal.isShared {
-					numOpts = 3
-				}
-				m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex - 1 + numOpts) % numOpts
-				return m, nil
-			case "1":
-				if m.deleteModal.isShared {
-					return m.executeDeleteChoice(0)
-				}
-			case "2":
-				if m.deleteModal.isShared {
-					return m.executeDeleteChoice(1)
-				}
-			case "y":
-				if !m.deleteModal.isShared {
-					return m.executeDeleteChoice(0)
-				}
-			case "enter":
-				return m.executeDeleteChoice(m.deleteModal.focusedIndex)
-			}
-			return m, nil
+			return m.updateDeleteModal(msg)
 		}
 
 		if m.renameModal.active {
-			switch msg.String() {
-			case "ctrl+c":
-				m.cancelStream()
-				return m, tea.Quit
-			case "esc":
-				m.renameModal = renameModalState{}
-				return m, nil
-			case "enter":
-				newName := strings.TrimSpace(m.renameModal.input.Value())
-				if newName == "" {
-					m.renameModal.err = "Profile name cannot be empty"
-					return m, nil
-				}
-				if newName == m.renameModal.targetProfile {
-					m.renameModal.err = "New profile name must be different from current name"
-					return m, nil
-				}
-				if m.pm != nil {
-					if err := m.pm.RenameProfile(m.renameModal.targetProfile, newName, m.cfg); err != nil {
-						m.renameModal.err = err.Error()
-						return m, nil
-					}
-				}
-				if m.cache != nil {
-					m.cache.Rename(m.renameModal.targetProfile, newName)
-				}
-				targetProfile := m.renameModal.targetProfile
-				if m.reports != nil {
-					for k, rep := range m.reports {
-						parts := strings.SplitN(k, ":", 2)
-						if len(parts) == 2 && parts[1] == targetProfile {
-							delete(m.reports, k)
-							rep.Profile = newName
-							m.reports[fmt.Sprintf("%s:%s", parts[0], newName)] = rep
-						} else if k == targetProfile {
-							delete(m.reports, k)
-							rep.Profile = newName
-							m.reports[newName] = rep
-						}
-					}
-				}
-				m.renameModal = renameModalState{}
-				m = m.refreshProfiles()
-				for idx, p := range m.profiles {
-					if p == newName {
-						m.cursor = idx
-						break
-					}
-				}
-				return m, nil
-			default:
-				var cmd tea.Cmd
-				m.renameModal.input, cmd = m.renameModal.input.Update(msg)
-				return m, cmd
-			}
+			return m.updateRenameModal(msg)
 		}
 
 		if m.doctorDrawer.active {
-			switch msg.String() {
-			case "ctrl+c":
-				m.cancelStream()
-				return m, tea.Quit
-			case "d", "esc", "q":
-				m.doctorDrawer = doctorDrawerState{}
-				return m, nil
-			case "up", "k":
-				if m.cursor > 0 {
-					m.cursor--
-					m = m.fetchDoctorDiagnostics()
-				}
-				return m, nil
-			case "down", "j":
-				if m.cursor < len(m.profiles)-1 {
-					m.cursor++
-					m = m.fetchDoctorDiagnostics()
-				}
-				return m, nil
-			case "1":
-				m.agent = "agy"
-				m.cursor = 0
-				m = m.refreshProfiles()
-				m = m.loadCachedReports()
-				m = m.fetchDoctorDiagnostics()
-				m.loading = true
-				return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
-			case "2":
-				m.agent = "gemini"
-				m.cursor = 0
-				m = m.refreshProfiles()
-				m = m.loadCachedReports()
-				m = m.fetchDoctorDiagnostics()
-				m.loading = true
-				return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
-			case "tab":
-				if m.agent == "agy" {
-					m.agent = "gemini"
-				} else {
-					m.agent = "agy"
-				}
-				m.cursor = 0
-				m = m.refreshProfiles()
-				m = m.loadCachedReports()
-				m = m.fetchDoctorDiagnostics()
-				m.loading = true
-				return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
-			}
-			return m, nil
+			return m.updateDoctorDrawer(msg)
 		}
 
-		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		if m.helpModal.active {
+			return m.updateHelpOverlay(msg)
+		}
+
+		if m.filter.active {
+			return m.updateFilter(msg)
+		}
+
+		keys := m.keys
+		if len(keys.Quit.Keys()) == 0 {
+			keys = DefaultKeyMap()
+		}
+
+		switch {
+		case key.Matches(msg, keys.Quit):
+			if m.filter.input.Value() != "" && msg.String() == "esc" {
+				prevSelected := ""
+				filtered := m.filteredProfiles()
+				if m.cursor >= 0 && m.cursor < len(filtered) {
+					prevSelected = filtered[m.cursor]
+				}
+				m.filter.input.SetValue("")
+				m.cursor = 0
+				if prevSelected != "" {
+					for idx, p := range m.profiles {
+						if p == prevSelected {
+							m.cursor = idx
+							break
+						}
+					}
+				} else if m.cursor >= len(m.profiles) {
+					if len(m.profiles) > 0 {
+						m.cursor = len(m.profiles) - 1
+					}
+				}
+				return m, nil
+			}
 			m.cancelStream()
 			return m, tea.Quit
-		case "up", "k":
+		case key.Matches(msg, keys.Up):
+			filtered := m.filteredProfiles()
+			if m.cursor >= len(filtered) && len(filtered) > 0 {
+				m.cursor = len(filtered) - 1
+			}
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case "down", "j":
-			if m.cursor < len(m.profiles)-1 {
+		case key.Matches(msg, keys.Down):
+			filtered := m.filteredProfiles()
+			if m.cursor < len(filtered)-1 {
 				m.cursor++
 			}
-		case "1":
-			m.agent = "agy"
-			m.cursor = 0
-			m = m.refreshProfiles()
-			m = m.loadCachedReports()
-			m.loading = true
-			return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
-		case "2":
-			m.agent = "gemini"
-			m.cursor = 0
-			m = m.refreshProfiles()
-			m = m.loadCachedReports()
-			m.loading = true
-			return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
-		case "tab":
-			if m.agent == "agy" {
-				m.agent = "gemini"
-			} else {
-				m.agent = "agy"
-			}
-			m.cursor = 0
-			m = m.refreshProfiles()
-			m = m.loadCachedReports()
-			m.loading = true
-			return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
-		case "r":
+		case msg.String() == "1":
+			return m.selectAgentByIndex(0)
+		case msg.String() == "2":
+			return m.selectAgentByIndex(1)
+		case msg.String() == "3":
+			return m.selectAgentByIndex(2)
+		case key.Matches(msg, keys.Tab):
+			return m.cycleAgent(true)
+		case msg.String() == "shift+tab":
+			return m.cycleAgent(false)
+		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.triggerRefreshCmd(true), m.spinTickCmd())
-		case "enter":
-			if len(m.profiles) > 0 {
-				m.selected = m.profiles[m.cursor]
+		case key.Matches(msg, keys.Run):
+			filtered := m.filteredProfiles()
+			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
+				m.selected = filtered[m.cursor]
 				m.outcome = ActionRun
 				m.cancelStream()
 				return m, tea.Quit
 			}
-		case "s":
-			if len(m.profiles) > 0 {
-				m.selected = m.profiles[m.cursor]
+		case key.Matches(msg, keys.Shell):
+			filtered := m.filteredProfiles()
+			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
+				m.selected = filtered[m.cursor]
 				m.outcome = ActionShell
 				m.cancelStream()
 				return m, tea.Quit
 			}
-		case "l":
+		case key.Matches(msg, keys.Login):
 			m.outcome = ActionLogin
 			m.cancelStream()
 			return m, tea.Quit
-		case "d":
-			m = m.fetchDoctorDiagnostics()
-			return m, nil
-		case "m", "R":
-			if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
-				target := m.profiles[m.cursor]
-				ti := textinput.New()
-				ti.Placeholder = target
-				ti.CharLimit = 64
-				ti.Width = 30
-				cmd := ti.Focus()
-				m.renameModal = renameModalState{
-					active:        true,
-					targetProfile: target,
-					input:         ti,
-				}
-				return m, cmd
-			}
-		case "x", "delete":
-			if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
-				target := m.profiles[m.cursor]
-				var agentsList []string
-				if m.cfg != nil {
-					agentsList = m.cfg.GetProfileAgents(target)
-				}
-				isShared := len(agentsList) > 1
-				defaultFocus := 1
-				if isShared {
-					defaultFocus = 2
-				}
-				m.deleteModal = deleteModalState{
-					active:        true,
-					targetProfile: target,
-					isShared:      isShared,
-					agents:        agentsList,
-					focusedIndex:  defaultFocus,
-				}
-				return m, nil
-			}
+		case key.Matches(msg, keys.Doctor):
+			return m.openDoctorDrawer()
+		case key.Matches(msg, keys.Rename):
+			return m.openRenameModal()
+		case key.Matches(msg, keys.Delete):
+			return m.openDeleteModal()
+		case key.Matches(msg, keys.Filter), msg.String() == "/":
+			return m.openFilter()
+		case key.Matches(msg, keys.Help), msg.String() == "?":
+			return m.openHelpOverlay()
 		}
+
 	default:
 		if m.renameModal.active {
-			var cmd tea.Cmd
-			m.renameModal.input, cmd = m.renameModal.input.Update(msg)
-			return m, cmd
+			return m.updateRenameModal(msg)
+		}
+		if m.filter.active {
+			return m.updateFilter(msg)
 		}
 	}
 	return m, nil
-}
-
-func (m Model) executeDeleteChoice(idx int) (tea.Model, tea.Cmd) {
-	target := m.deleteModal.targetProfile
-	isShared := m.deleteModal.isShared
-	m.deleteModal = deleteModalState{}
-
-	if !isShared {
-		if idx == 1 {
-			return m, nil
-		}
-		if m.pm != nil {
-			_ = m.pm.DeleteProfile(target, m.cfg)
-		}
-	} else {
-		if idx == 2 {
-			return m, nil
-		}
-		if idx == 0 {
-			if m.pm != nil {
-				_, _ = m.pm.RemoveAgent(target, m.agent, m.cfg)
-			}
-		} else if idx == 1 {
-			if m.pm != nil {
-				_ = m.pm.DeleteProfile(target, m.cfg)
-			}
-		}
-	}
-
-	if m.cache != nil {
-		m.cache.Delete(m.agent, target)
-	}
-	delete(m.reports, fmt.Sprintf("%s:%s", m.agent, target))
-	delete(m.reports, target)
-
-	m = m.refreshProfiles()
-	if m.cursor >= len(m.profiles) {
-		if len(m.profiles) > 0 {
-			m.cursor = len(m.profiles) - 1
-		} else {
-			m.cursor = 0
-		}
-	}
-
-	if len(m.profiles) > 0 {
-		return m, m.triggerRefreshCmd()
-	}
-	return m, nil
-}
-
-func (m Model) cancelStream() {
-	if m.usageStream != nil && m.usageStream.cancel != nil {
-		m.usageStream.cancel()
-		m.usageStream.cancel = nil
-	}
-}
-
-func formatBadge(rep usage.Report, isNarrow bool) string {
-	if rep.Error != "" || rep.Status == usage.StatusUnknown {
-		errLower := strings.ToLower(rep.Error)
-		summaryLower := strings.ToLower(rep.Summary)
-		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
-			return "[no credentials]"
-		}
-		if strings.Contains(errLower, "offline") || strings.Contains(summaryLower, "offline") ||
-			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") ||
-			strings.Contains(errLower, "timeout") {
-			return "[offline]"
-		}
-		if rep.Error != "" {
-			return fmt.Sprintf("[%s]", strings.ToLower(rep.Error))
-		}
-		if rep.Status != "" {
-			return fmt.Sprintf("[%s]", strings.ToLower(string(rep.Status)))
-		}
-		return ""
-	}
-
-	if len(rep.Windows) == 0 {
-		return ""
-	}
-
-	// Always report the bottleneck / most constrained limit percentage so the
-	// displayed percentage is strictly consistent with the badge color/status.
-	minPct := 100
-	for _, w := range rep.Windows {
-		if w.RemainingPct < minPct {
-			minPct = w.RemainingPct
-		}
-	}
-	if minPct < 0 {
-		minPct = 0
-	} else if minPct > 100 {
-		minPct = 100
-	}
-	return fmt.Sprintf("[%d%%]", minPct)
-}
-
-func formatWindowsBadge(windows []usage.LimitWindow) string {
-	if len(windows) == 0 {
-		return ""
-	}
-	formatWindow := func(w *usage.LimitWindow) string {
-		if w == nil {
-			return ""
-		}
-		label := "limit"
-		lower := strings.ToLower(w.Name)
-		if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") || strings.Contains(lower, "5-h") {
-			label = "5h"
-		} else if strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk") {
-			label = "wk"
-		} else if w.Name != "" {
-			label = w.Name
-		}
-		if w.RemainingPct < 100 && w.ResetsIn > 0 {
-			return fmt.Sprintf("%s: %d%% (%s)", label, w.RemainingPct, usage.FormatDuration(w.ResetsIn))
-		}
-		return fmt.Sprintf("%s: %d%%", label, w.RemainingPct)
-	}
-
-	var pw, ww *usage.LimitWindow
-	for i := range windows {
-		lower := strings.ToLower(windows[i].Name)
-		if pw == nil && (strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") || strings.Contains(lower, "5-h")) {
-			pw = &windows[i]
-		}
-		if ww == nil && (strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk")) {
-			ww = &windows[i]
-		}
-	}
-
-	if pw != nil && ww != nil && (pw == ww || pw.Name == ww.Name) {
-		name := strings.ToLower(pw.Name)
-		if !strings.Contains(name, "five") && !strings.Contains(name, "5h") && !strings.Contains(name, "5 hour") && !strings.Contains(name, "5-hour") {
-			pw = nil
-		} else {
-			ww = nil
-		}
-	}
-
-	var parts []string
-	if pw != nil {
-		parts = append(parts, formatWindow(pw))
-	}
-	if ww != nil {
-		parts = append(parts, formatWindow(ww))
-	}
-	if len(parts) == 0 {
-		for i := range windows {
-			parts = append(parts, formatWindow(&windows[i]))
-		}
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "[" + strings.Join(parts, " | ") + "]"
-}
-
-func (m Model) renderHeader() string {
-	logoStyle := lipgloss.NewStyle().Bold(true).Foreground(StatusGreen)
-	urlStyle := lipgloss.NewStyle().Foreground(AccentPurple)
-	tagStyle := lipgloss.NewStyle().Foreground(StatusGreen)
-	versionStyle := lipgloss.NewStyle().Foreground(TextSecondary)
-
-	logoLines := []string{
-		"    _    ___ __  __ ",
-		"   / \\  |_ _|  \\/  |",
-		"  / _ \\  | || |\\/| |",
-		" / ___ \\ | || |  | |",
-		"/_/   \\_\\___|_|  |_|",
-	}
-
-	tagLine := tagStyle.Render("AIM — AI Multiplexer")
-	if v := m.formatVersionTag(); v != "" {
-		tagLine += " " + versionStyle.Render(v)
-	}
-
-	var out strings.Builder
-	if m.width > 0 && m.width < 70 {
-		for _, l := range logoLines {
-			out.WriteString(logoStyle.Render(l) + "\n")
-		}
-		out.WriteString("  " + urlStyle.Render("https://github.com/adrijshikhar/aim") + "\n")
-		out.WriteString("  " + tagLine + "\n\n")
-		return out.String()
-	}
-
-	for i, l := range logoLines {
-		renderedLogo := logoStyle.Render(l)
-		if i == 2 {
-			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, urlStyle.Render("https://github.com/adrijshikhar/aim")))
-		} else if i == 3 {
-			out.WriteString(fmt.Sprintf("%s   %s\n", renderedLogo, tagLine))
-		} else {
-			out.WriteString(renderedLogo + "\n")
-		}
-	}
-	out.WriteString("\n")
-	return out.String()
 }
 
 func (m Model) View() string {
 	var s strings.Builder
 	s.WriteString(m.renderHeader())
+	s.WriteString(m.renderTabBar())
 
-	agyTab := TabInactiveStyle.Render("[1] Antigravity (agy)")
-	gemTab := TabInactiveStyle.Render("[2] Gemini")
-	if m.agent == "agy" {
-		agyTab = TabActiveStyle.Render("[1] Antigravity (agy)")
-	} else if m.agent == "gemini" {
-		gemTab = TabActiveStyle.Render("[2] Gemini")
+	if m.filter.active || m.filter.input.Value() != "" {
+		s.WriteString(m.renderFilterBar())
 	}
-
-	s.WriteString(fmt.Sprintf("  %s   %s   %s   %s\n\n",
-		agyTab,
-		gemTab,
-		TabInactiveStyle.Render("[3] Codex"),
-		TabInactiveStyle.Render("[4] Claude"),
-	))
 
 	isNarrow := m.width > 0 && m.width < 85
 
-	s.WriteString(fmt.Sprintf("  PROFILES (%s):\n", m.agent))
-	if len(m.profiles) == 0 {
-		s.WriteString(fmt.Sprintf("    (no profiles configured for %s - press 'l' to log in)\n", m.agent))
+	s.WriteString("  PROFILES:\n")
+	filtered := m.filteredProfiles()
+	if len(filtered) == 0 {
+		if m.filter.input.Value() != "" {
+			s.WriteString(fmt.Sprintf("    (no profiles matching %q)\n", m.filter.input.Value()))
+		} else {
+			s.WriteString(fmt.Sprintf("    (no profiles configured for %s - press 'l' to log in)\n", m.agent))
+		}
 	} else {
-		for i, p := range m.profiles {
+		for i, p := range filtered {
 			prefix := "    "
 			style := NormalRowStyle
 			if i == m.cursor {
@@ -988,268 +624,15 @@ func (m Model) View() string {
 		return s.String()
 	}
 
+	if m.helpModal.active {
+		s.WriteString(m.renderHelpOverlay())
+		return s.String()
+	}
+
 	// Bottom inspector section when a profile is highlighted
-	if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
-		curProfile := m.profiles[m.cursor]
-		s.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextDim).Render("── Profile Details: "+curProfile+" ──") + "\n")
-		rep, hasReport := m.getReport(curProfile)
-		lblWidth := 14
-
-		// Resolve account info from credentials or report
-		var pDir string
-		if m.pm != nil {
-			pDir = m.pm.ProfileDir(curProfile)
-		}
-		accInfo := profile.GetProfileAccountInfo(pDir)
-		accountEmail := accInfo.Email
-		accountName := accInfo.Name
-		authMethod := accInfo.AuthMethod
-
-		if accountEmail == "" && hasReport && rep.AccountEmail != "" {
-			accountEmail = rep.AccountEmail
-			accountName = rep.AccountName
-			authMethod = rep.AuthMethod
-		}
-
-		hasCreds := false
-		if m.reg != nil && pDir != "" {
-			if ad, err := m.reg.Get(m.agent); err == nil {
-				hasCreds = ad.HasCredentials(pDir)
-			}
-		}
-
-		padAccount := 0
-		if lblWidth > len("Account:") {
-			padAccount = lblWidth - len("Account:")
-		}
-		styledAccount := lipgloss.NewStyle().Foreground(TextSecondary).Render("Account:") + strings.Repeat(" ", padAccount)
-
-		if accountEmail != "" {
-			accountStr := lipgloss.NewStyle().Foreground(AccentCyan).Bold(true).Render(accountEmail)
-			if accountName != "" {
-				accountStr += " " + lipgloss.NewStyle().Foreground(TextMuted).Render("("+accountName+")")
-			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
-		} else if hasCreds {
-			accountStr := lipgloss.NewStyle().Foreground(TextMuted).Render("active (local credentials)")
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
-		} else {
-			accountStr := lipgloss.NewStyle().Foreground(TextMuted).Render("[no credentials - press 'l' to log in]")
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
-		}
-
-		if authMethod != "" {
-			padAuth := 0
-			if lblWidth > len("Auth:") {
-				padAuth = lblWidth - len("Auth:")
-			}
-			styledAuth := lipgloss.NewStyle().Foreground(TextSecondary).Render("Auth:") + strings.Repeat(" ", padAuth)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAuth, lipgloss.NewStyle().Foreground(TextDim).Render(authMethod)))
-		}
-
-		projectID := accInfo.ProjectID
-		if projectID == "" && hasReport && rep.ProjectID != "" {
-			projectID = rep.ProjectID
-		}
-		if projectID != "" {
-			padProj := 0
-			if lblWidth > len("Project:") {
-				padProj = lblWidth - len("Project:")
-			}
-			styledProj := lipgloss.NewStyle().Foreground(TextSecondary).Render("Project:") + strings.Repeat(" ", padProj)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledProj, lipgloss.NewStyle().Foreground(TextDim).Render(projectID)))
-		}
-
-		if m.cfg != nil {
-			agentsList := m.cfg.GetProfileAgents(curProfile)
-			if len(agentsList) > 1 {
-				padAgents := 0
-				if lblWidth > len("Agents:") {
-					padAgents = lblWidth - len("Agents:")
-				}
-				styledAgents := lipgloss.NewStyle().Foreground(TextSecondary).Render("Agents:") + strings.Repeat(" ", padAgents)
-				s.WriteString(fmt.Sprintf("    %s %s\n", styledAgents, lipgloss.NewStyle().Foreground(TextDim).Render(strings.Join(agentsList, ", "))))
-			}
-		}
-
-		if hasReport && rep.Error != "" {
-			padStatus := 0
-			if lblWidth > len("Status:") {
-				padStatus = lblWidth - len("Status:")
-			}
-			styledStatus := lipgloss.NewStyle().Foreground(TextSecondary).Render("Status:") + strings.Repeat(" ", padStatus)
-			statusMsg := rep.Summary
-			if statusMsg == "" {
-				statusMsg = rep.Error
-			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledStatus, lipgloss.NewStyle().Foreground(StatusYellow).Render(statusMsg)))
-		}
-
-		if hasReport {
-			modelGroups := rep.ModelGroups()
-			if len(modelGroups) > 1 {
-				for _, g := range modelGroups {
-					modelShort := g.Category
-					if strings.Contains(strings.ToLower(modelShort), "claude") || strings.Contains(strings.ToLower(modelShort), "gpt") {
-						modelShort = "Claude & GPT"
-					} else if strings.Contains(strings.ToLower(modelShort), "gemini") {
-						modelShort = "Gemini"
-					}
-
-					var win5h, winWk *usage.LimitWindow
-					for i := range g.Windows {
-						w := &g.Windows[i]
-						lower := strings.ToLower(w.Name)
-						if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") {
-							win5h = w
-						} else if strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk") {
-							winWk = w
-						}
-					}
-
-					formatWin := func(w usage.LimitWindow, label string) (string, int) {
-						bar := usage.RenderBar(w.RemainingPct, 10)
-						winStatus := usage.CalculateStatus([]usage.LimitWindow{w})
-						gaugeStyle := GaugeStyleForStatus(winStatus)
-
-						resetInfo := ""
-						if w.RemainingPct < 100 && w.ResetsIn > 0 {
-							resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (%s)", usage.FormatDuration(w.ResetsIn)))
-						}
-						rendered := fmt.Sprintf("%s%s %s%s",
-							lipgloss.NewStyle().Foreground(TextDim).Render(label+": "),
-							gaugeStyle.Render(bar),
-							gaugeStyle.Render(fmt.Sprintf("%d%%", w.RemainingPct)),
-							resetInfo,
-						)
-						plainLen := len(label) + 2 + 12 + 1 + len(fmt.Sprintf("%d%%", w.RemainingPct))
-						if w.RemainingPct < 100 && w.ResetsIn > 0 {
-							plainLen += 3 + len(usage.FormatDuration(w.ResetsIn))
-						}
-						return rendered, plainLen
-					}
-
-					var lineContent string
-					if win5h != nil && winWk != nil {
-						str5h, len5h := formatWin(*win5h, "5h")
-						strWk, _ := formatWin(*winWk, "Wk")
-						targetCol := 33
-						pad := 3
-						if targetCol > len5h {
-							pad = targetCol - len5h
-						}
-						lineContent = str5h + strings.Repeat(" ", pad) + strWk
-					} else if win5h != nil {
-						str5h, _ := formatWin(*win5h, "5h")
-						lineContent = str5h
-					} else if winWk != nil {
-						strWk, _ := formatWin(*winWk, "Wk")
-						lineContent = strWk
-					} else {
-						var parts []string
-						for _, w := range g.Windows {
-							str, _ := formatWin(w, w.Name)
-							parts = append(parts, str)
-						}
-						lineContent = strings.Join(parts, "   ")
-					}
-
-					lbl := modelShort + ":"
-					pad := 0
-					if len(lbl) < lblWidth {
-						pad = lblWidth - len(lbl)
-					}
-					styledLbl := lipgloss.NewStyle().Foreground(TextSecondary).Render(lbl) + strings.Repeat(" ", pad)
-					s.WriteString(fmt.Sprintf("    %s %s\n", styledLbl, lineContent))
-				}
-			} else {
-				pw := rep.PrimaryWindow()
-				ww := rep.WeeklyWindow()
-				if pw != nil && ww != nil && (pw == ww || pw.Name == ww.Name) {
-					name := strings.ToLower(pw.Name)
-					if !strings.Contains(name, "five") && !strings.Contains(name, "5h") && !strings.Contains(name, "5 hour") && !strings.Contains(name, "5-hour") && !strings.Contains(name, "5-h") {
-						pw = nil
-					} else {
-						ww = nil
-					}
-				}
-
-				// Primary Limit
-				primaryStr := lipgloss.NewStyle().Foreground(TextMuted).Render("None")
-				if pw != nil {
-					bar := usage.RenderBar(pw.RemainingPct, 10)
-					winStatus := usage.CalculateStatus([]usage.LimitWindow{*pw})
-					gaugeStyle := GaugeStyleForStatus(winStatus)
-					resetInfo := ""
-					if pw.RemainingPct < 100 && pw.ResetsIn > 0 {
-						resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (resets in %s)", usage.FormatDuration(pw.ResetsIn)))
-					}
-					primaryStr = fmt.Sprintf("%s %s%s", gaugeStyle.Render(bar), gaugeStyle.Render(fmt.Sprintf("%d%%", pw.RemainingPct)), resetInfo)
-				}
-				s.WriteString(fmt.Sprintf("    %-14s %s\n", lipgloss.NewStyle().Foreground(TextSecondary).Render("Primary Limit:"), primaryStr))
-
-				// Weekly Limit
-				weeklyStr := lipgloss.NewStyle().Foreground(TextMuted).Render("None")
-				if ww != nil {
-					bar := usage.RenderBar(ww.RemainingPct, 10)
-					winStatus := usage.CalculateStatus([]usage.LimitWindow{*ww})
-					gaugeStyle := GaugeStyleForStatus(winStatus)
-					resetInfo := ""
-					if ww.RemainingPct < 100 && ww.ResetsIn > 0 {
-						resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (resets in %s)", usage.FormatDuration(ww.ResetsIn)))
-					}
-					weeklyStr = fmt.Sprintf("%s %s%s", gaugeStyle.Render(bar), gaugeStyle.Render(fmt.Sprintf("%d%%", ww.RemainingPct)), resetInfo)
-				}
-				s.WriteString(fmt.Sprintf("    %-14s %s\n", lipgloss.NewStyle().Foreground(TextSecondary).Render("Weekly Limit:"), weeklyStr))
-
-				// Resets At
-				resetsAtStr := "None"
-				if pw != nil && !pw.ResetsAt.IsZero() {
-					resetsAtStr = pw.ResetsAt.Local().Format("2006-01-02 15:04:05")
-				} else if ww != nil && !ww.ResetsAt.IsZero() {
-					resetsAtStr = ww.ResetsAt.Local().Format("2006-01-02 15:04:05")
-				} else {
-					for _, w := range rep.Windows {
-						if !w.ResetsAt.IsZero() {
-							resetsAtStr = w.ResetsAt.Local().Format("2006-01-02 15:04:05")
-							break
-						}
-					}
-				}
-				s.WriteString(fmt.Sprintf("    %-14s %s\n", lipgloss.NewStyle().Foreground(TextSecondary).Render("Resets At:"), lipgloss.NewStyle().Foreground(TextMuted).Render(resetsAtStr)))
-			}
-
-			// Credits
-			creditsStr := "0"
-			if rep.Credits != "" {
-				creditsStr = rep.Credits
-			}
-			padCredits := 0
-			if len("Credits:") < lblWidth {
-				padCredits = lblWidth - len("Credits:")
-			}
-			styledCredits := lipgloss.NewStyle().Foreground(TextSecondary).Render("Credits:") + strings.Repeat(" ", padCredits)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledCredits, creditsStr))
-
-			// Cache Age
-			cacheAgeStr := "just now"
-			if !rep.FetchedAt.IsZero() {
-				age := time.Since(rep.FetchedAt)
-				if age >= time.Second {
-					cacheAgeStr = usage.FormatDuration(age) + " ago"
-				}
-			}
-			padAge := 0
-			if len("Cache Age:") < lblWidth {
-				padAge = lblWidth - len("Cache Age:")
-			}
-			styledAge := lipgloss.NewStyle().Foreground(TextSecondary).Render("Cache Age:") + strings.Repeat(" ", padAge)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAge, lipgloss.NewStyle().Foreground(TextMuted).Render(cacheAgeStr)))
-		} else if m.loading {
-			s.WriteString("    " + lipgloss.NewStyle().Foreground(TextMuted).Render("(fetching quota...)") + "\n")
-		} else {
-			s.WriteString("    (no quota data available - press 'r' to refresh)\n")
-		}
+	if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
+		curProfile := filtered[m.cursor]
+		s.WriteString(m.renderInspector(curProfile))
 	}
 
 	refreshHint := HintKeyStyle.Render("[r]") + " " + HintLabelStyle.Render("Refresh Quota  ")
@@ -1266,140 +649,10 @@ func (m Model) View() string {
 		HintKeyStyle.Render("[d]") + " " + HintLabelStyle.Render("Doctor  ") +
 		HintKeyStyle.Render("[m]") + " " + HintLabelStyle.Render("Rename  ") +
 		HintKeyStyle.Render("[x]") + " " + HintLabelStyle.Render("Delete  ") +
+		HintKeyStyle.Render("[/]") + " " + HintLabelStyle.Render("Filter  ") +
 		refreshHint +
+		HintKeyStyle.Render("[?]") + " " + HintLabelStyle.Render("Help  ") +
 		HintKeyStyle.Render("[q]") + " " + HintLabelStyle.Render("Quit") + "\n")
 
 	return s.String()
-}
-
-func (m Model) renderDeleteModal() string {
-	var b strings.Builder
-	pName := m.deleteModal.targetProfile
-
-	title := ModalTitleStyle.Render("[!] Confirm Deletion: " + pName)
-	b.WriteString(title + "\n\n")
-
-	if m.deleteModal.isShared {
-		agentsStr := strings.Join(m.deleteModal.agents, ", ")
-		b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(
-			fmt.Sprintf("Profile %q is shared across: %s", pName, agentsStr),
-		) + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			fmt.Sprintf("Do you want to unlink '%s' or delete the entire profile?", m.agent),
-		) + "\n\n")
-
-		btn0Style := ModalBtnInactiveStyle
-		btn1Style := ModalBtnInactiveStyle
-		btn2Style := ModalBtnInactiveStyle
-
-		if m.deleteModal.focusedIndex == 0 {
-			btn0Style = ModalBtnActiveStyle
-		} else if m.deleteModal.focusedIndex == 1 {
-			btn1Style = ModalBtnActiveStyle
-		} else if m.deleteModal.focusedIndex == 2 {
-			btn2Style = ModalBtnCancelActiveStyle
-		}
-
-		btn0 := btn0Style.Render(fmt.Sprintf("[1] Remove '%s' Only", m.agent))
-		btn1 := btn1Style.Render("[2] Delete Entire Profile")
-		btn2 := btn2Style.Render("[Cancel]")
-
-		b.WriteString(fmt.Sprintf("  %s    %s    %s\n\n", btn0, btn1, btn2))
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"  [←/→/Tab] Select  •  [Enter] Confirm  •  [Esc] Cancel",
-		))
-	} else {
-		b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(
-			fmt.Sprintf("Are you sure you want to permanently delete profile %q?", pName),
-		) + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"This will permanently delete all stored credentials and isolated state.",
-		) + "\n\n")
-
-		btn0Style := ModalBtnInactiveStyle
-		btn1Style := ModalBtnInactiveStyle
-
-		if m.deleteModal.focusedIndex == 0 {
-			btn0Style = ModalBtnActiveStyle
-		} else if m.deleteModal.focusedIndex == 1 {
-			btn1Style = ModalBtnCancelActiveStyle
-		}
-
-		btn0 := btn0Style.Render("[ Delete Profile ]")
-		btn1 := btn1Style.Render("[ Cancel ]")
-
-		b.WriteString(fmt.Sprintf("      %s      %s\n\n", btn0, btn1))
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"  [←/→/Tab] Select  •  [Enter/y] Confirm  •  [Esc] Cancel",
-		))
-	}
-
-	box := ModalBoxStyle.Render(b.String())
-	return "\n" + box + "\n"
-}
-
-func (m Model) renderDoctorDrawer() string {
-	var b strings.Builder
-	target := m.doctorDrawer.targetProfile
-	if target == "" {
-		target = "(none)"
-	}
-	title := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Render(
-		fmt.Sprintf("🩺  Diagnostics: %s / %s", m.doctorDrawer.targetAgent, target),
-	)
-	b.WriteString(title + "\n\n")
-
-	for _, r := range m.doctorDrawer.results {
-		var badgeStyle lipgloss.Style
-		switch r.Status {
-		case "OK":
-			badgeStyle = GaugeGreenStyle
-		case "WARN":
-			badgeStyle = GaugeYellowStyle
-		case "FAIL":
-			badgeStyle = GaugeRedStyle
-		default:
-			badgeStyle = GaugeDimStyle
-		}
-
-		badge := badgeStyle.Render(fmt.Sprintf("[%s]", r.Status))
-		cat := lipgloss.NewStyle().Bold(true).Foreground(TextPrimary).Render(r.Category + ":")
-		msg := lipgloss.NewStyle().Foreground(TextSecondary).Render(r.Message)
-
-		b.WriteString(fmt.Sprintf("  %-8s %-14s %s\n", badge, cat, msg))
-	}
-
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [↑/↓] Inspect Profile  •  [Tab] Switch Agent  •  [d/Esc/q] Close Drawer",
-	))
-
-	box := DoctorDrawerStyle.Render(b.String())
-	return "\n" + box + "\n"
-}
-
-func (m Model) renderRenameModal() string {
-	var b strings.Builder
-	pName := m.renameModal.targetProfile
-
-	title := RenameModalTitleStyle.Render("✎ Rename Profile: " + pName)
-	b.WriteString(title + "\n\n")
-
-	b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(
-		"Enter new name for profile:",
-	) + "\n\n")
-
-	b.WriteString("  " + m.renameModal.input.View() + "\n\n")
-
-	if m.renameModal.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(StatusRed).Bold(true).Render(
-			"  ✕ "+m.renameModal.err,
-		) + "\n\n")
-	}
-
-	b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [Enter] Confirm  •  [Esc] Cancel",
-	))
-
-	box := RenameModalBoxStyle.Render(b.String())
-	return "\n" + box + "\n"
 }

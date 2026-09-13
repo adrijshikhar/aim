@@ -72,8 +72,7 @@ func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string)
 			var gWindows []string
 			for i := range g.Windows {
 				w := &g.Windows[i]
-				lower := strings.ToLower(w.Name)
-				if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "5-hour") {
+				if w.IsHourly() {
 					if s := usage.FormatWindowSummary(w); s != "" {
 						gWindows = append(gWindows, s)
 					}
@@ -81,8 +80,7 @@ func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string)
 			}
 			for i := range g.Windows {
 				w := &g.Windows[i]
-				lower := strings.ToLower(w.Name)
-				if strings.Contains(lower, "week") || strings.Contains(lower, "7d") || strings.Contains(lower, "wk") {
+				if w.IsWeekly() {
 					if s := usage.FormatWindowSummary(w); s != "" {
 						gWindows = append(gWindows, s)
 					}

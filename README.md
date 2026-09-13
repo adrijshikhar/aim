@@ -28,7 +28,7 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 |---|---|
 | **Profile isolation** | Full virtual-home sandbox per profile — separate `~`, config, tokens, history |
 | **Agent-aware profiles** | Profiles are tagged per agent; `aim list agy` shows only Antigravity profiles |
-| **Multi-agent support** | Antigravity CLI (`agy`), Gemini CLI (`gemini`) out of the box; easily extensible |
+| **Multi-agent support** | Antigravity CLI (`agy`), Gemini CLI (`gemini`), and OpenAI Codex (`codex`) out of the box; easily extensible |
 | **Keychain isolation** | System keychains mounted for developer tools (`gh`, `git`); agent tokens explicitly purged |
 | **Debug logging** | Opt-in tracing via `--debug`, `AIM_DEBUG=1`, or config file with dual console/file logs |
 | **Usage & quota tracking** | Live capacity gauges, 5h & weekly limits, reset countdowns, and instant caching |
@@ -101,6 +101,7 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 ## Documentation
 
 - 📖 **[Wiki & Architecture Guide](wiki.md)** — In-depth guide to virtual home isolation, dotfile bridging rules, directory structures, and configuration schemas.
+- 🎨 **[Design System](design.md)** — Atom One Dark color palette, design tokens, typography, and Lipgloss implementation standards.
 - 🛠️ **[Contributing Guide](CONTRIBUTING.md)** — Local development setup, test suite execution (`make test`, `make smoke`), and how to add new agent adapters.
 - 🗺️ **[Roadmap](ROADMAP.md)** — Upcoming milestones including quota pooling, headless bursting, and cross-agent resumption.
 

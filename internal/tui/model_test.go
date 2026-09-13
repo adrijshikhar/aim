@@ -188,6 +188,13 @@ func TestTUIModelTabSwitching(t *testing.T) {
 		t.Errorf("expected cursor reset to 0, got %d", m.cursor)
 	}
 
+	// Press 'tab' again -> codex
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = newM.(Model)
+	if m.SelectedAgent() != "codex" {
+		t.Errorf("expected agent 'codex', got '%s'", m.SelectedAgent())
+	}
+
 	// Press 'tab' again -> agy
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = newM.(Model)
@@ -195,11 +202,57 @@ func TestTUIModelTabSwitching(t *testing.T) {
 		t.Errorf("expected agent 'agy', got '%s'", m.SelectedAgent())
 	}
 
+	// Press '3' -> codex
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = newM.(Model)
+	if m.SelectedAgent() != "codex" {
+		t.Errorf("expected agent 'codex', got '%s'", m.SelectedAgent())
+	}
+
+	// Press 'shift+tab' -> gemini
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = newM.(Model)
+	if m.SelectedAgent() != "gemini" {
+		t.Errorf("expected agent 'gemini' via shift+tab, got '%s'", m.SelectedAgent())
+	}
+
 	// Press '1' -> agy
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	m = newM.(Model)
 	if m.SelectedAgent() != "agy" {
 		t.Errorf("expected agent 'agy', got '%s'", m.SelectedAgent())
+	}
+}
+
+func TestTUI_MultiAgentTabBarRendering(t *testing.T) {
+	m := newTestModel(t, "alpha")
+	view := m.View()
+
+	if !strings.Contains(view, "[1] Antigravity (agy)") {
+		t.Errorf("expected view to contain [1] Antigravity (agy), got:\n%s", view)
+	}
+	if !strings.Contains(view, "[2] Gemini") {
+		t.Errorf("expected view to contain [2] Gemini, got:\n%s", view)
+	}
+	if !strings.Contains(view, "[3] Codex") {
+		t.Errorf("expected view to contain [3] Codex, got:\n%s", view)
+	}
+	if !strings.Contains(view, "[4] Claude") {
+		t.Errorf("expected view to contain [4] Claude, got:\n%s", view)
+	}
+
+	// Switch to codex and verify active tab
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	codexModel := newM.(Model)
+	if codexModel.SelectedAgent() != "codex" {
+		t.Errorf("expected selected agent 'codex', got %q", codexModel.SelectedAgent())
+	}
+	codexView := codexModel.View()
+	if !strings.Contains(codexView, "PROFILES:") {
+		t.Errorf("expected view to show PROFILES:, got:\n%s", codexView)
+	}
+	if strings.Contains(codexView, "PROFILES (") {
+		t.Errorf("expected view not to contain agent in parentheses in PROFILES: header, got:\n%s", codexView)
 	}
 }
 
@@ -409,11 +462,11 @@ func TestTUIUsageUpdateAndKeybinding(t *testing.T) {
 	if !strings.Contains(view, "Profile Details: default") {
 		t.Errorf("expected profile details header for highlighted profile 'default', got:\n%s", view)
 	}
-	if !strings.Contains(view, "Primary Limit:") {
-		t.Errorf("expected inspector to contain 'Primary Limit:', got:\n%s", view)
+	if !strings.Contains(view, "5-hour limit:") {
+		t.Errorf("expected inspector to contain '5-hour limit:', got:\n%s", view)
 	}
-	if !strings.Contains(view, "Weekly Limit:") {
-		t.Errorf("expected inspector to contain 'Weekly Limit:', got:\n%s", view)
+	if !strings.Contains(view, "Weekly limit:") {
+		t.Errorf("expected inspector to contain 'Weekly limit:', got:\n%s", view)
 	}
 	if !strings.Contains(view, "Resets At:") {
 		t.Errorf("expected inspector to contain 'Resets At:', got:\n%s", view)
@@ -421,8 +474,8 @@ func TestTUIUsageUpdateAndKeybinding(t *testing.T) {
 	if !strings.Contains(view, "Credits:") || !strings.Contains(view, "$25.00") {
 		t.Errorf("expected inspector to contain Credits $25.00, got:\n%s", view)
 	}
-	if !strings.Contains(view, "Cache Age:") || !strings.Contains(view, "5m ago") {
-		t.Errorf("expected inspector to contain Cache Age 5m ago, got:\n%s", view)
+	if !strings.Contains(view, "Refreshed:") || !strings.Contains(view, "5m ago") {
+		t.Errorf("expected inspector to contain Refreshed 5m ago, got:\n%s", view)
 	}
 	if !strings.Contains(view, "[r]") || !strings.Contains(view, "Refresh Quota") {
 		t.Errorf("expected hotkey hints to contain [r] Refresh Quota, got:\n%s", view)
@@ -499,11 +552,11 @@ func TestTUIUsage_SingleWindowBadge(t *testing.T) {
 	if !strings.Contains(view, "[75%]") {
 		t.Errorf("expected single window badge '[75%%]', got:\n%s", view)
 	}
-	// Verify inspector deduplication: for weekly-only profile, Primary Limit should be None and Weekly Limit populated
-	if !strings.Contains(view, "Primary Limit: None") {
-		t.Errorf("expected inspector Primary Limit to be 'None' for single weekly window profile, got:\n%s", view)
+	// Verify inspector: for weekly-only profile, Primary Limit is omitted and Weekly limit is populated
+	if strings.Contains(view, "Primary Limit") {
+		t.Errorf("expected inspector not to contain 'Primary Limit' for single weekly window profile, got:\n%s", view)
 	}
-	if !strings.Contains(view, "Weekly Limit:  [███████░░░] 75% (resets in 3d 8h)") {
+	if !strings.Contains(view, "Weekly limit:  [███████░░░] 75% (resets in 3d 8h)") {
 		t.Errorf("expected inspector Weekly Limit to show weekly quota, got:\n%s", view)
 	}
 }
@@ -548,7 +601,7 @@ func TestTUIUsage_FullCapacityOmitResetCountdown(t *testing.T) {
 	if !strings.Contains(wideView, "[100%]") {
 		t.Errorf("expected minimal badge without countdown '[100%%]', got:\n%s", wideView)
 	}
-	if !strings.Contains(wideView, "Primary Limit: [██████████] 100%") {
+	if !strings.Contains(wideView, "5h limit:      [██████████] 100%") {
 		t.Errorf("expected inspector to omit countdown at 100%% capacity, got:\n%s", wideView)
 	}
 	if strings.Contains(wideView, "(2h)") || strings.Contains(wideView, "(5d)") {
@@ -1240,6 +1293,18 @@ func TestTUI_RenameModal_ValidationErrors(t *testing.T) {
 	if m4.RenameModalError() != "New profile name must be different from current name" {
 		t.Errorf("expected same name error, got %q", m4.RenameModalError())
 	}
+
+	// Type "../invalid" (path traversal)
+	mTyping = m4
+	mTyping.renameModal.input.SetValue("../invalid")
+	mTrav, _ := mTyping.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m5 := mTrav.(Model)
+	if !m5.IsRenameModalActive() {
+		t.Fatalf("expected modal to remain active on traversal input")
+	}
+	if !strings.Contains(m5.RenameModalError(), "cannot contain slashes") {
+		t.Errorf("expected slash validation error, got %q", m5.RenameModalError())
+	}
 }
 
 func TestTUI_RenameModal_Success(t *testing.T) {
@@ -1501,5 +1566,500 @@ func TestTUI_Header_VersionDisplay(t *testing.T) {
 	}
 	if !strings.Contains(m4.View(), "v2.0.0") {
 		t.Errorf("expected 'v2.0.0' in view after SetVersion")
+	}
+}
+
+func TestTUI_ProfilesHeader_NoAgentParentheses(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("rs")
+	_, _ = pm.EnsureProfile("bby")
+
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("rs", "agy")
+	cfg.AddProfileAgent("rs", "codex")
+	cfg.AddProfileAgent("bby", "agy")
+
+	reg := agents.DefaultRegistry()
+
+	// Tab: agy
+	mAgy := NewModel(reg, pm, cfg)
+	mAgy.width = 100
+	mAgyView := mAgy.View()
+
+	// Header should just be "PROFILES:" without "(agy):"
+	if !strings.Contains(mAgyView, "PROFILES:") {
+		t.Errorf("expected 'PROFILES:' in view, got:\n%s", mAgyView)
+	}
+	if strings.Contains(mAgyView, "PROFILES (") {
+		t.Errorf("expected no agent parentheses in PROFILES: header, got:\n%s", mAgyView)
+	}
+
+	// bby only has agy, so it should not have brackets
+	if strings.Contains(mAgyView, "bby [") {
+		t.Errorf("expected 'bby' to have no bracket, got:\n%s", mAgyView)
+	}
+	// rs is shared by agy and codex: should show [agy, codex]
+	if !strings.Contains(mAgyView, "rs [agy, codex]") {
+		t.Errorf("expected 'rs [agy, codex]' on agy tab, got:\n%s", mAgyView)
+	}
+
+	// Switch to codex tab
+	mCodex, _ := mAgy.switchAgent("codex")
+	mCodex.width = 100
+	mCodexView := mCodex.View()
+
+	// Header should also be "PROFILES:" without "(codex):"
+	if !strings.Contains(mCodexView, "PROFILES:") {
+		t.Errorf("expected 'PROFILES:' in codex view, got:\n%s", mCodexView)
+	}
+	if strings.Contains(mCodexView, "PROFILES (") {
+		t.Errorf("expected no agent parentheses in PROFILES: header on codex tab, got:\n%s", mCodexView)
+	}
+
+	// On codex tab, rs is still shared across agy and codex, so it shows [agy, codex]
+	if !strings.Contains(mCodexView, "rs [agy, codex]") {
+		t.Errorf("expected 'rs [agy, codex]' on codex tab, got:\n%s", mCodexView)
+	}
+
+	// Agents line is rendered even for single-agent profiles (bby)
+	if !strings.Contains(mAgyView, "Agents:") || !strings.Contains(mAgyView, "agy") {
+		t.Errorf("expected 'Agents:' line with 'agy' for single-agent profile, got:\n%s", mAgyView)
+	}
+}
+
+func TestTUI_DecomposedComponents(t *testing.T) {
+	// 1. Keys
+	km := DefaultKeyMap()
+	if len(km.Up.Keys()) == 0 || len(km.Down.Keys()) == 0 || len(km.Quit.Keys()) == 0 {
+		t.Fatalf("expected non-empty keybindings in DefaultKeyMap")
+	}
+	if len(km.ShortHelp()) == 0 || len(km.FullHelp()) == 0 {
+		t.Fatalf("expected non-empty ShortHelp and FullHelp in KeyMap")
+	}
+
+	m := newTestModel(t, "test-prof")
+	if len(m.KeyMap().Quit.Keys()) == 0 {
+		t.Errorf("expected m.KeyMap() to return initialized KeyMap")
+	}
+
+	// 2. Header and TabBar
+	hdr := m.renderHeader()
+	if !strings.Contains(hdr, "AIM — AI Multiplexer") {
+		t.Errorf("expected header to contain 'AIM — AI Multiplexer', got:\n%s", hdr)
+	}
+	tabBar := m.renderTabBar()
+	if !strings.Contains(tabBar, "Antigravity (agy)") {
+		t.Errorf("expected tab bar to contain 'Antigravity (agy)', got:\n%s", tabBar)
+	}
+	if tag := m.formatVersionTag(); tag == "" || !strings.HasPrefix(tag, "v") {
+		t.Errorf("expected version tag starting with 'v', got %q", tag)
+	}
+
+	// 3. Inspector and formatWin
+	w := usage.LimitWindow{
+		Name:         "test-win",
+		RemainingPct: 80,
+		ResetsIn:     time.Hour,
+	}
+	winFormatted := formatWin(w, "5h")
+	if !strings.Contains(winFormatted, "80%") || !strings.Contains(winFormatted, "5h:") {
+		t.Errorf("expected formatWin to contain '80%%' and '5h:', got %q", winFormatted)
+	}
+
+	insp := m.renderInspector("test-prof")
+	if !strings.Contains(insp, "Profile Details: test-prof") {
+		t.Errorf("expected inspector to contain 'Profile Details: test-prof', got:\n%s", insp)
+	}
+	if empty := m.renderInspector(""); empty != "" {
+		t.Errorf("expected empty string for empty profile, got %q", empty)
+	}
+}
+
+func TestTUI_DecomposedModalsAndDrawers(t *testing.T) {
+	m := newTestModel(t, "test-prof")
+
+	// 1. Delete Modal decomposition
+	mDel, _ := m.openDeleteModal()
+	if !mDel.IsDeleteModalActive() {
+		t.Fatalf("expected delete modal to be active after openDeleteModal()")
+	}
+	delView := mDel.renderDeleteModal()
+	if !strings.Contains(delView, "Confirm Deletion: test-prof") {
+		t.Errorf("expected delete modal view to contain 'Confirm Deletion: test-prof', got:\n%s", delView)
+	}
+	mDelClosed, _ := mDel.updateDeleteModal(tea.KeyMsg{Type: tea.KeyEsc})
+	if mDelClosed.IsDeleteModalActive() {
+		t.Errorf("expected delete modal to be closed after updateDeleteModal(Esc)")
+	}
+
+	// 2. Rename Modal decomposition
+	mRen, _ := m.openRenameModal()
+	if !mRen.IsRenameModalActive() {
+		t.Fatalf("expected rename modal to be active after openRenameModal()")
+	}
+	renView := mRen.renderRenameModal()
+	if !strings.Contains(renView, "Rename Profile: test-prof") {
+		t.Errorf("expected rename modal view to contain 'Rename Profile: test-prof', got:\n%s", renView)
+	}
+	mRenClosed, _ := mRen.updateRenameModal(tea.KeyMsg{Type: tea.KeyEsc})
+	if mRenClosed.IsRenameModalActive() {
+		t.Errorf("expected rename modal to be closed after updateRenameModal(Esc)")
+	}
+
+	// 3. Doctor Drawer decomposition
+	mDoc, _ := m.openDoctorDrawer()
+	if !mDoc.IsDoctorDrawerActive() {
+		t.Fatalf("expected doctor drawer to be active after openDoctorDrawer()")
+	}
+	docView := mDoc.renderDoctorDrawer()
+	if !strings.Contains(docView, "Diagnostics") {
+		t.Errorf("expected doctor drawer view to contain 'Diagnostics', got:\n%s", docView)
+	}
+	mDocClosed, _ := mDoc.updateDoctorDrawer(tea.KeyMsg{Type: tea.KeyEsc})
+	if mDocClosed.IsDoctorDrawerActive() {
+		t.Errorf("expected doctor drawer to be closed after updateDoctorDrawer(Esc)")
+	}
+
+	// 4. Help Overlay decomposition
+	mHelp, _ := m.openHelpOverlay()
+	if !mHelp.IsHelpActive() {
+		t.Fatalf("expected help overlay to be active after openHelpOverlay()")
+	}
+	helpView := mHelp.renderHelpOverlay()
+	if !strings.Contains(helpView, "Keyboard Shortcuts") {
+		t.Errorf("expected help overlay view to contain 'Keyboard Shortcuts', got:\n%s", helpView)
+	}
+	mHelpClosed, _ := mHelp.updateHelpOverlay(tea.KeyMsg{Type: tea.KeyEsc})
+	if mHelpClosed.IsHelpActive() {
+		t.Errorf("expected help overlay to be closed after updateHelpOverlay(Esc)")
+	}
+
+	// 5. Filter bar decomposition
+	mFilter, cmdFilter := m.openFilter()
+	if !mFilter.IsFilterActive() {
+		t.Fatalf("expected filter to be active after openFilter()")
+	}
+	if cmdFilter == nil {
+		t.Errorf("expected non-nil focus cmd on openFilter()")
+	}
+	filterBarView := mFilter.renderFilterBar()
+	if !strings.Contains(filterBarView, "FILTER:") || !strings.Contains(filterBarView, "Enter to apply") {
+		t.Errorf("expected filter bar to contain prompt and hints, got:\n%s", filterBarView)
+	}
+	mFilterClosed, _ := mFilter.updateFilter(tea.KeyMsg{Type: tea.KeyEsc})
+	if mFilterClosed.IsFilterActive() {
+		t.Errorf("expected filter to be closed after updateFilter(Esc)")
+	}
+}
+
+func TestTUI_HelpOverlayToggle(t *testing.T) {
+	m := newTestModel(t, "test-prof")
+
+	// Initially help overlay is inactive
+	if m.IsHelpActive() {
+		t.Fatalf("expected help overlay to be initially inactive")
+	}
+
+	// Normal view should have [?] Help hint
+	normalView := m.View()
+	if !strings.Contains(normalView, "[?]") || !strings.Contains(normalView, "Help") {
+		t.Errorf("expected footer to contain [?] Help hint, got:\n%s", normalView)
+	}
+
+	// Press '?' to toggle open help overlay
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mHelp := updated.(Model)
+	if !mHelp.IsHelpActive() {
+		t.Fatalf("expected help overlay to be active after pressing '?'")
+	}
+
+	// Help overlay view contains cheatsheet content
+	view := mHelp.View()
+	if !strings.Contains(view, "Keyboard Shortcuts") {
+		t.Errorf("expected help overlay view to contain 'Keyboard Shortcuts', got:\n%s", view)
+	}
+	if !strings.Contains(view, "Navigation & Tabs") || !strings.Contains(view, "Actions & Commands") {
+		t.Errorf("expected help overlay view to contain cheatsheet categories, got:\n%s", view)
+	}
+
+	// Press 'Esc' to close help overlay
+	closed, _ := mHelp.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mClosed := closed.(Model)
+	if mClosed.IsHelpActive() {
+		t.Errorf("expected help overlay to close after pressing Esc")
+	}
+
+	// Press '?' to open again, then '?' to toggle close
+	reopened, _ := mClosed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mReopened := reopened.(Model)
+	if !mReopened.IsHelpActive() {
+		t.Fatalf("expected help overlay to be active after second '?'")
+	}
+	reclosed, _ := mReopened.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mReclosed := reclosed.(Model)
+	if mReclosed.IsHelpActive() {
+		t.Errorf("expected help overlay to toggle closed after pressing '?' again")
+	}
+
+	// Press '?' to open again, then 'q' to close
+	openForQ, _ := mReclosed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mOpenForQ := openForQ.(Model)
+	if !mOpenForQ.IsHelpActive() {
+		t.Fatalf("expected help overlay to be active before testing 'q' close")
+	}
+	closedByQ, _ := mOpenForQ.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	mClosedByQ := closedByQ.(Model)
+	if mClosedByQ.IsHelpActive() {
+		t.Errorf("expected help overlay to close after pressing 'q'")
+	}
+
+	// Non-closing keys should not close help overlay or trigger background actions
+	openAgain, _ := mClosedByQ.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	mOpenAgain := openAgain.(Model)
+	unhandled, cmd := mOpenAgain.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	mUnhandled := unhandled.(Model)
+	if !mUnhandled.IsHelpActive() {
+		t.Errorf("expected help overlay to remain active on unhandled key")
+	}
+	if cmd != nil {
+		t.Errorf("expected nil cmd for unhandled key in help overlay")
+	}
+
+	// Narrow view layout check (< 70 width)
+	mNarrow := mOpenAgain
+	mNarrow.width = 60
+	narrowView := mNarrow.View()
+	if !strings.Contains(narrowView, "Keyboard Shortcuts") {
+		t.Errorf("expected narrow help view to contain 'Keyboard Shortcuts', got:\n%s", narrowView)
+	}
+}
+
+func TestTUI_FilterProfiles(t *testing.T) {
+	// Baseline matching test specified in plan doc
+	{
+		m := NewModel(nil, nil, nil)
+		m.profiles = []string{"personal", "work-backend", "work-frontend"}
+		m.filter.active = true
+		m.filter.input.SetValue("backend")
+
+		filtered := m.filteredProfiles()
+		if len(filtered) != 1 || filtered[0] != "work-backend" {
+			t.Fatalf("expected only 'work-backend', got %v", filtered)
+		}
+	}
+
+	baseDir := t.TempDir()
+	pm := profile.NewProfileManager(baseDir)
+	cfg := config.NewDefaultConfig()
+
+	// Setup profiles
+	profiles := []string{"personal", "work-backend", "work-frontend", "prod-cluster"}
+	for _, p := range profiles {
+		_, _ = pm.EnsureProfile(p)
+	}
+	cfg.AddProfileAgent("personal", "agy")
+	cfg.AddProfileAgent("work-backend", "agy")
+	cfg.AddProfileAgent("work-backend", "codex")
+	cfg.AddProfileAgent("work-frontend", "agy")
+	cfg.AddProfileAgent("work-frontend", "claude")
+	cfg.AddProfileAgent("prod-cluster", "agy")
+	cfg.AddProfileAgent("prod-cluster", "gemini")
+
+	m := NewModel(nil, pm, cfg)
+	if len(m.Profiles()) != 4 {
+		t.Fatalf("expected 4 profiles, got %d", len(m.Profiles()))
+	}
+
+	// Initially filter is inactive, filteredProfiles returns all 4
+	if m.IsFilterActive() {
+		t.Fatalf("expected filter to be initially inactive")
+	}
+	if len(m.filteredProfiles()) != 4 {
+		t.Fatalf("expected 4 filtered profiles initially, got %d", len(m.filteredProfiles()))
+	}
+
+	// 1. Filtering by profile name
+	m.filter.input.SetValue("backend")
+	filtered := m.filteredProfiles()
+	if len(filtered) != 1 || filtered[0] != "work-backend" {
+		t.Fatalf("expected only 'work-backend' for query 'backend', got %v", filtered)
+	}
+
+	// 2. Filtering by attached agent name
+	m.filter.input.SetValue("claude")
+	filtered = m.filteredProfiles()
+	if len(filtered) != 1 || filtered[0] != "work-frontend" {
+		t.Fatalf("expected only 'work-frontend' for query 'claude', got %v", filtered)
+	}
+
+	m.filter.input.SetValue("gemini")
+	filtered = m.filteredProfiles()
+	if len(filtered) != 1 || filtered[0] != "prod-cluster" {
+		t.Fatalf("expected only 'prod-cluster' for query 'gemini', got %v", filtered)
+	}
+
+	// 3. Case-insensitivity (both name and agent)
+	m.filter.input.SetValue("BACKEND")
+	filtered = m.filteredProfiles()
+	if len(filtered) != 1 || filtered[0] != "work-backend" {
+		t.Fatalf("expected 'work-backend' for query 'BACKEND', got %v", filtered)
+	}
+
+	m.filter.input.SetValue("CLAUDE")
+	filtered = m.filteredProfiles()
+	if len(filtered) != 1 || filtered[0] != "work-frontend" {
+		t.Fatalf("expected 'work-frontend' for query 'CLAUDE', got %v", filtered)
+	}
+
+	// Substring matching multiple profiles
+	m.filter.input.SetValue("work")
+	filtered = m.filteredProfiles()
+	if len(filtered) != 2 || filtered[0] != "work-backend" || filtered[1] != "work-frontend" {
+		t.Fatalf("expected ['work-backend', 'work-frontend'] for query 'work', got %v", filtered)
+	}
+
+	// Non-matching query
+	m.filter.input.SetValue("nonexistent")
+	filtered = m.filteredProfiles()
+	if len(filtered) != 0 {
+		t.Fatalf("expected 0 filtered profiles for query 'nonexistent', got %v", filtered)
+	}
+	viewNonExistent := m.View()
+	if !strings.Contains(viewNonExistent, "(no profiles matching \"nonexistent\")") {
+		t.Errorf("expected view to show no profiles matching message, got:\n%s", viewNonExistent)
+	}
+
+	// 4. Interactive flow: '/' shortcut, typing, Enter lock-in, and list navigation
+	// Reset filter
+	m.filter = newFilterState()
+
+	// Press '/' to activate filter
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	if !m.IsFilterActive() {
+		t.Fatalf("expected filter to become active after pressing '/'")
+	}
+	if cmd == nil {
+		t.Errorf("expected focus command when activating filter")
+	}
+
+	// Check filter bar rendering while active
+	bar := m.renderFilterBar()
+	if !strings.Contains(bar, "FILTER:") || !strings.Contains(bar, "(Enter to apply, Esc to clear)") {
+		t.Errorf("expected filter bar to contain prompt and hints, got:\n%s", bar)
+	}
+
+	// Type 'w', 'o', 'r', 'k'
+	for _, r := range []rune{'w', 'o', 'r', 'k'} {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+	if m.FilterInputValue() != "work" {
+		t.Fatalf("expected input value 'work', got %q", m.FilterInputValue())
+	}
+	if len(m.filteredProfiles()) != 2 {
+		t.Fatalf("expected 2 filtered profiles while typing, got %d", len(m.filteredProfiles()))
+	}
+
+	// View should contain filter bar and only filtered profiles
+	view := m.View()
+	if !strings.Contains(view, "FILTER:") || !strings.Contains(view, "/work") {
+		t.Errorf("expected view to contain filter bar with '/work', got:\n%s", view)
+	}
+	if !strings.Contains(view, "work-backend") || !strings.Contains(view, "work-frontend") {
+		t.Errorf("expected view to contain filtered profiles, got:\n%s", view)
+	}
+	if strings.Contains(view, "personal") || strings.Contains(view, "prod-cluster") {
+		t.Errorf("expected view not to contain non-matching profiles, got:\n%s", view)
+	}
+
+	// Press Enter to lock in the filter
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.IsFilterActive() {
+		t.Fatalf("expected filter to be locked in (inactive) after pressing Enter")
+	}
+	if m.FilterInputValue() != "work" {
+		t.Fatalf("expected filter query to remain 'work' after lock-in, got %q", m.FilterInputValue())
+	}
+	if len(m.filteredProfiles()) != 2 {
+		t.Fatalf("expected 2 filtered profiles after lock-in, got %d", len(m.filteredProfiles()))
+	}
+
+	// Navigate within filtered list
+	if m.cursor != 0 {
+		t.Fatalf("expected cursor 0, got %d", m.cursor)
+	}
+	// Down to index 1 ("work-frontend")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.cursor != 1 {
+		t.Fatalf("expected cursor 1 after Down, got %d", m.cursor)
+	}
+	// Down again should be bounded at index 1 (not go to 2 or 3)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.cursor != 1 {
+		t.Fatalf("expected cursor to remain 1 at bottom of filtered list, got %d", m.cursor)
+	}
+	// Up back to index 0
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	if m.cursor != 0 {
+		t.Fatalf("expected cursor 0 after Up, got %d", m.cursor)
+	}
+
+	// Press Enter while filter is locked in -> triggers ActionRun on selected profile ("work-backend")
+	updated, runCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mRun := updated.(Model)
+	if mRun.Outcome() != ActionRun {
+		t.Fatalf("expected ActionRun on Enter when filter is locked in, got %v", mRun.Outcome())
+	}
+	if mRun.SelectedProfile() != "work-backend" {
+		t.Fatalf("expected selected profile 'work-backend', got %q", mRun.SelectedProfile())
+	}
+	if runCmd == nil {
+		t.Errorf("expected tea.Quit command on ActionRun")
+	}
+
+	// 5. Esc clears locked-in filter
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.FilterInputValue() != "" {
+		t.Fatalf("expected filter text to be cleared on Esc, got %q", m.FilterInputValue())
+	}
+	if len(m.filteredProfiles()) != 4 {
+		t.Fatalf("expected all 4 profiles after clearing filter, got %d", len(m.filteredProfiles()))
+	}
+	if strings.Contains(m.View(), "FILTER:") {
+		t.Errorf("expected filter bar to disappear when filter is empty and inactive")
+	}
+
+	// Esc clear while active
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	if !m.IsFilterActive() {
+		t.Fatalf("expected filter active")
+	}
+	for _, r := range []rune{'t', 'e', 's', 't'} {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+	if m.FilterInputValue() != "test" {
+		t.Fatalf("expected 'test', got %q", m.FilterInputValue())
+	}
+	// Press Esc while active -> clears filter and closes filter mode
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.IsFilterActive() {
+		t.Fatalf("expected filter inactive after Esc")
+	}
+	if m.FilterInputValue() != "" {
+		t.Fatalf("expected filter text empty after Esc, got %q", m.FilterInputValue())
+	}
+	if len(m.filteredProfiles()) != 4 {
+		t.Fatalf("expected 4 profiles, got %d", len(m.filteredProfiles()))
 	}
 }

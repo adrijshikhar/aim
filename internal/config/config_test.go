@@ -289,3 +289,164 @@ func TestConfig_ProfileEnvAndArgs(t *testing.T) {
 		t.Errorf("expected --no-stream arg to be preserved across load/save, got %v", loadedArgs)
 	}
 }
+
+func TestConfig_CustomAimHome(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	if got := BaseDir(); got != tempDir {
+		t.Errorf("BaseDir() = %q, want %q", got, tempDir)
+	}
+	if got := ConfigDir(); got != tempDir {
+		t.Errorf("ConfigDir() = %q, want %q", got, tempDir)
+	}
+	if got := DataDir(); got != tempDir {
+		t.Errorf("DataDir() = %q, want %q", got, tempDir)
+	}
+	if got := StateDir(); got != tempDir {
+		t.Errorf("StateDir() = %q, want %q", got, tempDir)
+	}
+	expectedCache := filepath.Join(tempDir, "cache")
+	if got := CacheDir(); got != expectedCache {
+		t.Errorf("CacheDir() = %q, want %q", got, expectedCache)
+	}
+	expectedConfigFile := filepath.Join(tempDir, "config.json")
+	if got := ConfigFilePath(); got != expectedConfigFile {
+		t.Errorf("ConfigFilePath() = %q, want %q", got, expectedConfigFile)
+	}
+}
+
+func TestConfig_LegacyAimFallback(t *testing.T) {
+	tempHome := t.TempDir()
+	legacyAimDir := filepath.Join(tempHome, ".aim")
+	if err := os.MkdirAll(legacyAimDir, 0755); err != nil {
+		t.Fatalf("failed to create fake legacy .aim: %v", err)
+	}
+
+	t.Setenv("AIM_HOME", "")
+	t.Setenv("AIM_REAL_HOME", tempHome)
+
+	if got := BaseDir(); got != legacyAimDir {
+		t.Errorf("BaseDir() = %q, want %q", got, legacyAimDir)
+	}
+	if got := ConfigDir(); got != legacyAimDir {
+		t.Errorf("ConfigDir() = %q, want %q", got, legacyAimDir)
+	}
+	if got := DataDir(); got != legacyAimDir {
+		t.Errorf("DataDir() = %q, want %q", got, legacyAimDir)
+	}
+	if got := StateDir(); got != legacyAimDir {
+		t.Errorf("StateDir() = %q, want %q", got, legacyAimDir)
+	}
+	expectedCache := filepath.Join(legacyAimDir, "cache")
+	if got := CacheDir(); got != expectedCache {
+		t.Errorf("CacheDir() = %q, want %q", got, expectedCache)
+	}
+	expectedConfigFile := filepath.Join(legacyAimDir, "config.json")
+	if got := ConfigFilePath(); got != expectedConfigFile {
+		t.Errorf("ConfigFilePath() = %q, want %q", got, expectedConfigFile)
+	}
+
+	// Test saving and loading config in legacy directory
+	cfg := NewDefaultConfig()
+	cfg.DefaultProfile = "legacy-prof"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	if _, err := os.Stat(expectedConfigFile); os.IsNotExist(err) {
+		t.Fatalf("expected config at %s", expectedConfigFile)
+	}
+	loaded, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if loaded.DefaultProfile != "legacy-prof" {
+		t.Errorf("expected DefaultProfile 'legacy-prof', got %q", loaded.DefaultProfile)
+	}
+}
+
+func TestConfig_DefaultXDG_WithCustomEnv(t *testing.T) {
+	cleanHome := t.TempDir()
+	t.Setenv("AIM_HOME", "")
+	t.Setenv("AIM_REAL_HOME", cleanHome)
+
+	cfgDir := filepath.Join(cleanHome, "custom-config")
+	dataDir := filepath.Join(cleanHome, "custom-data")
+	cacheDir := filepath.Join(cleanHome, "custom-cache")
+	stateDir := filepath.Join(cleanHome, "custom-state")
+
+	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	t.Setenv("XDG_DATA_HOME", dataDir)
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	ReloadXDG()
+
+	expectedCfg := filepath.Join(cfgDir, "aim")
+	expectedData := filepath.Join(dataDir, "aim")
+	expectedCache := filepath.Join(cacheDir, "aim")
+	expectedState := filepath.Join(stateDir, "aim")
+
+	if got := ConfigDir(); got != expectedCfg {
+		t.Errorf("ConfigDir() = %q, want %q", got, expectedCfg)
+	}
+	if got := DataDir(); got != expectedData {
+		t.Errorf("DataDir() = %q, want %q", got, expectedData)
+	}
+	if got := CacheDir(); got != expectedCache {
+		t.Errorf("CacheDir() = %q, want %q", got, expectedCache)
+	}
+	if got := StateDir(); got != expectedState {
+		t.Errorf("StateDir() = %q, want %q", got, expectedState)
+	}
+	if got := BaseDir(); got != expectedData {
+		t.Errorf("BaseDir() = %q, want %q", got, expectedData)
+	}
+	expectedConfigFile := filepath.Join(expectedCfg, "config.json")
+	if got := ConfigFilePath(); got != expectedConfigFile {
+		t.Errorf("ConfigFilePath() = %q, want %q", got, expectedConfigFile)
+	}
+
+	// Test saving and loading config in XDG config dir
+	cfg := NewDefaultConfig()
+	cfg.DefaultProfile = "xdg-prof"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	if _, err := os.Stat(expectedConfigFile); os.IsNotExist(err) {
+		t.Fatalf("expected config at %s", expectedConfigFile)
+	}
+	loaded, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if loaded.DefaultProfile != "xdg-prof" {
+		t.Errorf("expected DefaultProfile 'xdg-prof', got %q", loaded.DefaultProfile)
+	}
+}
+
+func TestConfig_DefaultXDG_WithoutEnv(t *testing.T) {
+	cleanHome := t.TempDir()
+	t.Setenv("AIM_HOME", "")
+	t.Setenv("AIM_REAL_HOME", cleanHome)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	ReloadXDG()
+
+	cDir := ConfigDir()
+	dDir := DataDir()
+	caDir := CacheDir()
+	sDir := StateDir()
+	bDir := BaseDir()
+
+	if cDir == "" || dDir == "" || caDir == "" || sDir == "" || bDir == "" {
+		t.Fatalf("expected non-empty directories from XDG resolution")
+	}
+
+	// Ensure none of them default to ~/.aim when cleanHome has no .aim
+	legacyAimDir := filepath.Join(cleanHome, ".aim")
+	if cDir == legacyAimDir || dDir == legacyAimDir || bDir == legacyAimDir {
+		t.Errorf("expected XDG resolution to not resolve to non-existent ~/.aim (%q)", legacyAimDir)
+	}
+}

@@ -7,25 +7,42 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/config"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	mu            sync.RWMutex
-	debugExplicit *bool
-	consoleOutput = true
-	logFile       *os.File
-	logFilePath   string
+	mu             sync.RWMutex
+	debugExplicit  *bool
+	consoleOutput  = true
+	logFile        *os.File
+	logFilePath    string
+	debugTagStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#c678dd")).Faint(true)
+	debugTimeStyle = lipgloss.NewStyle().Faint(true)
 )
 
+// LogFilePath returns the current or default path for aim-debug.log.
+func LogFilePath() string {
+	mu.RLock()
+	defer mu.RUnlock()
+	if logFilePath != "" {
+		return logFilePath
+	}
+	return filepath.Join(config.StateDir(), "aim-debug.log")
+}
+
 // Init initializes the logger with the base directory where aim-debug.log should be stored.
-func Init(baseDir string) {
+// If dir is empty or matches config.BaseDir(), it defaults to config.StateDir() so logs adhere to the XDG state standard.
+// If an explicit custom dir is provided, it is respected.
+func Init(dir string) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if baseDir == "" {
-		return
+	if dir == "" || dir == config.BaseDir() {
+		dir = config.StateDir()
 	}
-	targetPath := filepath.Join(baseDir, "aim-debug.log")
+	targetPath := filepath.Join(dir, "aim-debug.log")
 	if logFilePath == targetPath && logFile != nil {
 		return
 	}
@@ -37,7 +54,7 @@ func Init(baseDir string) {
 	if !isDebugLocked() {
 		return
 	}
-	_ = os.MkdirAll(baseDir, 0755)
+	_ = os.MkdirAll(dir, 0755)
 	f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err == nil {
 		logFile = f
@@ -111,11 +128,14 @@ func Debug(format string, args ...any) {
 	// Console output to stderr
 	if consoleOutput {
 		timeStr := now.Format("15:04:05.000")
-		fmt.Fprintf(os.Stderr, "\033[2;35m[AIM DEBUG]\033[0m \033[2m%s\033[0m %s\n", timeStr, msg)
+		fmt.Fprintf(os.Stderr, "%s %s %s\n", debugTagStyle.Render("[AIM DEBUG]"), debugTimeStyle.Render(timeStr), msg)
 	}
 
 	// Persistent file output
-	if logFile == nil && logFilePath != "" {
+	if logFile == nil {
+		if logFilePath == "" {
+			logFilePath = filepath.Join(config.StateDir(), "aim-debug.log")
+		}
 		_ = os.MkdirAll(filepath.Dir(logFilePath), 0755)
 		f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err == nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
+	"github.com/aim-cli/aim/internal/agents/codex"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
@@ -1633,5 +1634,62 @@ func TestCLI_List_MultiCategoryBadge(t *testing.T) {
 
 	if !strings.Contains(out, "gemini:") || !strings.Contains(out, "claude:") {
 		t.Errorf("expected multi-category list badge with gemini and claude, got:\n%s", out)
+	}
+}
+
+func TestCLI_CodexIntegration(t *testing.T) {
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	pm := profile.NewProfileManager(tempBase)
+	pDir, _ := pm.EnsureProfile("work")
+
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("work", "codex")
+	_ = config.SaveConfig(cfg)
+
+	// Mock auth.json in work profile
+	codexDir := filepath.Join(pDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"tokens":{"access_token":"mock-token"}}`), 0600)
+
+	reg := agents.NewRegistry()
+	reg.Register(codex.NewAdapter())
+
+	// 1. Test 'aim list codex'
+	outList, _ := captureOutput(t, func() {
+		code := dispatch([]string{"list", "codex"}, reg, pm)
+		if code != 0 {
+			t.Errorf("expected exit code 0 for 'list codex', got %d", code)
+		}
+	})
+	if !strings.Contains(outList, "work") {
+		t.Errorf("expected 'work' in list output, got:\n%s", outList)
+	}
+
+	// 2. Test 'aim doctor codex'
+	outDoc, _ := captureOutput(t, func() {
+		code := dispatch([]string{"doctor", "codex"}, reg, pm)
+		if code != 0 {
+			t.Errorf("expected exit code 0 for 'doctor codex', got %d", code)
+		}
+	})
+	if !strings.Contains(outDoc, "Codex") {
+		t.Errorf("expected doctor output to mention Codex, got:\n%s", outDoc)
+	}
+
+	// 3. Test 'aim clone codex work cloned-work'
+	outClone, _ := captureOutput(t, func() {
+		code := dispatch([]string{"clone", "codex", "work", "cloned-work"}, reg, pm)
+		if code != 0 {
+			t.Errorf("expected exit code 0 for 'clone codex', got %d", code)
+		}
+	})
+	if !strings.Contains(outClone, "Cloned") {
+		t.Errorf("expected clone success output, got:\n%s", outClone)
+	}
+	cfgReloaded, _ := config.LoadConfig()
+	if !cfgReloaded.HasAgent("cloned-work", "codex") {
+		t.Errorf("expected cloned profile to have codex agent")
 	}
 }

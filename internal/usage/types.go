@@ -24,6 +24,29 @@ type LimitWindow struct {
 	ResetsIn     time.Duration `json:"resets_in"`
 }
 
+func (w *LimitWindow) IsHourly() bool {
+	if w == nil {
+		return false
+	}
+	lower := strings.ToLower(w.Name)
+	return strings.Contains(lower, "five") ||
+		strings.Contains(lower, "5h") ||
+		strings.Contains(lower, "5 hour") ||
+		strings.Contains(lower, "5-hour") ||
+		strings.Contains(lower, "5-h") ||
+		strings.Contains(lower, "hour")
+}
+
+func (w *LimitWindow) IsWeekly() bool {
+	if w == nil {
+		return false
+	}
+	lower := strings.ToLower(w.Name)
+	return strings.Contains(lower, "week") ||
+		strings.Contains(lower, "7d") ||
+		strings.Contains(lower, "wk")
+}
+
 type Report struct {
 	Agent        string        `json:"agent"`
 	Profile      string        `json:"profile"`
@@ -45,8 +68,7 @@ func (r *Report) PrimaryWindow() *LimitWindow {
 		return nil
 	}
 	for i := range r.Windows {
-		name := strings.ToLower(r.Windows[i].Name)
-		if strings.Contains(name, "five") || strings.Contains(name, "5h") || strings.Contains(name, "5 hour") {
+		if r.Windows[i].IsHourly() {
 			return &r.Windows[i]
 		}
 	}
@@ -61,12 +83,30 @@ func (r *Report) WeeklyWindow() *LimitWindow {
 		return nil
 	}
 	for i := range r.Windows {
-		name := strings.ToLower(r.Windows[i].Name)
-		if strings.Contains(name, "week") || strings.Contains(name, "7d") {
+		if r.Windows[i].IsWeekly() {
 			return &r.Windows[i]
 		}
 	}
 	return nil
+}
+
+func (r *Report) BottleneckPct() int {
+	if r == nil || len(r.Windows) == 0 {
+		return 100
+	}
+	minPct := 100
+	for _, w := range r.Windows {
+		if w.RemainingPct < minPct {
+			minPct = w.RemainingPct
+		}
+	}
+	if minPct < 0 {
+		return 0
+	}
+	if minPct > 100 {
+		return 100
+	}
+	return minPct
 }
 
 func CalculateStatus(windows []LimitWindow) Status {
@@ -119,10 +159,9 @@ func FormatWindowSummary(w *LimitWindow) string {
 		return ""
 	}
 	label := "limit"
-	lower := strings.ToLower(w.Name)
-	if strings.Contains(lower, "five") || strings.Contains(lower, "5h") || strings.Contains(lower, "5 hour") {
+	if w.IsHourly() {
 		label = "5h"
-	} else if strings.Contains(lower, "week") || strings.Contains(lower, "7d") {
+	} else if w.IsWeekly() {
 		label = "wk"
 	}
 
@@ -169,8 +208,13 @@ func CleanModelCategory(cat string) string {
 		return "—"
 	}
 	lower := strings.ToLower(c)
+	if strings.Contains(lower, "spark") {
+		return "Codex Spark"
+	}
 	if strings.Contains(lower, "claude") || strings.Contains(lower, "gpt") {
-		return "Claude & GPT"
+		if !strings.Contains(lower, "codex") {
+			return "Claude & GPT"
+		}
 	}
 	if strings.Contains(lower, "gemini") {
 		return "Gemini"

@@ -1,0 +1,224 @@
+package codex
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/aim-cli/aim/internal/usage"
+)
+
+func TestCodexAdapter_Metadata(t *testing.T) {
+	a := NewAdapter()
+	if a.Name() != "codex" {
+		t.Errorf("expected name 'codex', got %q", a.Name())
+	}
+	if a.DisplayName() != "Codex CLI" {
+		t.Errorf("expected displayName 'Codex CLI', got %q", a.DisplayName())
+	}
+	if a.BinaryName() != "codex" {
+		t.Errorf("expected binaryName 'codex', got %q", a.BinaryName())
+	}
+	aliases := a.Aliases()
+	if len(aliases) == 0 || aliases[0] != "codex-cli" {
+		t.Errorf("expected aliases to include 'codex-cli', got %v", aliases)
+	}
+
+	aliasAdapter := NewCodexAdapter()
+	if aliasAdapter.Name() != "codex" {
+		t.Errorf("expected NewCodexAdapter to return codex adapter")
+	}
+}
+
+func TestCodexAdapter_HasCredentials(t *testing.T) {
+	a := NewAdapter()
+	tmpDir := t.TempDir()
+
+	// Missing credentials
+	if a.HasCredentials(tmpDir) {
+		t.Errorf("expected HasCredentials=false for empty dir")
+	}
+
+	// Valid auth.json
+	authDir := filepath.Join(tmpDir, ".codex")
+	_ = os.MkdirAll(authDir, 0755)
+	authFile := filepath.Join(authDir, "auth.json")
+	_ = os.WriteFile(authFile, []byte(`{"tokens":{"access_token":"mock-token"}}`), 0600)
+
+	if !a.HasCredentials(tmpDir) {
+		t.Errorf("expected HasCredentials=true for valid auth.json")
+	}
+}
+
+func TestCodexAdapter_PrepareEnv(t *testing.T) {
+	a := NewAdapter()
+	tmpDir := t.TempDir()
+	profileDir := filepath.Join(tmpDir, "profiles", "work")
+
+	launchEnv, err := a.PrepareEnv("work", profileDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+
+	codexDir := filepath.Join(profileDir, ".codex")
+	if fi, err := os.Stat(codexDir); err != nil || !fi.IsDir() {
+		t.Errorf("expected .codex directory to be created in profileDir")
+	} else if fi.Mode().Perm() != 0700 {
+		t.Errorf("expected .codex directory permissions 0700, got %v", fi.Mode().Perm())
+	}
+
+	if launchEnv.Env["HOME"] != profileDir {
+		t.Errorf("expected HOME=%q, got %q", profileDir, launchEnv.Env["HOME"])
+	}
+	if launchEnv.Env["CODEX_HOME"] != codexDir {
+		t.Errorf("expected CODEX_HOME=%q, got %q", codexDir, launchEnv.Env["CODEX_HOME"])
+	}
+	if launchEnv.Env["AIM_AGENT"] != "codex" {
+		t.Errorf("expected AIM_AGENT='codex', got %q", launchEnv.Env["AIM_AGENT"])
+	}
+	if launchEnv.Env["AIM_PROFILE"] != "work" {
+		t.Errorf("expected AIM_PROFILE='work', got %q", launchEnv.Env["AIM_PROFILE"])
+	}
+}
+
+func TestCodexAdapter_Doctor(t *testing.T) {
+	a := NewAdapter()
+	tmpDir := t.TempDir()
+	profileDir := filepath.Join(tmpDir, "profiles", "test")
+	_ = os.MkdirAll(filepath.Join(profileDir, ".codex"), 0755)
+
+	// Doctor with no credentials
+	results := a.Doctor(context.Background(), "test", profileDir)
+	if len(results) == 0 {
+		t.Fatalf("expected diagnostic results, got none")
+	}
+
+	var foundAuthWarn bool
+	for _, r := range results {
+		if r.Category == "Auth" && r.Status == "WARN" {
+			foundAuthWarn = true
+		}
+	}
+	if !foundAuthWarn {
+		t.Errorf("expected Auth warning when credentials missing")
+	}
+
+	// Add auth.json and re-run Doctor
+	authFile := filepath.Join(profileDir, ".codex", "auth.json")
+	_ = os.WriteFile(authFile, []byte(`{"tokens":{"access_token":"mock"}}`), 0600)
+
+	resultsAuth := a.Doctor(context.Background(), "test", profileDir)
+	var foundAuthOK bool
+	for _, r := range resultsAuth {
+		if r.Category == "Auth" && r.Status == "OK" {
+			foundAuthOK = true
+		}
+	}
+	if !foundAuthOK {
+		t.Errorf("expected Auth OK when credentials exist")
+	}
+}
+
+func TestCodexAdapter_GetUsage(t *testing.T) {
+	a := NewAdapter()
+	tmpDir := t.TempDir()
+	profileDir := filepath.Join(tmpDir, "profiles", "usage-test")
+
+	// No credentials
+	rep, err := a.GetUsage(context.Background(), "usage-test", profileDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rep.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown, got %v", rep.Status)
+	}
+
+	// Create auth.json with JWT
+	codexDir := filepath.Join(profileDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0755)
+
+	claimsJSON := `{"email":"codex@example.com","name":"Codex Pro User","https://api.openai.com/auth":{"chatgpt_plan_type":"pro"}}`
+	encodedPayload := base64.RawURLEncoding.EncodeToString([]byte(claimsJSON))
+	mockJWT := "eyJhbGciOiJSUzI1NiJ9." + encodedPayload + ".sig"
+	authJSON := `{"tokens":{"id_token":"` + mockJWT + `"}}`
+	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(authJSON), 0600)
+
+	// Create sessions dir with rate limit jsonl
+	sessionsDir := filepath.Join(codexDir, "sessions")
+	_ = os.MkdirAll(sessionsDir, 0755)
+	sessionLine := `{"rateLimits":{"secondary":{"used_percent":25}}}` + "\n"
+	_ = os.WriteFile(filepath.Join(sessionsDir, "session1.jsonl"), []byte(sessionLine), 0644)
+
+	repWithAuth, err := a.GetUsage(context.Background(), "usage-test", profileDir)
+	if err != nil {
+		t.Fatalf("unexpected error with auth: %v", err)
+	}
+	if repWithAuth.Status != usage.StatusOK {
+		t.Errorf("expected StatusOK, got %v", repWithAuth.Status)
+	}
+	if repWithAuth.AccountEmail != "codex@example.com" {
+		t.Errorf("expected email 'codex@example.com', got %q", repWithAuth.AccountEmail)
+	}
+	if repWithAuth.AuthMethod != "ChatGPT Pro" {
+		t.Errorf("expected AuthMethod 'ChatGPT Pro', got %q", repWithAuth.AuthMethod)
+	}
+	if len(repWithAuth.Windows) == 0 {
+		t.Errorf("expected windows to be populated, got 0")
+	} else {
+		ww := repWithAuth.WeeklyWindow()
+		if ww == nil {
+			t.Errorf("expected WeeklyWindow not to be nil")
+		} else if ww.RemainingPct != 75 {
+			t.Errorf("expected weekly remaining 75%%, got %d%%", ww.RemainingPct)
+		}
+	}
+
+	// Test real nested date-partitioned session rollout structure:
+	// sessions/YYYY/MM/DD/rollout-*.jsonl with payload.rate_limits
+	nestedDir := filepath.Join(sessionsDir, "2026", "09", "13")
+	_ = os.MkdirAll(nestedDir, 0755)
+	futureReset := time.Now().Add(2 * time.Hour).Unix()
+	futureWeeklyReset := time.Now().Add(7 * 24 * time.Hour).Unix()
+	codexDefaultEvent := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":21.0,"window_minutes":10080,"resets_at":%d}}}}`+"\n", futureWeeklyReset)
+	sparkEvent := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex_spark","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":10.5,"window_minutes":300,"resets_at":%d},"secondary":{"used_percent":5.0,"window_minutes":10080,"resets_at":%d},"credits":{"has_credits":true,"unlimited":false,"balance":"$15.00"}}}}`+"\n", futureReset, futureWeeklyReset)
+	_ = os.WriteFile(filepath.Join(nestedDir, "rollout-2026-09-13T13-05-43-test.jsonl"), []byte(codexDefaultEvent+sparkEvent), 0644)
+
+	repNested, err := a.GetUsage(context.Background(), "usage-test", profileDir)
+	if err != nil {
+		t.Fatalf("unexpected error with nested session: %v", err)
+	}
+	if len(repNested.Windows) != 3 {
+		t.Fatalf("expected 3 windows (Codex weekly, Spark 5h, Spark weekly), got %d: %+v", len(repNested.Windows), repNested.Windows)
+	}
+
+	// Verify Codex default weekly window
+	var codexWeekly, spark5h, sparkWeekly *usage.LimitWindow
+	for i := range repNested.Windows {
+		w := &repNested.Windows[i]
+		if w.Category == "Codex" && w.Name == "Weekly Limit" {
+			codexWeekly = w
+		} else if w.Category == "GPT-5.3-Codex-Spark" && w.Name == "5h Limit" {
+			spark5h = w
+		} else if w.Category == "GPT-5.3-Codex-Spark" && w.Name == "Weekly Limit" {
+			sparkWeekly = w
+		}
+	}
+
+	if codexWeekly == nil || codexWeekly.RemainingPct != 79 {
+		t.Errorf("expected Codex weekly remaining 79%%, got %v", codexWeekly)
+	}
+	if spark5h == nil || spark5h.RemainingPct != 90 {
+		t.Errorf("expected Spark 5h remaining 90%%, got %v", spark5h)
+	}
+	if sparkWeekly == nil || sparkWeekly.RemainingPct != 95 {
+		t.Errorf("expected Spark weekly remaining 95%%, got %v", sparkWeekly)
+	}
+	if repNested.Credits != "$15.00" {
+		t.Errorf("expected credits '$15.00', got %q", repNested.Credits)
+	}
+	_ = futureReset
+}

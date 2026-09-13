@@ -14,6 +14,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -166,7 +167,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 					mu.Lock()
 					txt := statusText
 					mu.Unlock()
-					spinner := lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render(spinnerFrames[frameIdx%len(spinnerFrames)])
+					spinner := lipgloss.NewStyle().Foreground(tui.AccentPurple).Render(spinnerFrames[frameIdx%len(spinnerFrames)])
 					fmt.Fprintf(os.Stderr, "\r\033[K%s %s", spinner, txt)
 					frameIdx++
 				}
@@ -222,15 +223,40 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		}
 	}
 
+	has5h := false
+	for _, r := range reports {
+		for i := range r.Windows {
+			if r.Windows[i].IsHourly() {
+				has5h = true
+				break
+			}
+		}
+		if has5h {
+			break
+		}
+	}
+
 	var headers []string
-	if hasAccount && hasCategory {
-		headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-	} else if hasAccount {
-		headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-	} else if hasCategory {
-		headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+	if has5h {
+		if hasAccount && hasCategory {
+			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else if hasAccount {
+			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else if hasCategory {
+			headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else {
+			headers = []string{"AGENT", "PROFILE", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		}
 	} else {
-		headers = []string{"AGENT", "PROFILE", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		if hasAccount && hasCategory {
+			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else if hasAccount {
+			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else if hasCategory {
+			headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		} else {
+			headers = []string{"AGENT", "PROFILE", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
+		}
 	}
 
 	var rows [][]string
@@ -248,14 +274,26 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 
 		if len(r.Windows) == 0 {
 			st := renderCLIStatus(r.Status, useColor)
-			if hasAccount && hasCategory {
-				rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", "—", "—", checked})
-			} else if hasAccount {
-				rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", "—", "—", checked})
-			} else if hasCategory {
-				rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", "—", "—", checked})
+			if has5h {
+				if hasAccount && hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", "—", "—", checked})
+				} else if hasAccount {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", "—", "—", checked})
+				} else if hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", "—", "—", checked})
+				} else {
+					rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", "—", "—", checked})
+				}
 			} else {
-				rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", "—", "—", checked})
+				if hasAccount && hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", checked})
+				} else if hasAccount {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", checked})
+				} else if hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", checked})
+				} else {
+					rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", checked})
+				}
 			}
 			continue
 		}
@@ -302,14 +340,26 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			}
 
 			statusStr := renderCLIStatus(catStatus, useColor)
-			if hasAccount && hasCategory {
-				rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, pStr, pReset, wStr, wReset, checked})
-			} else if hasAccount {
-				rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, pStr, pReset, wStr, wReset, checked})
-			} else if hasCategory {
-				rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, pStr, pReset, wStr, wReset, checked})
+			if has5h {
+				if hasAccount && hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, pStr, pReset, wStr, wReset, checked})
+				} else if hasAccount {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, pStr, pReset, wStr, wReset, checked})
+				} else if hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, pStr, pReset, wStr, wReset, checked})
+				} else {
+					rows = append(rows, []string{r.Agent, r.Profile, statusStr, pStr, pReset, wStr, wReset, checked})
+				}
 			} else {
-				rows = append(rows, []string{r.Agent, r.Profile, statusStr, pStr, pReset, wStr, wReset, checked})
+				if hasAccount && hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, wStr, wReset, checked})
+				} else if hasAccount {
+					rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, wStr, wReset, checked})
+				} else if hasCategory {
+					rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, wStr, wReset, checked})
+				} else {
+					rows = append(rows, []string{r.Agent, r.Profile, statusStr, wStr, wReset, checked})
+				}
 			}
 		}
 	}
@@ -328,8 +378,13 @@ func isTerminal() bool {
 func cleanModelCategory(cat string) string {
 	c := strings.TrimSpace(cat)
 	lower := strings.ToLower(c)
-	if strings.Contains(lower, "claude") {
-		return "Claude & GPT"
+	if strings.Contains(lower, "spark") {
+		return "Codex Spark"
+	}
+	if strings.Contains(lower, "claude") || strings.Contains(lower, "gpt") {
+		if !strings.Contains(lower, "codex") {
+			return "Claude & GPT"
+		}
 	}
 	if strings.Contains(lower, "gemini") {
 		return "Gemini"
@@ -345,11 +400,10 @@ func findCategoryWindows(windows []usage.LimitWindow) (*usage.LimitWindow, *usag
 	var weekly *usage.LimitWindow
 
 	for i := range windows {
-		name := strings.ToLower(windows[i].Name)
-		if primary == nil && (strings.Contains(name, "five") || strings.Contains(name, "5h") || strings.Contains(name, "5 hour") || strings.Contains(name, "5-hour")) {
+		if primary == nil && windows[i].IsHourly() {
 			primary = &windows[i]
 		}
-		if weekly == nil && (strings.Contains(name, "week") || strings.Contains(name, "7d")) {
+		if weekly == nil && windows[i].IsWeekly() {
 			weekly = &windows[i]
 		}
 	}
@@ -380,16 +434,16 @@ func renderCLIBar(pct int, width int, st usage.Status, useColor bool) string {
 	filled := (clamped * width) / 100
 	empty := width - filled
 
-	fillColor := "2" // Green
+	fillColor := tui.StatusGreen
 	if clamped <= 15 {
-		fillColor = "1" // Red
+		fillColor = tui.StatusRed
 	} else if clamped <= 50 {
-		fillColor = "3" // Yellow
+		fillColor = tui.StatusYellow
 	}
 
-	fillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(fillColor))
-	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	bracketStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	fillStyle := lipgloss.NewStyle().Foreground(fillColor)
+	emptyStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
+	bracketStyle := lipgloss.NewStyle().Foreground(tui.TextDim)
 
 	bar := bracketStyle.Render("[") +
 		fillStyle.Render(strings.Repeat("█", filled)) +
@@ -404,16 +458,7 @@ func renderCLIStatus(st usage.Status, useColor bool) string {
 	if !useColor {
 		return str
 	}
-	switch st {
-	case usage.StatusOK:
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2")).Render(str)
-	case usage.StatusWarning:
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3")).Render(str)
-	case usage.StatusCritical, usage.StatusExhausted:
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1")).Render(str)
-	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(str)
-	}
+	return tui.GaugeStyleForStatus(st).Render(str)
 }
 
 func printTable(headers []string, rows [][]string, useColor bool) {
@@ -425,9 +470,9 @@ func printTable(headers []string, rows [][]string, useColor bool) {
 	if useColor {
 		t.StyleFunc(func(row, col int) lipgloss.Style {
 			if row == 0 {
-				return lipgloss.NewStyle().Bold(true)
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 			}
-			return lipgloss.NewStyle()
+			return lipgloss.NewStyle().Foreground(tui.TextPrimary)
 		})
 	}
 	fmt.Println(t.Render())

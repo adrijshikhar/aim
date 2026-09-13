@@ -49,6 +49,14 @@ For Antigravity CLI (`agy`), AIM maintains a unified session cache while isolati
 - **Shared across profiles**: Conversations, brainstorm trajectories (`brain/`), conversation database (`conversation_summaries.db`), and command history (`history.jsonl`) are automatically bridged to `~/.gemini/antigravity-cli/` or `~/.aim/shared/antigravity-cli/`.
 - **Isolated per profile**: `antigravity-oauth-token` is stored strictly inside `~/.aim/profiles/<profile>/.gemini/antigravity-cli/antigravity-oauth-token`.
 
+### OpenAI Codex CLI (`codex`) Architecture
+
+For OpenAI Codex CLI (`codex`), AIM utilizes Codex's native environment virtualization:
+- **`$CODEX_HOME` Redirection**: AIM sets `CODEX_HOME=~/.aim/profiles/<profile>/.codex` and `HOME=~/.aim/profiles/<profile>`.
+- **Pure File-Based Auth**: Unlike tools reliant on OS Keychains, Codex reads and writes its authentication state strictly to `$CODEX_HOME/auth.json` (mode `0600`).
+- **Concurrent Execution**: Because each profile possesses its own isolated SQLite databases (`state_5.sqlite`, `logs_2.sqlite`), session history, and config, multiple profiles can run concurrently in separate terminals without database lock collisions.
+- **Account & Quota Telemetry**: AIM extracts the authenticated user email and ChatGPT plan type (e.g. `ChatGPT Plus`, `ChatGPT Pro`, `ChatGPT Team`) directly from the JWT `id_token` payload claims, and parses session logs for real-time rate limit telemetry.
+
 ---
 
 ## 2. Directory Layout & Configuration
