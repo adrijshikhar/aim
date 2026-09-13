@@ -1069,7 +1069,7 @@ func (m Model) View() string {
 		curProfile := m.profiles[m.cursor]
 		s.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextDim).Render("── Profile Details: "+curProfile+" ──") + "\n")
 		rep, hasReport := m.getReport(curProfile)
-		lblWidth := 14
+		lblStyle := lipgloss.NewStyle().Width(14).Foreground(TextSecondary)
 
 		// Resolve account info from credentials or report
 		var pDir string
@@ -1094,33 +1094,22 @@ func (m Model) View() string {
 			}
 		}
 
-		padAccount := 0
-		if lblWidth > len("Account:") {
-			padAccount = lblWidth - len("Account:")
-		}
-		styledAccount := lipgloss.NewStyle().Foreground(TextSecondary).Render("Account:") + strings.Repeat(" ", padAccount)
-
 		if accountEmail != "" {
 			accountStr := lipgloss.NewStyle().Foreground(AccentCyan).Bold(true).Render(accountEmail)
 			if accountName != "" {
 				accountStr += " " + lipgloss.NewStyle().Foreground(TextMuted).Render("("+accountName+")")
 			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Account:"), accountStr))
 		} else if hasCreds {
 			accountStr := lipgloss.NewStyle().Foreground(TextMuted).Render("active (local credentials)")
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Account:"), accountStr))
 		} else {
 			accountStr := lipgloss.NewStyle().Foreground(TextMuted).Render("[no credentials - press 'l' to log in]")
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAccount, accountStr))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Account:"), accountStr))
 		}
 
 		if authMethod != "" {
-			padAuth := 0
-			if lblWidth > len("Auth:") {
-				padAuth = lblWidth - len("Auth:")
-			}
-			styledAuth := lipgloss.NewStyle().Foreground(TextSecondary).Render("Auth:") + strings.Repeat(" ", padAuth)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledAuth, lipgloss.NewStyle().Foreground(TextDim).Render(authMethod)))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Auth:"), lipgloss.NewStyle().Foreground(TextDim).Render(authMethod)))
 		}
 
 		projectID := accInfo.ProjectID
@@ -1128,37 +1117,22 @@ func (m Model) View() string {
 			projectID = rep.ProjectID
 		}
 		if projectID != "" {
-			padProj := 0
-			if lblWidth > len("Project:") {
-				padProj = lblWidth - len("Project:")
-			}
-			styledProj := lipgloss.NewStyle().Foreground(TextSecondary).Render("Project:") + strings.Repeat(" ", padProj)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledProj, lipgloss.NewStyle().Foreground(TextDim).Render(projectID)))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Project:"), lipgloss.NewStyle().Foreground(TextDim).Render(projectID)))
 		}
 
 		if m.cfg != nil {
 			agentsList := m.cfg.GetProfileAgents(curProfile)
 			if len(agentsList) > 1 {
-				padAgents := 0
-				if lblWidth > len("Agents:") {
-					padAgents = lblWidth - len("Agents:")
-				}
-				styledAgents := lipgloss.NewStyle().Foreground(TextSecondary).Render("Agents:") + strings.Repeat(" ", padAgents)
-				s.WriteString(fmt.Sprintf("    %s %s\n", styledAgents, lipgloss.NewStyle().Foreground(TextDim).Render(strings.Join(agentsList, ", "))))
+				s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Agents:"), lipgloss.NewStyle().Foreground(TextDim).Render(strings.Join(agentsList, ", "))))
 			}
 		}
 
 		if hasReport && rep.Error != "" {
-			padStatus := 0
-			if lblWidth > len("Status:") {
-				padStatus = lblWidth - len("Status:")
-			}
-			styledStatus := lipgloss.NewStyle().Foreground(TextSecondary).Render("Status:") + strings.Repeat(" ", padStatus)
 			statusMsg := rep.Summary
 			if statusMsg == "" {
 				statusMsg = rep.Error
 			}
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledStatus, lipgloss.NewStyle().Foreground(StatusYellow).Render(statusMsg)))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Status:"), lipgloss.NewStyle().Foreground(StatusYellow).Render(statusMsg)))
 		}
 
 		if hasReport {
@@ -1233,13 +1207,7 @@ func (m Model) View() string {
 						lineContent = strings.Join(parts, "   ")
 					}
 
-					lbl := modelShort + ":"
-					pad := 0
-					if len(lbl) < lblWidth {
-						pad = lblWidth - len(lbl)
-					}
-					styledLbl := lipgloss.NewStyle().Foreground(TextSecondary).Render(lbl) + strings.Repeat(" ", pad)
-					s.WriteString(fmt.Sprintf("    %s %s\n", styledLbl, lineContent))
+					s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render(modelShort+":"), lineContent))
 				}
 			} else if len(rep.Windows) > 0 {
 				for _, w := range rep.Windows {
@@ -1251,13 +1219,7 @@ func (m Model) View() string {
 						resetInfo = lipgloss.NewStyle().Foreground(TextMuted).Render(fmt.Sprintf(" (resets in %s)", usage.FormatDuration(w.ResetsIn)))
 					}
 					primaryStr := fmt.Sprintf("%s %s%s", gaugeStyle.Render(bar), gaugeStyle.Render(fmt.Sprintf("%d%%", w.RemainingPct)), resetInfo)
-					lbl := w.Name + ":"
-					pad := 0
-					if len(lbl) < lblWidth {
-						pad = lblWidth - len(lbl)
-					}
-					styledLbl := lipgloss.NewStyle().Foreground(TextSecondary).Render(lbl) + strings.Repeat(" ", pad)
-					s.WriteString(fmt.Sprintf("    %s %s\n", styledLbl, primaryStr))
+					s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render(w.Name+":"), primaryStr))
 				}
 			}
 
@@ -1274,24 +1236,14 @@ func (m Model) View() string {
 			if !soonestReset.IsZero() {
 				resetsAtStr = soonestReset.Local().Format("2006-01-02 15:04:05")
 			}
-			padResets := 0
-			if len("Resets At:") < lblWidth {
-				padResets = lblWidth - len("Resets At:")
-			}
-			styledResets := lipgloss.NewStyle().Foreground(TextSecondary).Render("Resets At:") + strings.Repeat(" ", padResets)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledResets, lipgloss.NewStyle().Foreground(TextMuted).Render(resetsAtStr)))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Resets At:"), lipgloss.NewStyle().Foreground(TextMuted).Render(resetsAtStr)))
 
 			// Credits
 			creditsStr := "0"
 			if rep.Credits != "" {
 				creditsStr = rep.Credits
 			}
-			padCredits := 0
-			if len("Credits:") < lblWidth {
-				padCredits = lblWidth - len("Credits:")
-			}
-			styledCredits := lipgloss.NewStyle().Foreground(TextSecondary).Render("Credits:") + strings.Repeat(" ", padCredits)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledCredits, creditsStr))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Credits:"), creditsStr))
 
 			// Refreshed
 			refreshedStr := "just now"
@@ -1301,12 +1253,7 @@ func (m Model) View() string {
 					refreshedStr = usage.FormatDuration(age) + " ago"
 				}
 			}
-			padRefreshed := 0
-			if len("Refreshed:") < lblWidth {
-				padRefreshed = lblWidth - len("Refreshed:")
-			}
-			styledRefreshed := lipgloss.NewStyle().Foreground(TextSecondary).Render("Refreshed:") + strings.Repeat(" ", padRefreshed)
-			s.WriteString(fmt.Sprintf("    %s %s\n", styledRefreshed, lipgloss.NewStyle().Foreground(TextMuted).Render(refreshedStr)))
+			s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Refreshed:"), lipgloss.NewStyle().Foreground(TextMuted).Render(refreshedStr)))
 		} else if m.loading {
 			s.WriteString("    " + lipgloss.NewStyle().Foreground(TextMuted).Render("(fetching quota...)") + "\n")
 		} else {
