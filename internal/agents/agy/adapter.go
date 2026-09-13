@@ -417,6 +417,52 @@ func bridgeSharedState(realHome, profileDir string) error {
 	sHist := filepath.Join(sharedDir, "history.jsonl")
 	bridgeFile(pHist, sHist)
 
+	// 5. plugin_data (plugin runtime cache & storage)
+	pPluginData := filepath.Join(tokenDir, "plugin_data")
+	sPluginData := filepath.Join(sharedDir, "plugin_data")
+	_ = os.MkdirAll(sPluginData, 0755)
+	bridgeDir(pPluginData, sPluginData)
+
+	// 6. Gemini config directory (plugins, import_manifest.json, hooks, settings)
+	var sharedConfigDir string
+	realConfigDir := filepath.Join(realHome, ".gemini", "config")
+	if _, err := os.Stat(realConfigDir); err == nil {
+		sharedConfigDir = realConfigDir
+	} else {
+		sharedConfigDir = filepath.Join(config.BaseDir(), "shared", "gemini-config")
+	}
+	_ = os.MkdirAll(sharedConfigDir, 0755)
+
+	profileConfigDir := filepath.Join(profileDir, ".gemini", "config")
+	_ = os.MkdirAll(profileConfigDir, 0755)
+
+	// 6a. plugins directory
+	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "plugins"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "plugins"), filepath.Join(sharedConfigDir, "plugins"))
+
+	// 6b. import_manifest.json
+	bridgeFile(filepath.Join(profileConfigDir, "import_manifest.json"), filepath.Join(sharedConfigDir, "import_manifest.json"))
+
+	// 6c. hooks.json & hooks directory
+	bridgeFile(filepath.Join(profileConfigDir, "hooks.json"), filepath.Join(sharedConfigDir, "hooks.json"))
+	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "hooks"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "hooks"), filepath.Join(sharedConfigDir, "hooks"))
+
+	// 6d. config.json & mcp_config.json
+	bridgeFile(filepath.Join(profileConfigDir, "config.json"), filepath.Join(sharedConfigDir, "config.json"))
+	bridgeFile(filepath.Join(profileConfigDir, "mcp_config.json"), filepath.Join(sharedConfigDir, "mcp_config.json"))
+
+	// 6e. projects
+	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "projects"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "projects"), filepath.Join(sharedConfigDir, "projects"))
+
+	// 6f. skills symlink in .gemini/config
+	sSkills := filepath.Join(realHome, ".agents", "skills")
+	if _, sErr := os.Stat(sSkills); sErr == nil {
+		pSkills := filepath.Join(profileConfigDir, "skills")
+		bridgeDir(pSkills, sSkills)
+	}
+
 	return nil
 }
 
@@ -429,6 +475,12 @@ func bridgeDir(profilePath, sharedPath string) {
 		return
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
+		target, rErr := os.Readlink(profilePath)
+		if rErr == nil && target == sharedPath {
+			return
+		}
+		_ = os.Remove(profilePath)
+		_ = os.Symlink(sharedPath, profilePath)
 		return
 	}
 	// Migrate existing items to sharedPath
@@ -471,13 +523,23 @@ func bridgeFile(profileFile, sharedFile string) {
 		return
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
+		target, rErr := os.Readlink(profileFile)
+		if rErr == nil && target == sharedFile {
+			return
+		}
+		_ = os.Remove(profileFile)
+		if _, sErr := os.Stat(sharedFile); sErr == nil {
+			_ = os.Symlink(sharedFile, profileFile)
+		}
 		return
 	}
 	if _, sErr := os.Stat(sharedFile); os.IsNotExist(sErr) {
 		_ = copySingleFile(profileFile, sharedFile)
 	}
 	_ = os.Remove(profileFile)
-	_ = os.Symlink(sharedFile, profileFile)
+	if _, sErr := os.Stat(sharedFile); sErr == nil {
+		_ = os.Symlink(sharedFile, profileFile)
+	}
 }
 
 func copySingleFile(src, dst string) error {

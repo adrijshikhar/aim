@@ -702,3 +702,110 @@ func TestAgy_MultiCategoryReportSummary(t *testing.T) {
 		t.Errorf("expected multi-category summary with Gemini and Claude, got: %q", rep.Summary)
 	}
 }
+
+func TestAgyBridgeSharedState_PluginsAndConfig(t *testing.T) {
+	fakeRealHome := t.TempDir()
+
+	// 1. Setup host plugins, manifest, hooks, config, and skills
+	hostConfigDir := filepath.Join(fakeRealHome, ".gemini", "config")
+	_ = os.MkdirAll(filepath.Join(hostConfigDir, "plugins", "scardlist"), 0755)
+	_ = os.WriteFile(filepath.Join(hostConfigDir, "plugins", "scardlist", "plugin.json"), []byte(`{"name":"scardlist"}`), 0644)
+	_ = os.WriteFile(filepath.Join(hostConfigDir, "import_manifest.json"), []byte(`{"imports":[{"name":"scardlist"}]}`), 0644)
+	_ = os.WriteFile(filepath.Join(hostConfigDir, "hooks.json"), []byte(`{"hooks":{}}`), 0644)
+	_ = os.MkdirAll(filepath.Join(hostConfigDir, "hooks"), 0755)
+	_ = os.WriteFile(filepath.Join(hostConfigDir, "hooks", "hook.sh"), []byte("#!/bin/sh"), 0755)
+	_ = os.WriteFile(filepath.Join(hostConfigDir, "config.json"), []byte(`{"theme":"dark"}`), 0644)
+	_ = os.WriteFile(filepath.Join(hostConfigDir, "mcp_config.json"), []byte(`{"mcpServers":{}}`), 0644)
+	_ = os.MkdirAll(filepath.Join(hostConfigDir, "projects"), 0755)
+	_ = os.WriteFile(filepath.Join(hostConfigDir, "projects", "p1.json"), []byte(`{"id":"p1"}`), 0644)
+
+	hostAgyDir := filepath.Join(fakeRealHome, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(filepath.Join(hostAgyDir, "plugin_data", "scardlist"), 0755)
+	_ = os.WriteFile(filepath.Join(hostAgyDir, "plugin_data", "scardlist", "data.db"), []byte("plugin-db"), 0644)
+
+	hostSkillsDir := filepath.Join(fakeRealHome, ".agents", "skills")
+	_ = os.MkdirAll(hostSkillsDir, 0755)
+	_ = os.WriteFile(filepath.Join(hostSkillsDir, "skill.md"), []byte("# Skill"), 0644)
+
+	// 2. Setup profile directory with isolated token
+	profileDir := t.TempDir()
+	tokenDir := filepath.Join(profileDir, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(tokenDir, 0700)
+	tokenFile := filepath.Join(tokenDir, "antigravity-oauth-token")
+	_ = os.WriteFile(tokenFile, []byte("profile-secret-token"), 0600)
+
+	// Pre-create a legacy 0-byte mcp_config.json in profile config to test cleanup/migration
+	profConfigDir := filepath.Join(profileDir, ".gemini", "config")
+	_ = os.MkdirAll(profConfigDir, 0755)
+	_ = os.WriteFile(filepath.Join(profConfigDir, "mcp_config.json"), []byte{}, 0644)
+
+	// 3. Execute bridgeSharedState
+	if err := bridgeSharedState(fakeRealHome, profileDir); err != nil {
+		t.Fatalf("bridgeSharedState failed: %v", err)
+	}
+
+	// 4. Verify plugins directory symlink
+	pPlugins := filepath.Join(profConfigDir, "plugins")
+	if fi, err := os.Lstat(pPlugins); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile plugins to be a symlink")
+	}
+	content, err := os.ReadFile(filepath.Join(pPlugins, "scardlist", "plugin.json"))
+	if err != nil || !strings.Contains(string(content), "scardlist") {
+		t.Errorf("expected plugin.json to be accessible through symlink, got err: %v, content: %s", err, string(content))
+	}
+
+	// 5. Verify import_manifest.json symlink
+	pManifest := filepath.Join(profConfigDir, "import_manifest.json")
+	if fi, err := os.Lstat(pManifest); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile import_manifest.json to be a symlink")
+	}
+
+	// 6. Verify hooks and hooks.json symlinks
+	pHooksFile := filepath.Join(profConfigDir, "hooks.json")
+	if fi, err := os.Lstat(pHooksFile); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile hooks.json to be a symlink")
+	}
+	pHooksDir := filepath.Join(profConfigDir, "hooks")
+	if fi, err := os.Lstat(pHooksDir); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile hooks dir to be a symlink")
+	}
+
+	// 7. Verify config.json and mcp_config.json symlinks
+	pConfig := filepath.Join(profConfigDir, "config.json")
+	if fi, err := os.Lstat(pConfig); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile config.json to be a symlink")
+	}
+	pMcp := filepath.Join(profConfigDir, "mcp_config.json")
+	if fi, err := os.Lstat(pMcp); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile mcp_config.json to be a symlink")
+	}
+
+	// 8. Verify projects and skills symlinks
+	pProjects := filepath.Join(profConfigDir, "projects")
+	if fi, err := os.Lstat(pProjects); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile projects to be a symlink")
+	}
+	pSkills := filepath.Join(profConfigDir, "skills")
+	if fi, err := os.Lstat(pSkills); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile skills to be a symlink")
+	}
+
+	// 9. Verify plugin_data in tokenDir
+	pPluginData := filepath.Join(tokenDir, "plugin_data")
+	if fi, err := os.Lstat(pPluginData); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected profile plugin_data to be a symlink")
+	}
+
+	// 10. CRITICAL SECURITY ASSERTION: Token must remain a regular file (NOT a symlink)
+	fiToken, err := os.Lstat(tokenFile)
+	if err != nil {
+		t.Fatalf("expected token file to exist: %v", err)
+	}
+	if fiToken.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("SECURITY VIOLATION: profile token must NEVER be converted to a symlink")
+	}
+	tokenBytes, err := os.ReadFile(tokenFile)
+	if err != nil || string(tokenBytes) != "profile-secret-token" {
+		t.Errorf("expected profile token to remain intact, got %q", string(tokenBytes))
+	}
+}

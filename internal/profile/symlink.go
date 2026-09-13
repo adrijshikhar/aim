@@ -44,6 +44,9 @@ var defaultBridgedPaths = []string{
 	".aws",
 	".config/gcloud",
 	".kube",
+
+	// AI Agent Skills & Instructions
+	".agents",
 }
 
 // bridgedDotfiles provides backwards compatibility with existing references.
