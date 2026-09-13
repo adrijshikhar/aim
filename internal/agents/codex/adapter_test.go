@@ -164,4 +164,50 @@ func TestCodexAdapter_GetUsage(t *testing.T) {
 	if repWithAuth.AuthMethod != "ChatGPT Pro" {
 		t.Errorf("expected AuthMethod 'ChatGPT Pro', got %q", repWithAuth.AuthMethod)
 	}
+	if len(repWithAuth.Windows) == 0 {
+		t.Errorf("expected windows to be populated, got 0")
+	} else {
+		pw := repWithAuth.PrimaryWindow()
+		if pw == nil {
+			t.Errorf("expected PrimaryWindow not to be nil")
+		} else if pw.RemainingPct != 75 {
+			t.Errorf("expected primary remaining 75%%, got %d%%", pw.RemainingPct)
+		}
+	}
+
+	// Test real nested date-partitioned session rollout structure:
+	// sessions/YYYY/MM/DD/rollout-*.jsonl with payload.rate_limits
+	nestedDir := filepath.Join(sessionsDir, "2026", "09", "13")
+	_ = os.MkdirAll(nestedDir, 0755)
+	futureReset := 1789316216
+	realCodexEvent := `{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex_spark","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":10.5,"window_minutes":300,"resets_at":` +
+		"1789316216" + `},"secondary":{"used_percent":5.0,"window_minutes":10080,"resets_at":` +
+		"1789903016" + `},"credits":{"has_credits":true,"unlimited":false,"balance":"$15.00"}}}}` + "\n"
+	_ = os.WriteFile(filepath.Join(nestedDir, "rollout-2026-09-13T13-05-43-test.jsonl"), []byte(realCodexEvent), 0644)
+
+	repNested, err := a.GetUsage(context.Background(), "usage-test", profileDir)
+	if err != nil {
+		t.Fatalf("unexpected error with nested session: %v", err)
+	}
+	if len(repNested.Windows) != 2 {
+		t.Fatalf("expected 2 windows (primary and secondary), got %d", len(repNested.Windows))
+	}
+	pw := repNested.PrimaryWindow()
+	if pw == nil {
+		t.Fatalf("expected primary window, got nil")
+	}
+	if pw.RemainingPct != 90 { // 100 - round(10.5) = 100 - 10 = 90
+		t.Errorf("expected primary remaining 90%%, got %d%%", pw.RemainingPct)
+	}
+	ww := repNested.WeeklyWindow()
+	if ww == nil {
+		t.Fatalf("expected weekly window, got nil")
+	}
+	if ww.RemainingPct != 95 { // 100 - round(5.0) = 95
+		t.Errorf("expected weekly remaining 95%%, got %d%%", ww.RemainingPct)
+	}
+	if repNested.Credits != "$15.00" {
+		t.Errorf("expected credits '$15.00', got %q", repNested.Credits)
+	}
+	_ = futureReset
 }

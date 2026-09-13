@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -300,6 +302,36 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 	return results
 }
 
+type codexRateLimitWindow struct {
+	UsedPercent   float64 `json:"used_percent"`
+	WindowMinutes int     `json:"window_minutes"`
+	ResetsAt      int64   `json:"resets_at"`
+}
+
+type codexCredits struct {
+	HasCredits bool   `json:"has_credits"`
+	Unlimited  bool   `json:"unlimited"`
+	Balance    string `json:"balance"`
+}
+
+type codexRateLimits struct {
+	LimitID   string                `json:"limit_id"`
+	LimitName string                `json:"limit_name"`
+	Primary   *codexRateLimitWindow `json:"primary"`
+	Secondary *codexRateLimitWindow `json:"secondary"`
+	Credits   *codexCredits         `json:"credits"`
+}
+
+type codexSessionEvent struct {
+	Type    string `json:"type"`
+	Payload struct {
+		Type       string           `json:"type"`
+		RateLimits *codexRateLimits `json:"rate_limits"`
+	} `json:"payload"`
+	RateLimits      *codexRateLimits `json:"rate_limits"`
+	RateLimitsCamel *codexRateLimits `json:"rateLimits"`
+}
+
 func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
 	if !a.HasCredentials(profileDir) {
 		return &usage.Report{
@@ -317,16 +349,121 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		summary = accInfo.AuthMethod
 	}
 
-	sessionsDir := filepath.Join(profileDir, ".codex", "sessions")
-	sessionSummary := parseLatestSessionRateLimits(sessionsDir)
-	if sessionSummary != "" {
-		summary += " • " + sessionSummary
+	rl := getLatestCodexRateLimits(profileName, profileDir)
+	var windows []usage.LimitWindow
+	var credits string
+
+	if rl != nil {
+		cat := rl.LimitName
+		if cat == "" {
+			cat = "Codex"
+		}
+
+		if rl.Primary != nil {
+			var resetsAt time.Time
+			var resetsIn time.Duration
+			if rl.Primary.ResetsAt > 0 {
+				resetsAt = time.Unix(rl.Primary.ResetsAt, 0)
+				resetsIn = time.Until(resetsAt)
+				if resetsIn < 0 {
+					resetsIn = 0
+				}
+			}
+			remaining := int(math.Round(100.0 - rl.Primary.UsedPercent))
+			if remaining < 0 {
+				remaining = 0
+			} else if remaining > 100 {
+				remaining = 100
+			}
+			if !resetsAt.IsZero() && time.Now().After(resetsAt) {
+				remaining = 100
+				resetsIn = 0
+			}
+
+			name := "5h (Primary)"
+			if rl.Primary.WindowMinutes > 0 {
+				wm := formatWindowMinutes(rl.Primary.WindowMinutes)
+				if strings.Contains(strings.ToLower(wm), "5h") {
+					name = "5h (Primary)"
+				} else {
+					name = fmt.Sprintf("%s (Primary)", wm)
+				}
+			}
+
+			windows = append(windows, usage.LimitWindow{
+				Category:     cat,
+				Name:         name,
+				RemainingPct: remaining,
+				ResetsAt:     resetsAt,
+				ResetsIn:     resetsIn,
+			})
+		}
+
+		if rl.Secondary != nil {
+			var resetsAt time.Time
+			var resetsIn time.Duration
+			if rl.Secondary.ResetsAt > 0 {
+				resetsAt = time.Unix(rl.Secondary.ResetsAt, 0)
+				resetsIn = time.Until(resetsAt)
+				if resetsIn < 0 {
+					resetsIn = 0
+				}
+			}
+			remaining := int(math.Round(100.0 - rl.Secondary.UsedPercent))
+			if remaining < 0 {
+				remaining = 0
+			} else if remaining > 100 {
+				remaining = 100
+			}
+			if !resetsAt.IsZero() && time.Now().After(resetsAt) {
+				remaining = 100
+				resetsIn = 0
+			}
+
+			name := "Weekly (Secondary)"
+			if rl.Secondary.WindowMinutes > 0 {
+				wm := formatWindowMinutes(rl.Secondary.WindowMinutes)
+				if strings.Contains(strings.ToLower(wm), "week") || strings.Contains(strings.ToLower(wm), "7d") {
+					name = "Weekly (Secondary)"
+				} else {
+					name = fmt.Sprintf("%s (Secondary)", wm)
+				}
+			}
+
+			windows = append(windows, usage.LimitWindow{
+				Category:     cat,
+				Name:         name,
+				RemainingPct: remaining,
+				ResetsAt:     resetsAt,
+				ResetsIn:     resetsIn,
+			})
+		}
+
+		if rl.Credits != nil {
+			if rl.Credits.Unlimited {
+				credits = "Unlimited"
+			} else if rl.Credits.Balance != "" {
+				credits = rl.Credits.Balance
+			}
+		}
+	}
+
+	status := usage.StatusOK
+	if len(windows) > 0 {
+		status = usage.CalculateStatus(windows)
+		var parts []string
+		for _, w := range windows {
+			parts = append(parts, fmt.Sprintf("%s: %d%%", w.Name, w.RemainingPct))
+		}
+		summary += " • " + strings.Join(parts, ", ")
 	}
 
 	return &usage.Report{
 		Agent:        a.Name(),
 		Profile:      profileName,
-		Status:       usage.StatusOK,
+		Status:       status,
+		Windows:      windows,
+		Credits:      credits,
 		AccountEmail: accInfo.Email,
 		AccountName:  accInfo.Name,
 		AuthMethod:   accInfo.AuthMethod,
@@ -335,61 +472,110 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 	}, nil
 }
 
-func parseLatestSessionRateLimits(sessionsDir string) string {
-	entries, err := os.ReadDir(sessionsDir)
-	if err != nil || len(entries) == 0 {
+func formatWindowMinutes(minutes int) string {
+	if minutes <= 0 {
 		return ""
 	}
-
-	// Find the newest session jsonl file
-	var latestFile string
-	var latestMod time.Time
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
+	if minutes%(60*24) == 0 {
+		days := minutes / (60 * 24)
+		if days == 7 {
+			return "Weekly"
 		}
-		info, err := e.Info()
+		return fmt.Sprintf("%dd", days)
+	}
+	if minutes%60 == 0 {
+		return fmt.Sprintf("%dh", minutes/60)
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
+
+type sessionFileInfo struct {
+	path    string
+	modTime time.Time
+}
+
+func findRecentSessionFiles(dir string) []sessionFileInfo {
+	var files []sessionFileInfo
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return nil
+	}
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			continue
+			return nil
 		}
-		if info.ModTime().After(latestMod) {
-			latestMod = info.ModTime()
-			latestFile = filepath.Join(sessionsDir, e.Name())
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".jsonl") {
+			info, err := d.Info()
+			if err == nil {
+				files = append(files, sessionFileInfo{
+					path:    path,
+					modTime: info.ModTime(),
+				})
+			}
 		}
-	}
+		return nil
+	})
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].modTime.After(files[j].modTime)
+	})
+	return files
+}
 
-	if latestFile == "" {
-		return ""
-	}
-
-	f, err := os.Open(latestFile)
+func parseSessionFileRateLimits(filePath string) *codexRateLimits {
+	f, err := os.Open(filePath)
 	if err != nil {
-		return ""
+		return nil
 	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 64*1024)
 	scanner.Buffer(buf, 10*1024*1024)
-	var lastRateLimitSummary string
+	var latest *codexRateLimits
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		var msg struct {
-			RateLimits struct {
-				Primary struct {
-					UsedPercent int `json:"used_percent"`
-				} `json:"primary"`
-			} `json:"rateLimits"`
+		if !strings.Contains(string(line), "rate_limits") && !strings.Contains(string(line), "rateLimits") {
+			continue
 		}
+		var msg codexSessionEvent
 		if err := json.Unmarshal(line, &msg); err == nil {
-			if msg.RateLimits.Primary.UsedPercent > 0 {
-				lastRateLimitSummary = fmt.Sprintf("%d%% rate limit used", msg.RateLimits.Primary.UsedPercent)
+			rl := msg.Payload.RateLimits
+			if rl == nil {
+				rl = msg.RateLimits
+			}
+			if rl == nil {
+				rl = msg.RateLimitsCamel
+			}
+			if rl != nil {
+				latest = rl
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		logger.Debug("[codex] scanner error reading session file %s: %v", latestFile, err)
+		logger.Debug("[codex] scanner error reading session file %s: %v", filePath, err)
+	}
+	return latest
+}
+
+func getLatestCodexRateLimits(profileName, profileDir string) *codexRateLimits {
+	// 1. Check profileDir/.codex/sessions
+	profileSessionsDir := filepath.Join(profileDir, ".codex", "sessions")
+	files := findRecentSessionFiles(profileSessionsDir)
+
+	// 2. If no session files found in profile, and profile is eligible for seeding (e.g. primary profile),
+	// fall back to host ~/.codex/sessions
+	if len(files) == 0 && isProfileEligibleForSeeding(profileName) {
+		hostSessionsDir := filepath.Join(config.RealHomeDir(), ".codex", "sessions")
+		files = findRecentSessionFiles(hostSessionsDir)
 	}
 
-	return lastRateLimitSummary
+	maxCheck := 5
+	if len(files) < maxCheck {
+		maxCheck = len(files)
+	}
+	for i := 0; i < maxCheck; i++ {
+		if rl := parseSessionFileRateLimits(files[i].path); rl != nil {
+			return rl
+		}
+	}
+	return nil
 }
