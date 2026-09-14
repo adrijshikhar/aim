@@ -1,16 +1,12 @@
-```text
-    _    ___ __  __ 
-   / \  |_ _|  \/  |
-  / _ \  | || |\/| |   https://github.com/adrijshikhar/aim
- / ___ \ | || |  | |   AIM — AI Multiplexer
-/_/   \_\___|_|  |_|
-```
-
 # aim — AI Multiplexer
 
 `aim` is a lightweight CLI and TUI for multiplexing multiple AI coding assistants (Antigravity, Gemini, Claude Code, Codex…) under fully isolated profiles with real-time quota telemetry.
 
 Each profile gets its own sandboxed virtual home directory — separate credentials, history, and state — so you can switch between `work` and `personal` accounts seamlessly.
+
+<p align="center">
+  <img src="assets/tui-dashboard.png" alt="aim TUI Dashboard" width="850" />
+</p>
 
 ```bash
 aim                      # open the interactive TUI dashboard
@@ -102,6 +98,22 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim completion <shell>` | Generate shell completions (`zsh`, `bash`, `fish`) |
 | `aim --debug <command>` | Run any command with verbose debug tracing |
 
+### Active & Recent Sessions Tracking
+
+Track active terminal sessions and recent conversations across profiles and host with `aim sessions`:
+
+<p align="center">
+  <img src="assets/cli-sessions.png" alt="aim sessions CLI Output" width="850" />
+</p>
+
+### Real-Time Multi-Agent Quota Telemetry
+
+Inspect quota limits, live capacity gauges, reset countdowns, and status warnings across all accounts and models with `aim usage`:
+
+<p align="center">
+  <img src="assets/cli-usage.png" alt="aim usage Telemetry Table" width="850" />
+</p>
+
 ---
 
 ## TUI Keybindings
@@ -127,9 +139,13 @@ When running `aim`, navigate using the following shortcuts:
 
 ---
 
-## Context Handoffs with Catalyst
+## Session Resumption & Context Handoffs with Catalyst
 
-`aim` integrates with **[Catalyst](https://github.com/adrijshikhar/catalyst)** for structured, token-efficient context handoffs across profiles and sessions:
+`aim` tracks active and past sessions across isolated profiles and the host environment (`aim sessions` or press `s` in the TUI). It integrates with **[Catalyst](https://github.com/adrijshikhar/catalyst)** for structured, token-efficient context handoffs across profiles and sessions:
+
+<p align="center">
+  <img src="assets/tui-sessions.png" alt="aim Sessions Explorer Drawer" width="850" />
+</p>
 
 - **Exact Resume (`Enter` / `--exact`)**: Reopens the session with its full verbatim conversation history intact.
 - **Catalyst Handoff (`c` / `--catalyst`)**: Distills the session's goal, key decisions, and notes into a structured Handoff Brief (`.catalyst/handoffs/<branch>.json`). When resuming work on another profile or agent, AIM ingests this brief to continue work with a fresh context window without token bloat.
