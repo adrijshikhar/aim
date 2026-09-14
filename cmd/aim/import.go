@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/profile"
@@ -80,10 +81,13 @@ Flags:
 				}
 
 				count := 0
+				var failed []string
 				for _, s := range hostSessions {
 					sessCopy := s
 					if _, err := prov.Hydrate(ctx, &sessCopy, targetProfileDir, forkFlag); err == nil {
 						count++
+					} else {
+						failed = append(failed, fmt.Sprintf("%s (%v)", s.ShortID, err))
 					}
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s Successfully imported %d host session(s) into profile %q.\n",
@@ -91,6 +95,14 @@ Flags:
 					count,
 					targetProfile,
 				)
+				if len(failed) > 0 {
+					yellowStyle := lipgloss.NewStyle().Foreground(tui.StatusYellow)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s Warning: %d session(s) failed to import: %s\n",
+						yellowStyle.Render("!"),
+						len(failed),
+						strings.Join(failed, ", "),
+					)
+				}
 				return nil
 			}
 

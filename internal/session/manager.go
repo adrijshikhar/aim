@@ -160,6 +160,59 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 		return nil, fmt.Errorf("session ID or prefix cannot be empty")
 	}
 
+	// Fast-path: query registered provider directly via GetSession if agent is specified
+	if agent != "" {
+		if p, ok := m.providers[agent]; ok {
+			var matches []Session
+			profilesDir := filepath.Join(config.BaseDir(), "profiles")
+			entries, _ := os.ReadDir(profilesDir)
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				profDir := filepath.Join(profilesDir, entry.Name())
+				if s, err := p.GetSession(ctx, idOrPrefix, profDir, false); err == nil && s != nil {
+					s.Profile = entry.Name()
+					s.IsHost = false
+					matches = append(matches, *s)
+				}
+			}
+			hostDir := config.RealHomeDir()
+			if s, err := p.GetSession(ctx, idOrPrefix, hostDir, true); err == nil && s != nil {
+				s.Profile = "<host>"
+				s.IsHost = true
+				matches = append(matches, *s)
+			}
+
+			if len(matches) > 0 {
+				uniqueMap := make(map[string]Session)
+				for _, match := range matches {
+					uniqueMap[match.ID] = match
+				}
+				if len(uniqueMap) > 1 {
+					var ids []string
+					for id := range uniqueMap {
+						ids = append(ids, id)
+					}
+					return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", idOrPrefix, strings.Join(ids, ", "))
+				}
+				for _, s := range uniqueMap {
+					res := s
+					if m.scanner != nil {
+						if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
+							if active, ok := procs[res.ID]; ok {
+								res.Status = StatusActive
+								res.PID = active.PID
+							}
+						}
+					}
+					return &res, nil
+				}
+			}
+		}
+	}
+
+	// Fallback to broad scan via ListSessions
 	sessions, err := m.ListSessions(ctx, agent, "", false)
 	if err != nil {
 		return nil, err

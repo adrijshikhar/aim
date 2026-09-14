@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aim-cli/aim/internal/logger"
 )
 
 var (
@@ -45,6 +47,8 @@ func (s *DefaultProcessScanner) ScanActiveProcesses(ctx context.Context) (map[st
 func ParseProcessOutput(r io.Reader) map[string]ActiveProcessInfo {
 	result := make(map[string]ActiveProcessInfo)
 	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -106,6 +110,9 @@ func ParseProcessOutput(r io.Reader) map[string]ActiveProcessInfo {
 			}
 			continue
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Debug("[session/process] scanner error parsing process output: %v", err)
 	}
 
 	return result

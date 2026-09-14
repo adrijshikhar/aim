@@ -143,7 +143,13 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
 			m.selectedSession = &target
-			m.selected = target.Profile
+			if m.selected == "" || m.selected == "<host>" {
+				if target.Profile != "" && target.Profile != "<host>" {
+					m.selected = target.Profile
+				} else {
+					m.selected = "default"
+				}
+			}
 			m.outcome = ActionResumeExact
 			m.cancelStream()
 			return m, tea.Quit
@@ -153,7 +159,13 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
 			m.selectedSession = &target
-			m.selected = target.Profile
+			if m.selected == "" || m.selected == "<host>" {
+				if target.Profile != "" && target.Profile != "<host>" {
+					m.selected = target.Profile
+				} else {
+					m.selected = "default"
+				}
+			}
 			m.outcome = ActionResumeCatalyst
 			m.cancelStream()
 			return m, tea.Quit
@@ -163,7 +175,13 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
 			m.selectedSession = &target
-			m.selected = target.Profile
+			if m.selected == "" || m.selected == "<host>" {
+				if target.Profile != "" && target.Profile != "<host>" {
+					m.selected = target.Profile
+				} else {
+					m.selected = "default"
+				}
+			}
 			m.sessionsDrawer.fork = true
 			m.outcome = ActionResumeExact
 			m.cancelStream()

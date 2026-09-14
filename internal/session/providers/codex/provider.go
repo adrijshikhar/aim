@@ -222,13 +222,15 @@ CREATE TABLE IF NOT EXISTS threads (
 );`
 		_ = exec.CommandContext(ctx, p.sqliteBin, targetDB, schema).Run()
 
+		escapedID := strings.ReplaceAll(srcSession.ID, "'", "''")
+		escapedPath := strings.ReplaceAll(targetRolloutPath, "'", "''")
 		escapedTitle := strings.ReplaceAll(srcSession.Title, "'", "''")
 		escapedPreview := strings.ReplaceAll(srcSession.Summary, "'", "''")
 		unixNow := time.Now().Unix()
 
 		insertQuery := fmt.Sprintf(
 			"INSERT OR REPLACE INTO threads (id, rollout_path, created_at, updated_at, title, preview) VALUES ('%s', '%s', %d, %d, '%s', '%s');",
-			srcSession.ID, targetRolloutPath, unixNow, unixNow, escapedTitle, escapedPreview,
+			escapedID, escapedPath, unixNow, unixNow, escapedTitle, escapedPreview,
 		)
 		if err := exec.CommandContext(ctx, p.sqliteBin, targetDB, insertQuery).Run(); err != nil {
 			logger.Debug("[session/codex] failed to insert thread into %s: %v", targetDB, err)
@@ -238,7 +240,7 @@ CREATE TABLE IF NOT EXISTS threads (
 	return srcSession.ID, nil
 }
 
-func copyFile(src, dst string) error {
+func copyFile(src, dst string) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -249,8 +251,14 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() {
+		if closeErr := out.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
 }

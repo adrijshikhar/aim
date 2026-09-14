@@ -116,7 +116,8 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 		return nil, nil
 	}
 
-	query := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries WHERE conversation_id LIKE '%s%%' LIMIT 2;", idOrPrefix)
+	escapedPrefix := strings.ReplaceAll(idOrPrefix, "'", "''")
+	query := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries WHERE conversation_id LIKE '%s%%' LIMIT 2;", escapedPrefix)
 	cmd := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||", query)
 	out, err := cmd.Output()
 	if err != nil {
