@@ -47,6 +47,7 @@ Primary Commands:
   shell <agent> <profile>    Launch subshell with profile environment
   login <agent> <profile>    Authenticate new account via OAuth PKCE
   list [agent]               List all profiles and status
+  sessions [agent]           List active and past conversation sessions
   usage [agent] [profile]    Display remaining quota and usage limits
   doctor [agent]             Diagnose environment, tokens, and binaries
   remove [agent] <profile>   Delete profile credentials and state
@@ -88,6 +89,7 @@ Flags:
 		newShellCmd(reg, pm),
 		newLoginCmd(reg, pm),
 		newListCmd(reg, pm),
+		newSessionsCmd(reg, pm),
 		newUsageCmd(reg, pm),
 		newDoctorCmd(reg, pm),
 		newRemoveCmd(reg, pm),
