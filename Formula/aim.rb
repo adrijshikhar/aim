@@ -4,7 +4,7 @@
 class Aim < Formula
   desc "Isolated Profile Manager for AI Agents (Antigravity, Claude Code, Codex, Gemini)"
   homepage "https://github.com/adrijshikhar/aim"
-  version "0.1.0"
+  version "0.4.0"
   license "MIT"
 
   on_macos do

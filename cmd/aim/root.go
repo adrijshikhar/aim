@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"runtime/debug"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
@@ -12,7 +13,7 @@ import (
 
 var (
 	// Version is the current version of AIM, injected at build time via -ldflags.
-	Version = "0.1.0"
+	Version = "0.4.0"
 	// Commit is the git commit hash at build time.
 	Commit = "none"
 	// Date is the build timestamp.
@@ -22,6 +23,21 @@ var (
 )
 
 func init() {
+	if Commit == "none" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			for _, setting := range info.Settings {
+				if setting.Key == "vcs.revision" && Commit == "none" {
+					Commit = setting.Value
+					if len(Commit) > 7 {
+						Commit = Commit[:7]
+					}
+				}
+				if setting.Key == "vcs.time" && Date == "unknown" {
+					Date = setting.Value
+				}
+			}
+		}
+	}
 	tui.Version = Version
 }
 

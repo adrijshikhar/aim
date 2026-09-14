@@ -37,7 +37,7 @@ type usageStream struct {
 }
 
 // Version is the package-level version string shown in the TUI header.
-var Version = "0.1.0"
+var Version = "0.4.0"
 
 type Model struct {
 	reg      *agents.Registry

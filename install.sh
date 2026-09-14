@@ -63,7 +63,7 @@ else
   fi
 
   if [ -z "${VERSION:-}" ] || [ "$VERSION" = "latest" ]; then
-    VERSION="v0.1.0"
+    VERSION="v0.4.0"
   fi
 fi
 
