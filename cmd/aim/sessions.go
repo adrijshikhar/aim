@@ -14,6 +14,7 @@ import (
 	"github.com/aim-cli/aim/internal/session/providers/codex"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 )
 
@@ -121,23 +122,18 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
-	colHeaderStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
 	activeStatusStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.StatusGreen)
 	mutedStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
 	cyanStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan)
 
 	if len(activeSessions) > 0 {
 		fmt.Fprintln(w, headerStyle.Render("ACTIVE SESSIONS"))
-		fmt.Fprintf(w, "%-10s %-8s %-12s %-32s %-12s %s\n",
-			colHeaderStyle.Render("PROFILE"),
-			colHeaderStyle.Render("AGENT"),
-			colHeaderStyle.Render("SESSION ID"),
-			colHeaderStyle.Render("TITLE"),
-			colHeaderStyle.Render("STARTED"),
-			colHeaderStyle.Render("STATUS"),
-		)
+		t := table.New().
+			Border(lipgloss.HiddenBorder()).
+			Headers("PROFILE", "AGENT", "SESSION ID", "TITLE", "STARTED", "STATUS")
+
 		for _, s := range activeSessions {
-			title := truncateString(s.Title, 30)
+			title := truncateString(s.Title, 40)
 			if title == "" {
 				title = "(untitled)"
 			}
@@ -147,7 +143,7 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 				statusStr = fmt.Sprintf("ACTIVE (PID %d)", s.PID)
 			}
 
-			fmt.Fprintf(w, "%-10s %-8s %-12s %-32s %-12s %s\n",
+			t.Row(
 				s.Profile,
 				s.Agent,
 				s.ShortID,
@@ -156,6 +152,15 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 				activeStatusStyle.Render(statusStr),
 			)
 		}
+
+		t.StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+			}
+			return lipgloss.NewStyle().Foreground(tui.TextPrimary)
+		})
+
+		fmt.Fprintln(w, t.Render())
 	}
 
 	if !activeOnly && len(recentSessions) > 0 {
@@ -163,21 +168,18 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintln(w, headerStyle.Render("RECENT SESSIONS"))
-		fmt.Fprintf(w, "%-10s %-8s %-12s %-46s %s\n",
-			colHeaderStyle.Render("PROFILE"),
-			colHeaderStyle.Render("AGENT"),
-			colHeaderStyle.Render("SESSION ID"),
-			colHeaderStyle.Render("TITLE"),
-			colHeaderStyle.Render("LAST ACTIVE"),
-		)
+		t := table.New().
+			Border(lipgloss.HiddenBorder()).
+			Headers("PROFILE", "AGENT", "SESSION ID", "TITLE", "LAST ACTIVE")
+
 		for _, s := range recentSessions {
-			title := truncateString(s.Title, 44)
+			title := truncateString(s.Title, 46)
 			if title == "" {
 				title = "(untitled)"
 			}
 			lastActive := formatRelativeTime(s.LastActiveAt)
 
-			fmt.Fprintf(w, "%-10s %-8s %-12s %-46s %s\n",
+			t.Row(
 				s.Profile,
 				s.Agent,
 				s.ShortID,
@@ -185,6 +187,15 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 				mutedStyle.Render(lastActive),
 			)
 		}
+
+		t.StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+			}
+			return lipgloss.NewStyle().Foreground(tui.TextPrimary)
+		})
+
+		fmt.Fprintln(w, t.Render())
 	}
 }
 

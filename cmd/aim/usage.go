@@ -469,8 +469,8 @@ func printTable(headers []string, rows [][]string, useColor bool) {
 
 	if useColor {
 		t.StyleFunc(func(row, col int) lipgloss.Style {
-			if row == 0 {
-				return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+			if row == table.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan)
 			}
 			return lipgloss.NewStyle().Foreground(tui.TextPrimary)
 		})
