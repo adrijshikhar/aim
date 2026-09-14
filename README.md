@@ -143,7 +143,6 @@ Special thanks and credit to **[Catalyst](https://github.com/adrijshikhar/cataly
 - 📖 **[Wiki & Architecture Guide](wiki.md)** — In-depth guide to virtual home isolation, dotfile bridging rules, directory structures, and configuration schemas.
 - 🎨 **[Design System](design.md)** — Atom One Dark color palette, design tokens, typography, and Lipgloss implementation standards.
 - 🛠️ **[Contributing Guide](CONTRIBUTING.md)** — Local development setup, test suite execution (`make test`, `make smoke`), and how to add new agent adapters.
-- 🗺️ **[Roadmap](ROADMAP.md)** — Upcoming milestones including quota pooling, headless bursting, and cross-agent resumption.
 
 ---
 
