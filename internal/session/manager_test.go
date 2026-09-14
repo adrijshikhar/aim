@@ -209,4 +209,3 @@ func TestManager_DeduplicateAndAmbiguity(t *testing.T) {
 		t.Errorf("expected ambiguous prefix error message, got: %v", errAmbig)
 	}
 }
-

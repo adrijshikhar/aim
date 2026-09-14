@@ -174,4 +174,3 @@ func TestProvider_SQLInjectionSafety(t *testing.T) {
 		t.Fatalf("table conversation_summaries was compromised or corrupted: err=%v, sessions=%d", err, len(sessions))
 	}
 }
-

@@ -179,4 +179,3 @@ func TestProvider_SQLInjectionSafety(t *testing.T) {
 	}
 	_ = err
 }
-

@@ -295,5 +295,3 @@ func deduplicateMatches(matches []Session) []Session {
 	})
 	return result
 }
-
-
