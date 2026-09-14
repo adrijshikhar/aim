@@ -317,6 +317,21 @@ func (m Model) renderResumeModal() string {
 		))
 	}
 
-	box := ResumeModalBoxStyle.Render(b.String())
+	// Match outer width precisely to sessions drawer so the container does not jump or change width
+	drawerBox := m.renderSessionsDrawer()
+	targetWidth := lipgloss.Width(drawerBox) - 2 // subtract 2 for left and right border columns
+	if targetWidth < 80 {
+		targetWidth = 96
+		if m.width > 0 && m.width-6 < targetWidth {
+			targetWidth = m.width - 6
+		}
+	}
+
+	boxStyle := ResumeModalBoxStyle
+	if targetWidth > 0 {
+		boxStyle = boxStyle.Width(targetWidth)
+	}
+
+	box := boxStyle.Render(b.String())
 	return "\n" + box + "\n"
 }

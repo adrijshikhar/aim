@@ -15,6 +15,7 @@ import (
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/usage"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func newTestModel(t *testing.T, profileNames ...string) Model {
@@ -2335,6 +2336,13 @@ func TestResumeModal_QuotaAndActiveBadges(t *testing.T) {
 	viewBeta := m.renderResumeModal()
 	if !strings.Contains(viewBeta, "has low remaining limit (10%)") {
 		t.Errorf("expected view to contain low remaining limit notice for beta, got:\n%s", viewBeta)
+	}
+
+	// Verify width matching: Resume modal width must exactly match Sessions drawer width
+	modalWidth := lipgloss.Width(m.renderResumeModal())
+	drawerWidth := lipgloss.Width(m.renderSessionsDrawer())
+	if modalWidth != drawerWidth {
+		t.Errorf("expected resume modal width (%d) to match sessions drawer width (%d)", modalWidth, drawerWidth)
 	}
 }
 

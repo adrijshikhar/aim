@@ -117,9 +117,8 @@ var (
 
 	ResumeModalBoxStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(AccentCyan).
-				Padding(1, 2).
-				MarginLeft(2)
+				BorderForeground(AccentBlue).
+				Padding(1, 2)
 )
 
 func GaugeStyleForStatus(st usage.Status) lipgloss.Style {
