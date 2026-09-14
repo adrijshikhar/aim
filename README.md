@@ -15,8 +15,8 @@ Each profile gets its own sandboxed virtual home directory — separate credenti
 ```bash
 aim                      # open the interactive TUI dashboard
 aim run agy work         # run Antigravity under the "work" profile
-aim run agy personal     # run Antigravity under the "personal" profile
-aim usage                # check quota capacity and reset timers across accounts
+aim run codex personal   # run Codex under the "personal" profile
+aim usage agy            # check quota capacity and reset timers across accounts
 aim doctor               # diagnose binaries, tokens, and dotfile health
 ```
 
@@ -29,11 +29,12 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 | **Profile isolation** | Full virtual-home sandbox per profile — separate `~`, config, tokens, history |
 | **Agent-aware profiles** | Profiles are tagged per agent; `aim list agy` shows only Antigravity profiles |
 | **Multi-agent support** | Antigravity CLI (`agy`), Gemini CLI (`gemini`), and OpenAI Codex (`codex`) out of the box; easily extensible |
+| **Interactive TUI** | Bubble Tea dashboard with real-time capacity gauges, multi-agent tabs (`1`–`4`, `Tab`), live fuzzy filter (`/`), help overlay (`?`), and one-key launch |
+| **XDG Base Directory** | Follows XDG standards (`~/.config/aim`, `~/.local/state/aim`, etc.) with seamless legacy `~/.aim` fallback |
 | **Keychain isolation** | System keychains mounted for developer tools (`gh`, `git`); agent tokens explicitly purged |
 | **Debug logging** | Opt-in tracing via `--debug`, `AIM_DEBUG=1`, or config file with dual console/file logs |
 | **Usage & quota tracking** | Live capacity gauges, 5h & weekly limits, reset countdowns, and instant caching |
 | **OAuth PKCE login** | `aim login agy work` completes OAuth in browser and isolates the token |
-| **Interactive TUI** | Bubble Tea dashboard with real-time capacity gauges, tabs, and one-key launch |
 | **Shell completions** | Tab-complete agents, profiles, and subcommands in zsh, bash, and fish |
 | **Doctor command** | Diagnoses missing binaries, tokens, ADC status, and keychain isolation |
 
@@ -95,6 +96,27 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim remove [agent] <profile>` | Unlink agent from profile (deletes dir if empty) |
 | `aim completion <shell>` | Generate shell completions (`zsh`, `bash`, `fish`) |
 | `aim --debug <command>` | Run any command with verbose debug tracing |
+
+---
+
+## TUI Keybindings
+
+When running `aim` or `aim ui`, navigate using the following shortcuts:
+
+| Key | Action |
+|---|---|
+| `↑` / `k`, `↓` / `j` | Navigate profile list |
+| `Enter` | Launch selected profile in terminal |
+| `Tab` / `Shift+Tab` | Cycle agent tabs forward / backward |
+| `1` – `4` | Switch directly to agent tab (`[1] Antigravity`, `[2] Gemini`, `[3] Codex`…) |
+| `/` | Live fuzzy profile filter (by profile or agent name) |
+| `Esc` | Clear filter or dismiss open modal |
+| `?` | Toggle contextual keyboard help overlay |
+| `r` | Rename selected profile |
+| `d` | Delete / unlink selected profile (with confirmation modal) |
+| `D` | Toggle doctor diagnostics drawer |
+| `s` | Open isolated subshell |
+| `q` / `Ctrl+C` | Quit dashboard |
 
 ---
 
