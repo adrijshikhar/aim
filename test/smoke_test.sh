@@ -295,4 +295,28 @@ echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"agy\""
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"gemini\""
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"codex\""
 
+echo "=== 15. Testing sessions, resume & import CLI commands ==="
+# Test sessions help
+"$AIM_BIN" sessions --help > /dev/null
+"$AIM_BIN" chats --help > /dev/null
+
+# Test sessions listing empty & json output
+"$AIM_BIN" sessions | grep -i "no sessions found"
+"$AIM_BIN" sessions --json | grep "\[\]"
+
+# Test resume help & validation
+"$AIM_BIN" resume --help > /dev/null
+if "$AIM_BIN" resume 2>/dev/null; then
+  echo "Error: bare 'aim resume' should fail"
+  exit 1
+fi
+
+# Test sessions import help & validation
+"$AIM_BIN" sessions import --help > /dev/null
+if "$AIM_BIN" sessions import 2>/dev/null; then
+  echo "Error: bare 'aim sessions import' should fail"
+  exit 1
+fi
+echo "Sessions, resume & import CLI commands OK!"
+
 echo "ALL SMOKE TESTS PASSED!"

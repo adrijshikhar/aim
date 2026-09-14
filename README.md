@@ -86,6 +86,9 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 |---|---|
 | `aim` / `aim ui` | Open the interactive TUI dashboard |
 | `aim run <agent> <profile> [-- args...]` | Execute an agent under an isolated profile |
+| `aim sessions [agent] [--active] [--json]` | List active and past conversation sessions across profiles & host |
+| `aim resume <agent> <profile> [id]` | Resume conversation verbatim (`--exact`) or via Catalyst handoff (`--catalyst`) |
+| `aim sessions import <agent> <profile> [id]`| Import or hydrate conversation from host into profile (`--all`, `--fork`) |
 | `aim usage [agent] [profile] [-r] [--json]` | Display remaining quota, reset timers, and credits |
 | `aim list [agent]` | List all configured profiles and inline quota badges |
 | `aim login <agent> <profile>` | Authenticate a new account via OAuth PKCE |
@@ -107,15 +110,17 @@ When running `aim` or `aim ui`, navigate using the following shortcuts:
 |---|---|
 | `↑` / `k`, `↓` / `j` | Navigate profile list |
 | `Enter` | Launch selected profile in terminal |
+| `s` | Open Sessions Explorer drawer (navigate, resume exact, or catalyst handoff) |
+| `S` / `$` | Open isolated subshell |
 | `Tab` / `Shift+Tab` | Cycle agent tabs forward / backward |
-| `1` – `4` | Switch directly to agent tab (`[1] Antigravity`, `[2] Gemini`, `[3] Codex`…) |
+| `1` – `3` | Switch directly to agent tab (`[1] Antigravity`, `[2] Gemini`, `[3] Codex`) |
 | `/` | Live fuzzy profile filter (by profile or agent name) |
-| `Esc` | Clear filter or dismiss open modal |
+| `Esc` | Clear filter or dismiss open modal / drawer |
 | `?` | Toggle contextual keyboard help overlay |
-| `r` | Rename selected profile |
-| `d` | Delete / unlink selected profile (with confirmation modal) |
-| `D` | Toggle doctor diagnostics drawer |
-| `s` | Open isolated subshell |
+| `m` / `R` | Rename selected profile |
+| `x` / `Delete` | Delete / unlink selected profile (with confirmation modal) |
+| `d` | Toggle doctor diagnostics drawer |
+| `r` | Refresh quota and limits |
 | `q` / `Ctrl+C` | Quit dashboard |
 
 ---
