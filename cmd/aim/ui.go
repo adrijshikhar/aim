@@ -139,6 +139,46 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 		if name != "" {
 			return executeLogin(reg, pm, agent, name)
 		}
+	case tui.ActionResumeExact:
+		sess := res.SelectedSession()
+		if sess != nil {
+			targetProfile := res.SelectedProfile()
+			if targetProfile == "" || targetProfile == "<host>" {
+				targetProfile = sess.Profile
+			}
+			if targetProfile == "" || targetProfile == "<host>" {
+				targetProfile = "default"
+			}
+			mgr := defaultSessionManager()
+			pDir, err := pm.EnsureProfile(targetProfile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error ensuring profile: %v\n", err)
+				return 1
+			}
+			resumeCmd := newResumeCmd(reg, pm)
+			if err := executeExactResume(resumeCmd, reg, pm, mgr, sess.Agent, targetProfile, pDir, sess, res.IsForkResume(), nil); err != nil {
+				fmt.Fprintf(os.Stderr, "Resume error: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+	case tui.ActionResumeCatalyst:
+		sess := res.SelectedSession()
+		if sess != nil {
+			targetProfile := res.SelectedProfile()
+			if targetProfile == "" || targetProfile == "<host>" {
+				targetProfile = sess.Profile
+			}
+			if targetProfile == "" || targetProfile == "<host>" {
+				targetProfile = "default"
+			}
+			resumeCmd := newResumeCmd(reg, pm)
+			if err := executeCatalystResume(resumeCmd, reg, pm, sess.Agent, targetProfile, sess, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "Catalyst resume error: %v\n", err)
+				return 1
+			}
+			return 0
+		}
 	}
 	return 0
 }

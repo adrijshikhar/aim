@@ -12,6 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/usage"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -274,11 +275,11 @@ func TestTUIModelActions(t *testing.T) {
 		t.Errorf("expected non-nil tea.Quit cmd")
 	}
 
-	// Test ActionShell ('s')
+	// Test ActionShell ('S')
 	m = newTestModel(t, "alpha", "beta")
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = newM.(Model)
-	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = newM.(Model)
 	if m.Outcome() != ActionShell {
 		t.Errorf("expected ActionShell, got %v", m.Outcome())
@@ -337,14 +338,14 @@ func TestTUIModelEmptyProfiles(t *testing.T) {
 		t.Errorf("expected nil cmd on empty profiles Enter")
 	}
 
-	// 's' on empty profiles does not trigger Shell
-	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	// 'S' on empty profiles does not trigger Shell
+	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = newM.(Model)
 	if m.Outcome() != ActionNone {
-		t.Errorf("expected ActionNone on empty profiles 's', got %v", m.Outcome())
+		t.Errorf("expected ActionNone on empty profiles 'S', got %v", m.Outcome())
 	}
 	if cmd != nil {
-		t.Errorf("expected nil cmd on empty profiles 's'")
+		t.Errorf("expected nil cmd on empty profiles 'S'")
 	}
 
 	// View output includes empty prompt
@@ -2063,3 +2064,93 @@ func TestTUI_FilterProfiles(t *testing.T) {
 		t.Fatalf("expected 4 profiles, got %d", len(m.filteredProfiles()))
 	}
 }
+
+func TestSessionsDrawer_OpenAndClose(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	// Press 's' to open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	if !m.IsSessionsDrawerActive() {
+		t.Fatalf("expected sessions drawer to be active after pressing 's'")
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "Sessions Explorer") {
+		t.Errorf("expected view to contain 'Sessions Explorer', got:\n%s", view)
+	}
+
+	// Press Esc to close
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+
+	if m.IsSessionsDrawerActive() {
+		t.Fatalf("expected sessions drawer to be closed after pressing Esc")
+	}
+}
+
+func TestSessionsDrawer_Interactions(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	// Open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	// Inject mock sessions
+	s1 := session.NewSession("11111111-2222-3333-4444-555566667777", "Session One", "agy", "alpha", false, time.Now())
+	s2 := session.NewSession("88888888-9999-aaaa-bbbb-ccccddddeeee", "Session Two", "agy", "beta", false, time.Now())
+	m.SetSessionsForTest([]session.Session{s1, s2})
+
+	// Test navigation: Down (j)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updated.(Model)
+
+	// Press Enter to resume exact on second session
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.Outcome() != ActionResumeExact {
+		t.Fatalf("expected ActionResumeExact, got %v", m.Outcome())
+	}
+	if m.SelectedSession() == nil || m.SelectedSession().ID != s2.ID {
+		t.Fatalf("expected selected session %s, got %v", s2.ID, m.SelectedSession())
+	}
+	if cmd == nil {
+		t.Errorf("expected tea.Quit command on resume")
+	}
+
+	// Test Catalyst resume ('c')
+	m = newTestModel(t, "alpha", "beta")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+	m.SetSessionsForTest([]session.Session{s1, s2})
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = updated.(Model)
+
+	if m.Outcome() != ActionResumeCatalyst {
+		t.Fatalf("expected ActionResumeCatalyst, got %v", m.Outcome())
+	}
+	if m.SelectedSession() == nil || m.SelectedSession().ID != s1.ID {
+		t.Fatalf("expected selected session %s, got %v", s1.ID, m.SelectedSession())
+	}
+
+	// Test Fork resume ('b')
+	m = newTestModel(t, "alpha", "beta")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+	m.SetSessionsForTest([]session.Session{s1, s2})
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = updated.(Model)
+
+	if m.Outcome() != ActionResumeExact {
+		t.Fatalf("expected ActionResumeExact for fork, got %v", m.Outcome())
+	}
+	if !m.IsForkResume() {
+		t.Fatalf("expected IsForkResume to be true")
+	}
+}
+
+

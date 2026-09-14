@@ -4,19 +4,20 @@ import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap defines the keybindings for the TUI application.
 type KeyMap struct {
-	Up      key.Binding
-	Down    key.Binding
-	Run     key.Binding
-	Shell   key.Binding
-	Login   key.Binding
-	Tab     key.Binding
-	Doctor  key.Binding
-	Rename  key.Binding
-	Delete  key.Binding
-	Refresh key.Binding
-	Filter  key.Binding
-	Help    key.Binding
-	Quit    key.Binding
+	Up       key.Binding
+	Down     key.Binding
+	Run      key.Binding
+	Sessions key.Binding
+	Shell    key.Binding
+	Login    key.Binding
+	Tab      key.Binding
+	Doctor   key.Binding
+	Rename   key.Binding
+	Delete   key.Binding
+	Refresh  key.Binding
+	Filter   key.Binding
+	Help     key.Binding
+	Quit     key.Binding
 }
 
 // DefaultKeyMap returns the default set of keybindings.
@@ -34,9 +35,13 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "run"),
 		),
-		Shell: key.NewBinding(
+		Sessions: key.NewBinding(
 			key.WithKeys("s"),
-			key.WithHelp("s", "shell"),
+			key.WithHelp("s", "sessions"),
+		),
+		Shell: key.NewBinding(
+			key.WithKeys("S", "$"),
+			key.WithHelp("S", "shell"),
 		),
 		Login: key.NewBinding(
 			key.WithKeys("l"),
@@ -79,14 +84,14 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns keybindings to be shown in the mini help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Run, k.Shell, k.Login, k.Tab, k.Doctor, k.Rename, k.Delete, k.Refresh, k.Quit}
+	return []key.Binding{k.Run, k.Sessions, k.Shell, k.Login, k.Tab, k.Doctor, k.Rename, k.Delete, k.Refresh, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Run, k.Shell},
-		{k.Login, k.Tab, k.Doctor, k.Rename},
-		{k.Delete, k.Refresh, k.Filter, k.Help, k.Quit},
+		{k.Up, k.Down, k.Run, k.Sessions},
+		{k.Shell, k.Login, k.Tab, k.Doctor},
+		{k.Rename, k.Delete, k.Refresh, k.Filter, k.Help, k.Quit},
 	}
 }
