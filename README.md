@@ -84,7 +84,7 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 
 | Command | Description |
 |---|---|
-| `aim` / `aim ui` | Open the interactive TUI dashboard |
+| `aim` | Open the interactive TUI dashboard (default) |
 | `aim run <agent> <profile> [-- args...]` | Execute an agent under an isolated profile |
 | `aim sessions [agent] [--active] [--json]` | List active and past conversation sessions across profiles & host |
 | `aim sessions show [agent] <id>` | Show detailed preview card, goal summary, and metadata for a session |
@@ -105,7 +105,7 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 
 ## TUI Keybindings
 
-When running `aim` or `aim ui`, navigate using the following shortcuts:
+When running `aim`, navigate using the following shortcuts:
 
 | Key | Action |
 |---|---|

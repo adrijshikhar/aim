@@ -14,22 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/spf13/cobra"
 )
-
-func newUICmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
-	return &cobra.Command{
-		Use:   "ui",
-		Short: "Open interactive TUI dashboard (default)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			code := runTUI(reg, pm)
-			if code != 0 {
-				return &ExitError{Code: code}
-			}
-			return nil
-		},
-	}
-}
 
 type profileInputModel struct {
 	textInput textinput.Model

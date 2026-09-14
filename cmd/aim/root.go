@@ -70,7 +70,6 @@ Primary Commands:
   remove [agent] <profile>   Delete profile credentials and state
   clone [agent] <src> <dst>  Duplicate profile settings without copying tokens
   whoami                     Show active profile, agent, session, and quota
-  ui                         Open interactive TUI dashboard (default)
   completion <shell>         Generate shell completion script (zsh, bash, fish)
 
 Flags:
@@ -113,7 +112,6 @@ Flags:
 		newRemoveCmd(reg, pm),
 		newCloneCmd(reg, pm),
 		newWhoamiCmd(reg, pm),
-		newUICmd(reg, pm),
 		newPrewarmCmd(reg, pm),
 		newCompletionCmd(rootCmd),
 		newVersionCmd(),

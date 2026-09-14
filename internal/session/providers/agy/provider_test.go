@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/session/providers/agy"
@@ -95,5 +96,48 @@ func TestProvider_GetSession(t *testing.T) {
 	}
 	if nonExistent != nil {
 		t.Fatalf("expected nil for non-existent session, got %+v", nonExistent)
+	}
+}
+
+func TestProvider_TranscriptSummaryExtraction(t *testing.T) {
+	mockProfileDir := setupMockAgyDB(t)
+	p := agy.NewProvider()
+	ctx := context.Background()
+
+	// Create a mock transcript for session 775e6ada
+	brainDir := filepath.Join(mockProfileDir, ".gemini", "antigravity-cli", "brain", "775e6ada-1595-4e7e-84fa-ce0ea71e3007", ".system_generated", "logs")
+	if err := os.MkdirAll(brainDir, 0755); err != nil {
+		t.Fatalf("failed to create brainDir: %v", err)
+	}
+
+	transcriptPath := filepath.Join(brainDir, "transcript.jsonl")
+	transcriptContent := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"<USER_REQUEST>\nYou are implementing Task 6: Adopt K9s-Style Contextual Help Overlay (?)\n\n## Task Description\nRead your task brief first.\n</USER_REQUEST>"}`
+	if err := os.WriteFile(transcriptPath, []byte(transcriptContent), 0644); err != nil {
+		t.Fatalf("failed to write mock transcript: %v", err)
+	}
+
+	s, err := p.GetSession(ctx, "775e6ada", mockProfileDir, false)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if s == nil {
+		t.Fatalf("expected session, got nil")
+	}
+
+	// s.Summary should now contain the extracted user request from the transcript
+	if !strings.Contains(s.Summary, "Adopt K9s-Style Contextual Help Overlay") {
+		t.Errorf("expected summary to contain user request, got: %s", s.Summary)
+	}
+	if !strings.Contains(s.Summary, "Read your task brief first.") {
+		t.Errorf("expected summary to include multi-line description, got: %s", s.Summary)
+	}
+
+	// Session without transcript should still fall back to DB preview
+	s2, err := p.GetSession(ctx, "fcdbc2e0", mockProfileDir, false)
+	if err != nil {
+		t.Fatalf("GetSession for fcdbc2e0 failed: %v", err)
+	}
+	if s2 == nil || s2.Summary != "Review PRs" {
+		t.Errorf("expected fallback preview 'Review PRs', got: %+v", s2)
 	}
 }

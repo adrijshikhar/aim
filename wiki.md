@@ -159,7 +159,7 @@ aim completion fish > ~/.config/fish/completions/aim.fish
 
 ## 4. Interactive TUI Dashboard
 
-Launching `aim` without arguments (or running `aim ui`) opens the terminal user interface built with Charm Bubble Tea & Lip Gloss.
+Launching `aim` without arguments opens the terminal user interface built with Charm Bubble Tea & Lip Gloss.
 
 ### TUI Features
 - **Profile Navigation**: Use `↑` / `↓` (`k` / `j`) to browse configured profiles.

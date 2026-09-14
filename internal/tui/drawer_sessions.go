@@ -325,12 +325,12 @@ func (m Model) renderSessionsDrawer() string {
 			}
 			previewText = strings.TrimSpace(previewText)
 			if previewText == "" {
-				previewText = "(no preview text recorded for this session)"
+				previewText = "(no summary recorded for this session)"
 			}
 
 			displayLines := wrapText(previewText, 86, 3)
 			if len(displayLines) == 0 {
-				displayLines = []string{"(no preview text recorded for this session)"}
+				displayLines = []string{"(no summary recorded for this session)"}
 			}
 
 			previewCard := lipgloss.NewStyle().
@@ -350,7 +350,7 @@ func (m Model) renderSessionsDrawer() string {
 			}
 
 			previewHeader := fmt.Sprintf("%s %s  %s %s  %s %s  %s %s",
-				lipgloss.NewStyle().Bold(true).Foreground(AccentCyan).Render("Preview:"),
+				lipgloss.NewStyle().Bold(true).Foreground(AccentCyan).Render("Summary:"),
 				lipgloss.NewStyle().Bold(true).Foreground(TextBright).Render(sel.ShortID),
 				lipgloss.NewStyle().Foreground(TextMuted).Render("Agent:"),
 				lipgloss.NewStyle().Foreground(AccentBlue).Render(sel.Agent),

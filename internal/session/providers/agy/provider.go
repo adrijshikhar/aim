@@ -2,7 +2,9 @@ package agy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,9 +88,15 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 		preview := strings.TrimSpace(parts[2])
 		rawTime := strings.TrimSpace(parts[3])
 
+		brainDir := p.brainDir(profileDir, isHost, convID)
+		trSummary := extractTranscriptSummary(brainDir)
+
 		if title == "" {
 			if preview != "" {
 				firstLine := strings.Split(preview, "\n")[0]
+				title = strings.TrimSpace(firstLine)
+			} else if trSummary != "" {
+				firstLine := strings.Split(trSummary, "\n")[0]
 				title = strings.TrimSpace(firstLine)
 			}
 			if title == "" {
@@ -98,8 +106,12 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 
 		modTime := parseTimeString(rawTime)
 		s := session.NewSession(convID, title, "agy", profileName, isHost, modTime)
-		s.Summary = preview
-		s.StoragePath = db
+		s.StoragePath = brainDir
+		if trSummary != "" {
+			s.Summary = trSummary
+		} else {
+			s.Summary = preview
+		}
 		sessions = append(sessions, s)
 	}
 
@@ -144,9 +156,15 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 	preview := strings.TrimSpace(parts[2])
 	rawTime := strings.TrimSpace(parts[3])
 
+	brainDir := p.brainDir(profileDir, isHost, convID)
+	trSummary := extractTranscriptSummary(brainDir)
+
 	if title == "" {
 		if preview != "" {
 			firstLine := strings.Split(preview, "\n")[0]
+			title = strings.TrimSpace(firstLine)
+		} else if trSummary != "" {
+			firstLine := strings.Split(trSummary, "\n")[0]
 			title = strings.TrimSpace(firstLine)
 		}
 		if title == "" {
@@ -156,9 +174,93 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 
 	modTime := parseTimeString(rawTime)
 	s := session.NewSession(convID, title, "agy", profileName, isHost, modTime)
-	s.Summary = preview
-	s.StoragePath = db
+	s.StoragePath = brainDir
+	if trSummary != "" {
+		s.Summary = trSummary
+	} else {
+		s.Summary = preview
+	}
 	return &s, nil
+}
+
+func (p *Provider) brainDir(profileDir string, isHost bool, convID string) string {
+	if isHost {
+		return filepath.Join(config.RealHomeDir(), ".gemini", "antigravity-cli", "brain", convID)
+	}
+	return filepath.Join(profileDir, ".gemini", "antigravity-cli", "brain", convID)
+}
+
+func extractTranscriptSummary(brainDir string) string {
+	tPath := filepath.Join(brainDir, ".system_generated", "logs", "transcript.jsonl")
+	f, err := os.Open(tPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	// Read up to 32KB to find the initial user request or summary
+	buf := make([]byte, 32768)
+	n, err := f.Read(buf)
+	if n == 0 || (err != nil && err != io.EOF) {
+		return ""
+	}
+	rawStr := string(buf[:n])
+	line := rawStr
+	if idx := strings.Index(rawStr, "\n"); idx != -1 {
+		line = rawStr[:idx]
+	}
+
+	var step struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(line), &step); err != nil {
+		return ""
+	}
+
+	raw := step.Content
+	if raw == "" {
+		return ""
+	}
+
+	// 1. Look for <summary>...</summary>
+	if start := strings.Index(raw, "<summary>"); start != -1 {
+		rest := raw[start+9:]
+		if end := strings.Index(rest, "</summary>"); end != -1 {
+			return cleanSummaryText(rest[:end])
+		}
+	}
+
+	// 2. Look for <USER_REQUEST>...</USER_REQUEST>
+	if start := strings.Index(raw, "<USER_REQUEST>"); start != -1 {
+		rest := raw[start+14:]
+		if end := strings.Index(rest, "</USER_REQUEST>"); end != -1 {
+			return cleanSummaryText(rest[:end])
+		}
+		return cleanSummaryText(rest)
+	}
+
+	return cleanSummaryText(raw)
+}
+
+func cleanSummaryText(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
+	var parts []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		// Skip XML tags or metadata markers like <ADDITIONAL_METADATA>, </USER_REQUEST>, etc.
+		if strings.HasPrefix(l, "<") && strings.HasSuffix(l, ">") {
+			continue
+		}
+		parts = append(parts, l)
+	}
+	return strings.Join(parts, " ")
 }
 
 func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, destProfileDir string, fork bool) (string, error) {
