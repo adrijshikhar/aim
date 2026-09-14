@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/adrijshikhar/aim/compare/v0.3.3...v0.4.0) (2026-09-14)
+
+
+### Features
+
+* Codex adapter, K9s-inspired TUI refactor, XDG paths, help & filter ([#23](https://github.com/adrijshikhar/aim/issues/23)) ([d3503ef](https://github.com/adrijshikhar/aim/commit/d3503ef9e8367d19eacb37d9ca17f6a9be00190a))
+
 ## [0.3.3](https://github.com/adrijshikhar/aim/compare/v0.3.2...v0.3.3) (2026-09-13)
 
 
