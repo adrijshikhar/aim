@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/adrijshikhar/aim/compare/v0.4.0...v0.5.0) (2026-09-14)
+
+
+### Features
+
+* **session:** cross-profile conversation resumption & catalyst handoff ([#27](https://github.com/adrijshikhar/aim/issues/27)) ([2566fc7](https://github.com/adrijshikhar/aim/commit/2566fc7845c0ea142fa1f85628e24c5aef8365e1))
+
 ## [0.4.0](https://github.com/adrijshikhar/aim/compare/v0.3.3...v0.4.0) (2026-09-14)
 
 
