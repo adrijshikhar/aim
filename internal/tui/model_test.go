@@ -2152,5 +2152,3 @@ func TestSessionsDrawer_Interactions(t *testing.T) {
 		t.Fatalf("expected IsForkResume to be true")
 	}
 }
-
-

@@ -165,4 +165,3 @@ func TestSessionsCmd_Filters(t *testing.T) {
 		t.Errorf("expected 2 agy sessions, got %d", len(sessions))
 	}
 }
-
