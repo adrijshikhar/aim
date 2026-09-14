@@ -262,6 +262,8 @@ To ensure Catalyst handoff hooks fire reliably inside isolated Codex profiles, A
 ### 5.4 CLI Commands
 
 - `aim sessions [agent]`: Lists active and recent conversations formatted as tables, with `--profile`, `--agent`, `--active`, `--all`, and `--json` options.
+- `aim sessions show [agent] <session-id>`: Displays an instantaneous preview card with goal summary, metadata, status, and quick-resume tips (aliases: `preview`, `info`, `inspect`).
 - `aim resume <agent> <profile> [session-id]`: Resumes a session with prefix matching (e.g. `aim resume agy work 775e6ada`), active process collision warnings, and `--catalyst` or `--exact` modes.
 - `aim sessions import <agent> <target-profile> [session-id]`: Explicitly imports and hydrates conversations from host without launching them immediately (`--all`, `--fork`).
+- **Interactive TUI Drawer Preview**: In the TUI Sessions Drawer (`s`), an instant (0ms) preview box displays the full summary/goal of the currently highlighted session as you navigate with `↑`/`↓` (`k`/`j`), with a windowed list view preventing viewport overflow.
 

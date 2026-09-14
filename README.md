@@ -87,6 +87,7 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim` / `aim ui` | Open the interactive TUI dashboard |
 | `aim run <agent> <profile> [-- args...]` | Execute an agent under an isolated profile |
 | `aim sessions [agent] [--active] [--json]` | List active and past conversation sessions across profiles & host |
+| `aim sessions show [agent] <id>` | Show detailed preview card, goal summary, and metadata for a session |
 | `aim resume <agent> <profile> [id]` | Resume conversation verbatim (`--exact`) or via Catalyst handoff (`--catalyst`) |
 | `aim sessions import <agent> <profile> [id]`| Import or hydrate conversation from host into profile (`--all`, `--fork`) |
 | `aim usage [agent] [profile] [-r] [--json]` | Display remaining quota, reset timers, and credits |

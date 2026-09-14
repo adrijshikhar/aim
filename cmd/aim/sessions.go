@@ -103,6 +103,7 @@ Flags:
 	cmd.Flags().BoolVar(&jsonFlag, "json", false, "Output raw JSON for scripting")
 
 	cmd.AddCommand(newSessionsImportCmd(reg, pm))
+	cmd.AddCommand(newSessionsShowCmd(reg, pm))
 
 	return cmd
 }
@@ -234,4 +235,133 @@ func formatTimeOrRelative(started, lastActive time.Time) string {
 		return t.Format("3:04PM")
 	}
 	return t.Format("Jan 02 3:04PM")
+}
+
+func newSessionsShowCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
+	var (
+		agentFlag string
+		jsonFlag  bool
+	)
+
+	cmd := &cobra.Command{
+		Use:     "show [agent] <session-id>",
+		Aliases: []string{"preview", "info", "inspect"},
+		Short:   "Show detailed preview and metadata for a conversation session",
+		Long: `Show detailed preview, goal summary, storage path, and status for a specific conversation session.
+
+Arguments:
+  [agent]       Optional agent filter (agy, codex)
+  <session-id>  Full UUID or short prefix (e.g. 8 chars)
+
+Aliases:
+  aim sessions preview <session-id>
+  aim sessions info <session-id>
+  aim sessions inspect <session-id>`,
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var agentName string
+			var sessionID string
+
+			if len(args) == 1 {
+				sessionID = args[0]
+				agentName = agentFlag
+			} else {
+				agentName = args[0]
+				sessionID = args[1]
+			}
+
+			if reg != nil && agentName != "" {
+				if ad, err := reg.Get(agentName); err == nil {
+					agentName = ad.Name()
+				}
+			}
+
+			mgr := defaultSessionManager()
+			ctx := cmd.Context()
+			sess, err := mgr.ResolveSession(ctx, agentName, sessionID)
+			if err != nil {
+				return err
+			}
+
+			if jsonFlag {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(sess)
+			}
+
+			renderSessionPreviewCard(cmd.OutOrStdout(), sess)
+			return nil
+		},
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 0 {
+				return completeAgents(reg, toComplete), cobra.ShellCompDirectiveNoFileComp
+			}
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		},
+	}
+
+	cmd.Flags().StringVarP(&agentFlag, "agent", "a", "", "Filter by agent (agy, codex)")
+	cmd.Flags().BoolVar(&jsonFlag, "json", false, "Output raw JSON for scripting")
+
+	return cmd
+}
+
+func renderSessionPreviewCard(w io.Writer, s *session.Session) {
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Width(16)
+	valStyle := lipgloss.NewStyle().Foreground(tui.TextPrimary)
+	cyanStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan)
+	greenStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.StatusGreen)
+	yellowStyle := lipgloss.NewStyle().Foreground(tui.StatusYellow)
+	mutedStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
+
+	statusStr := mutedStyle.Render("IDLE")
+	if s.Status == session.StatusActive {
+		if s.PID > 0 {
+			statusStr = greenStyle.Render(fmt.Sprintf("ACTIVE (PID %d)", s.PID))
+		} else {
+			statusStr = greenStyle.Render("ACTIVE")
+		}
+	}
+
+	previewText := s.Summary
+	if previewText == "" {
+		previewText = s.Title
+	}
+	previewText = strings.TrimSpace(previewText)
+	if previewText == "" {
+		previewText = "(no preview text recorded)"
+	}
+
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(tui.AccentBlue).
+		Padding(1, 2)
+
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("⚡ Conversation Session Preview") + "\n\n")
+
+	b.WriteString(fmt.Sprintf("%s %s (%s)\n", labelStyle.Render("Session ID:"), cyanStyle.Render(s.ShortID), mutedStyle.Render(s.ID)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Agent:"), valStyle.Render(s.Agent)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Profile:"), yellowStyle.Render(s.Profile)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Status:"), statusStr))
+	if !s.LastActiveAt.IsZero() {
+		b.WriteString(fmt.Sprintf("%s %s (%s)\n", labelStyle.Render("Last Active:"), valStyle.Render(formatRelativeTime(s.LastActiveAt)), mutedStyle.Render(s.LastActiveAt.Format(time.RFC3339))))
+	}
+	if s.StoragePath != "" {
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Storage:"), mutedStyle.Render(s.StoragePath)))
+	}
+
+	b.WriteString("\n" + labelStyle.Render("Title:") + "\n")
+	b.WriteString("  " + lipgloss.NewStyle().Bold(true).Render(s.Title) + "\n\n")
+
+	b.WriteString(labelStyle.Render("Summary / Goal:") + "\n")
+	lines := strings.Split(previewText, "\n")
+	for _, l := range lines {
+		b.WriteString("  " + valStyle.Render(l) + "\n")
+	}
+
+	b.WriteString("\n" + mutedStyle.Render(fmt.Sprintf("Quick resume: aim resume %s %s %s", s.Agent, s.Profile, s.ShortID)) + "\n")
+
+	fmt.Fprint(w, cardStyle.Render(b.String())+"\n")
 }

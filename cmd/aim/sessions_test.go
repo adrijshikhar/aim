@@ -165,3 +165,68 @@ func TestSessionsCmd_Filters(t *testing.T) {
 		t.Errorf("expected 2 agy sessions, got %d", len(sessions))
 	}
 }
+
+func TestSessionsShowCmd(t *testing.T) {
+	_, reg, pm := setupMockSessionEnv(t)
+
+	// 1. Show by short prefix
+	var buf bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"sessions", "show", "deadbeef"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Conversation Session Preview") {
+		t.Errorf("expected output to contain 'Conversation Session Preview', got: %s", out)
+	}
+	if !strings.Contains(out, "Past Idle Task") {
+		t.Errorf("expected output to contain title, got: %s", out)
+	}
+	if !strings.Contains(out, "Past summary") {
+		t.Errorf("expected output to contain summary preview, got: %s", out)
+	}
+	if !strings.Contains(out, "aim resume agy work deadbeef") {
+		t.Errorf("expected output to contain quick resume tip, got: %s", out)
+	}
+
+	// 2. Show JSON
+	buf.Reset()
+	cmd = newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"sessions", "show", "--json", "deadbeef"})
+
+	err = cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var sess session.Session
+	if err := json.Unmarshal(buf.Bytes(), &sess); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+	if sess.ShortID != "deadbeef" {
+		t.Errorf("expected ShortID deadbeef, got %s", sess.ShortID)
+	}
+	if sess.Summary != "Past summary" {
+		t.Errorf("expected summary 'Past summary', got %s", sess.Summary)
+	}
+
+	// 3. Show non-existent
+	buf.Reset()
+	cmd = newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"sessions", "show", "nonexistent"})
+
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error for non-existent session, got nil")
+	}
+}

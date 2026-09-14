@@ -261,7 +261,23 @@ func (m Model) renderSessionsDrawer() string {
 	if len(filtered) == 0 {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextMuted).Render("(no conversation sessions found matching filter)") + "\n\n")
 	} else {
-		for i, s := range filtered {
+		// Windowed view if list has more than 8 items to fit comfortably in standard terminal heights
+		const maxVisible = 8
+		start := 0
+		if m.sessionsDrawer.cursor >= maxVisible {
+			start = m.sessionsDrawer.cursor - maxVisible + 1
+		}
+		end := start + maxVisible
+		if end > len(filtered) {
+			end = len(filtered)
+			start = end - maxVisible
+			if start < 0 {
+				start = 0
+			}
+		}
+
+		for i := start; i < end; i++ {
+			s := filtered[i]
 			cursorStr := "  "
 			rowStyle := NormalRowStyle
 			if i == m.sessionsDrawer.cursor {
@@ -293,6 +309,73 @@ func (m Model) renderSessionsDrawer() string {
 
 			rowContent := fmt.Sprintf("%s%s %s %s %s %s %s", cursorStr, cProfile, cAgent, cID, cTitle, cActive, cMode)
 			b.WriteString(rowStyle.Render(rowContent) + "\n")
+		}
+
+		if len(filtered) > maxVisible {
+			scrollInfo := fmt.Sprintf("  (showing %d-%d of %d sessions)", start+1, end, len(filtered))
+			b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(scrollInfo) + "\n")
+		}
+
+		// Dedicated Live Preview Box for the currently highlighted session
+		if m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
+			sel := filtered[m.sessionsDrawer.cursor]
+			previewText := sel.Summary
+			if previewText == "" {
+				previewText = sel.Title
+			}
+			previewText = strings.TrimSpace(previewText)
+			if previewText == "" {
+				previewText = "(no preview text recorded for this session)"
+			}
+
+			lines := strings.Split(previewText, "\n")
+			var displayLines []string
+			for idx, l := range lines {
+				if idx >= 3 {
+					displayLines = append(displayLines, "...")
+					break
+				}
+				l = strings.TrimSpace(l)
+				if l != "" {
+					if len(l) > 80 {
+						l = l[:77] + "..."
+					}
+					displayLines = append(displayLines, l)
+				}
+			}
+
+			previewCard := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(AccentCyan).
+				Padding(0, 1).
+				MarginTop(1)
+
+			var pb strings.Builder
+			statusLabel := lipgloss.NewStyle().Foreground(TextMuted).Render("IDLE")
+			if sel.Status == session.StatusActive {
+				if sel.PID > 0 {
+					statusLabel = lipgloss.NewStyle().Bold(true).Foreground(StatusGreen).Render(fmt.Sprintf("ACTIVE (PID %d)", sel.PID))
+				} else {
+					statusLabel = lipgloss.NewStyle().Bold(true).Foreground(StatusGreen).Render("ACTIVE")
+				}
+			}
+
+			previewHeader := fmt.Sprintf("%s %s  %s %s  %s %s  %s %s",
+				lipgloss.NewStyle().Bold(true).Foreground(AccentCyan).Render("Preview:"),
+				lipgloss.NewStyle().Bold(true).Foreground(TextBright).Render(sel.ShortID),
+				lipgloss.NewStyle().Foreground(TextMuted).Render("Agent:"),
+				lipgloss.NewStyle().Foreground(AccentBlue).Render(sel.Agent),
+				lipgloss.NewStyle().Foreground(TextMuted).Render("Profile:"),
+				lipgloss.NewStyle().Foreground(StatusYellow).Render(sel.Profile),
+				lipgloss.NewStyle().Foreground(TextMuted).Render("Status:"),
+				statusLabel,
+			)
+			pb.WriteString(previewHeader + "\n")
+			for _, dl := range displayLines {
+				pb.WriteString(lipgloss.NewStyle().Foreground(TextPrimary).Render(dl) + "\n")
+			}
+
+			b.WriteString(previewCard.Render(pb.String()) + "\n")
 		}
 	}
 
