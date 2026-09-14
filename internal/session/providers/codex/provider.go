@@ -3,6 +3,7 @@ package codex
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -198,10 +199,18 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 	targetSessionsDir := filepath.Join(targetCodexDir, "sessions")
 	_ = os.MkdirAll(targetSessionsDir, 0755)
 
+	targetID := srcSession.ID
+	if fork {
+		targetID = generateUUID()
+	}
+
 	targetRolloutPath := srcSession.StoragePath
 	if srcSession.StoragePath != "" {
 		if fi, err := os.Stat(srcSession.StoragePath); err == nil && !fi.IsDir() {
 			baseName := filepath.Base(srcSession.StoragePath)
+			if fork {
+				baseName = fmt.Sprintf("rollout-%s.jsonl", targetID)
+			}
 			destPath := filepath.Join(targetSessionsDir, baseName)
 			if err := copyFile(srcSession.StoragePath, destPath); err == nil {
 				targetRolloutPath = destPath
@@ -218,26 +227,54 @@ CREATE TABLE IF NOT EXISTS threads (
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
 	title TEXT NOT NULL,
-	preview TEXT NOT NULL DEFAULT ''
+	preview TEXT NOT NULL DEFAULT '',
+	source TEXT NOT NULL DEFAULT 'cli',
+	model_provider TEXT NOT NULL DEFAULT 'openai',
+	cwd TEXT NOT NULL DEFAULT '',
+	sandbox_policy TEXT NOT NULL DEFAULT 'workspace-write',
+	approval_mode TEXT NOT NULL DEFAULT 'ask'
 );`
 		_ = exec.CommandContext(ctx, p.sqliteBin, targetDB, schema).Run()
 
-		escapedID := strings.ReplaceAll(srcSession.ID, "'", "''")
+		escapedID := strings.ReplaceAll(targetID, "'", "''")
 		escapedPath := strings.ReplaceAll(targetRolloutPath, "'", "''")
 		escapedTitle := strings.ReplaceAll(srcSession.Title, "'", "''")
 		escapedPreview := strings.ReplaceAll(srcSession.Summary, "'", "''")
+		escapedProfileDir := strings.ReplaceAll(destProfileDir, "'", "''")
 		unixNow := time.Now().Unix()
 
 		insertQuery := fmt.Sprintf(
-			"INSERT OR REPLACE INTO threads (id, rollout_path, created_at, updated_at, title, preview) VALUES ('%s', '%s', %d, %d, '%s', '%s');",
-			escapedID, escapedPath, unixNow, unixNow, escapedTitle, escapedPreview,
+			"INSERT OR REPLACE INTO threads (id, rollout_path, created_at, updated_at, title, preview, source, model_provider, cwd, sandbox_policy, approval_mode) VALUES ('%s', '%s', %d, %d, '%s', '%s', 'cli', 'openai', '%s', 'workspace-write', 'ask');",
+			escapedID, escapedPath, unixNow, unixNow, escapedTitle, escapedPreview, escapedProfileDir,
 		)
 		if err := exec.CommandContext(ctx, p.sqliteBin, targetDB, insertQuery).Run(); err != nil {
 			logger.Debug("[session/codex] failed to insert thread into %s: %v", targetDB, err)
 		}
 	}
 
-	return srcSession.ID, nil
+	targetIndex := filepath.Join(targetCodexDir, "session_index.jsonl")
+	rec := map[string]interface{}{
+		"id":          targetID,
+		"thread_name": srcSession.Title,
+		"updated_at":  time.Now().Format(time.RFC3339),
+		"file_path":   targetRolloutPath,
+	}
+	if b, err := json.Marshal(rec); err == nil {
+		if f, err := os.OpenFile(targetIndex, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+			_, _ = f.Write(append(b, '\n'))
+			_ = f.Close()
+		}
+	}
+
+	return targetID, nil
+}
+
+func generateUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func copyFile(src, dst string) (err error) {
