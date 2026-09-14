@@ -9,6 +9,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -22,6 +23,8 @@ const (
 	ActionRun
 	ActionShell
 	ActionLogin
+	ActionResumeExact
+	ActionResumeCatalyst
 )
 
 type usageReportMsg usage.Report
@@ -34,7 +37,7 @@ type usageStream struct {
 }
 
 // Version is the package-level version string shown in the TUI header.
-var Version = "0.1.0"
+var Version = "0.4.0"
 
 type Model struct {
 	reg      *agents.Registry
@@ -57,12 +60,16 @@ type Model struct {
 	spinnerIdx int
 	version    string
 
-	deleteModal  deleteModalState
-	renameModal  renameModalState
-	doctorDrawer doctorDrawerState
-	helpModal    helpModalState
-	filter       filterState
-	keys         KeyMap
+	deleteModal    deleteModalState
+	renameModal    renameModalState
+	doctorDrawer   doctorDrawerState
+	sessionsDrawer sessionsDrawerState
+	resumeModal    resumeModalState
+	helpModal      helpModalState
+	filter         filterState
+	keys           KeyMap
+
+	selectedSession *session.Session
 }
 
 func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config) Model {
@@ -141,6 +148,10 @@ func (m Model) Outcome() ActionOutcome {
 
 func (m Model) SelectedProfile() string {
 	return m.selected
+}
+
+func (m Model) SelectedSession() *session.Session {
+	return m.selectedSession
 }
 
 func (m Model) SelectedAgent() string {
@@ -267,6 +278,25 @@ func (m Model) getReport(prof string) (usage.Report, bool) {
 	}
 	rep, ok := m.reports[prof]
 	return rep, ok
+}
+
+func (m Model) getReportForAgent(agent, prof string) (usage.Report, bool) {
+	if m.reports != nil {
+		if agent != "" {
+			if rep, ok := m.reports[fmt.Sprintf("%s:%s", agent, prof)]; ok {
+				return rep, true
+			}
+		}
+		if rep, ok := m.reports[prof]; ok {
+			return rep, true
+		}
+	}
+	if m.cache != nil && agent != "" {
+		if rep, ok := m.cache.Get(agent, prof); ok {
+			return rep, true
+		}
+	}
+	return m.getReport(prof)
 }
 
 func waitForUsageReport(ch <-chan usage.Report) tea.Cmd {
@@ -453,6 +483,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDoctorDrawer(msg)
 		}
 
+		if m.resumeModal.active {
+			return m.updateResumeModal(msg)
+		}
+
+		if m.sessionsDrawer.active {
+			return m.updateSessionsDrawer(msg)
+		}
+
 		if m.helpModal.active {
 			return m.updateHelpOverlay(msg)
 		}
@@ -526,6 +564,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelStream()
 				return m, tea.Quit
 			}
+		case key.Matches(msg, keys.Sessions):
+			return m.openSessionsDrawer()
 		case key.Matches(msg, keys.Shell):
 			filtered := m.filteredProfiles()
 			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
@@ -624,6 +664,16 @@ func (m Model) View() string {
 		return s.String()
 	}
 
+	if m.resumeModal.active {
+		s.WriteString(m.renderResumeModal())
+		return s.String()
+	}
+
+	if m.sessionsDrawer.active {
+		s.WriteString(m.renderSessionsDrawer())
+		return s.String()
+	}
+
 	if m.helpModal.active {
 		s.WriteString(m.renderHelpOverlay())
 		return s.String()
@@ -643,7 +693,8 @@ func (m Model) View() string {
 
 	s.WriteString("\n  " +
 		HintKeyStyle.Render("[Enter]") + " " + HintLabelStyle.Render("Run  ") +
-		HintKeyStyle.Render("[s]") + " " + HintLabelStyle.Render("Shell  ") +
+		HintKeyStyle.Render("[s]") + " " + HintLabelStyle.Render("Sessions  ") +
+		HintKeyStyle.Render("[S]") + " " + HintLabelStyle.Render("Shell  ") +
 		HintKeyStyle.Render("[l]") + " " + HintLabelStyle.Render("Login  ") +
 		HintKeyStyle.Render("[Tab]") + " " + HintLabelStyle.Render("Switch Agent  ") +
 		HintKeyStyle.Render("[d]") + " " + HintLabelStyle.Render("Doctor  ") +

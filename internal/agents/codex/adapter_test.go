@@ -222,3 +222,43 @@ func TestCodexAdapter_GetUsage(t *testing.T) {
 	}
 	_ = futureReset
 }
+
+func TestCodexAdapter_BridgePluginsAndHooks(t *testing.T) {
+	mockHome := t.TempDir()
+	t.Setenv("HOME", mockHome)
+
+	mockHostCodex := filepath.Join(mockHome, ".codex")
+	mockPlugins := filepath.Join(mockHostCodex, "plugins")
+	mockHooksDir := filepath.Join(mockHostCodex, "hooks")
+	mockHooksJSON := filepath.Join(mockHostCodex, "hooks.json")
+
+	_ = os.MkdirAll(mockPlugins, 0755)
+	_ = os.MkdirAll(mockHooksDir, 0755)
+	_ = os.WriteFile(mockHooksJSON, []byte(`{"hooks":{}}`), 0644)
+
+	profileCodexDir := filepath.Join(t.TempDir(), "profile", ".codex")
+	_ = os.MkdirAll(profileCodexDir, 0700)
+
+	bridgePluginsAndHooks(mockHome, profileCodexDir)
+
+	// Check plugins symlink
+	targetPlugins := filepath.Join(profileCodexDir, "plugins")
+	fi, err := os.Lstat(targetPlugins)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected plugins to be symlink, err=%v", err)
+	}
+
+	// Check hooks dir symlink
+	targetHooks := filepath.Join(profileCodexDir, "hooks")
+	fi, err = os.Lstat(targetHooks)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected hooks to be symlink, err=%v", err)
+	}
+
+	// Check hooks.json symlink
+	targetJSON := filepath.Join(profileCodexDir, "hooks.json")
+	fi, err = os.Lstat(targetJSON)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected hooks.json to be symlink, err=%v", err)
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"runtime/debug"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
@@ -12,7 +13,7 @@ import (
 
 var (
 	// Version is the current version of AIM, injected at build time via -ldflags.
-	Version = "0.1.0"
+	Version = "0.4.0"
 	// Commit is the git commit hash at build time.
 	Commit = "none"
 	// Date is the build timestamp.
@@ -22,6 +23,21 @@ var (
 )
 
 func init() {
+	if Commit == "none" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			for _, setting := range info.Settings {
+				if setting.Key == "vcs.revision" && Commit == "none" {
+					Commit = setting.Value
+					if len(Commit) > 7 {
+						Commit = Commit[:7]
+					}
+				}
+				if setting.Key == "vcs.time" && Date == "unknown" {
+					Date = setting.Value
+				}
+			}
+		}
+	}
 	tui.Version = Version
 }
 
@@ -47,12 +63,13 @@ Primary Commands:
   shell <agent> <profile>    Launch subshell with profile environment
   login <agent> <profile>    Authenticate new account via OAuth PKCE
   list [agent]               List all profiles and status
+  sessions [agent]           List active and past conversation sessions
+  resume <agent> <profile>   Resume an existing session under a profile
   usage [agent] [profile]    Display remaining quota and usage limits
   doctor [agent]             Diagnose environment, tokens, and binaries
   remove [agent] <profile>   Delete profile credentials and state
   clone [agent] <src> <dst>  Duplicate profile settings without copying tokens
   whoami                     Show active profile, agent, session, and quota
-  ui                         Open interactive TUI dashboard (default)
   completion <shell>         Generate shell completion script (zsh, bash, fish)
 
 Flags:
@@ -88,12 +105,13 @@ Flags:
 		newShellCmd(reg, pm),
 		newLoginCmd(reg, pm),
 		newListCmd(reg, pm),
+		newSessionsCmd(reg, pm),
+		newResumeCmd(reg, pm),
 		newUsageCmd(reg, pm),
 		newDoctorCmd(reg, pm),
 		newRemoveCmd(reg, pm),
 		newCloneCmd(reg, pm),
 		newWhoamiCmd(reg, pm),
-		newUICmd(reg, pm),
 		newPrewarmCmd(reg, pm),
 		newCompletionCmd(rootCmd),
 		newVersionCmd(),

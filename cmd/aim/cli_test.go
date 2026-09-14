@@ -566,22 +566,19 @@ func TestCLIDispatchUI(t *testing.T) {
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(t.TempDir())
 
-	// Test dispatch with "ui"
-	code := dispatch([]string{"ui"}, reg, pm)
-	if code != 0 {
-		t.Errorf("dispatch([\"ui\"]) expected code 0, got %d", code)
-	}
-	if calledCount != 1 {
-		t.Errorf("expected tuiRunner to be called once for \"ui\", got %d", calledCount)
-	}
-
-	// Test dispatch with no args (bare `aim`)
-	code = dispatch([]string{}, reg, pm)
+	// Test dispatch with no args (bare `aim` directly launches TUI)
+	code := dispatch([]string{}, reg, pm)
 	if code != 0 {
 		t.Errorf("dispatch([]) expected code 0, got %d", code)
 	}
-	if calledCount != 2 {
-		t.Errorf("expected tuiRunner to be called twice after bare aim dispatch, got %d", calledCount)
+	if calledCount != 1 {
+		t.Errorf("expected tuiRunner to be called once after bare aim dispatch, got %d", calledCount)
+	}
+
+	// Test that "ui" subcommand has been removed
+	codeUI := dispatch([]string{"ui"}, reg, pm)
+	if codeUI == 0 {
+		t.Errorf("expected dispatch([\"ui\"]) to fail since ui command is removed, got 0")
 	}
 }
 

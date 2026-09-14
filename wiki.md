@@ -159,7 +159,7 @@ aim completion fish > ~/.config/fish/completions/aim.fish
 
 ## 4. Interactive TUI Dashboard
 
-Launching `aim` without arguments (or running `aim ui`) opens the terminal user interface built with Charm Bubble Tea & Lip Gloss.
+Launching `aim` without arguments opens the terminal user interface built with Charm Bubble Tea & Lip Gloss.
 
 ### TUI Features
 - **Profile Navigation**: Use `↑` / `↓` (`k` / `j`) to browse configured profiles.
@@ -228,3 +228,42 @@ Debug logging is **off by default**. You can enable it via any of the following 
 When debug mode is active:
 - **Console Output**: Color-coded, timestamped trace messages are streamed directly to `os.Stderr` (automatically suppressed during interactive TUI sessions to prevent screen corruption).
 - **Persistent Log File**: All debug traces are appended to `~/.aim/aim-debug.log` with microsecond timestamps and severity levels.
+
+---
+
+## 5. Sessions, Cross-Profile Resumption & Catalyst Handoff
+
+AIM provides comprehensive conversation session discovery, cross-profile thread hydration, and vendor-neutral Catalyst handoffs across all configured profiles and host dotfiles.
+
+### 5.1 Multi-Source Discovery & Process Correlation
+
+AIM inspects conversation storage across both virtualized profile homes (`~/.aim/profiles/*/`) and unmanaged host environments (`~/.gemini/antigravity-cli`, `~/.codex`):
+- **Antigravity (`agy`)**: Reads `conversation_summaries.db` extracting `conversation_id`, title, preview text, and last modified timestamps.
+- **Codex (`codex`)**: Scans `$CODEX_HOME/state_5.sqlite` (`threads` table) and falls back to JSONL index records (`session_index.jsonl`) and session rollout files (`sessions/*.jsonl`).
+- **Live Process Scanner**: Rather than relying on stale 0-byte `.lock` files, AIM inspects the active OS process table (`ps -eo pid,command`) matching `--conversation=<id>` (Antigravity) and `resume <id>` (Codex). Active processes are automatically marked with `Status: ACTIVE (PID <pid>)`.
+
+### 5.2 Dual-Mode Resumption
+
+When resuming a conversation under a destination profile:
+1. **Exact Thread (`--exact` or `[Enter]` in TUI)**:
+   - Resumes the verbatim conversation history and local state.
+   - If resuming a host thread into a profile, AIM automatically hydrates the thread (`Hydrate`) into the destination profile's database and session storage.
+   - Passing `--fork` (`-b`) generates a clean child conversation ID to branch off without mutating the original history.
+2. **Catalyst Summary Handoff (`--catalyst`, `-c`, or `[c]` in TUI)**:
+   - Extracts goal, decisions, and trajectory context into Catalyst's standard `.catalyst/handoffs/<branch>.json` brief.
+   - Starts a fresh context window under the destination profile, primed with the condensed handoff brief. This eliminates context-rot and allows cross-vendor resumption (e.g. continuing an Antigravity task inside Codex).
+
+### 5.3 Codex Hook & Plugin Bridging
+
+To ensure Catalyst handoff hooks fire reliably inside isolated Codex profiles, AIM automatically bridges:
+- Host `~/.codex/plugins/` → Profile `.codex/plugins/`
+- Host `~/.codex/hooks.json` & `~/.codex/hooks/` → Profile `.codex/hooks/` and `.codex/hooks.json`
+
+### 5.4 CLI Commands
+
+- `aim sessions [agent]`: Lists active and recent conversations formatted as tables, with `--profile`, `--agent`, `--active`, `--all`, and `--json` options.
+- `aim sessions show [agent] <session-id>`: Displays an instantaneous preview card with goal summary, metadata, status, and quick-resume tips (aliases: `preview`, `info`, `inspect`).
+- `aim resume <agent> <profile> [session-id]`: Resumes a session with prefix matching (e.g. `aim resume agy work 775e6ada`), active process collision warnings, and `--catalyst` or `--exact` modes.
+- `aim sessions import <agent> <target-profile> [session-id]`: Explicitly imports and hydrates conversations from host without launching them immediately (`--all`, `--fork`).
+- **Interactive TUI Drawer Preview**: In the TUI Sessions Drawer (`s`), an instant (0ms) preview box displays the full summary/goal of the currently highlighted session as you navigate with `↑`/`↓` (`k`/`j`), with a windowed list view preventing viewport overflow.
+

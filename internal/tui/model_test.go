@@ -12,8 +12,10 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/usage"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func newTestModel(t *testing.T, profileNames ...string) Model {
@@ -274,11 +276,11 @@ func TestTUIModelActions(t *testing.T) {
 		t.Errorf("expected non-nil tea.Quit cmd")
 	}
 
-	// Test ActionShell ('s')
+	// Test ActionShell ('S')
 	m = newTestModel(t, "alpha", "beta")
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = newM.(Model)
-	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = newM.(Model)
 	if m.Outcome() != ActionShell {
 		t.Errorf("expected ActionShell, got %v", m.Outcome())
@@ -337,14 +339,14 @@ func TestTUIModelEmptyProfiles(t *testing.T) {
 		t.Errorf("expected nil cmd on empty profiles Enter")
 	}
 
-	// 's' on empty profiles does not trigger Shell
-	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	// 'S' on empty profiles does not trigger Shell
+	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = newM.(Model)
 	if m.Outcome() != ActionNone {
-		t.Errorf("expected ActionNone on empty profiles 's', got %v", m.Outcome())
+		t.Errorf("expected ActionNone on empty profiles 'S', got %v", m.Outcome())
 	}
 	if cmd != nil {
-		t.Errorf("expected nil cmd on empty profiles 's'")
+		t.Errorf("expected nil cmd on empty profiles 'S'")
 	}
 
 	// View output includes empty prompt
@@ -2061,5 +2063,345 @@ func TestTUI_FilterProfiles(t *testing.T) {
 	}
 	if len(m.filteredProfiles()) != 4 {
 		t.Fatalf("expected 4 profiles, got %d", len(m.filteredProfiles()))
+	}
+}
+
+func TestSessionsDrawer_OpenAndClose(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	// Press 's' to open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	if !m.IsSessionsDrawerActive() {
+		t.Fatalf("expected sessions drawer to be active after pressing 's'")
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "Sessions Explorer") {
+		t.Errorf("expected view to contain 'Sessions Explorer', got:\n%s", view)
+	}
+
+	// Press Esc to close
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+
+	if m.IsSessionsDrawerActive() {
+		t.Fatalf("expected sessions drawer to be closed after pressing Esc")
+	}
+}
+
+func TestSessionsDrawer_Interactions(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	// Open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	// Inject mock sessions
+	s1 := session.NewSession("11111111-2222-3333-4444-555566667777", "Session One", "agy", "alpha", false, time.Now())
+	s2 := session.NewSession("88888888-9999-aaaa-bbbb-ccccddddeeee", "Session Two", "agy", "beta", false, time.Now())
+	m.SetSessionsForTest([]session.Session{s1, s2})
+
+	// Test navigation: Down (j)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updated.(Model)
+
+	// Press Enter on second session to open resume modal
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected ResumeModal to be active")
+	}
+	if m.ResumeModalSession() == nil || m.ResumeModalSession().ID != s2.ID {
+		t.Fatalf("expected resume modal session %s, got %v", s2.ID, m.ResumeModalSession())
+	}
+
+	// Press Enter again inside resume modal to confirm pre-selected original profile
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.Outcome() != ActionResumeExact {
+		t.Fatalf("expected ActionResumeExact, got %v", m.Outcome())
+	}
+	if m.SelectedSession() == nil || m.SelectedSession().ID != s2.ID {
+		t.Fatalf("expected selected session %s, got %v", s2.ID, m.SelectedSession())
+	}
+	if m.SelectedProfile() != "beta" {
+		t.Fatalf("expected selected profile to be beta, got %s", m.SelectedProfile())
+	}
+	if cmd == nil {
+		t.Errorf("expected tea.Quit command on resume")
+	}
+
+	// Test Catalyst resume ('c')
+	m = newTestModel(t, "alpha", "beta")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+	m.SetSessionsForTest([]session.Session{s1, s2})
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected ResumeModal to be active for catalyst resume")
+	}
+
+	// Confirm in modal
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.Outcome() != ActionResumeCatalyst {
+		t.Fatalf("expected ActionResumeCatalyst, got %v", m.Outcome())
+	}
+	if m.SelectedSession() == nil || m.SelectedSession().ID != s1.ID {
+		t.Fatalf("expected selected session %s, got %v", s1.ID, m.SelectedSession())
+	}
+	if m.SelectedProfile() != "alpha" {
+		t.Fatalf("expected selected profile alpha, got %s", m.SelectedProfile())
+	}
+
+	// Test Fork resume ('b')
+	m = newTestModel(t, "alpha", "beta")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+	m.SetSessionsForTest([]session.Session{s1, s2})
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected ResumeModal to be active for fork resume")
+	}
+
+	// Confirm in modal
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.Outcome() != ActionResumeExact {
+		t.Fatalf("expected ActionResumeExact for fork, got %v", m.Outcome())
+	}
+	if !m.IsForkResume() {
+		t.Fatalf("expected IsForkResume to be true")
+	}
+}
+
+func TestResumeModal_ProfileNavigationAndCustom(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta", "gamma")
+
+	// Open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	s1 := session.NewSession("11111111-2222-3333-4444-555566667777", "Session One", "agy", "beta", false, time.Now())
+	m.SetSessionsForTest([]session.Session{s1})
+
+	// Open modal via Enter
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal active")
+	}
+	// Original profile "beta" should be first
+	profiles := m.ResumeModalProfiles()
+	if len(profiles) == 0 || profiles[0] != "beta" {
+		t.Fatalf("expected first profile to be original 'beta', got %v", profiles)
+	}
+
+	// Navigate down to second profile
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updated.(Model)
+	if m.ResumeModalCursor() != 1 {
+		t.Fatalf("expected cursor 1, got %d", m.ResumeModalCursor())
+	}
+
+	// Confirm with second profile
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatalf("expected quit command")
+	}
+	if m.SelectedProfile() != profiles[1] {
+		t.Fatalf("expected selected profile %s, got %s", profiles[1], m.SelectedProfile())
+	}
+
+	// Test Esc dismisses modal back to drawer
+	m = newTestModel(t, "alpha", "beta")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+	m.SetSessionsForTest([]session.Session{s1})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal active")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal dismissed")
+	}
+	if !m.sessionsDrawer.active {
+		t.Fatalf("expected sessions drawer still active")
+	}
+
+	// Test Custom Profile input
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	// Cursor to bottom ("Enter custom profile name...")
+	totalOpts := len(m.ResumeModalProfiles()) + 1
+	for i := 0; i < totalOpts; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		m = updated.(Model)
+	}
+	// Enter custom mode
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if !m.ResumeModalIsCustomMode() {
+		t.Fatalf("expected customMode true")
+	}
+
+	// Type custom profile name: "work-profile"
+	for _, r := range "work-profile" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+	// Confirm custom profile
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatalf("expected quit command")
+	}
+	if m.SelectedProfile() != "work-profile" {
+		t.Fatalf("expected selected 'work-profile', got '%s'", m.SelectedProfile())
+	}
+}
+
+func TestResumeModal_QuotaAndActiveBadges(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+	m.agent = "agy"
+
+	// Inject usage reports
+	m.reports["agy:alpha"] = usage.Report{
+		Agent:   "agy",
+		Profile: "alpha",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{
+			{Name: "5-hour limit", RemainingPct: 85},
+		},
+	}
+	m.reports["agy:beta"] = usage.Report{
+		Agent:   "agy",
+		Profile: "beta",
+		Status:  usage.StatusCritical,
+		Windows: []usage.LimitWindow{
+			{Name: "5-hour limit", RemainingPct: 10},
+		},
+	}
+
+	// Open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	// Inject sessions: s1 idle in alpha, s2 active in beta
+	s1 := session.NewSession("11111111-2222-3333-4444-555566667777", "Session One", "agy", "alpha", false, time.Now())
+	s2 := session.NewSession("88888888-9999-aaaa-bbbb-ccccddddeeee", "Session Two", "agy", "beta", false, time.Now())
+	s2.Status = session.StatusActive
+	m.SetSessionsForTest([]session.Session{s1, s2})
+
+	// Open resume modal on s1 (original: alpha)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal active")
+	}
+
+	view := m.renderResumeModal()
+	if !strings.Contains(view, "[85%]") {
+		t.Errorf("expected view to contain [85%%], got:\n%s", view)
+	}
+	if !strings.Contains(view, "[10%]") {
+		t.Errorf("expected view to contain [10%%], got:\n%s", view)
+	}
+	if !strings.Contains(view, "(1 active)") {
+		t.Errorf("expected view to contain '(1 active)', got:\n%s", view)
+	}
+
+	// Move cursor down to beta (index 1)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updated.(Model)
+
+	// Verify matching width and border integrity:
+	modalView := m.renderResumeModal()
+	modalWidth := lipgloss.Width(modalView)
+	drawerView := m.renderSessionsDrawer()
+	drawerWidth := lipgloss.Width(drawerView)
+
+	if modalWidth != drawerWidth {
+		t.Errorf("expected modal width (%d) to equal drawer width (%d)", modalWidth, drawerWidth)
+	}
+
+	lines := strings.Split(modalView, "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		w := lipgloss.Width(l)
+		if w != modalWidth {
+			t.Errorf("modal line %d width %d does not match expected box width %d: %q", i, w, modalWidth, l)
+		}
+	}
+
+	drawerLines := strings.Split(drawerView, "\n")
+	for i, l := range drawerLines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		w := lipgloss.Width(l)
+		if w != drawerWidth {
+			t.Errorf("drawer line %d width %d does not match expected box width %d: %q", i, w, drawerWidth, l)
+		}
+	}
+}
+
+func TestSessionsDrawer_WrapText(t *testing.T) {
+	// Test 1: Empty text
+	if lines := wrapText("", 80, 3); len(lines) != 0 {
+		t.Errorf("expected 0 lines for empty text, got %d", len(lines))
+	}
+
+	// Test 2: Very long unbroken word (e.g. file path) must be clamped to maxWidth
+	longWord := "/Users/nemesis/Projects/my-projects/aim/.superpowers/sdd/2026-09-14-k9s-architecture-and-code-health/task-6-brief.md"
+	wrapped := wrapText(longWord, 40, 3)
+	for idx, l := range wrapped {
+		if lipgloss.Width(l) > 40 {
+			t.Errorf("line %d width %d exceeded maxWidth 40: %s", idx, lipgloss.Width(l), l)
+		}
+	}
+
+	// Test 2: Text that wraps across 3 lines
+	longPrompt := "Please perform a thorough, comprehensive code review of the pull request changes on branch 'feat/sessions-and-cross-profile-resume' in /Users/nemesis/Projects/my-projects/aim against main."
+	lines := wrapText(longPrompt, 80, 3)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 wrapped lines, got %d: %+v", len(lines), lines)
+	}
+
+	if !strings.Contains(lines[0], "Please perform") {
+		t.Errorf("expected line 1 to start with 'Please perform', got: %s", lines[0])
+	}
+	if !strings.Contains(lines[2], "against main.") {
+		t.Errorf("expected line 3 to contain 'against main.', got: %s", lines[2])
+	}
+
+	// Test 3: Very long text exceeding 3 lines should end with ...
+	veryLong := "Word " + strings.Repeat("test ", 100)
+	linesLong := wrapText(veryLong, 50, 3)
+	if len(linesLong) != 3 {
+		t.Fatalf("expected 3 lines for very long text, got %d", len(linesLong))
+	}
+	if !strings.HasSuffix(linesLong[2], "...") {
+		t.Errorf("expected line 3 to end with '...', got: %s", linesLong[2])
 	}
 }

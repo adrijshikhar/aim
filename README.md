@@ -37,6 +37,7 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 | **OAuth PKCE login** | `aim login agy work` completes OAuth in browser and isolates the token |
 | **Shell completions** | Tab-complete agents, profiles, and subcommands in zsh, bash, and fish |
 | **Doctor command** | Diagnoses missing binaries, tokens, ADC status, and keychain isolation |
+| **Session resumption & handoffs** | Browse history across profiles (`aim sessions` or `s` in TUI), resume verbatim, or hand off context with Catalyst |
 
 ---
 
@@ -84,8 +85,12 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 
 | Command | Description |
 |---|---|
-| `aim` / `aim ui` | Open the interactive TUI dashboard |
+| `aim` | Open the interactive TUI dashboard (default) |
 | `aim run <agent> <profile> [-- args...]` | Execute an agent under an isolated profile |
+| `aim sessions [agent] [--active] [--json]` | List active and past conversation sessions across profiles & host |
+| `aim sessions show [agent] <id>` | Show detailed preview card, goal summary, and metadata for a session |
+| `aim resume <agent> <profile> [id]` | Resume conversation verbatim (`--exact`) or via Catalyst handoff (`--catalyst`) |
+| `aim sessions import <agent> <profile> [id]`| Import or hydrate conversation from host into profile (`--all`, `--fork`) |
 | `aim usage [agent] [profile] [-r] [--json]` | Display remaining quota, reset timers, and credits |
 | `aim list [agent]` | List all configured profiles and inline quota badges |
 | `aim login <agent> <profile>` | Authenticate a new account via OAuth PKCE |
@@ -101,22 +106,35 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 
 ## TUI Keybindings
 
-When running `aim` or `aim ui`, navigate using the following shortcuts:
+When running `aim`, navigate using the following shortcuts:
 
 | Key | Action |
 |---|---|
 | `↑` / `k`, `↓` / `j` | Navigate profile list |
 | `Enter` | Launch selected profile in terminal |
+| `s` | Open Sessions Explorer drawer (navigate, resume exact, or catalyst handoff) |
+| `S` / `$` | Open isolated subshell |
 | `Tab` / `Shift+Tab` | Cycle agent tabs forward / backward |
-| `1` – `4` | Switch directly to agent tab (`[1] Antigravity`, `[2] Gemini`, `[3] Codex`…) |
+| `1` – `3` | Switch directly to agent tab (`[1] Antigravity`, `[2] Gemini`, `[3] Codex`) |
 | `/` | Live fuzzy profile filter (by profile or agent name) |
-| `Esc` | Clear filter or dismiss open modal |
+| `Esc` | Clear filter or dismiss open modal / drawer |
 | `?` | Toggle contextual keyboard help overlay |
-| `r` | Rename selected profile |
-| `d` | Delete / unlink selected profile (with confirmation modal) |
-| `D` | Toggle doctor diagnostics drawer |
-| `s` | Open isolated subshell |
+| `m` / `R` | Rename selected profile |
+| `x` / `Delete` | Delete / unlink selected profile (with confirmation modal) |
+| `d` | Toggle doctor diagnostics drawer |
+| `r` | Refresh quota and limits |
 | `q` / `Ctrl+C` | Quit dashboard |
+
+---
+
+## Context Handoffs with Catalyst
+
+`aim` integrates with **[Catalyst](https://github.com/adrijshikhar/catalyst)** for structured, token-efficient context handoffs across profiles and sessions:
+
+- **Exact Resume (`Enter` / `--exact`)**: Reopens the session with its full verbatim conversation history intact.
+- **Catalyst Handoff (`c` / `--catalyst`)**: Distills the session's goal, key decisions, and notes into a structured Handoff Brief (`.catalyst/handoffs/<branch>.json`). When resuming work on another profile or agent, AIM ingests this brief to continue work with a fresh context window without token bloat.
+
+Special thanks and credit to **[Catalyst](https://github.com/adrijshikhar/catalyst)** for the handoff protocol specification. Be sure to check out the Catalyst project!
 
 ---
 
@@ -125,7 +143,6 @@ When running `aim` or `aim ui`, navigate using the following shortcuts:
 - 📖 **[Wiki & Architecture Guide](wiki.md)** — In-depth guide to virtual home isolation, dotfile bridging rules, directory structures, and configuration schemas.
 - 🎨 **[Design System](design.md)** — Atom One Dark color palette, design tokens, typography, and Lipgloss implementation standards.
 - 🛠️ **[Contributing Guide](CONTRIBUTING.md)** — Local development setup, test suite execution (`make test`, `make smoke`), and how to add new agent adapters.
-- 🗺️ **[Roadmap](ROADMAP.md)** — Upcoming milestones including quota pooling, headless bursting, and cross-agent resumption.
 
 ---
 

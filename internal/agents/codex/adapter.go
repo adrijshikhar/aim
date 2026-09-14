@@ -190,6 +190,9 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	realHome := config.RealHomeDir()
 	copyHostConfig(realHome, codexDir)
 
+	// Bridge host plugins and hooks (e.g. Catalyst) into profile
+	bridgePluginsAndHooks(realHome, codexDir)
+
 	bin := a.ResolveBinary()
 	logger.Debug("[codex] Resolved binary: %s", bin)
 
@@ -224,6 +227,32 @@ func copyHostConfig(realHome, profileCodexDir string) {
 	if _, err := os.Stat(destConfig); os.IsNotExist(err) {
 		if data, err := os.ReadFile(hostConfig); err == nil && len(data) > 0 {
 			_ = os.WriteFile(destConfig, data, 0644)
+		}
+	}
+}
+
+func bridgePluginsAndHooks(realHome, profileCodexDir string) {
+	hostPlugins := filepath.Join(realHome, ".codex", "plugins")
+	destPlugins := filepath.Join(profileCodexDir, "plugins")
+	if fi, err := os.Stat(hostPlugins); err == nil && fi.IsDir() {
+		if _, err := os.Lstat(destPlugins); os.IsNotExist(err) {
+			_ = os.Symlink(hostPlugins, destPlugins)
+		}
+	}
+
+	hostHooksDir := filepath.Join(realHome, ".codex", "hooks")
+	destHooksDir := filepath.Join(profileCodexDir, "hooks")
+	if fi, err := os.Stat(hostHooksDir); err == nil && fi.IsDir() {
+		if _, err := os.Lstat(destHooksDir); os.IsNotExist(err) {
+			_ = os.Symlink(hostHooksDir, destHooksDir)
+		}
+	}
+
+	hostHooksJSON := filepath.Join(realHome, ".codex", "hooks.json")
+	destHooksJSON := filepath.Join(profileCodexDir, "hooks.json")
+	if fi, err := os.Stat(hostHooksJSON); err == nil && !fi.IsDir() {
+		if _, err := os.Lstat(destHooksJSON); os.IsNotExist(err) {
+			_ = os.Symlink(hostHooksJSON, destHooksJSON)
 		}
 	}
 }
