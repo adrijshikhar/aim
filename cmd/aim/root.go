@@ -48,6 +48,7 @@ Primary Commands:
   login <agent> <profile>    Authenticate new account via OAuth PKCE
   list [agent]               List all profiles and status
   sessions [agent]           List active and past conversation sessions
+  resume <agent> <profile>   Resume an existing session under a profile
   usage [agent] [profile]    Display remaining quota and usage limits
   doctor [agent]             Diagnose environment, tokens, and binaries
   remove [agent] <profile>   Delete profile credentials and state
@@ -90,6 +91,7 @@ Flags:
 		newLoginCmd(reg, pm),
 		newListCmd(reg, pm),
 		newSessionsCmd(reg, pm),
+		newResumeCmd(reg, pm),
 		newUsageCmd(reg, pm),
 		newDoctorCmd(reg, pm),
 		newRemoveCmd(reg, pm),

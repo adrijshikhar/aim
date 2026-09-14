@@ -102,6 +102,8 @@ Flags:
 	cmd.Flags().BoolVar(&allFlag, "all", false, "Show full history (default limits to 20)")
 	cmd.Flags().BoolVar(&jsonFlag, "json", false, "Output raw JSON for scripting")
 
+	cmd.AddCommand(newSessionsImportCmd(reg, pm))
+
 	return cmd
 }
 
