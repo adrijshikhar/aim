@@ -115,21 +115,18 @@ var (
 				Bold(true).
 				Foreground(AccentBlue)
 
-	DrawerContentWidth = 95
-
 	SessionsDrawerStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(AccentBlue).
 				Padding(1, 2).
-				MarginLeft(2).
-				Width(DrawerContentWidth)
+				MarginLeft(2)
 
 	ResumeModalBoxStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(AccentBlue).
 				Padding(1, 2).
 				MarginLeft(2).
-				Width(DrawerContentWidth)
+				Width(104)
 )
 
 func GaugeStyleForStatus(st usage.Status) lipgloss.Style {
