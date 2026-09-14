@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,7 +74,21 @@ func (s *mockProcessScanner) ScanActiveProcesses(ctx context.Context) (map[strin
 	return s.active, nil
 }
 
+func setupTestProfiles(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+	for _, prof := range []string{"work", "bby"} {
+		p := filepath.Join(tmpDir, "profiles", prof)
+		if err := os.MkdirAll(p, 0755); err != nil {
+			t.Fatalf("failed to create test profile dir %s: %v", p, err)
+		}
+	}
+	return tmpDir
+}
+
 func TestManager_ResolveSession(t *testing.T) {
+	setupTestProfiles(t)
 	mgr := session.NewManager()
 
 	s1 := session.NewSession("775e6ada-1595-4e7e-84fa-ce0ea71e3007", "Title 1", "agy", "work", false, time.Now())
@@ -119,6 +134,7 @@ func TestManager_ResolveSession(t *testing.T) {
 }
 
 func TestManager_ActiveProcessCorrelation(t *testing.T) {
+	setupTestProfiles(t)
 	s1 := session.NewSession("775e6ada-1595-4e7e-84fa-ce0ea71e3007", "Active Conv", "agy", "bby", false, time.Now())
 	s2 := session.NewSession("fcdbc2e0-2dc8-4ffa-9ee2-eb5aaa3e556f", "Idle Conv", "agy", "work", false, time.Now().Add(-1*time.Hour))
 
@@ -172,6 +188,7 @@ func TestManager_ActiveProcessCorrelation(t *testing.T) {
 }
 
 func TestManager_DeduplicateAndAmbiguity(t *testing.T) {
+	setupTestProfiles(t)
 	mgr := session.NewManager()
 	ctx := context.Background()
 
