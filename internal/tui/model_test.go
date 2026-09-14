@@ -2333,15 +2333,16 @@ func TestResumeModal_QuotaAndActiveBadges(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = updated.(Model)
 
-	// Verify width matching: Resume modal width must exactly match Sessions drawer width
-	modalWidth := lipgloss.Width(m.renderResumeModal())
-	drawerWidth := lipgloss.Width(m.renderSessionsDrawer())
+	// Verify matching width and border integrity:
+	modalView := m.renderResumeModal()
+	modalWidth := lipgloss.Width(modalView)
+	drawerView := m.renderSessionsDrawer()
+	drawerWidth := lipgloss.Width(drawerView)
+
 	if modalWidth != drawerWidth {
-		t.Errorf("expected resume modal width (%d) to match sessions drawer width (%d)", modalWidth, drawerWidth)
+		t.Errorf("expected modal width (%d) to equal drawer width (%d)", modalWidth, drawerWidth)
 	}
 
-	// Verify border integrity: No broken right border pipes or wrapping outside box
-	modalView := m.renderResumeModal()
 	lines := strings.Split(modalView, "\n")
 	for i, l := range lines {
 		if strings.TrimSpace(l) == "" {
@@ -2349,7 +2350,18 @@ func TestResumeModal_QuotaAndActiveBadges(t *testing.T) {
 		}
 		w := lipgloss.Width(l)
 		if w != modalWidth {
-			t.Errorf("line %d width %d does not match expected box width %d: %q", i, w, modalWidth, l)
+			t.Errorf("modal line %d width %d does not match expected box width %d: %q", i, w, modalWidth, l)
+		}
+	}
+
+	drawerLines := strings.Split(drawerView, "\n")
+	for i, l := range drawerLines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		w := lipgloss.Width(l)
+		if w != drawerWidth {
+			t.Errorf("drawer line %d width %d does not match expected box width %d: %q", i, w, drawerWidth, l)
 		}
 	}
 }
@@ -2358,6 +2370,15 @@ func TestSessionsDrawer_WrapText(t *testing.T) {
 	// Test 1: Empty text
 	if lines := wrapText("", 80, 3); len(lines) != 0 {
 		t.Errorf("expected 0 lines for empty text, got %d", len(lines))
+	}
+
+	// Test 2: Very long unbroken word (e.g. file path) must be clamped to maxWidth
+	longWord := "/Users/nemesis/Projects/my-projects/aim/.superpowers/sdd/2026-09-14-k9s-architecture-and-code-health/task-6-brief.md"
+	wrapped := wrapText(longWord, 40, 3)
+	for idx, l := range wrapped {
+		if lipgloss.Width(l) > 40 {
+			t.Errorf("line %d width %d exceeded maxWidth 40: %s", idx, lipgloss.Width(l), l)
+		}
 	}
 
 	// Test 2: Text that wraps across 3 lines

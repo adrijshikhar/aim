@@ -14,11 +14,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var SessionsDrawerStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(AccentBlue).
-	Padding(1, 2)
-
 type sessionsDrawerState struct {
 	active       bool
 	sessions     []session.Session
@@ -204,7 +199,7 @@ func (m Model) renderSessionsDrawer() string {
 	codexActive := m.sessionsDrawer.agentFilter == "codex"
 
 	topBar := fmt.Sprintf("%s  %s %s %s  %s",
-		titleStyle.Render("⚡ Sessions Explorer"),
+		titleStyle.Render("Sessions Explorer"),
 		filterTabStyle(allActive).Render("[0] All"),
 		filterTabStyle(agyActive).Render("[1] Antigravity"),
 		filterTabStyle(codexActive).Render("[2] Codex"),
@@ -297,7 +292,7 @@ func (m Model) renderSessionsDrawer() string {
 				previewText = "(no summary recorded for this session)"
 			}
 
-			displayLines := wrapText(previewText, 86, 3)
+			displayLines := wrapText(previewText, 89, 3)
 			if len(displayLines) == 0 {
 				displayLines = []string{"(no summary recorded for this session)"}
 			}
@@ -306,7 +301,8 @@ func (m Model) renderSessionsDrawer() string {
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(AccentCyan).
 				Padding(0, 1).
-				MarginTop(1)
+				MarginTop(1).
+				Width(91)
 
 			var pb strings.Builder
 			statusLabel := lipgloss.NewStyle().Foreground(TextMuted).Render("IDLE")
@@ -394,6 +390,10 @@ func wrapText(text string, maxWidth int, maxLines int) []string {
 
 		var current strings.Builder
 		for i, w := range words {
+			if len(w) > maxWidth {
+				w = w[:maxWidth-3] + "..."
+			}
+
 			if len(lines) == maxLines-1 {
 				// We are on the final line allowed.
 				// Fit as many remaining words as possible.

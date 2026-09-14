@@ -180,7 +180,7 @@ func (m Model) renderResumeModal() string {
 		modeStr = "Forked Session (Branch)"
 	}
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(AccentCyan).Render(fmt.Sprintf("🚀 Resume Session: %s", sess.ShortID))
+	title := lipgloss.NewStyle().Bold(true).Foreground(AccentCyan).Render(fmt.Sprintf("Resume Session: %s", sess.ShortID))
 	b.WriteString(title + "\n\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(TextMuted)
@@ -229,11 +229,6 @@ func (m Model) renderResumeModal() string {
 				itemStyle = lipgloss.NewStyle().Bold(true).Foreground(AccentCyan)
 			}
 
-			bullet := "○ "
-			if isOriginal {
-				bullet = "● "
-			}
-
 			// Calculate padding for aligned columns
 			curLen := len(p)
 			if isOriginal {
@@ -272,7 +267,7 @@ func (m Model) renderResumeModal() string {
 				activeBadge = " " + lipgloss.NewStyle().Foreground(StatusYellow).Render(fmt.Sprintf("(%d active)", activeCount))
 			}
 
-			b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s\n", cursor, bullet, itemStyle.Render(p), origBadge, padding, quotaBadge, activeBadge))
+			b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s\n", cursor, itemStyle.Render(p), origBadge, padding, quotaBadge, activeBadge))
 		}
 
 		// Custom option
@@ -287,18 +282,9 @@ func (m Model) renderResumeModal() string {
 
 		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
 			"  [↑/↓] Select Profile  •  [Enter] Confirm & Resume  •  [Esc] Back",
-		) + "\n")
+		))
 	}
 
-	drawerWidth := lipgloss.Width(m.renderSessionsDrawer())
-	boxWidth := drawerWidth - 2
-	if boxWidth < 80 {
-		boxWidth = 107
-	}
-	if m.width > 0 && m.width-4 < boxWidth {
-		boxWidth = m.width - 4
-	}
-
-	box := ResumeModalBoxStyle.Width(boxWidth).Render(b.String())
+	box := ResumeModalBoxStyle.Render(b.String())
 	return "\n" + box + "\n"
 }
