@@ -51,7 +51,7 @@ func (b *Bridge) WriteHandoffBrief(repoRoot, branch string, s *session.Session) 
 
 	storeDir := filepath.Join(repoRoot, ".catalyst", "handoffs")
 	if err := os.MkdirAll(storeDir, 0755); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create handoffs directory: %w", err)
 	}
 
 	key := BranchToKey(branch)
@@ -78,17 +78,17 @@ func (b *Bridge) WriteHandoffBrief(repoRoot, branch string, s *session.Session) 
 
 	data, err := json.MarshalIndent(brief, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal handoff brief: %w", err)
 	}
 
 	tmpPath := targetPath + ".tmp"
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to write temp handoff brief: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, targetPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return "", err
+		return "", fmt.Errorf("failed to commit handoff brief: %w", err)
 	}
 
 	return targetPath, nil
@@ -101,12 +101,12 @@ func (b *Bridge) ReadHandoffBrief(repoRoot, branch string) (*HandoffBrief, error
 
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read handoff brief %s: %w", targetPath, err)
 	}
 
 	var brief HandoffBrief
 	if err := json.Unmarshal(data, &brief); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse handoff brief %s: %w", targetPath, err)
 	}
 
 	return &brief, nil

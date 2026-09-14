@@ -58,12 +58,13 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 		return nil, nil
 	}
 
-	query := "SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;"
-	cmd := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||", query)
+	query := "SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
+	cmd := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||")
+	cmd.Stdin = strings.NewReader(query)
 	out, err := cmd.Output()
 	if err != nil {
 		logger.Debug("[session/agy] query error on %s: %v", db, err)
-		return nil, nil
+		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", db, err)
 	}
 
 	profileName := filepath.Base(profileDir)
@@ -123,22 +124,48 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 		return nil, nil
 	}
 
+	if !isValidSessionID(idOrPrefix) {
+		return nil, nil
+	}
+
 	db := p.dbPath(profileDir, isHost)
 	if fi, err := os.Stat(db); err != nil || fi.Size() == 0 {
 		return nil, nil
 	}
 
-	escapedPrefix := strings.ReplaceAll(idOrPrefix, "'", "''")
-	query := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries WHERE conversation_id LIKE '%s%%' LIMIT 2;", escapedPrefix)
-	cmd := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||", query)
+	prefixLen := len(idOrPrefix)
+	query := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
+	cmd := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||")
+	cmd.Stdin = strings.NewReader(query)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("failed to query session %s from %s: %w", idOrPrefix, db, err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+	var validLines []string
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			validLines = append(validLines, l)
+		}
+	}
+	if len(validLines) == 0 {
 		return nil, nil
+	}
+
+	if len(validLines) > 1 {
+		var ids []string
+		for _, l := range validLines {
+			p := strings.Split(l, "|||")
+			if len(p) >= 1 {
+				id := strings.TrimSpace(p[0])
+				if len(id) >= 8 {
+					id = id[:8]
+				}
+				ids = append(ids, id)
+			}
+		}
+		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions in %s: %s", idOrPrefix, profileDir, strings.Join(ids, ", "))
 	}
 
 	profileName := filepath.Base(profileDir)
@@ -146,7 +173,7 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 		profileName = "<host>"
 	}
 
-	parts := strings.Split(lines[0], "|||")
+	parts := strings.Split(validLines[0], "|||")
 	if len(parts) < 4 {
 		return nil, nil
 	}
@@ -181,6 +208,18 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 		s.Summary = preview
 	}
 	return &s, nil
+}
+
+func isValidSessionID(s string) bool {
+	if s == "" || len(s) > 128 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Provider) brainDir(profileDir string, isHost bool, convID string) string {

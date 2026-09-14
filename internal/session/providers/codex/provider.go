@@ -79,11 +79,12 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 }
 
 func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName string, isHost bool) ([]session.Session, error) {
-	query := "SELECT id, title, preview, updated_at, rollout_path FROM threads ORDER BY updated_at DESC LIMIT 50;"
-	cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath, "-separator", "|||", query)
+	query := "SELECT id, title, preview, updated_at, rollout_path FROM threads ORDER BY updated_at DESC LIMIT 50;\n"
+	cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath, "-separator", "|||")
+	cmd.Stdin = strings.NewReader(query)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
 	}
 
 	var sessions []session.Session
@@ -129,7 +130,7 @@ func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName strin
 func (p *Provider) listFromJSONL(indexPath, profileName string, isHost bool) ([]session.Session, error) {
 	f, err := os.Open(indexPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open session index at %s: %w", indexPath, err)
 	}
 	defer f.Close()
 
@@ -168,21 +169,39 @@ func (p *Provider) listFromJSONL(indexPath, profileName string, isHost bool) ([]
 		sessions = append(sessions, s)
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan session index at %s: %w", indexPath, err)
+	}
+
 	return sessions, nil
 }
 
 func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
 	sessions, err := p.ListSessions(ctx, profileDir, isHost)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list sessions for codex: %w", err)
 	}
 
+	var matches []*session.Session
 	for _, s := range sessions {
 		if strings.HasPrefix(s.ID, idOrPrefix) {
 			match := s
-			return &match, nil
+			matches = append(matches, &match)
 		}
 	}
+
+	if len(matches) > 1 {
+		var ids []string
+		for _, m := range matches {
+			ids = append(ids, m.ShortID)
+		}
+		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions in %s: %s", idOrPrefix, profileDir, strings.Join(ids, ", "))
+	}
+
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
 	return nil, nil
 }
 
@@ -193,15 +212,25 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 
 	targetCodexDir := filepath.Join(destProfileDir, ".codex")
 	if err := os.MkdirAll(targetCodexDir, 0700); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create target codex directory %s: %w", targetCodexDir, err)
 	}
 
 	targetSessionsDir := filepath.Join(targetCodexDir, "sessions")
-	_ = os.MkdirAll(targetSessionsDir, 0755)
+	if err := os.MkdirAll(targetSessionsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create target sessions directory %s: %w", targetSessionsDir, err)
+	}
 
 	targetID := srcSession.ID
 	if fork {
-		targetID = generateUUID()
+		var err error
+		targetID, err = generateUUID()
+		if err != nil {
+			return "", fmt.Errorf("failed to generate uuid for forked session: %w", err)
+		}
+	}
+
+	if !isValidSessionID(targetID) {
+		return "", fmt.Errorf("invalid session ID %q", targetID)
 	}
 
 	targetRolloutPath := srcSession.StoragePath
@@ -212,9 +241,10 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 				baseName = fmt.Sprintf("rollout-%s.jsonl", targetID)
 			}
 			destPath := filepath.Join(targetSessionsDir, baseName)
-			if err := copyFile(srcSession.StoragePath, destPath); err == nil {
-				targetRolloutPath = destPath
+			if err := copyFile(srcSession.StoragePath, destPath); err != nil {
+				return "", fmt.Errorf("failed to copy rollout file to %s: %w", destPath, err)
 			}
+			targetRolloutPath = destPath
 		}
 	}
 
@@ -234,20 +264,20 @@ CREATE TABLE IF NOT EXISTS threads (
 	sandbox_policy TEXT NOT NULL DEFAULT 'workspace-write',
 	approval_mode TEXT NOT NULL DEFAULT 'ask'
 );`
-		_ = exec.CommandContext(ctx, p.sqliteBin, targetDB, schema).Run()
+		schemaCmd := exec.CommandContext(ctx, p.sqliteBin, targetDB)
+		schemaCmd.Stdin = strings.NewReader(schema)
+		if err := schemaCmd.Run(); err != nil {
+			logger.Debug("[session/codex] failed to initialize schema at %s: %v", targetDB, err)
+		}
 
-		escapedID := strings.ReplaceAll(targetID, "'", "''")
-		escapedPath := strings.ReplaceAll(targetRolloutPath, "'", "''")
-		escapedTitle := strings.ReplaceAll(srcSession.Title, "'", "''")
-		escapedPreview := strings.ReplaceAll(srcSession.Summary, "'", "''")
-		escapedProfileDir := strings.ReplaceAll(destProfileDir, "'", "''")
 		unixNow := time.Now().Unix()
-
 		insertQuery := fmt.Sprintf(
-			"INSERT OR REPLACE INTO threads (id, rollout_path, created_at, updated_at, title, preview, source, model_provider, cwd, sandbox_policy, approval_mode) VALUES ('%s', '%s', %d, %d, '%s', '%s', 'cli', 'openai', '%s', 'workspace-write', 'ask');",
-			escapedID, escapedPath, unixNow, unixNow, escapedTitle, escapedPreview, escapedProfileDir,
+			"INSERT OR REPLACE INTO threads (id, rollout_path, created_at, updated_at, title, preview, source, model_provider, cwd, sandbox_policy, approval_mode) VALUES ('%s', '%s', %d, %d, '%s', '%s', 'cli', 'openai', '%s', 'workspace-write', 'ask');\n",
+			escapeSQL(targetID), escapeSQL(targetRolloutPath), unixNow, unixNow, escapeSQL(srcSession.Title), escapeSQL(srcSession.Summary), escapeSQL(destProfileDir),
 		)
-		if err := exec.CommandContext(ctx, p.sqliteBin, targetDB, insertQuery).Run(); err != nil {
+		insertCmd := exec.CommandContext(ctx, p.sqliteBin, targetDB)
+		insertCmd.Stdin = strings.NewReader(insertQuery)
+		if err := insertCmd.Run(); err != nil {
 			logger.Debug("[session/codex] failed to insert thread into %s: %v", targetDB, err)
 		}
 	}
@@ -259,43 +289,75 @@ CREATE TABLE IF NOT EXISTS threads (
 		"updated_at":  time.Now().Format(time.RFC3339),
 		"file_path":   targetRolloutPath,
 	}
-	if b, err := json.Marshal(rec); err == nil {
-		if f, err := os.OpenFile(targetIndex, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
-			_, _ = f.Write(append(b, '\n'))
-			_ = f.Close()
-		}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal session index record: %w", err)
+	}
+
+	f, err := os.OpenFile(targetIndex, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to open session index file at %s: %w", targetIndex, err)
+	}
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		_ = f.Close()
+		return "", fmt.Errorf("failed to write to session index file at %s: %w", targetIndex, err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("failed to close session index file at %s: %w", targetIndex, err)
 	}
 
 	return targetID, nil
 }
 
-func generateUUID() string {
+func isValidSessionID(s string) bool {
+	if s == "" || len(s) > 128 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func escapeSQL(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+func generateUUID() (string, error) {
 	var b [16]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("failed to read random bytes for UUID: %w", err)
+	}
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 
 func copyFile(src, dst string) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open source %s: %w", src, err)
 	}
 	defer in.Close()
 
 	out, err := os.Create(dst)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create destination %s: %w", dst, err)
 	}
 	defer func() {
 		if closeErr := out.Close(); closeErr != nil && err == nil {
-			err = closeErr
+			err = fmt.Errorf("failed to close destination %s: %w", dst, closeErr)
 		}
 	}()
 
 	if _, err = io.Copy(out, in); err != nil {
-		return err
+		return fmt.Errorf("failed to copy data from %s to %s: %w", src, dst, err)
 	}
-	return out.Sync()
+	if err = out.Sync(); err != nil {
+		return fmt.Errorf("failed to sync destination %s: %w", dst, err)
+	}
+	return nil
 }

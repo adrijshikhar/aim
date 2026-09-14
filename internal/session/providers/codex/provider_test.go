@@ -127,3 +127,56 @@ func TestProvider_Hydrate(t *testing.T) {
 		t.Errorf("expected target state_5.sqlite to exist: %v", err)
 	}
 }
+
+func TestProvider_Hydrate_Fork(t *testing.T) {
+	setupMockCodex(t)
+	targetDir := t.TempDir()
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	dummyRollout := filepath.Join(t.TempDir(), "dummy-rollout.jsonl")
+	_ = os.WriteFile(dummyRollout, []byte(`{"turn": 1}`), 0644)
+
+	srcSession := session.NewSession("01a09eb7-2f6c-7c52-895f-218f9ac9eecd", "Fork Test", "codex", "<host>", true, time.Now())
+	srcSession.StoragePath = dummyRollout
+
+	forkedID, err := p.Hydrate(ctx, &srcSession, targetDir, true)
+	if err != nil {
+		t.Fatalf("Hydrate fork failed: %v", err)
+	}
+	if forkedID == srcSession.ID {
+		t.Errorf("expected forked ID to be different from source ID, got %s", forkedID)
+	}
+	if len(forkedID) != 36 {
+		t.Errorf("expected 36-character UUID for forked ID, got %s", forkedID)
+	}
+
+	// Verify rollout file was copied with forked ID
+	forkedRollout := filepath.Join(targetDir, ".codex", "sessions", "rollout-"+forkedID+".jsonl")
+	if _, err := os.Stat(forkedRollout); err != nil {
+		t.Errorf("expected forked rollout file to exist: %v", err)
+	}
+}
+
+func TestProvider_SQLInjectionSafety(t *testing.T) {
+	mockProfileDir := setupMockCodex(t)
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	// 1. Malicious session ID in Hydrate
+	maliciousSession := session.NewSession("'; DROP TABLE threads; --", "Hacked Title", "codex", "<host>", true, time.Now())
+	targetDir := t.TempDir()
+	_, err := p.Hydrate(ctx, &maliciousSession, targetDir, false)
+	if err == nil {
+		t.Errorf("expected error for malicious session ID in Hydrate, got nil")
+	}
+
+	// 2. Querying with malicious prefix
+	s, err := p.GetSession(ctx, "'; DROP TABLE threads; --", mockProfileDir, false)
+	if s != nil {
+		t.Errorf("malicious prefix unexpectedly returned a session")
+	}
+	_ = err
+}
+

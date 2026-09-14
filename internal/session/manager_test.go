@@ -2,6 +2,9 @@ package session_test
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,15 +21,42 @@ func (m *mockProvider) Agent() string {
 }
 
 func (m *mockProvider) ListSessions(ctx context.Context, profileDir string, isHost bool) ([]session.Session, error) {
-	return m.sessions, nil
+	var filtered []session.Session
+	profName := filepath.Base(profileDir)
+	for _, s := range m.sessions {
+		if isHost && s.IsHost {
+			filtered = append(filtered, s)
+		} else if !isHost && !s.IsHost && (s.Profile == "" || s.Profile == profName) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
 }
 
 func (m *mockProvider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
+	var matches []*session.Session
+	profName := filepath.Base(profileDir)
 	for _, s := range m.sessions {
-		if s.ID == idOrPrefix || (len(idOrPrefix) >= 4 && len(s.ID) >= len(idOrPrefix) && s.ID[:len(idOrPrefix)] == idOrPrefix) {
-			res := s
-			return &res, nil
+		if isHost && !s.IsHost {
+			continue
 		}
+		if !isHost && (s.IsHost || (s.Profile != "" && s.Profile != profName)) {
+			continue
+		}
+		if s.ID == idOrPrefix || strings.HasPrefix(s.ID, idOrPrefix) {
+			res := s
+			matches = append(matches, &res)
+		}
+	}
+	if len(matches) > 1 {
+		var ids []string
+		for _, match := range matches {
+			ids = append(ids, match.ShortID)
+		}
+		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", idOrPrefix, strings.Join(ids, ", "))
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
 	}
 	return nil, nil
 }
@@ -140,3 +170,43 @@ func TestManager_ActiveProcessCorrelation(t *testing.T) {
 		t.Errorf("expected both active and idle sessions to be verified")
 	}
 }
+
+func TestManager_DeduplicateAndAmbiguity(t *testing.T) {
+	mgr := session.NewManager()
+	ctx := context.Background()
+
+	// 1. Profile vs Host deduplication: isolated profile must take priority over host
+	sHost := session.NewSession("dup-session-12345678", "Host Copy", "codex", "<host>", true, time.Now().Add(-10*time.Minute))
+	sProf := session.NewSession("dup-session-12345678", "Prof Copy", "codex", "work", false, time.Now())
+
+	mockCodex := &mockProvider{
+		agent:    "codex",
+		sessions: []session.Session{sHost, sProf},
+	}
+	mgr.RegisterProvider(mockCodex)
+
+	res, err := mgr.ResolveSession(ctx, "codex", "dup-session")
+	if err != nil {
+		t.Fatalf("expected to resolve session without error, got %v", err)
+	}
+	if res.IsHost {
+		t.Errorf("expected isolated profile to be prioritized over host, got IsHost=true")
+	}
+	if res.Profile != "work" {
+		t.Errorf("expected Profile 'work', got %q", res.Profile)
+	}
+
+	// 2. Ambiguous prefix matching multiple distinct sessions
+	sA := session.NewSession("ambig-1111-aaaa", "Task A", "codex", "work", false, time.Now())
+	sB := session.NewSession("ambig-2222-bbbb", "Task B", "codex", "work", false, time.Now())
+	mockCodex.sessions = []session.Session{sA, sB}
+
+	_, errAmbig := mgr.ResolveSession(ctx, "codex", "ambig")
+	if errAmbig == nil {
+		t.Fatalf("expected error for ambiguous prefix, got nil")
+	}
+	if !strings.Contains(errAmbig.Error(), "ambiguous prefix") {
+		t.Errorf("expected ambiguous prefix error message, got: %v", errAmbig)
+	}
+}
+

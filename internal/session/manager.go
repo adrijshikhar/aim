@@ -205,29 +205,25 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 			}
 
 			if len(matches) > 0 {
-				uniqueMap := make(map[string]Session)
-				for _, match := range matches {
-					uniqueMap[match.ID] = match
-				}
-				if len(uniqueMap) > 1 {
+				uniqueMatches := deduplicateMatches(matches)
+				if len(uniqueMatches) > 1 {
 					var ids []string
-					for id := range uniqueMap {
-						ids = append(ids, id)
+					for _, s := range uniqueMatches {
+						ids = append(ids, s.ShortID)
 					}
+					sort.Strings(ids)
 					return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", idOrPrefix, strings.Join(ids, ", "))
 				}
-				for _, s := range uniqueMap {
-					res := s
-					if m.scanner != nil {
-						if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
-							if active, ok := procs[res.ID]; ok {
-								res.Status = StatusActive
-								res.PID = active.PID
-							}
+				res := uniqueMatches[0]
+				if m.scanner != nil {
+					if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
+						if active, ok := procs[res.ID]; ok {
+							res.Status = StatusActive
+							res.PID = active.PID
 						}
 					}
-					return &res, nil
 				}
+				return &res, nil
 			}
 		}
 	}
@@ -235,7 +231,7 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 	// Fallback to broad scan via ListSessions
 	sessions, err := m.ListSessions(ctx, agent, "", false)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}
 
 	var matches []Session
@@ -249,25 +245,55 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, idOrPrefix)
 	}
 
-	// Deduplicate matches with the exact same ID
-	uniqueMap := make(map[string]Session)
-	for _, m := range matches {
-		uniqueMap[m.ID] = m
-	}
+	uniqueMatches := deduplicateMatches(matches)
 
-	if len(uniqueMap) > 1 {
+	if len(uniqueMatches) > 1 {
 		var ids []string
-		for id := range uniqueMap {
-			ids = append(ids, id)
+		for _, s := range uniqueMatches {
+			ids = append(ids, s.ShortID)
 		}
+		sort.Strings(ids)
 		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", idOrPrefix, strings.Join(ids, ", "))
 	}
 
-	// Return the single matched session
-	for _, s := range uniqueMap {
-		res := s
-		return &res, nil
+	res := uniqueMatches[0]
+	return &res, nil
+}
+
+func deduplicateMatches(matches []Session) []Session {
+	idToSession := make(map[string]Session)
+	for _, match := range matches {
+		existing, exists := idToSession[match.ID]
+		if !exists {
+			idToSession[match.ID] = match
+			continue
+		}
+		// If existing is host and new match is an isolated profile, prioritize the isolated profile
+		if existing.IsHost && !match.IsHost {
+			idToSession[match.ID] = match
+			continue
+		}
+		// If existing is an isolated profile and new match is host, keep existing isolated profile
+		if !existing.IsHost && match.IsHost {
+			continue
+		}
+		// If both are profiles or both are host, prioritize the more recently active one
+		if match.LastActiveAt.After(existing.LastActiveAt) {
+			idToSession[match.ID] = match
+		}
 	}
 
-	return nil, ErrSessionNotFound
+	var result []Session
+	for _, s := range idToSession {
+		result = append(result, s)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].LastActiveAt.Equal(result[j].LastActiveAt) {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].LastActiveAt.After(result[j].LastActiveAt)
+	})
+	return result
 }
+
+

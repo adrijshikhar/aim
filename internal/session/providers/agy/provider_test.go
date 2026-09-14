@@ -141,3 +141,37 @@ func TestProvider_TranscriptSummaryExtraction(t *testing.T) {
 		t.Errorf("expected fallback preview 'Review PRs', got: %+v", s2)
 	}
 }
+
+func TestProvider_SQLInjectionSafety(t *testing.T) {
+	mockProfileDir := setupMockAgyDB(t)
+	p := agy.NewProvider()
+	ctx := context.Background()
+
+	maliciousInputs := []string{
+		"'; DROP TABLE conversation_summaries; --",
+		"775e6ada' OR '1'='1",
+		"775e6ada; SELECT * FROM conversation_summaries;",
+		"775e6ada\x00extra",
+		"775e6ada%",
+		"775e6ada_",
+	}
+
+	for _, input := range maliciousInputs {
+		t.Run(input, func(t *testing.T) {
+			s, err := p.GetSession(ctx, input, mockProfileDir, false)
+			// Must either cleanly return nil without error (rejected by whitelist)
+			// or error out without executing injection.
+			if s != nil {
+				t.Errorf("malicious input %q unexpectedly returned a session", input)
+			}
+			_ = err
+		})
+	}
+
+	// Verify table was not dropped
+	sessions, err := p.ListSessions(ctx, mockProfileDir, false)
+	if err != nil || len(sessions) != 2 {
+		t.Fatalf("table conversation_summaries was compromised or corrupted: err=%v, sessions=%d", err, len(sessions))
+	}
+}
+
