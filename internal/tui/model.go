@@ -64,6 +64,7 @@ type Model struct {
 	renameModal    renameModalState
 	doctorDrawer   doctorDrawerState
 	sessionsDrawer sessionsDrawerState
+	resumeModal    resumeModalState
 	helpModal      helpModalState
 	filter         filterState
 	keys           KeyMap
@@ -463,6 +464,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDoctorDrawer(msg)
 		}
 
+		if m.resumeModal.active {
+			return m.updateResumeModal(msg)
+		}
+
 		if m.sessionsDrawer.active {
 			return m.updateSessionsDrawer(msg)
 		}
@@ -637,6 +642,11 @@ func (m Model) View() string {
 
 	if m.doctorDrawer.active {
 		s.WriteString(m.renderDoctorDrawer())
+		return s.String()
+	}
+
+	if m.resumeModal.active {
+		s.WriteString(m.renderResumeModal())
 		return s.String()
 	}
 

@@ -2106,8 +2106,19 @@ func TestSessionsDrawer_Interactions(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = updated.(Model)
 
-	// Press Enter to resume exact on second session
+	// Press Enter on second session to open resume modal
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected ResumeModal to be active")
+	}
+	if m.ResumeModalSession() == nil || m.ResumeModalSession().ID != s2.ID {
+		t.Fatalf("expected resume modal session %s, got %v", s2.ID, m.ResumeModalSession())
+	}
+
+	// Press Enter again inside resume modal to confirm pre-selected original profile
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(Model)
 
 	if m.Outcome() != ActionResumeExact {
@@ -2115,6 +2126,9 @@ func TestSessionsDrawer_Interactions(t *testing.T) {
 	}
 	if m.SelectedSession() == nil || m.SelectedSession().ID != s2.ID {
 		t.Fatalf("expected selected session %s, got %v", s2.ID, m.SelectedSession())
+	}
+	if m.SelectedProfile() != "beta" {
+		t.Fatalf("expected selected profile to be beta, got %s", m.SelectedProfile())
 	}
 	if cmd == nil {
 		t.Errorf("expected tea.Quit command on resume")
@@ -2126,7 +2140,15 @@ func TestSessionsDrawer_Interactions(t *testing.T) {
 	m = updated.(Model)
 	m.SetSessionsForTest([]session.Session{s1, s2})
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected ResumeModal to be active for catalyst resume")
+	}
+
+	// Confirm in modal
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(Model)
 
 	if m.Outcome() != ActionResumeCatalyst {
@@ -2135,6 +2157,9 @@ func TestSessionsDrawer_Interactions(t *testing.T) {
 	if m.SelectedSession() == nil || m.SelectedSession().ID != s1.ID {
 		t.Fatalf("expected selected session %s, got %v", s1.ID, m.SelectedSession())
 	}
+	if m.SelectedProfile() != "alpha" {
+		t.Fatalf("expected selected profile alpha, got %s", m.SelectedProfile())
+	}
 
 	// Test Fork resume ('b')
 	m = newTestModel(t, "alpha", "beta")
@@ -2142,7 +2167,15 @@ func TestSessionsDrawer_Interactions(t *testing.T) {
 	m = updated.(Model)
 	m.SetSessionsForTest([]session.Session{s1, s2})
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected ResumeModal to be active for fork resume")
+	}
+
+	// Confirm in modal
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(Model)
 
 	if m.Outcome() != ActionResumeExact {
@@ -2150,6 +2183,97 @@ func TestSessionsDrawer_Interactions(t *testing.T) {
 	}
 	if !m.IsForkResume() {
 		t.Fatalf("expected IsForkResume to be true")
+	}
+}
+
+func TestResumeModal_ProfileNavigationAndCustom(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta", "gamma")
+
+	// Open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	s1 := session.NewSession("11111111-2222-3333-4444-555566667777", "Session One", "agy", "beta", false, time.Now())
+	m.SetSessionsForTest([]session.Session{s1})
+
+	// Open modal via Enter
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal active")
+	}
+	// Original profile "beta" should be first
+	profiles := m.ResumeModalProfiles()
+	if len(profiles) == 0 || profiles[0] != "beta" {
+		t.Fatalf("expected first profile to be original 'beta', got %v", profiles)
+	}
+
+	// Navigate down to second profile
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updated.(Model)
+	if m.ResumeModalCursor() != 1 {
+		t.Fatalf("expected cursor 1, got %d", m.ResumeModalCursor())
+	}
+
+	// Confirm with second profile
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatalf("expected quit command")
+	}
+	if m.SelectedProfile() != profiles[1] {
+		t.Fatalf("expected selected profile %s, got %s", profiles[1], m.SelectedProfile())
+	}
+
+	// Test Esc dismisses modal back to drawer
+	m = newTestModel(t, "alpha", "beta")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+	m.SetSessionsForTest([]session.Session{s1})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal active")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal dismissed")
+	}
+	if !m.sessionsDrawer.active {
+		t.Fatalf("expected sessions drawer still active")
+	}
+
+	// Test Custom Profile input
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	// Cursor to bottom ("Enter custom profile name...")
+	totalOpts := len(m.ResumeModalProfiles()) + 1
+	for i := 0; i < totalOpts; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		m = updated.(Model)
+	}
+	// Enter custom mode
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if !m.ResumeModalIsCustomMode() {
+		t.Fatalf("expected customMode true")
+	}
+
+	// Type custom profile name: "work-profile"
+	for _, r := range "work-profile" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+	// Confirm custom profile
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatalf("expected quit command")
+	}
+	if m.SelectedProfile() != "work-profile" {
+		t.Fatalf("expected selected 'work-profile', got '%s'", m.SelectedProfile())
 	}
 }
 

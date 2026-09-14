@@ -142,50 +142,19 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		filtered := m.filteredSessions()
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
-			m.selectedSession = &target
-			if m.selected == "" || m.selected == "<host>" {
-				if target.Profile != "" && target.Profile != "<host>" {
-					m.selected = target.Profile
-				} else {
-					m.selected = "default"
-				}
-			}
-			m.outcome = ActionResumeExact
-			m.cancelStream()
-			return m, tea.Quit
+			return m.openResumeModal(&target, ActionResumeExact, false)
 		}
 	case "c":
 		filtered := m.filteredSessions()
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
-			m.selectedSession = &target
-			if m.selected == "" || m.selected == "<host>" {
-				if target.Profile != "" && target.Profile != "<host>" {
-					m.selected = target.Profile
-				} else {
-					m.selected = "default"
-				}
-			}
-			m.outcome = ActionResumeCatalyst
-			m.cancelStream()
-			return m, tea.Quit
+			return m.openResumeModal(&target, ActionResumeCatalyst, false)
 		}
 	case "b", "f":
 		filtered := m.filteredSessions()
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
-			m.selectedSession = &target
-			if m.selected == "" || m.selected == "<host>" {
-				if target.Profile != "" && target.Profile != "<host>" {
-					m.selected = target.Profile
-				} else {
-					m.selected = "default"
-				}
-			}
-			m.sessionsDrawer.fork = true
-			m.outcome = ActionResumeExact
-			m.cancelStream()
-			return m, tea.Quit
+			return m.openResumeModal(&target, ActionResumeExact, true)
 		}
 	case "tab":
 		if m.sessionsDrawer.agentFilter == "agy" {
