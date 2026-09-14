@@ -2152,3 +2152,34 @@ func TestSessionsDrawer_Interactions(t *testing.T) {
 		t.Fatalf("expected IsForkResume to be true")
 	}
 }
+
+func TestSessionsDrawer_WrapText(t *testing.T) {
+	// Test 1: Empty text
+	if lines := wrapText("", 80, 3); len(lines) != 0 {
+		t.Errorf("expected 0 lines for empty text, got %d", len(lines))
+	}
+
+	// Test 2: Text that wraps across 3 lines
+	longPrompt := "Please perform a thorough, comprehensive code review of the pull request changes on branch 'feat/sessions-and-cross-profile-resume' in /Users/nemesis/Projects/my-projects/aim against main."
+	lines := wrapText(longPrompt, 80, 3)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 wrapped lines, got %d: %+v", len(lines), lines)
+	}
+
+	if !strings.Contains(lines[0], "Please perform") {
+		t.Errorf("expected line 1 to start with 'Please perform', got: %s", lines[0])
+	}
+	if !strings.Contains(lines[2], "against main.") {
+		t.Errorf("expected line 3 to contain 'against main.', got: %s", lines[2])
+	}
+
+	// Test 3: Very long text exceeding 3 lines should end with ...
+	veryLong := "Word " + strings.Repeat("test ", 100)
+	linesLong := wrapText(veryLong, 50, 3)
+	if len(linesLong) != 3 {
+		t.Fatalf("expected 3 lines for very long text, got %d", len(linesLong))
+	}
+	if !strings.HasSuffix(linesLong[2], "...") {
+		t.Errorf("expected line 3 to end with '...', got: %s", linesLong[2])
+	}
+}

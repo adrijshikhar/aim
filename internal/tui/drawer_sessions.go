@@ -328,20 +328,9 @@ func (m Model) renderSessionsDrawer() string {
 				previewText = "(no preview text recorded for this session)"
 			}
 
-			lines := strings.Split(previewText, "\n")
-			var displayLines []string
-			for idx, l := range lines {
-				if idx >= 3 {
-					displayLines = append(displayLines, "...")
-					break
-				}
-				l = strings.TrimSpace(l)
-				if l != "" {
-					if len(l) > 80 {
-						l = l[:77] + "..."
-					}
-					displayLines = append(displayLines, l)
-				}
+			displayLines := wrapText(previewText, 86, 3)
+			if len(displayLines) == 0 {
+				displayLines = []string{"(no preview text recorded for this session)"}
 			}
 
 			previewCard := lipgloss.NewStyle().
@@ -417,4 +406,66 @@ func formatRelativeTime(t time.Time) string {
 		return fmt.Sprintf("%d days ago", days)
 	}
 	return t.Format("Jan 02")
+}
+
+func wrapText(text string, maxWidth int, maxLines int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+
+	paragraphs := strings.Split(text, "\n")
+	var lines []string
+
+	for _, p := range paragraphs {
+		words := strings.Fields(p)
+		if len(words) == 0 {
+			continue
+		}
+
+		var current strings.Builder
+		for i, w := range words {
+			if len(lines) == maxLines-1 {
+				// We are on the final line allowed.
+				// Fit as many remaining words as possible.
+				if current.Len() == 0 {
+					current.WriteString(w)
+				} else if current.Len()+1+len(w) <= maxWidth-4 {
+					current.WriteString(" " + w)
+				} else {
+					// Word doesn't fit or there are more words remaining
+					current.WriteString("...")
+					lines = append(lines, current.String())
+					return lines
+				}
+				// If this was the last word of all paragraphs, append and return
+				if i == len(words)-1 && p == paragraphs[len(paragraphs)-1] {
+					lines = append(lines, current.String())
+					return lines
+				}
+				continue
+			}
+
+			if current.Len() == 0 {
+				current.WriteString(w)
+			} else if current.Len()+1+len(w) <= maxWidth {
+				current.WriteString(" " + w)
+			} else {
+				lines = append(lines, current.String())
+				current.Reset()
+				current.WriteString(w)
+			}
+		}
+
+		if current.Len() > 0 && len(lines) < maxLines {
+			lines = append(lines, current.String())
+			current.Reset()
+		}
+
+		if len(lines) >= maxLines {
+			break
+		}
+	}
+
+	return lines
 }
