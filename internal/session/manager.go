@@ -101,8 +101,18 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 					if active, ok := activeProcesses[s.ID]; ok {
 						s.Status = StatusActive
 						s.PID = active.PID
+						if active.Profile != "" {
+							s.Profile = active.Profile
+							s.IsHost = (active.Profile == "<host>")
+						}
 					} else {
 						s.Status = StatusIdle
+					}
+					if filterProfile != "" && filterProfile != "host" && filterProfile != "<host>" && s.Profile != filterProfile {
+						continue
+					}
+					if (filterProfile == "host" || filterProfile == "<host>") && !s.IsHost {
+						continue
 					}
 					allSessions = append(allSessions, s)
 				}
@@ -125,8 +135,18 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 						if active, ok := activeProcesses[s.ID]; ok {
 							s.Status = StatusActive
 							s.PID = active.PID
+							if active.Profile != "" {
+								s.Profile = active.Profile
+								s.IsHost = (active.Profile == "<host>")
+							}
 						} else {
 							s.Status = StatusIdle
+						}
+						if filterProfile != "" && filterProfile != "host" && filterProfile != "<host>" && s.Profile != filterProfile {
+							continue
+						}
+						if (filterProfile == "host" || filterProfile == "<host>") && !s.IsHost {
+							continue
 						}
 						allSessions = append(allSessions, s)
 					}

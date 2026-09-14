@@ -145,7 +145,13 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 	rawTime := strings.TrimSpace(parts[3])
 
 	if title == "" {
-		title = preview
+		if preview != "" {
+			firstLine := strings.Split(preview, "\n")[0]
+			title = strings.TrimSpace(firstLine)
+		}
+		if title == "" {
+			title = "Untitled Session"
+		}
 	}
 
 	modTime := parseTimeString(rawTime)
