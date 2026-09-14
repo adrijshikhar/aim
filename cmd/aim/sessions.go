@@ -163,29 +163,26 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintln(w, headerStyle.Render("RECENT SESSIONS"))
-		fmt.Fprintf(w, "%-10s %-8s %-12s %-32s %-14s %s\n",
+		fmt.Fprintf(w, "%-10s %-8s %-12s %-46s %s\n",
 			colHeaderStyle.Render("PROFILE"),
 			colHeaderStyle.Render("AGENT"),
 			colHeaderStyle.Render("SESSION ID"),
 			colHeaderStyle.Render("TITLE"),
 			colHeaderStyle.Render("LAST ACTIVE"),
-			colHeaderStyle.Render("SUMMARY MODE"),
 		)
 		for _, s := range recentSessions {
-			title := truncateString(s.Title, 30)
+			title := truncateString(s.Title, 44)
 			if title == "" {
 				title = "(untitled)"
 			}
 			lastActive := formatRelativeTime(s.LastActiveAt)
-			summaryMode := "Catalyst Ready"
 
-			fmt.Fprintf(w, "%-10s %-8s %-12s %-32s %-14s %s\n",
+			fmt.Fprintf(w, "%-10s %-8s %-12s %-46s %s\n",
 				s.Profile,
 				s.Agent,
 				s.ShortID,
 				title,
-				lastActive,
-				mutedStyle.Render(summaryMode),
+				mutedStyle.Render(lastActive),
 			)
 		}
 	}

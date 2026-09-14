@@ -215,11 +215,10 @@ func (m Model) renderSessionsDrawer() string {
 	colProfile := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(10).Render("PROFILE")
 	colAgent := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(8).Render("AGENT")
 	colID := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(12).Render("SESSION ID")
-	colTitle := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(32).Render("TITLE")
+	colTitle := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(47).Render("TITLE")
 	colActive := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(14).Render("LAST ACTIVE")
-	colMode := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Render("MODE")
 
-	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s\n", colProfile, colAgent, colID, colTitle, colActive, colMode))
+	b.WriteString(fmt.Sprintf("  %s %s %s %s %s\n", colProfile, colAgent, colID, colTitle, colActive))
 
 	filtered := m.filteredSessions()
 	if len(filtered) == 0 {
@@ -249,7 +248,7 @@ func (m Model) renderSessionsDrawer() string {
 				rowStyle = SelectedRowStyle
 			}
 
-			titleStr := truncateString(s.Title, 30)
+			titleStr := truncateString(s.Title, 45)
 			if titleStr == "" {
 				titleStr = "(untitled)"
 			}
@@ -259,19 +258,13 @@ func (m Model) renderSessionsDrawer() string {
 				lastActiveStr = "ACTIVE"
 			}
 
-			modeStr := "Catalyst Ready"
-			if s.Status == session.StatusActive {
-				modeStr = "In-Progress"
-			}
-
 			cProfile := lipgloss.NewStyle().Width(10).Render(s.Profile)
 			cAgent := lipgloss.NewStyle().Width(8).Render(s.Agent)
 			cID := lipgloss.NewStyle().Width(12).Render(s.ShortID)
-			cTitle := lipgloss.NewStyle().Width(32).Render(titleStr)
+			cTitle := lipgloss.NewStyle().Width(47).Render(titleStr)
 			cActive := lipgloss.NewStyle().Width(14).Render(lastActiveStr)
-			cMode := lipgloss.NewStyle().Foreground(TextMuted).Render(modeStr)
 
-			rowContent := fmt.Sprintf("%s%s %s %s %s %s %s", cursorStr, cProfile, cAgent, cID, cTitle, cActive, cMode)
+			rowContent := fmt.Sprintf("%s%s %s %s %s %s", cursorStr, cProfile, cAgent, cID, cTitle, cActive)
 			b.WriteString(rowStyle.Render(rowContent) + "\n")
 		}
 
@@ -334,7 +327,7 @@ func (m Model) renderSessionsDrawer() string {
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [↑/↓] Navigate  •  [Enter] Exact Resume  •  [c] Catalyst Handoff  •  [b] Fork  •  [Esc] Close",
+		"  [↑/↓] Navigate  •  [Enter] Resume  •  [c] Catalyst Handoff  •  [b] Fork  •  [Esc] Close",
 	))
 
 	box := SessionsDrawerStyle.Render(b.String())

@@ -37,6 +37,7 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 | **OAuth PKCE login** | `aim login agy work` completes OAuth in browser and isolates the token |
 | **Shell completions** | Tab-complete agents, profiles, and subcommands in zsh, bash, and fish |
 | **Doctor command** | Diagnoses missing binaries, tokens, ADC status, and keychain isolation |
+| **Session resumption & handoffs** | Browse history across profiles (`aim sessions` or `s` in TUI), resume verbatim, or hand off context with Catalyst |
 
 ---
 
@@ -123,6 +124,17 @@ When running `aim`, navigate using the following shortcuts:
 | `d` | Toggle doctor diagnostics drawer |
 | `r` | Refresh quota and limits |
 | `q` / `Ctrl+C` | Quit dashboard |
+
+---
+
+## Context Handoffs with Catalyst
+
+`aim` integrates with **[Catalyst](https://github.com/adrijshikhar/catalyst)** for structured, token-efficient context handoffs across profiles and sessions:
+
+- **Exact Resume (`Enter` / `--exact`)**: Reopens the session with its full verbatim conversation history intact.
+- **Catalyst Handoff (`c` / `--catalyst`)**: Distills the session's goal, key decisions, and notes into a structured Handoff Brief (`.catalyst/handoffs/<branch>.json`). When resuming work on another profile or agent, AIM ingests this brief to continue work with a fresh context window without token bloat.
+
+Special thanks and credit to **[Catalyst](https://github.com/adrijshikhar/catalyst)** for the handoff protocol specification. Be sure to check out the Catalyst project!
 
 ---
 
