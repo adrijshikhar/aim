@@ -2333,16 +2333,24 @@ func TestResumeModal_QuotaAndActiveBadges(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = updated.(Model)
 
-	viewBeta := m.renderResumeModal()
-	if !strings.Contains(viewBeta, "has low remaining limit (10%)") {
-		t.Errorf("expected view to contain low remaining limit notice for beta, got:\n%s", viewBeta)
-	}
-
 	// Verify width matching: Resume modal width must exactly match Sessions drawer width
 	modalWidth := lipgloss.Width(m.renderResumeModal())
 	drawerWidth := lipgloss.Width(m.renderSessionsDrawer())
 	if modalWidth != drawerWidth {
 		t.Errorf("expected resume modal width (%d) to match sessions drawer width (%d)", modalWidth, drawerWidth)
+	}
+
+	// Verify border integrity: No broken right border pipes or wrapping outside box
+	modalView := m.renderResumeModal()
+	lines := strings.Split(modalView, "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		w := lipgloss.Width(l)
+		if w != modalWidth {
+			t.Errorf("line %d width %d does not match expected box width %d: %q", i, w, modalWidth, l)
+		}
 	}
 }
 

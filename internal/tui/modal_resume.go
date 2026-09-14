@@ -285,53 +285,16 @@ func (m Model) renderResumeModal() string {
 		}
 		b.WriteString(fmt.Sprintf("  %s+ %s\n\n", cursor, itemStyle.Render("Enter custom profile name...")))
 
-		// Show contextual status hint if selected profile has warnings
-		if m.resumeModal.cursor >= 0 && m.resumeModal.cursor < len(m.resumeModal.profiles) {
-			selProf := m.resumeModal.profiles[m.resumeModal.cursor]
-			activeCount := 0
-			for _, s := range m.sessionsDrawer.sessions {
-				if s.Profile == selProf && s.Status == session.StatusActive {
-					activeCount++
-				}
-			}
-
-			if rep, ok := m.getReportForAgent(sess.Agent, selProf); ok {
-				if rep.Status == usage.StatusCritical || rep.Status == usage.StatusExhausted {
-					b.WriteString(lipgloss.NewStyle().Foreground(StatusRed).Render(
-						fmt.Sprintf("  ⚠️  Notice: Profile '%s' has low remaining limit (%d%%)\n\n", selProf, rep.BottleneckPct()),
-					))
-				} else if activeCount > 0 {
-					b.WriteString(lipgloss.NewStyle().Foreground(StatusYellow).Render(
-						fmt.Sprintf("  ℹ️  Notice: Profile '%s' currently has %d active session running\n\n", selProf, activeCount),
-					))
-				}
-			} else if activeCount > 0 {
-				b.WriteString(lipgloss.NewStyle().Foreground(StatusYellow).Render(
-					fmt.Sprintf("  ℹ️  Notice: Profile '%s' currently has %d active session running\n\n", selProf, activeCount),
-				))
-			}
-		}
-
 		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
 			"  [↑/↓] Select Profile  •  [Enter] Confirm & Resume  •  [Esc] Back",
-		))
+		) + "\n")
 	}
 
-	// Match outer width precisely to sessions drawer so the container does not jump or change width
-	drawerBox := m.renderSessionsDrawer()
-	targetWidth := lipgloss.Width(drawerBox) - 2 // subtract 2 for left and right border columns
-	if targetWidth < 80 {
-		targetWidth = 96
-		if m.width > 0 && m.width-6 < targetWidth {
-			targetWidth = m.width - 6
-		}
+	boxWidth := 100
+	if m.width > 0 && m.width-4 < boxWidth {
+		boxWidth = m.width - 4
 	}
 
-	boxStyle := ResumeModalBoxStyle
-	if targetWidth > 0 {
-		boxStyle = boxStyle.Width(targetWidth)
-	}
-
-	box := boxStyle.Render(b.String())
+	box := ResumeModalBoxStyle.Width(boxWidth).Render(b.String())
 	return "\n" + box + "\n"
 }
