@@ -114,6 +114,12 @@ var (
 	RenameModalTitleStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(AccentBlue)
+
+	ResumeModalBoxStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(AccentCyan).
+				Padding(1, 2).
+				MarginLeft(2)
 )
 
 func GaugeStyleForStatus(st usage.Status) lipgloss.Style {

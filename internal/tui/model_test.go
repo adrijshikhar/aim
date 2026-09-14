@@ -2277,6 +2277,67 @@ func TestResumeModal_ProfileNavigationAndCustom(t *testing.T) {
 	}
 }
 
+func TestResumeModal_QuotaAndActiveBadges(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+	m.agent = "agy"
+
+	// Inject usage reports
+	m.reports["agy:alpha"] = usage.Report{
+		Agent:   "agy",
+		Profile: "alpha",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{
+			{Name: "5-hour limit", RemainingPct: 85},
+		},
+	}
+	m.reports["agy:beta"] = usage.Report{
+		Agent:   "agy",
+		Profile: "beta",
+		Status:  usage.StatusCritical,
+		Windows: []usage.LimitWindow{
+			{Name: "5-hour limit", RemainingPct: 10},
+		},
+	}
+
+	// Open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	// Inject sessions: s1 idle in alpha, s2 active in beta
+	s1 := session.NewSession("11111111-2222-3333-4444-555566667777", "Session One", "agy", "alpha", false, time.Now())
+	s2 := session.NewSession("88888888-9999-aaaa-bbbb-ccccddddeeee", "Session Two", "agy", "beta", false, time.Now())
+	s2.Status = session.StatusActive
+	m.SetSessionsForTest([]session.Session{s1, s2})
+
+	// Open resume modal on s1 (original: alpha)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal active")
+	}
+
+	view := m.renderResumeModal()
+	if !strings.Contains(view, "[85%]") {
+		t.Errorf("expected view to contain [85%%], got:\n%s", view)
+	}
+	if !strings.Contains(view, "[10%]") {
+		t.Errorf("expected view to contain [10%%], got:\n%s", view)
+	}
+	if !strings.Contains(view, "(1 active)") {
+		t.Errorf("expected view to contain '(1 active)', got:\n%s", view)
+	}
+
+	// Move cursor down to beta (index 1)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updated.(Model)
+
+	viewBeta := m.renderResumeModal()
+	if !strings.Contains(viewBeta, "has low remaining limit (10%)") {
+		t.Errorf("expected view to contain low remaining limit notice for beta, got:\n%s", viewBeta)
+	}
+}
+
 func TestSessionsDrawer_WrapText(t *testing.T) {
 	// Test 1: Empty text
 	if lines := wrapText("", 80, 3); len(lines) != 0 {

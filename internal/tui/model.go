@@ -280,6 +280,25 @@ func (m Model) getReport(prof string) (usage.Report, bool) {
 	return rep, ok
 }
 
+func (m Model) getReportForAgent(agent, prof string) (usage.Report, bool) {
+	if m.reports != nil {
+		if agent != "" {
+			if rep, ok := m.reports[fmt.Sprintf("%s:%s", agent, prof)]; ok {
+				return rep, true
+			}
+		}
+		if rep, ok := m.reports[prof]; ok {
+			return rep, true
+		}
+	}
+	if m.cache != nil && agent != "" {
+		if rep, ok := m.cache.Get(agent, prof); ok {
+			return rep, true
+		}
+	}
+	return m.getReport(prof)
+}
+
 func waitForUsageReport(ch <-chan usage.Report) tea.Cmd {
 	if ch == nil {
 		return nil

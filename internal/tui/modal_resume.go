@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -202,13 +203,25 @@ func (m Model) renderResumeModal() string {
 	} else {
 		b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render("Choose target profile for resumption:") + "\n\n")
 
+		// Calculate max label length for clean column alignment
+		maxLabelLen := 0
+		for _, p := range m.resumeModal.profiles {
+			l := len(p)
+			if p == sess.Profile {
+				l += len(" (original)")
+			}
+			if l > maxLabelLen {
+				maxLabelLen = l
+			}
+		}
+
 		for i, p := range m.resumeModal.profiles {
 			isOriginal := p == sess.Profile
 			cursor := "  "
 			itemStyle := lipgloss.NewStyle().Foreground(TextPrimary)
-			badge := ""
+			origBadge := ""
 			if isOriginal {
-				badge = lipgloss.NewStyle().Foreground(TextMuted).Render(" (original)")
+				origBadge = lipgloss.NewStyle().Foreground(TextMuted).Render(" (original)")
 			}
 
 			if i == m.resumeModal.cursor {
@@ -221,7 +234,45 @@ func (m Model) renderResumeModal() string {
 				bullet = "● "
 			}
 
-			b.WriteString(fmt.Sprintf("  %s%s%s%s\n", cursor, bullet, itemStyle.Render(p), badge))
+			// Calculate padding for aligned columns
+			curLen := len(p)
+			if isOriginal {
+				curLen += len(" (original)")
+			}
+			padding := ""
+			if maxLabelLen > curLen {
+				padding = strings.Repeat(" ", maxLabelLen-curLen)
+			}
+
+			// Usage quota / limit remaining badge
+			quotaBadge := ""
+			if rep, ok := m.getReportForAgent(sess.Agent, p); ok {
+				badge := formatBadge(rep, false)
+				if badge != "" {
+					gaugeStyle := GaugeStyleForStatus(rep.Status)
+					quotaBadge = "  " + gaugeStyle.Render(badge)
+
+					// Show short reset duration if available and quota is not 100%
+					if rep.PrimaryWindow() != nil && rep.PrimaryWindow().ResetsIn > 0 && rep.BottleneckPct() < 100 {
+						resetStr := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf("(%s)", usage.FormatDuration(rep.PrimaryWindow().ResetsIn)))
+						quotaBadge += " " + resetStr
+					}
+				}
+			}
+
+			// Active session count for profile
+			activeCount := 0
+			for _, s := range m.sessionsDrawer.sessions {
+				if s.Profile == p && s.Status == session.StatusActive {
+					activeCount++
+				}
+			}
+			activeBadge := ""
+			if activeCount > 0 {
+				activeBadge = " " + lipgloss.NewStyle().Foreground(StatusYellow).Render(fmt.Sprintf("(%d active)", activeCount))
+			}
+
+			b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s\n", cursor, bullet, itemStyle.Render(p), origBadge, padding, quotaBadge, activeBadge))
 		}
 
 		// Custom option
@@ -234,11 +285,38 @@ func (m Model) renderResumeModal() string {
 		}
 		b.WriteString(fmt.Sprintf("  %s+ %s\n\n", cursor, itemStyle.Render("Enter custom profile name...")))
 
+		// Show contextual status hint if selected profile has warnings
+		if m.resumeModal.cursor >= 0 && m.resumeModal.cursor < len(m.resumeModal.profiles) {
+			selProf := m.resumeModal.profiles[m.resumeModal.cursor]
+			activeCount := 0
+			for _, s := range m.sessionsDrawer.sessions {
+				if s.Profile == selProf && s.Status == session.StatusActive {
+					activeCount++
+				}
+			}
+
+			if rep, ok := m.getReportForAgent(sess.Agent, selProf); ok {
+				if rep.Status == usage.StatusCritical || rep.Status == usage.StatusExhausted {
+					b.WriteString(lipgloss.NewStyle().Foreground(StatusRed).Render(
+						fmt.Sprintf("  ⚠️  Notice: Profile '%s' has low remaining limit (%d%%)\n\n", selProf, rep.BottleneckPct()),
+					))
+				} else if activeCount > 0 {
+					b.WriteString(lipgloss.NewStyle().Foreground(StatusYellow).Render(
+						fmt.Sprintf("  ℹ️  Notice: Profile '%s' currently has %d active session running\n\n", selProf, activeCount),
+					))
+				}
+			} else if activeCount > 0 {
+				b.WriteString(lipgloss.NewStyle().Foreground(StatusYellow).Render(
+					fmt.Sprintf("  ℹ️  Notice: Profile '%s' currently has %d active session running\n\n", selProf, activeCount),
+				))
+			}
+		}
+
 		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
 			"  [↑/↓] Select Profile  •  [Enter] Confirm & Resume  •  [Esc] Back",
 		))
 	}
 
-	box := ModalBoxStyle.Render(b.String())
+	box := ResumeModalBoxStyle.Render(b.String())
 	return "\n" + box + "\n"
 }
