@@ -290,7 +290,11 @@ func (m Model) renderResumeModal() string {
 		) + "\n")
 	}
 
-	boxWidth := 100
+	drawerWidth := lipgloss.Width(m.renderSessionsDrawer())
+	boxWidth := drawerWidth - 2
+	if boxWidth < 80 {
+		boxWidth = 107
+	}
 	if m.width > 0 && m.width-4 < boxWidth {
 		boxWidth = m.width - 4
 	}

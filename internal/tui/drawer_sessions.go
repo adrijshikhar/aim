@@ -341,12 +341,7 @@ func (m Model) renderSessionsDrawer() string {
 		"  [↑/↓] Navigate  •  [Enter] Exact Resume  •  [c] Catalyst Handoff  •  [b] Fork  •  [Esc] Close",
 	))
 
-	boxWidth := 100
-	if m.width > 0 && m.width-4 < boxWidth {
-		boxWidth = m.width - 4
-	}
-
-	box := SessionsDrawerStyle.Width(boxWidth).Render(b.String())
+	box := SessionsDrawerStyle.Render(b.String())
 	return "\n" + box + "\n"
 }
 
