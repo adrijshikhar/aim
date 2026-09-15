@@ -8,6 +8,8 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -64,18 +66,23 @@ func executeClone(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 
 	err := pm.CloneProfile(sourceProfile, newProfile, agentName, cfg)
 	if err != nil {
+		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
 		if strings.Contains(err.Error(), "not associated") {
-			fmt.Fprintf(os.Stderr, "Agent %q is not associated with profile %q\n", agentName, sourceProfile)
+			fmt.Fprintf(os.Stderr, "%s Agent %q is not associated with profile %q\n", errBadge, agentName, sourceProfile)
 		} else {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
 		}
 		return 1
 	}
 
+	okBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
+	cyan := lipgloss.NewStyle().Foreground(tui.AccentCyan)
+	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+
 	if agentName != "" {
-		fmt.Printf("Cloned profile '%s' to '%s' for agent '%s'.\n", sourceProfile, newProfile, agentName)
+		fmt.Printf("%s Cloned profile %s to %s for agent %s.\n", okBadge, cyan.Render(sourceProfile), cyan.Render(newProfile), bold.Render(agentName))
 	} else {
-		fmt.Printf("Cloned profile '%s' to '%s' successfully.\n", sourceProfile, newProfile)
+		fmt.Printf("%s Cloned profile %s to %s successfully.\n", okBadge, cyan.Render(sourceProfile), cyan.Render(newProfile))
 	}
 	return 0
 }

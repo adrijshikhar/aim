@@ -76,7 +76,7 @@ Flags:
 					return fmt.Errorf("failed to list host sessions: %w", err)
 				}
 				if len(hostSessions) == 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), "No host sessions found to import.")
+					fmt.Fprintln(cmd.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.TextMuted).Render("No host sessions found to import."))
 					return nil
 				}
 
@@ -90,10 +90,10 @@ Flags:
 						failed = append(failed, fmt.Sprintf("%s (%v)", s.ShortID, err))
 					}
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s Successfully imported %d host session(s) into profile %q.\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "%s Successfully imported %d host session(s) into profile %s.\n",
 					greenStyle.Render("✔"),
 					count,
-					targetProfile,
+					cyanStyle.Render(targetProfile),
 				)
 				if len(failed) > 0 {
 					yellowStyle := lipgloss.NewStyle().Foreground(tui.StatusYellow)

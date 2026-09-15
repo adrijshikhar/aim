@@ -1405,7 +1405,7 @@ func TestCLIListWithUsageBadges(t *testing.T) {
 	out, _ = captureOutput(t, func() {
 		_ = runList(reg, pm, "agy")
 	})
-	if !strings.Contains(out, "unauthed [no credentials]") {
+	if !strings.Contains(out, "unauthed") || !strings.Contains(out, "[no credentials]") {
 		t.Errorf("expected '[no credentials]' badge in aim list agy, got:\n%s", out)
 	}
 
@@ -1426,7 +1426,7 @@ func TestCLIListWithUsageBadges(t *testing.T) {
 	out, _ = captureOutput(t, func() {
 		_ = runList(reg, pm, "agy")
 	})
-	if !strings.Contains(out, "offline-prof [offline]") {
+	if !strings.Contains(out, "offline-prof") || !strings.Contains(out, "[offline]") {
 		t.Errorf("expected '[offline]' badge in aim list agy, got:\n%s", out)
 	}
 }

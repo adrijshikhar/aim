@@ -18,6 +18,7 @@ import (
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/otiai10/copy"
 )
 
@@ -315,7 +316,9 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		}
 	}
 
-	fmt.Printf("[Success] Authenticated profile '%s' as %s\n", profileName, tok.UserEmail)
+	okBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#98c379")).Bold(true).Render("✔")
+	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("#56b6c2"))
+	fmt.Printf("%s Authenticated profile %s as %s\n", okBadge, cyan.Render(profileName), cyan.Render(tok.UserEmail))
 	return nil
 }
 

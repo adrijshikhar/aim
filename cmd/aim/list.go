@@ -9,7 +9,10 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 )
 
@@ -135,6 +138,7 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 		baseDir = pm.BaseDir
 	}
 	cache := usage.NewCacheStore(baseDir, usage.DefaultTTL)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
 
 	if agentName != "" {
 		canonicalAgent := agentName
@@ -147,12 +151,17 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("=== Configured Profiles (%s) ===\n", canonicalAgent)
+		fmt.Println(headerStyle.Render(fmt.Sprintf("=== Configured Profiles (%s) ===", canonicalAgent)))
 		if len(profiles) == 0 {
-			fmt.Printf("  No profiles found for agent %q. Run: aim login %s <profile>\n", canonicalAgent, canonicalAgent)
+			emptyStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
+			fmt.Println(emptyStyle.Render(fmt.Sprintf("  No profiles found for agent %q. Run: aim login %s <profile>", canonicalAgent, canonicalAgent)))
 			return nil
 		}
 		hasStale := false
+		t := table.New().
+			Border(lipgloss.HiddenBorder()).
+			Headers("#", "PROFILE", "QUOTA STATUS", "STORAGE PATH")
+
 		for i, p := range profiles {
 			if cache.IsStale(canonicalAgent, p, 10*time.Minute) {
 				hasStale = true
@@ -160,13 +169,36 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 			badgeStr := ""
 			if summary := formatProfileUsageBadge(cache, canonicalAgent, p); summary != "" {
 				if strings.HasPrefix(summary, "[") && strings.HasSuffix(summary, "]") {
-					badgeStr = fmt.Sprintf(" %s", summary)
+					badgeStr = summary
 				} else {
-					badgeStr = fmt.Sprintf(" (%s)", summary)
+					badgeStr = fmt.Sprintf("(%s)", summary)
 				}
 			}
-			fmt.Printf("  %d. %s%s (%s)\n", i+1, p, badgeStr, pm.ProfileDir(p))
+			t.Row(
+				fmt.Sprintf("%d.", i+1),
+				p,
+				badgeStr,
+				pm.ProfileDir(p),
+			)
 		}
+
+		t.StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+			}
+			switch col {
+			case 0:
+				return lipgloss.NewStyle().Foreground(tui.TextMuted)
+			case 1:
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+			case 2:
+				return lipgloss.NewStyle().Foreground(tui.AccentCyan)
+			default:
+				return lipgloss.NewStyle().Foreground(tui.TextDim)
+			}
+		})
+
+		fmt.Println(t.Render())
 		if hasStale {
 			triggerPrewarmAsync(baseDir, canonicalAgent)
 		}
@@ -178,17 +210,22 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 	if err != nil {
 		return err
 	}
-	fmt.Println("=== Configured Profiles ===")
+	fmt.Println(headerStyle.Render("=== Configured Profiles ==="))
 	if len(profiles) == 0 {
-		fmt.Println("  No profiles found. Run: aim login agy <profile>")
+		emptyStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
+		fmt.Println(emptyStyle.Render("  No profiles found. Run: aim login agy <profile>"))
 		return nil
 	}
 	hasStale := false
+	t := table.New().
+		Border(lipgloss.HiddenBorder()).
+		Headers("#", "PROFILE", "AGENTS", "QUOTA STATUS", "STORAGE PATH")
+
 	for i, p := range profiles {
 		agentsList := cfg.GetProfileAgents(p)
 		agentStr := ""
 		if len(agentsList) > 0 {
-			agentStr = fmt.Sprintf(" [%s]", strings.Join(agentsList, ", "))
+			agentStr = fmt.Sprintf("[%s]", strings.Join(agentsList, ", "))
 		}
 
 		var summaries []string
@@ -217,13 +254,39 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 		}
 		badgeStr := ""
 		if len(summaries) == 1 && strings.HasPrefix(summaries[0], "[") && strings.HasSuffix(summaries[0], "]") {
-			badgeStr = fmt.Sprintf(" %s", summaries[0])
+			badgeStr = summaries[0]
 		} else if len(summaries) > 0 {
-			badgeStr = fmt.Sprintf(" (%s)", strings.Join(summaries, ", "))
+			badgeStr = fmt.Sprintf("(%s)", strings.Join(summaries, ", "))
 		}
 
-		fmt.Printf("  %d. %s%s%s (%s)\n", i+1, p, agentStr, badgeStr, pm.ProfileDir(p))
+		t.Row(
+			fmt.Sprintf("%d.", i+1),
+			p,
+			agentStr,
+			badgeStr,
+			pm.ProfileDir(p),
+		)
 	}
+
+	t.StyleFunc(func(row, col int) lipgloss.Style {
+		if row == table.HeaderRow {
+			return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+		}
+		switch col {
+		case 0:
+			return lipgloss.NewStyle().Foreground(tui.TextMuted)
+		case 1:
+			return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+		case 2:
+			return lipgloss.NewStyle().Foreground(tui.AccentPurple)
+		case 3:
+			return lipgloss.NewStyle().Foreground(tui.AccentCyan)
+		default:
+			return lipgloss.NewStyle().Foreground(tui.TextDim)
+		}
+	})
+
+	fmt.Println(t.Render())
 	if hasStale {
 		triggerPrewarmAsync(baseDir, "")
 	}
