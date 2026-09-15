@@ -14,10 +14,10 @@ type mockAdapter struct {
 	tokenPath string
 }
 
-func (m *mockAdapter) Name() string                                         { return m.name }
-func (m *mockAdapter) DisplayName() string                                  { return m.name }
-func (m *mockAdapter) Aliases() []string                                    { return nil }
-func (m *mockAdapter) BinaryName() string                                   { return m.name }
+func (m *mockAdapter) Name() string        { return m.name }
+func (m *mockAdapter) DisplayName() string { return m.name }
+func (m *mockAdapter) Aliases() []string   { return nil }
+func (m *mockAdapter) BinaryName() string  { return m.name }
 func (m *mockAdapter) HasCredentials(p string) bool {
 	if m.tokenPath != "" {
 		fi, err := os.Stat(filepath.Join(p, m.tokenPath))
@@ -25,11 +25,13 @@ func (m *mockAdapter) HasCredentials(p string) bool {
 	}
 	return false
 }
-func (m *mockAdapter) TokenPath(p string) string                            { return filepath.Join(p, m.tokenPath) }
-func (m *mockAdapter) Login(ctx any, p, d string) error                     { return nil }
-func (m *mockAdapter) PrepareEnv(p, d string) (agents.LaunchEnv, error)     { return agents.LaunchEnv{}, nil }
+func (m *mockAdapter) TokenPath(p string) string        { return filepath.Join(p, m.tokenPath) }
+func (m *mockAdapter) Login(ctx any, p, d string) error { return nil }
+func (m *mockAdapter) PrepareEnv(p, d string) (agents.LaunchEnv, error) {
+	return agents.LaunchEnv{}, nil
+}
 func (m *mockAdapter) Doctor(ctx any, p, d string) []agents.DiagnosticResult { return nil }
-func (m *mockAdapter) GetUsage(ctx any, p, d string) (any, error)           { return nil, nil }
+func (m *mockAdapter) GetUsage(ctx any, p, d string) (any, error)            { return nil, nil }
 
 func TestMoveAgent_Validation(t *testing.T) {
 	tempDir := t.TempDir()
