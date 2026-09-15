@@ -115,6 +115,16 @@ var (
 				Bold(true).
 				Foreground(AccentBlue)
 
+	MoveModalBoxStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(AccentCyan).
+				Padding(1, 2).
+				MarginLeft(2)
+
+	MoveModalTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(AccentCyan)
+
 	SessionsDrawerStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(AccentBlue).

@@ -62,6 +62,7 @@ type Model struct {
 
 	deleteModal    deleteModalState
 	renameModal    renameModalState
+	moveModal      moveModalState
 	doctorDrawer   doctorDrawerState
 	sessionsDrawer sessionsDrawerState
 	resumeModal    resumeModalState
@@ -479,6 +480,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateRenameModal(msg)
 		}
 
+		if m.moveModal.active {
+			return m.updateMoveModal(msg)
+		}
+
 		if m.doctorDrawer.active {
 			return m.updateDoctorDrawer(msg)
 		}
@@ -582,6 +587,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openDoctorDrawer()
 		case key.Matches(msg, keys.Rename):
 			return m.openRenameModal()
+		case key.Matches(msg, keys.Move):
+			return m.openMoveModal()
 		case key.Matches(msg, keys.Delete):
 			return m.openDeleteModal()
 		case key.Matches(msg, keys.Filter), msg.String() == "/":
@@ -593,6 +600,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		if m.renameModal.active {
 			return m.updateRenameModal(msg)
+		}
+		if m.moveModal.active {
+			return m.updateMoveModal(msg)
 		}
 		if m.filter.active {
 			return m.updateFilter(msg)
@@ -656,6 +666,11 @@ func (m Model) View() string {
 
 	if m.renameModal.active {
 		s.WriteString(m.renderRenameModal())
+		return s.String()
+	}
+
+	if m.moveModal.active {
+		s.WriteString(m.renderMoveModal())
 		return s.String()
 	}
 

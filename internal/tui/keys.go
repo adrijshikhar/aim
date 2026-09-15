@@ -13,6 +13,7 @@ type KeyMap struct {
 	Tab      key.Binding
 	Doctor   key.Binding
 	Rename   key.Binding
+	Move     key.Binding
 	Delete   key.Binding
 	Refresh  key.Binding
 	Filter   key.Binding
@@ -59,6 +60,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("m", "R"),
 			key.WithHelp("m/R", "rename"),
 		),
+		Move: key.NewBinding(
+			key.WithKeys("v"),
+			key.WithHelp("v", "move"),
+		),
 		Delete: key.NewBinding(
 			key.WithKeys("x", "delete"),
 			key.WithHelp("x", "delete"),
@@ -84,7 +89,7 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns keybindings to be shown in the mini help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Run, k.Sessions, k.Shell, k.Login, k.Tab, k.Doctor, k.Rename, k.Delete, k.Refresh, k.Quit}
+	return []key.Binding{k.Run, k.Sessions, k.Shell, k.Login, k.Tab, k.Doctor, k.Rename, k.Move, k.Delete, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view.
@@ -92,6 +97,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Run, k.Sessions},
 		{k.Shell, k.Login, k.Tab, k.Doctor},
-		{k.Rename, k.Delete, k.Refresh, k.Filter, k.Help, k.Quit},
+		{k.Rename, k.Move, k.Delete, k.Refresh, k.Filter, k.Help, k.Quit},
 	}
 }
