@@ -132,6 +132,9 @@ echo "=== 6. Testing shell completion ==="
 "$AIM_BIN" __complete clone | grep "agy"
 "$AIM_BIN" __complete clone | grep "gemini"
 "$AIM_BIN" __complete clone | grep "codex"
+"$AIM_BIN" __complete mv | grep "agy"
+"$AIM_BIN" __complete mv | grep "gemini"
+"$AIM_BIN" __complete mv | grep "codex"
 
 # 6. aim __complete run emits configured profiles (e.g. smoke_profile)
 "$AIM_BIN" __complete run agy | grep "smoke_profile"
@@ -139,6 +142,7 @@ echo "=== 6. Testing shell completion ==="
 "$AIM_BIN" __complete run codex | grep "smoke_profile"
 "$AIM_BIN" __complete clone agy | grep "smoke_profile"
 "$AIM_BIN" __complete clone codex | grep "smoke_profile"
+"$AIM_BIN" __complete mv codex | grep "smoke_profile"
 
 # Shorthand completion rejected
 SHORTHAND_COMP="$("$AIM_BIN" __complete agy run 2>/dev/null || true)"
@@ -249,6 +253,44 @@ if "$AIM_BIN" rename smoke_profile smoke_renamed 2>/dev/null; then
   echo "Error: 'aim rename' should not be a CLI command (TUI action only)"
   exit 1
 fi
+
+echo "=== 12c. Testing agent account move (aim mv) ==="
+# Verify 'aim move' alias does not exist (aim mv only)
+if "$AIM_BIN" move codex smoke_profile mv_target 2>/dev/null; then
+  echo "Error: 'aim move' should not exist ('aim mv' only)"
+  exit 1
+fi
+
+echo '{"token":"smoke_codex_token"}' > "$TEST_AIM_HOME/profiles/smoke_profile/.codex/auth.json"
+
+# Move codex from smoke_profile to mv_target
+"$AIM_BIN" mv codex smoke_profile mv_target
+
+# Assert mv_target has codex profile, credentials directory, and the file moved
+[ -d "$TEST_AIM_HOME/profiles/mv_target/.codex" ]
+[ -f "$TEST_AIM_HOME/profiles/mv_target/.codex/auth.json" ]
+grep -q "smoke_codex_token" "$TEST_AIM_HOME/profiles/mv_target/.codex/auth.json"
+"$AIM_BIN" list codex | grep "mv_target"
+
+# smoke_profile should no longer have codex
+if "$AIM_BIN" list codex | grep -q "smoke_profile"; then
+  echo "Error: smoke_profile should not have codex after moving to mv_target"
+  exit 1
+fi
+# But smoke_profile still has agy and gemini!
+"$AIM_BIN" list agy | grep "smoke_profile"
+"$AIM_BIN" list gemini | grep "smoke_profile"
+
+# Move codex back to smoke_profile
+"$AIM_BIN" mv codex mv_target smoke_profile
+
+# Clean up dummy auth.json so subsequent steps retain expected empty credentials state
+rm -f "$TEST_AIM_HOME/profiles/smoke_profile/.codex/auth.json"
+
+# Assert mv_target was cleaned up (as it had only codex)
+[ ! -d "$TEST_AIM_HOME/profiles/mv_target" ]
+"$AIM_BIN" list codex | grep "smoke_profile"
+echo "aim mv agent account OK!"
 
 echo "=== 13. Testing partial removal (gemini and codex) ==="
 "$AIM_BIN" remove gemini smoke_profile
