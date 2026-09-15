@@ -8,6 +8,8 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -62,29 +64,35 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 		cfg = config.NewDefaultConfig()
 	}
 
+	okBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
+	cyan := lipgloss.NewStyle().Foreground(tui.AccentCyan)
+	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+
 	if agentName != "" {
 		cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg)
 		if err != nil {
+			errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
 			if strings.Contains(err.Error(), "not associated") {
-				fmt.Fprintf(os.Stderr, "Agent %q is not associated with profile %q\n", agentName, profileName)
+				fmt.Fprintf(os.Stderr, "%s Agent %q is not associated with profile %q\n", errBadge, agentName, profileName)
 			} else {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
 			}
 			return 1
 		}
 		if cleanedUp {
-			fmt.Printf("Removed agent %q and cleaned up profile %q\n", agentName, profileName)
+			fmt.Printf("%s Removed agent %s and cleaned up profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
 		} else {
-			fmt.Printf("Removed agent %q from profile %q\n", agentName, profileName)
+			fmt.Printf("%s Removed agent %s from profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
 		}
 		return 0
 	}
 
 	if err := pm.DeleteProfile(profileName, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
+		fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
 		return 1
 	}
-	fmt.Printf("Profile '%s' removed successfully.\n", profileName)
+	fmt.Printf("%s Profile %s removed successfully.\n", okBadge, cyan.Render(profileName))
 	return 0
 }
 

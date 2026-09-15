@@ -69,7 +69,8 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 		return
 	}
 
-	fmt.Printf("\n%s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Platform Diagnostics (macOS)]"))
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Platform Diagnostics (macOS)]"))
 	var customServices []string
 	if cfg != nil {
 		customServices = cfg.CustomIgnoredKeychains
@@ -78,46 +79,53 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 	lingering := profile.FindIgnoredKeychains(agentName, customServices...)
 	if len(lingering) > 0 {
 		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
-		fmt.Printf("  %s %s: %d agent token(s) detected in macOS Keychain (potential profile isolation risk):\n",
+		keychainCat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain:")
+		fmt.Printf("  %s %s %d agent token(s) detected in macOS Keychain (potential profile isolation risk):\n",
 			warnBadge,
-			lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain"),
+			keychainCat,
 			len(lingering),
 		)
 		for _, entry := range lingering {
-			fmt.Printf("         - %s (service: %q)\n", entry.Description, entry.Service)
+			fmt.Printf("         - %s %s\n",
+				lipgloss.NewStyle().Foreground(tui.TextPrimary).Render(entry.Description),
+				lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("(service: %q)", entry.Service)),
+			)
 		}
-		fmt.Println("         Auto-purging ignored agent keychains to enforce profile isolation...")
+		fmt.Println(lipgloss.NewStyle().Foreground(tui.TextMuted).Render("         Auto-purging ignored agent keychains to enforce profile isolation..."))
 		if err := profile.PurgeIgnoredKeychains(agentName, customServices...); err != nil {
-			fmt.Printf("  %s %s: Could not purge some entries: %v\n",
+			fmt.Printf("  %s %s Could not purge some entries: %v\n",
 				warnBadge,
-				lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain"),
+				keychainCat,
 				err,
 			)
 		} else {
 			okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
-			fmt.Printf("  %s %s: Agent credentials successfully purged from macOS Keychain.\n",
+			fmt.Printf("  %s %s Agent credentials successfully purged from macOS Keychain.\n",
 				okBadge,
-				lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain"),
+				keychainCat,
 			)
 		}
 	} else {
 		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
-		fmt.Printf("  %s %s: No lingering agent tokens in macOS Keychain (clean isolation).\n",
+		keychainCat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain:")
+		fmt.Printf("  %s %s No lingering agent tokens in macOS Keychain (clean isolation).\n",
 			okBadge,
-			lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain"),
+			keychainCat,
 		)
 	}
 }
 
 func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry) {
-	fmt.Printf("\n%s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render(fmt.Sprintf("[%s (%s)]", adapter.DisplayName(), adapter.Name())))
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render(fmt.Sprintf("[%s (%s)]", adapter.DisplayName(), adapter.Name())))
 	profiles, _ := pm.ListProfilesForAgent(adapter.Name(), cfg, reg)
 	if len(profiles) == 0 {
-		fmt.Printf("  %s\n", lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
+		fmt.Println(lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("  No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
 		return
 	}
 	for _, p := range profiles {
-		fmt.Printf("\nProfile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
+		fmt.Println()
+		fmt.Printf("Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
 		results := adapter.Doctor(context.Background(), p, pm.ProfileDir(p))
 		if cfg != nil {
 			if env := cfg.GetProfileEnv(p); len(env) > 0 {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/pkg/browser"
 	"golang.org/x/oauth2"
 )
@@ -85,10 +86,19 @@ func Authenticate(ctx context.Context, cfg ProviderConfig, openBrowser bool) (*T
 		Scopes:      cfg.Scopes,
 	}
 	fullAuthURL := strings.TrimSpace(oauthConfig.AuthCodeURL(state, opts...))
-	fmt.Printf("\nOpening browser for authorization:\n%s\n\n", fullAuthURL)
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#61afef")).
+		Padding(0, 1).
+		Render(fmt.Sprintf("%s\n%s",
+			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#61afef")).Render("🌐 Opening browser for authorization:"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#56b6c2")).Render(fullAuthURL),
+		))
+	fmt.Printf("\n%s\n\n", card)
 	if openBrowser {
 		if err := OpenBrowser(fullAuthURL); err != nil {
-			fmt.Printf("Note: Could not open browser automatically: %v\nPlease copy and open the URL above.\n\n", err)
+			note := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5c07b")).Render(fmt.Sprintf("Note: Could not open browser automatically: %v\nPlease copy and open the URL above.", err))
+			fmt.Printf("%s\n\n", note)
 		}
 	}
 

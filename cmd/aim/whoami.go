@@ -62,16 +62,20 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 
 	// If still no active profile, show summary of available profiles
 	if profileName == "" {
-		bold := lipgloss.NewStyle().Bold(true)
+		bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 		muted := lipgloss.NewStyle().Foreground(tui.TextMuted)
 		accent := lipgloss.NewStyle().Foreground(tui.AccentBlue).Bold(true)
+		cardStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(tui.TextDim).
+			Padding(0, 1)
 
-		fmt.Println(bold.Render("No active AIM session in this shell."))
-		fmt.Println()
+		var b strings.Builder
+		b.WriteString(bold.Render("No active AIM session in this shell.") + "\n")
 		if pm != nil {
 			profs, _ := pm.ListProfiles()
 			if len(profs) > 0 {
-				fmt.Println(muted.Render("Configured profiles:"))
+				b.WriteString("\n" + muted.Render("Configured profiles:") + "\n")
 				for _, p := range profs {
 					var agentList []string
 					if cfg != nil {
@@ -81,12 +85,14 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 					if len(agentList) > 0 {
 						agentTag = fmt.Sprintf(" [%s]", strings.Join(agentList, ", "))
 					}
-					fmt.Printf("  • %s%s\n", accent.Render(p), muted.Render(agentTag))
+					b.WriteString(fmt.Sprintf("  • %s%s\n", accent.Render(p), muted.Render(agentTag)))
 				}
-				fmt.Println()
 			}
 		}
-		fmt.Println(muted.Render("Run 'aim' or 'aim run <agent> <profile>' to start a session."))
+		b.WriteString("\n" + muted.Render("Run 'aim' or 'aim run <agent> <profile>' to start a session."))
+		fmt.Println()
+		fmt.Println(cardStyle.Render(strings.TrimRight(b.String(), "\n")))
+		fmt.Println()
 		return
 	}
 
@@ -115,18 +121,19 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 		}
 	}
 
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(tui.AccentBlue).
+		Padding(0, 1)
+
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
 	labelStyle := lipgloss.NewStyle().Foreground(tui.TextMuted).Width(15)
-	valStyle := lipgloss.NewStyle().Bold(true)
-	borderStyle := lipgloss.NewStyle().Foreground(tui.TextDim)
+	valStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 
-	divider := borderStyle.Render("───────────────────────────────────────────────────")
-
-	fmt.Println()
-	fmt.Println(titleStyle.Render("⚡ Active AIM Session"))
-	fmt.Println(divider)
-	fmt.Printf("%s %s\n", labelStyle.Render("Profile:"), valStyle.Render(profileName))
-	fmt.Printf("%s %s\n", labelStyle.Render("Agent:"), valStyle.Render(agentName))
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("⚡ Active AIM Session") + "\n\n")
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Profile:"), valStyle.Render(profileName)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Agent:"), valStyle.Render(agentName)))
 
 	accInfo := profile.GetProfileAccountInfo(profileDir)
 	if accInfo.Email != "" {
@@ -134,34 +141,35 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 		if accInfo.Name != "" {
 			accStr += " (" + accInfo.Name + ")"
 		}
-		fmt.Printf("%s %s\n", labelStyle.Render("Account:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Bold(true).Render(accStr))
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Account:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Bold(true).Render(accStr)))
 	}
 	if accInfo.AuthMethod != "" {
-		fmt.Printf("%s %s\n", labelStyle.Render("Auth Method:"), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(accInfo.AuthMethod))
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Auth Method:"), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(accInfo.AuthMethod)))
 	}
 	if accInfo.ProjectID != "" {
-		fmt.Printf("%s %s\n", labelStyle.Render("Project ID:"), lipgloss.NewStyle().Foreground(tui.TextDim).Render(accInfo.ProjectID))
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Project ID:"), lipgloss.NewStyle().Foreground(tui.TextDim).Render(accInfo.ProjectID)))
 	}
 
-	fmt.Printf("%s %s\n", labelStyle.Render("Profile Home:"), lipgloss.NewStyle().Render(profileDir))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Profile Home:"), lipgloss.NewStyle().Foreground(tui.TextDim).Render(profileDir)))
 
 	if convID != "" {
 		shortID := convID
 		if len(shortID) > 8 {
 			shortID = shortID[:8]
 		}
-		fmt.Printf("%s %s %s\n", labelStyle.Render("Session ID:"), valStyle.Render(shortID), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("(%s)", convID)))
+		b.WriteString(fmt.Sprintf("%s %s %s\n", labelStyle.Render("Session ID:"), valStyle.Render(shortID), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("(%s)", convID))))
 	}
 
 	if chatTitle != "" {
-		fmt.Printf("%s %s\n", labelStyle.Render("Chat Title:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(chatTitle))
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Chat Title:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(chatTitle)))
 	}
 
 	if quotaSummary != "" {
-		fmt.Printf("%s %s\n", labelStyle.Render("Quota:"), lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(quotaSummary))
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Quota:"), lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(quotaSummary)))
 	}
 
-	fmt.Println(divider)
+	fmt.Println()
+	fmt.Println(cardStyle.Render(strings.TrimRight(b.String(), "\n")))
 	fmt.Println()
 }
 

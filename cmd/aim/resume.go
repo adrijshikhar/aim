@@ -179,9 +179,12 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		resumeArgs = append([]string{resumeID}, extraArgs...)
 	}
 
+	arrowStyle := lipgloss.NewStyle().Foreground(tui.AccentBlue).Bold(true)
 	cyanStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan)
-	fmt.Fprintf(cmd.OutOrStdout(), "Resuming %s session %s under profile %q...\n",
-		agent,
+	boldStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+	fmt.Fprintf(cmd.OutOrStdout(), "%s Resuming %s session %s under profile %q...\n",
+		arrowStyle.Render("➜"),
+		boldStyle.Render(agent),
 		cyanStyle.Render(sess.ShortID),
 		profile,
 	)
