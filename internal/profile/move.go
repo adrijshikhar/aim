@@ -53,6 +53,9 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 	if !hasAgent && adapter != nil && srcDirExists && adapter.HasCredentials(srcDir) {
 		hasAgent = true
 	}
+	if !hasAgent && srcDirExists && hasAgentCredentialsOnDisk(canonicalAgent, srcDir) {
+		hasAgent = true
+	}
 	if !hasAgent {
 		return fmt.Errorf("agent %q is not associated with profile %q", canonicalAgent, sourceProfile)
 	}
@@ -133,9 +136,7 @@ func moveAgentData(agent, srcDir, dstDir string, force bool, adapter agents.Agen
 		src := filepath.Join(srcDir, ".codex")
 		dst := filepath.Join(dstDir, ".codex")
 		if fi, err := os.Stat(src); err == nil && fi.IsDir() {
-			if force {
-				_ = os.RemoveAll(dst)
-			}
+			_ = os.RemoveAll(dst)
 			if err := moveOrCopyDir(src, dst); err != nil {
 				return err
 			}
@@ -144,9 +145,7 @@ func moveAgentData(agent, srcDir, dstDir string, force bool, adapter agents.Agen
 		src := filepath.Join(srcDir, ".gemini", "antigravity-cli")
 		dst := filepath.Join(dstDir, ".gemini", "antigravity-cli")
 		if fi, err := os.Stat(src); err == nil && fi.IsDir() {
-			if force {
-				_ = os.RemoveAll(dst)
-			}
+			_ = os.RemoveAll(dst)
 			_ = os.MkdirAll(filepath.Dir(dst), 0700)
 			if err := moveOrCopyDir(src, dst); err != nil {
 				return err
@@ -155,9 +154,7 @@ func moveAgentData(agent, srcDir, dstDir string, force bool, adapter agents.Agen
 		srcGcloud := filepath.Join(srcDir, ".config", "gcloud")
 		dstGcloud := filepath.Join(dstDir, ".config", "gcloud")
 		if fi, err := os.Stat(srcGcloud); err == nil && fi.IsDir() {
-			if force {
-				_ = os.RemoveAll(dstGcloud)
-			}
+			_ = os.RemoveAll(dstGcloud)
 			_ = os.MkdirAll(filepath.Dir(dstGcloud), 0700)
 			_ = moveOrCopyDir(srcGcloud, dstGcloud)
 		}
@@ -165,9 +162,7 @@ func moveAgentData(agent, srcDir, dstDir string, force bool, adapter agents.Agen
 		srcTok := filepath.Join(srcDir, ".gemini", "gemini-oauth-token")
 		dstTok := filepath.Join(dstDir, ".gemini", "gemini-oauth-token")
 		if fi, err := os.Stat(srcTok); err == nil && !fi.IsDir() {
-			if force {
-				_ = os.Remove(dstTok)
-			}
+			_ = os.Remove(dstTok)
 			_ = os.MkdirAll(filepath.Dir(dstTok), 0700)
 			_ = moveOrCopyFile(srcTok, dstTok)
 		}
