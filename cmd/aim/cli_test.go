@@ -152,6 +152,55 @@ func TestCLIRunRemove(t *testing.T) {
 	}
 }
 
+func TestCLIRunMv(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	srcDir, err := pm.EnsureProfile("rs")
+	if err != nil {
+		t.Fatalf("EnsureProfile rs failed: %v", err)
+	}
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("rs", "agy")
+	cfg.AddProfileAgent("rs", "codex")
+	_ = config.SaveConfig(cfg)
+
+	// Mock codex credentials in rs
+	codexDir := filepath.Join(srcDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte("secret-token"), 0600)
+
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{name: "codex"})
+	reg.Register(&mockAdapter{name: "agy"})
+
+	// Execute aim mv codex rs work
+	code := executeMv(reg, pm, "codex", "rs", "work", false)
+	if code != 0 {
+		t.Fatalf("executeMv failed with exit code: %d", code)
+	}
+
+	// Verify rs still has agy but not codex
+	cfgReload, _ := config.LoadConfig()
+	if !cfgReload.HasAgent("rs", "agy") {
+		t.Errorf("expected rs to still have agy")
+	}
+	if cfgReload.HasAgent("rs", "codex") {
+		t.Errorf("expected rs to no longer have codex")
+	}
+
+	// Verify work has codex and credentials
+	if !cfgReload.HasAgent("work", "codex") {
+		t.Errorf("expected work to have codex")
+	}
+	workAuth, err := os.ReadFile(filepath.Join(pm.ProfileDir("work"), ".codex", "auth.json"))
+	if err != nil || string(workAuth) != "secret-token" {
+		t.Errorf("expected moved codex credentials in work profile, got %s (err: %v)", string(workAuth), err)
+	}
+}
+
 func TestCLIRunDoctor(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "aim-cli-test-*")
 	if err != nil {
