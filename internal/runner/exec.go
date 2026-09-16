@@ -50,16 +50,21 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		}
 
 		profileDir := launch.Env["HOME"]
-		// Check whether the profile already has credentials on disk (token file or ADC).
+		// Check whether the profile is authenticated in keyring bypass mode.
+		// For agy, if SSH_CONNECTION is omitted, the session is unauthenticated, expired, or logging in.
 		hasCreds := false
 		if profileDir != "" {
-			tokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-			if fi, err := os.Stat(tokenPath); err == nil && fi.Size() > 0 {
+			if _, hasSSH := launch.Env["SSH_CONNECTION"]; hasSSH {
 				hasCreds = true
-			} else {
-				adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
-				if fi, err := os.Stat(adcPath); err == nil && fi.Size() > 0 {
+			} else if agentName != "agy" {
+				tokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+				if fi, err := os.Stat(tokenPath); err == nil && fi.Size() > 0 {
 					hasCreds = true
+				} else {
+					adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
+					if fi, err := os.Stat(adcPath); err == nil && fi.Size() > 0 {
+						hasCreds = true
+					}
 				}
 			}
 		}

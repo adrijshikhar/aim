@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -217,5 +218,42 @@ func TestRunnerExecute_SSHEnvFiltering(t *testing.T) {
 	codeAuth, err := r.Run(context.Background(), envAuth, []string{checkAuthScript})
 	if err != nil || codeAuth != 0 {
 		t.Fatalf("expected exit code 0 (SSH_CONNECTION preserved, others filtered), got %d, err: %v", codeAuth, err)
+	}
+}
+
+func TestRunner_ExpiredToken_OmittedSSHConnection(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not found")
+	}
+
+	tempProf := t.TempDir()
+	// Write an expired token file on disk in the profile
+	tokDir := filepath.Join(tempProf, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(tokDir, 0700)
+	_ = os.WriteFile(filepath.Join(tokDir, "antigravity-oauth-token"), []byte(`{"token":{"access_token":"expired"}}`), 0600)
+
+	r := NewRunner()
+
+	// When SSH_CONNECTION is omitted (because token is expired/offline),
+	// runner.Run should NOT inject SSH_CONNECTION and must run child in browser-ready mode.
+	envExpired := agents.LaunchEnv{
+		BinaryPath: sh,
+		Args:       []string{"-c"},
+		Env: map[string]string{
+			"HOME":        tempProf,
+			"AIM_AGENT":   "agy",
+			"AIM_PROFILE": "test_expired",
+		},
+	}
+	checkScript := `
+		if [ -n "$SSH_CONNECTION" ]; then
+			exit 1
+		fi
+		exit 0
+	`
+	code, err := r.Run(context.Background(), envExpired, []string{checkScript})
+	if err != nil || code != 0 {
+		t.Fatalf("expected exit code 0 (SSH_CONNECTION omitted for expired token), got %d, err: %v", code, err)
 	}
 }

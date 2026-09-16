@@ -101,6 +101,90 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 	return false
 }
 
+// IsTokenHealthy checks whether the profile has a valid, healthy authentication token.
+// If the token is missing, corrupt, expired, or flagged offline by usage diagnostics,
+// it returns false so that SSH_CONNECTION is omitted, enabling Antigravity to auto-open
+// the browser for login or re-authentication instead of printing a manual copy-paste URL.
+func (a *Adapter) IsTokenHealthy(profileName, profileDir string) bool {
+	p := a.TokenPath(profileDir)
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) == 0 {
+		// Fallback: Check if Google Application Default Credentials (ADC) exist
+		adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
+		if fi, statErr := os.Stat(adcPath); statErr == nil && !fi.IsDir() && fi.Size() > 0 {
+			return true
+		}
+		return false
+	}
+
+	cleanedData, valid := validateAndRepairTokenJSON(p, data)
+	if !valid {
+		return false
+	}
+
+	var tok struct {
+		Token struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			Expiry       string `json:"expiry"`
+		} `json:"token"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		Expiry       string `json:"expiry"`
+	}
+	if err := json.Unmarshal(cleanedData, &tok); err != nil {
+		return false
+	}
+
+	refreshToken := tok.Token.RefreshToken
+	if refreshToken == "" {
+		refreshToken = tok.RefreshToken
+	}
+	accessToken := tok.Token.AccessToken
+	if accessToken == "" {
+		accessToken = tok.AccessToken
+	}
+	expiryStr := tok.Token.Expiry
+	if expiryStr == "" {
+		expiryStr = tok.Expiry
+	}
+
+	if accessToken == "" && refreshToken == "" {
+		return false
+	}
+
+	// If usage cache reports offline or authentication error for this profile,
+	// the token cannot be used without re-authenticating.
+	cache := usage.NewCacheStore(config.BaseDir(), usage.DefaultTTL)
+	if cache != nil {
+		if rep, found := cache.Get(a.Name(), profileName); found {
+			errLower := strings.ToLower(rep.Error)
+			sumLower := strings.ToLower(rep.Summary)
+			if strings.Contains(errLower, "credential") || strings.Contains(sumLower, "credential") ||
+				strings.Contains(errLower, "offline") || strings.Contains(sumLower, "offline") ||
+				strings.Contains(errLower, "401") || strings.Contains(errLower, "unauthorized") ||
+				strings.Contains(errLower, "invalid_grant") || strings.Contains(errLower, "token expired") {
+				logger.Debug("[agy] IsTokenHealthy: false for profile %q (usage reports %s / %s)", profileName, rep.Summary, rep.Error)
+				return false
+			}
+		}
+	}
+
+	// If access token is expired, check whether it is expired and cannot be refreshed
+	if expiryStr != "" {
+		if expiryTime, err := time.Parse(time.RFC3339, expiryStr); err == nil {
+			if time.Now().After(expiryTime) {
+				// If access token is expired, omit SSH_CONNECTION so that if refresh fails,
+				// Antigravity auto-opens the browser instead of suppressing it.
+				logger.Debug("[agy] IsTokenHealthy: false for profile %q (access token expired at %s)", profileName, expiryStr)
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
 func isProfileEligibleForSeeding(profileName string) bool {
 	switch profileName {
 	case "personal", "p", "me", "main":
@@ -359,9 +443,9 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}
 
 	envMap["HOME"] = profileDir
-	// Only set SSH_CONNECTION if profile already has credentials on disk,
-	// to isolate file-based token reads without suppressing browser auto-open during login.
-	if a.HasCredentials(profileDir) {
+	// Only set SSH_CONNECTION if profile has valid, healthy credentials on disk,
+	// to isolate file-based token reads without suppressing browser auto-open during login or re-auth.
+	if a.IsTokenHealthy(profileName, profileDir) {
 		envMap["SSH_CONNECTION"] = "127.0.0.1 50000 127.0.0.1 22"
 	} else {
 		delete(envMap, "SSH_CONNECTION")
