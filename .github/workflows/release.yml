@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
@@ -22,7 +24,7 @@ jobs:
   release-please:
     name: Release Please (PR & Tag)
     runs-on: ubuntu-latest
-    if: github.repository == 'adrijshikhar/aim'
+    if: github.repository == 'adrijshikhar/aim' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -40,12 +42,29 @@ jobs:
     needs: release-please
     if: |
       github.repository == 'adrijshikhar/aim' &&
-      (needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch')
+      (needs.release-please.outputs.releases_created == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    outputs:
+      tag: ${{ steps.target.outputs.ref }}
+      version: ${{ steps.target.outputs.version }}
     steps:
+      - name: Determine Target Git Ref
+        id: target
+        run: |
+          if [ -n "${{ needs.release-please.outputs.tag_name }}" ]; then
+            TAG="${{ needs.release-please.outputs.tag_name }}"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Checkout target ref
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name || github.event.inputs.tag || github.ref_name }}
+          ref: ${{ steps.target.outputs.ref }}
           fetch-depth: 0
 
       - name: Set up Go
@@ -73,7 +92,7 @@ jobs:
     needs: [release-please, test-and-verify]
     if: |
       github.repository == 'adrijshikhar/aim' &&
-      (needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch')
+      (needs.release-please.outputs.releases_created == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
     outputs:
       tag: ${{ steps.target.outputs.ref }}
       version: ${{ steps.target.outputs.version }}
@@ -81,7 +100,9 @@ jobs:
       - name: Determine Target Git Ref
         id: target
         run: |
-          if [ -n "${{ needs.release-please.outputs.tag_name }}" ]; then
+          if [ -n "${{ needs.test-and-verify.outputs.tag }}" ]; then
+            TAG="${{ needs.test-and-verify.outputs.tag }}"
+          elif [ -n "${{ needs.release-please.outputs.tag_name }}" ]; then
             TAG="${{ needs.release-please.outputs.tag_name }}"
           elif [ -n "${{ github.event.inputs.tag }}" ]; then
             TAG="${{ github.event.inputs.tag }}"
