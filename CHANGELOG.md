@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/adrijshikhar/aim/compare/v0.5.0...v0.6.0) (2026-09-16)
+
+
+### Features
+
+* **cli:** unify lipgloss styling and table formatting across all commands ([#30](https://github.com/adrijshikhar/aim/issues/30)) ([9b90b36](https://github.com/adrijshikhar/aim/commit/9b90b36ad225c46d44f99fd29371e40200799682))
+* **profile:** add aim mv command and TUI 'v' key to move agent accounts ([#32](https://github.com/adrijshikhar/aim/issues/32)) ([89d975e](https://github.com/adrijshikhar/aim/commit/89d975ef1c5cce7a7556cd8c2e7086efee5bdb3b))
+
+
+### Bug Fixes
+
+* **auth:** enable browser auto-open when re-authenticating expired profiles ([#34](https://github.com/adrijshikhar/aim/issues/34)) ([5ea7c12](https://github.com/adrijshikhar/aim/commit/5ea7c1288920ef403d780df9a9450819a2154b90))
+
 ## [0.5.0](https://github.com/adrijshikhar/aim/compare/v0.4.0...v0.5.0) (2026-09-14)
 
 
