@@ -809,3 +809,90 @@ func TestAgyBridgeSharedState_PluginsAndConfig(t *testing.T) {
 		t.Errorf("expected profile token to remain intact, got %q", string(tokenBytes))
 	}
 }
+
+func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("AIM_HOME", tempHome)
+	t.Setenv("HOME", tempHome)
+
+	adapter := NewAdapter()
+	profDir := filepath.Join(tempHome, "profiles", "testprof")
+	tokenDir := filepath.Join(profDir, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(tokenDir, 0700)
+	tokenFile := filepath.Join(tokenDir, "antigravity-oauth-token")
+
+	// 1. Missing token -> IsTokenHealthy should be false, SSH_CONNECTION omitted in PrepareEnv
+	if adapter.IsTokenHealthy("testprof", profDir) {
+		t.Errorf("expected missing token to not be healthy")
+	}
+	envMissing, err := adapter.PrepareEnv("testprof", profDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+	if _, exists := envMissing.Env["SSH_CONNECTION"]; exists {
+		t.Errorf("expected SSH_CONNECTION to be omitted when token is missing")
+	}
+
+	// 2. Corrupt token -> IsTokenHealthy should be false, SSH_CONNECTION omitted
+	_ = os.WriteFile(tokenFile, []byte("{malformed json"), 0600)
+	if adapter.IsTokenHealthy("testprof", profDir) {
+		t.Errorf("expected corrupt token to not be healthy")
+	}
+	envCorrupt, err := adapter.PrepareEnv("testprof", profDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+	if _, exists := envCorrupt.Env["SSH_CONNECTION"]; exists {
+		t.Errorf("expected SSH_CONNECTION to be omitted when token is corrupt")
+	}
+
+	// 3. Expired token (past expiry) -> IsTokenHealthy should be false, SSH_CONNECTION omitted to enable browser auto-open
+	pastExpiry := time.Now().Add(-2 * time.Hour).Format(time.RFC3339)
+	expiredPayload := fmt.Sprintf(`{"token":{"access_token":"old_tok","refresh_token":"ref_tok","expiry":%q}}`, pastExpiry)
+	_ = os.WriteFile(tokenFile, []byte(expiredPayload), 0600)
+	if adapter.IsTokenHealthy("testprof", profDir) {
+		t.Errorf("expected expired token to not be healthy")
+	}
+	envExpired, err := adapter.PrepareEnv("testprof", profDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+	if _, exists := envExpired.Env["SSH_CONNECTION"]; exists {
+		t.Errorf("expected SSH_CONNECTION to be omitted when token is expired to enable browser auto-open")
+	}
+
+	// 4. Valid unexpired token -> IsTokenHealthy should be true, SSH_CONNECTION should be set
+	futureExpiry := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
+	validPayload := fmt.Sprintf(`{"token":{"access_token":"fresh_tok","refresh_token":"ref_tok","expiry":%q}}`, futureExpiry)
+	_ = os.WriteFile(tokenFile, []byte(validPayload), 0600)
+	if !adapter.IsTokenHealthy("testprof", profDir) {
+		t.Errorf("expected valid token with future expiry to be healthy")
+	}
+	envValid, err := adapter.PrepareEnv("testprof", profDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+	if envValid.Env["SSH_CONNECTION"] != "127.0.0.1 50000 127.0.0.1 22" {
+		t.Errorf("expected SSH_CONNECTION to be set for valid token, got %q", envValid.Env["SSH_CONNECTION"])
+	}
+
+	// 5. Offline profile in usage cache -> IsTokenHealthy should be false even with future token
+	cache := usage.NewCacheStore(tempHome, usage.DefaultTTL)
+	_ = cache.Put(usage.Report{
+		Agent:     "agy",
+		Profile:   "testprof",
+		Summary:   "Offline",
+		Error:     "401 Unauthorized",
+		FetchedAt: time.Now(),
+	})
+	if adapter.IsTokenHealthy("testprof", profDir) {
+		t.Errorf("expected offline profile to not be healthy")
+	}
+	envOffline, err := adapter.PrepareEnv("testprof", profDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+	if _, exists := envOffline.Env["SSH_CONNECTION"]; exists {
+		t.Errorf("expected SSH_CONNECTION to be omitted when profile is offline in usage cache")
+	}
+}
