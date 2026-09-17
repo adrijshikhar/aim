@@ -193,6 +193,9 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	// Bridge host plugins and hooks (e.g. Catalyst) into profile
 	bridgePluginsAndHooks(realHome, codexDir)
 
+	// Bridge host cxstatusline config into profile
+	bridgeCxStatusline(realHome, profileDir)
+
 	bin := a.ResolveBinary()
 	logger.Debug("[codex] Resolved binary: %s", bin)
 
@@ -253,6 +256,26 @@ func bridgePluginsAndHooks(realHome, profileCodexDir string) {
 	if fi, err := os.Stat(hostHooksJSON); err == nil && !fi.IsDir() {
 		if _, err := os.Lstat(destHooksJSON); os.IsNotExist(err) {
 			_ = os.Symlink(hostHooksJSON, destHooksJSON)
+		}
+	}
+}
+
+func bridgeCxStatusline(realHome, profileDir string) {
+	hostConfig := filepath.Join(realHome, ".config", "cxstatusline")
+	destConfig := filepath.Join(profileDir, ".config", "cxstatusline")
+	if fi, err := os.Stat(hostConfig); err == nil && fi.IsDir() {
+		lfi, err := os.Lstat(destConfig)
+		if os.IsNotExist(err) {
+			_ = os.MkdirAll(filepath.Dir(destConfig), 0755)
+			_ = os.Symlink(hostConfig, destConfig)
+		} else if err == nil && lfi.IsDir() && (lfi.Mode()&os.ModeSymlink == 0) {
+			// If destConfig exists as a non-symlink directory, check if it only has an auto-generated settings.json or is empty.
+			// In that case, replace it with a symlink to hostConfig so custom statusline settings are shared.
+			entries, readErr := os.ReadDir(destConfig)
+			if readErr == nil && (len(entries) == 0 || (len(entries) == 1 && entries[0].Name() == "settings.json")) {
+				_ = os.RemoveAll(destConfig)
+				_ = os.Symlink(hostConfig, destConfig)
+			}
 		}
 	}
 }

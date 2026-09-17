@@ -23,6 +23,7 @@ To balance complete agent isolation with seamless developer workflow, AIM select
 | **Shell Configs** | `.zshrc`, `.bashrc`, `.profile`, `.config/fish` | **Bridged** (developer aliases & prompt settings) |
 | **Package Managers** | `.npmrc`, `.yarnrc`, `.pip/pip.conf`, `.cargo/` | **Bridged** (package registry auth & configs) |
 | **Cloud & Containers** | `.docker`, `.aws`, `.config/gcloud`, `.kube` | **Bridged** (cloud credentials) |
+| **Terminal & Tooling** | `.config/cxstatusline` | **Bridged** (Codex statusline themes & widget config) |
 | **AIM State** | `.aim` | **Isolated** (blocked from profile symlinks) |
 | **Antigravity State** | `.gemini/antigravity-cli/antigravity-oauth-token` | **Isolated** (per-profile token sandbox) |
 | **Claude State** | `.claude`, `.claude.json` | **Isolated** (per-profile token sandbox) |
