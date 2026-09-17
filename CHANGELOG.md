@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/adrijshikhar/aim/compare/v0.6.0...v0.7.0) (2026-09-17)
+
+
+### Features
+
+* **codex:** bridge cxstatusline configuration into profiles ([#36](https://github.com/adrijshikhar/aim/issues/36)) ([243a0b7](https://github.com/adrijshikhar/aim/commit/243a0b747e1dc2fbeff611923d060ad5ec34a4fa))
+
 ## [0.6.0](https://github.com/adrijshikhar/aim/compare/v0.5.0...v0.6.0) (2026-09-16)
 
 
