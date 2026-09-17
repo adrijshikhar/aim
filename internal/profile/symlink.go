@@ -47,6 +47,9 @@ var defaultBridgedPaths = []string{
 
 	// AI Agent Skills & Instructions
 	".agents",
+
+	// Terminal & Statusline Tooling
+	".config/cxstatusline",
 }
 
 // bridgedDotfiles provides backwards compatibility with existing references.

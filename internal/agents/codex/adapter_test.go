@@ -262,3 +262,85 @@ func TestCodexAdapter_BridgePluginsAndHooks(t *testing.T) {
 		t.Errorf("expected hooks.json to be symlink, err=%v", err)
 	}
 }
+
+func TestCodexAdapter_BridgeCxStatusline(t *testing.T) {
+	mockHome := t.TempDir()
+	hostCxDir := filepath.Join(mockHome, ".config", "cxstatusline")
+	if err := os.MkdirAll(hostCxDir, 0755); err != nil {
+		t.Fatalf("mkdir host cxstatusline failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hostCxDir, "settings.json"), []byte(`{"lines":[]}`), 0644); err != nil {
+		t.Fatalf("write host settings failed: %v", err)
+	}
+
+	t.Run("fresh profile", func(t *testing.T) {
+		profileDir := t.TempDir()
+		bridgeCxStatusline(mockHome, profileDir)
+
+		dest := filepath.Join(profileDir, ".config", "cxstatusline")
+		fi, err := os.Lstat(dest)
+		if err != nil {
+			t.Fatalf("expected bridged cxstatusline to exist: %v", err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("expected bridged cxstatusline to be a symlink")
+		}
+	})
+
+	t.Run("migrate auto-generated default settings directory", func(t *testing.T) {
+		profileDir := t.TempDir()
+		dest := filepath.Join(profileDir, ".config", "cxstatusline")
+		if err := os.MkdirAll(dest, 0755); err != nil {
+			t.Fatalf("mkdir dest failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dest, "settings.json"), []byte(`{"default":true}`), 0644); err != nil {
+			t.Fatalf("write fallback settings failed: %v", err)
+		}
+
+		bridgeCxStatusline(mockHome, profileDir)
+
+		fi, err := os.Lstat(dest)
+		if err != nil {
+			t.Fatalf("expected bridged cxstatusline to exist after migration: %v", err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("expected auto-generated directory to be replaced with symlink")
+		}
+	})
+
+	t.Run("preserve custom profile directory with extra files", func(t *testing.T) {
+		profileDir := t.TempDir()
+		dest := filepath.Join(profileDir, ".config", "cxstatusline")
+		if err := os.MkdirAll(dest, 0755); err != nil {
+			t.Fatalf("mkdir dest failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dest, "settings.json"), []byte(`{}`), 0644); err != nil {
+			t.Fatalf("write settings failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dest, "custom.theme"), []byte("theme"), 0644); err != nil {
+			t.Fatalf("write custom theme failed: %v", err)
+		}
+
+		bridgeCxStatusline(mockHome, profileDir)
+
+		fi, err := os.Lstat(dest)
+		if err != nil {
+			t.Fatalf("expected custom cxstatusline to exist: %v", err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("expected custom directory with extra files to NOT be replaced with symlink")
+		}
+	})
+
+	t.Run("noop when host has no cxstatusline", func(t *testing.T) {
+		emptyHome := t.TempDir()
+		profileDir := t.TempDir()
+
+		bridgeCxStatusline(emptyHome, profileDir)
+
+		dest := filepath.Join(profileDir, ".config", "cxstatusline")
+		if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+			t.Errorf("expected no cxstatusline bridged when host has none")
+		}
+	})
+}

@@ -159,6 +159,15 @@ func TestEnsureDotfiles_ComprehensiveDeveloperTools(t *testing.T) {
 		t.Fatalf("write skill failed: %v", err)
 	}
 
+	// Terminal & Statusline tooling (cxstatusline)
+	cxDir := filepath.Join(fakeHome, ".config", "cxstatusline")
+	if err := os.MkdirAll(cxDir, 0755); err != nil {
+		t.Fatalf("mkdir cxstatusline failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cxDir, "settings.json"), []byte("{}"), 0644); err != nil {
+		t.Fatalf("write settings failed: %v", err)
+	}
+
 	// Run EnsureDotfiles with an extra custom path
 	customFile := filepath.Join(fakeHome, ".custom-dev-token")
 	if err := os.WriteFile(customFile, []byte("token"), 0600); err != nil {
@@ -217,6 +226,16 @@ func TestEnsureDotfiles_ComprehensiveDeveloperTools(t *testing.T) {
 	}
 	if fiAgents.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("expected .agents to be a symlink")
+	}
+
+	// Verify .config/cxstatusline symlink
+	targetCX := filepath.Join(profileDir, ".config", "cxstatusline")
+	fiCX, err := os.Lstat(targetCX)
+	if err != nil {
+		t.Fatalf("expected .config/cxstatusline to exist: %v", err)
+	}
+	if fiCX.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected .config/cxstatusline to be a symlink")
 	}
 
 	// Verify custom path symlink
