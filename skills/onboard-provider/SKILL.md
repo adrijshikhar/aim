@@ -1,5 +1,5 @@
 ---
-name: aim-agent-onboarding
+name: onboard-provider
 description: Use when onboarding, implementing, refactoring, or testing an AI CLI agent adapter (such as Claude Code, Codex, Antigravity, Aider, OpenCode) in AIM to prevent profile pollution, credential collisions, sidecar proxy failures, and broken lifecycle hooks.
 ---
 
