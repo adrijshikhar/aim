@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -343,4 +344,125 @@ func TestCodexAdapter_BridgeCxStatusline(t *testing.T) {
 			t.Errorf("expected no cxstatusline bridged when host has none")
 		}
 	})
+}
+
+func TestCodexAdapter_CopyHostConfig_HookTrustPathRewriting(t *testing.T) {
+	mockHome := t.TempDir()
+	hostCodexDir := filepath.Join(mockHome, ".codex")
+	if err := os.MkdirAll(hostCodexDir, 0755); err != nil {
+		t.Fatalf("mkdir host codex failed: %v", err)
+	}
+
+	hostHooksJSON := filepath.Join(hostCodexDir, "hooks.json")
+	hostConfigPath := filepath.Join(hostCodexDir, "config.toml")
+	hostConfigContent := fmt.Sprintf(`model_provider = "caveman"
+[hooks.state."%s:pre_tool_use:0:0"]
+trusted_hash = "sha256:abc12345"
+`, hostHooksJSON)
+
+	if err := os.WriteFile(hostConfigPath, []byte(hostConfigContent), 0644); err != nil {
+		t.Fatalf("write host config failed: %v", err)
+	}
+
+	t.Run("fresh copy rewrites hook trust paths", func(t *testing.T) {
+		profileCodexDir := filepath.Join(t.TempDir(), ".codex")
+		if err := os.MkdirAll(profileCodexDir, 0700); err != nil {
+			t.Fatalf("mkdir profile codex failed: %v", err)
+		}
+
+		copyHostConfig(mockHome, profileCodexDir)
+
+		destConfig := filepath.Join(profileCodexDir, "config.toml")
+		data, err := os.ReadFile(destConfig)
+		if err != nil {
+			t.Fatalf("read dest config failed: %v", err)
+		}
+
+		expectedDestHooksJSON := filepath.Join(profileCodexDir, "hooks.json")
+		if strings.Contains(string(data), hostHooksJSON) {
+			t.Errorf("expected hostHooksJSON to be rewritten, found in config: %s", string(data))
+		}
+		if !strings.Contains(string(data), expectedDestHooksJSON) {
+			t.Errorf("expected destHooksJSON %q in config: %s", expectedDestHooksJSON, string(data))
+		}
+	})
+
+	t.Run("migrates existing config with old host hook paths", func(t *testing.T) {
+		profileCodexDir := filepath.Join(t.TempDir(), ".codex")
+		if err := os.MkdirAll(profileCodexDir, 0700); err != nil {
+			t.Fatalf("mkdir profile codex failed: %v", err)
+		}
+
+		destConfig := filepath.Join(profileCodexDir, "config.toml")
+		// Write unmigrated config directly
+		if err := os.WriteFile(destConfig, []byte(hostConfigContent), 0644); err != nil {
+			t.Fatalf("write dest config failed: %v", err)
+		}
+
+		copyHostConfig(mockHome, profileCodexDir)
+
+		data, err := os.ReadFile(destConfig)
+		if err != nil {
+			t.Fatalf("read dest config failed: %v", err)
+		}
+
+		expectedDestHooksJSON := filepath.Join(profileCodexDir, "hooks.json")
+		if strings.Contains(string(data), hostHooksJSON) {
+			t.Errorf("expected existing hostHooksJSON to be migrated, still found: %s", string(data))
+		}
+		if !strings.Contains(string(data), expectedDestHooksJSON) {
+			t.Errorf("expected destHooksJSON %q in migrated config: %s", expectedDestHooksJSON, string(data))
+		}
+	})
+}
+
+func TestCodexAdapter_EnsureSidecarDaemons(t *testing.T) {
+	mockHome := t.TempDir()
+	profileCodexDir := filepath.Join(t.TempDir(), ".codex")
+	_ = os.MkdirAll(profileCodexDir, 0700)
+
+	t.Run("noop when no caveman proxy configured", func(t *testing.T) {
+		cfgPath := filepath.Join(profileCodexDir, "config.toml")
+		_ = os.WriteFile(cfgPath, []byte("model = \"gpt-4\"\n"), 0644)
+
+		// Should not error or panic
+		ensureSidecarDaemons(mockHome, profileCodexDir)
+	})
+
+	t.Run("handles missing binary gracefully when caveman is configured", func(t *testing.T) {
+		cfgPath := filepath.Join(profileCodexDir, "config.toml")
+		_ = os.WriteFile(cfgPath, []byte("model_provider = \"caveman\"\nbase_url = \"http://127.0.0.1:8787/chatgpt\"\n"), 0644)
+
+		// mockHome has no caveman-proxy binary; should log debug and not panic
+		ensureSidecarDaemons(mockHome, profileCodexDir)
+	})
+}
+
+func TestCodexAdapter_Doctor_SidecarAndHooks(t *testing.T) {
+	adapter := NewAdapter()
+	profileDir := t.TempDir()
+	profileCodexDir := filepath.Join(profileDir, ".codex")
+	_ = os.MkdirAll(profileCodexDir, 0700)
+
+	cfgPath := filepath.Join(profileCodexDir, "config.toml")
+	cfgContent := `model_provider = "caveman"
+[hooks.state."/fake/host/.codex/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:123"
+`
+	_ = os.WriteFile(cfgPath, []byte(cfgContent), 0644)
+
+	results := adapter.Doctor(context.Background(), "testprof", profileDir)
+
+	hasSidecar := false
+	for _, r := range results {
+		if r.Category == "Sidecar" {
+			hasSidecar = true
+			if r.Status != "OK" && r.Status != "WARN" {
+				t.Errorf("unexpected sidecar status: %s", r.Status)
+			}
+		}
+	}
+	if !hasSidecar {
+		t.Errorf("expected Sidecar check in Doctor results")
+	}
 }

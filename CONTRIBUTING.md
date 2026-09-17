@@ -59,6 +59,9 @@ make release-snapshot
 AIM is designed to be easily extensible to new AI agents. Adding support for an agent requires implementing the `AgentAdapter` interface.
 
 ### Step 1: Create the Adapter
+> [!TIP]
+> For complete architectural guidelines, keychain mitigation rules, hook trust path rewriting, and sidecar proxy handling when building adapters, consult the comprehensive onboarding guide at [`.agents/skills/aim-agent-onboarding/SKILL.md`](.agents/skills/aim-agent-onboarding/SKILL.md).
+
 Create a new package under `internal/agents/<name>/adapter.go`:
 
 ```go

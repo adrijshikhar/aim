@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -186,9 +188,12 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	// Auto-seed credentials for eligible profile if missing in profileDir but available on host
 	_ = a.SeedDefaultCredentials(profileName, profileDir)
 
-	// Copy host config.toml to profile if not present
+	// Copy host config.toml to profile if not present (with hook trust path rewriting)
 	realHome := config.RealHomeDir()
 	copyHostConfig(realHome, codexDir)
+
+	// Probe and auto-start local sidecar proxy daemons (e.g. Caveman) if configured
+	ensureSidecarDaemons(realHome, codexDir)
 
 	// Bridge host plugins and hooks (e.g. Catalyst) into profile
 	bridgePluginsAndHooks(realHome, codexDir)
@@ -227,11 +232,79 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 func copyHostConfig(realHome, profileCodexDir string) {
 	hostConfig := filepath.Join(realHome, ".codex", "config.toml")
 	destConfig := filepath.Join(profileCodexDir, "config.toml")
+	hostHooksJSON := filepath.Join(realHome, ".codex", "hooks.json")
+	destHooksJSON := filepath.Join(profileCodexDir, "hooks.json")
+
 	if _, err := os.Stat(destConfig); os.IsNotExist(err) {
 		if data, err := os.ReadFile(hostConfig); err == nil && len(data) > 0 {
-			_ = os.WriteFile(destConfig, data, 0644)
+			// Rewrite hook trust hashes keyed by host hooks.json path to the profile's hooks.json path
+			rewritten := strings.ReplaceAll(string(data), hostHooksJSON, destHooksJSON)
+			_ = os.WriteFile(destConfig, []byte(rewritten), 0644)
+		}
+	} else {
+		// Migrate any existing hostHooksJSON paths that were copied before path rewriting was implemented
+		if data, err := os.ReadFile(destConfig); err == nil {
+			destStr := string(data)
+			if strings.Contains(destStr, hostHooksJSON) {
+				rewritten := strings.ReplaceAll(destStr, hostHooksJSON, destHooksJSON)
+				_ = os.WriteFile(destConfig, []byte(rewritten), 0644)
+			}
 		}
 	}
+}
+
+func ensureSidecarDaemons(realHome, profileCodexDir string) {
+	cfgPath := filepath.Join(profileCodexDir, "config.toml")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return
+	}
+	cfgStr := string(data)
+	if !strings.Contains(cfgStr, "127.0.0.1:8787") && !strings.Contains(cfgStr, "localhost:8787") && !strings.Contains(cfgStr, "model_provider = \"caveman\"") {
+		return
+	}
+
+	// 1. Probe port 8787
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 250*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		return
+	}
+
+	// 2. Port is unreachable; locate caveman-proxy binary
+	bin := filepath.Join(realHome, ".caveman", "bin", "caveman-proxy")
+	if _, err := os.Stat(bin); err != nil {
+		if path, err := exec.LookPath("caveman-proxy"); err == nil {
+			bin = path
+		} else {
+			logger.Debug("[codex] caveman-proxy binary not found, cannot auto-start")
+			return
+		}
+	}
+
+	logger.Debug("[codex] Caveman proxy on 127.0.0.1:8787 is not reachable. Auto-starting %s...", bin)
+	cmd := exec.Command(bin)
+	cmd.Dir = realHome
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+	if err := cmd.Start(); err != nil {
+		logger.Debug("[codex] Failed to start caveman-proxy daemon: %v", err)
+		return
+	}
+
+	// Wait up to 1.5s for the proxy to start listening
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 150*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			logger.Debug("[codex] caveman-proxy auto-started and listening on 127.0.0.1:8787")
+			return
+		}
+	}
+	logger.Debug("[codex] caveman-proxy did not become ready within timeout")
 }
 
 func bridgePluginsAndHooks(realHome, profileCodexDir string) {
@@ -349,6 +422,41 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 			Status:   "WARN",
 			Message:  fmt.Sprintf("CODEX_HOME directory not yet created (%s)", codexDir),
 		})
+	}
+
+	// 4. Sidecar Check (Caveman / local proxy if configured)
+	cfgPath := filepath.Join(codexDir, "config.toml")
+	if cfgData, err := os.ReadFile(cfgPath); err == nil {
+		cfgStr := string(cfgData)
+		if strings.Contains(cfgStr, "127.0.0.1:8787") || strings.Contains(cfgStr, "localhost:8787") || strings.Contains(cfgStr, "model_provider = \"caveman\"") {
+			conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 250*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				results = append(results, agents.DiagnosticResult{
+					Category: "Sidecar",
+					Status:   "OK",
+					Message:  "Caveman proxy listening on 127.0.0.1:8787",
+				})
+			} else {
+				results = append(results, agents.DiagnosticResult{
+					Category: "Sidecar",
+					Status:   "WARN",
+					Message:  "Caveman proxy on 127.0.0.1:8787 unreachable (will auto-start on run)",
+				})
+			}
+		}
+
+		// 5. Hooks Trust Check
+		realHome := config.RealHomeDir()
+		hostHooksJSON := filepath.Join(realHome, ".codex", "hooks.json")
+		if strings.Contains(cfgStr, hostHooksJSON) {
+			copyHostConfig(realHome, codexDir)
+			results = append(results, agents.DiagnosticResult{
+				Category: "Hooks",
+				Status:   "OK",
+				Message:  "Auto-migrated host hook trust paths in config.toml to profile",
+			})
+		}
 	}
 
 	return results
