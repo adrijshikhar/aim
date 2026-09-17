@@ -466,3 +466,85 @@ trusted_hash = "sha256:123"
 		t.Errorf("expected Sidecar check in Doctor results")
 	}
 }
+
+func TestDeduplicateTomlTables(t *testing.T) {
+	input := `model_provider = "caveman"
+base_url = "http://127.0.0.1:8787"
+
+[hooks.state."/path/to/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:111"
+
+[desktop]
+followUpQueueMode = "steer"
+
+[hooks.state."/path/to/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:222"
+
+[[array_table]]
+key = "v1"
+
+[[array_table]]
+key = "v2"
+`
+
+	cleaned, dupes := deduplicateTomlTables(input)
+	if dupes != 1 {
+		t.Fatalf("expected 1 duplicate removed, got %d", dupes)
+	}
+
+	if strings.Count(cleaned, `[hooks.state."/path/to/hooks.json:pre_tool_use:0:0"]`) != 1 {
+		t.Errorf("expected exactly 1 instance of the table header, got:\n%s", cleaned)
+	}
+
+	if !strings.Contains(cleaned, `trusted_hash = "sha256:111"`) {
+		t.Errorf("expected first instance to be preserved, got:\n%s", cleaned)
+	}
+
+	if strings.Contains(cleaned, `trusted_hash = "sha256:222"`) {
+		t.Errorf("expected second duplicate instance to be removed, got:\n%s", cleaned)
+	}
+
+	if strings.Count(cleaned, "[[array_table]]") != 2 {
+		t.Errorf("expected array of tables to be preserved, got:\n%s", cleaned)
+	}
+}
+
+func TestCodexAdapter_Doctor_DuplicateTomlRepair(t *testing.T) {
+	adapter := NewAdapter()
+	profileDir := t.TempDir()
+	profileCodexDir := filepath.Join(profileDir, ".codex")
+	_ = os.MkdirAll(profileCodexDir, 0700)
+
+	cfgPath := filepath.Join(profileCodexDir, "config.toml")
+	cfgContent := `[hooks.state."/path/to/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:111"
+
+[hooks.state."/path/to/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:222"
+`
+	_ = os.WriteFile(cfgPath, []byte(cfgContent), 0644)
+
+	results := adapter.Doctor(context.Background(), "testprof", profileDir)
+
+	hasConfigRepair := false
+	for _, r := range results {
+		if r.Category == "Config" && strings.Contains(r.Message, "duplicate table key") {
+			hasConfigRepair = true
+			if r.Status != "OK" {
+				t.Errorf("expected Config repair status OK, got %s", r.Status)
+			}
+		}
+	}
+	if !hasConfigRepair {
+		t.Errorf("expected Config duplicate repair in Doctor results")
+	}
+
+	// Verify file was repaired
+	repairedData, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to read repaired config: %v", err)
+	}
+	if strings.Count(string(repairedData), `[hooks.state."/path/to/hooks.json:pre_tool_use:0:0"]`) != 1 {
+		t.Errorf("expected file to be deduplicated on disk, got:\n%s", string(repairedData))
+	}
+}

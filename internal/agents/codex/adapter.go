@@ -229,6 +229,45 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}, nil
 }
 
+// deduplicateTomlTables removes duplicate table headers [foo] in TOML files while preserving
+// array-of-tables [[foo]] and returning the cleaned string and count of duplicate sections removed.
+func deduplicateTomlTables(content string) (string, int) {
+	lines := strings.Split(content, "\n")
+	seenTables := make(map[string]bool)
+	var output []string
+	skipping := false
+	dupes := 0
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Array of tables [[foo]] can appear multiple times in valid TOML
+		isArrayTable := strings.HasPrefix(trimmed, "[[") && strings.HasSuffix(trimmed, "]]")
+		// Standard table [foo] cannot appear multiple times in valid TOML
+		isSingleTable := !isArrayTable && strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")
+
+		if isSingleTable {
+			tableName := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			if seenTables[tableName] {
+				skipping = true
+				dupes++
+				continue
+			}
+			skipping = false
+			seenTables[tableName] = true
+			output = append(output, line)
+		} else if isArrayTable {
+			skipping = false
+			output = append(output, line)
+		} else {
+			if !skipping {
+				output = append(output, line)
+			}
+		}
+	}
+	return strings.Join(output, "\n"), dupes
+}
+
 func copyHostConfig(realHome, profileCodexDir string) {
 	hostConfig := filepath.Join(realHome, ".codex", "config.toml")
 	destConfig := filepath.Join(profileCodexDir, "config.toml")
@@ -239,15 +278,21 @@ func copyHostConfig(realHome, profileCodexDir string) {
 		if data, err := os.ReadFile(hostConfig); err == nil && len(data) > 0 {
 			// Rewrite hook trust hashes keyed by host hooks.json path to the profile's hooks.json path
 			rewritten := strings.ReplaceAll(string(data), hostHooksJSON, destHooksJSON)
-			_ = os.WriteFile(destConfig, []byte(rewritten), 0644)
+			cleaned, _ := deduplicateTomlTables(rewritten)
+			_ = os.WriteFile(destConfig, []byte(cleaned), 0644)
 		}
 	} else {
-		// Migrate any existing hostHooksJSON paths that were copied before path rewriting was implemented
+		// Migrate any existing hostHooksJSON paths and deduplicate tables
 		if data, err := os.ReadFile(destConfig); err == nil {
 			destStr := string(data)
+			changed := false
 			if strings.Contains(destStr, hostHooksJSON) {
-				rewritten := strings.ReplaceAll(destStr, hostHooksJSON, destHooksJSON)
-				_ = os.WriteFile(destConfig, []byte(rewritten), 0644)
+				destStr = strings.ReplaceAll(destStr, hostHooksJSON, destHooksJSON)
+				changed = true
+			}
+			cleaned, dupes := deduplicateTomlTables(destStr)
+			if changed || dupes > 0 {
+				_ = os.WriteFile(destConfig, []byte(cleaned), 0644)
 			}
 		}
 	}
@@ -455,6 +500,16 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 				Category: "Hooks",
 				Status:   "OK",
 				Message:  "Auto-migrated host hook trust paths in config.toml to profile",
+			})
+		}
+
+		// 6. TOML Integrity Check (Deduplication)
+		if _, dupes := deduplicateTomlTables(cfgStr); dupes > 0 {
+			copyHostConfig(realHome, codexDir)
+			results = append(results, agents.DiagnosticResult{
+				Category: "Config",
+				Status:   "OK",
+				Message:  fmt.Sprintf("Auto-repaired %d duplicate table key(s) in config.toml", dupes),
 			})
 		}
 	}
