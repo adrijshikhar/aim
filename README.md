@@ -85,7 +85,7 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim run <agent> <profile> [-- args...]` | Execute an agent under an isolated profile |
 | `aim sessions [agent] [--active] [--json]` | List active and past conversation sessions across profiles & host |
 | `aim sessions show [agent] <id>` | Show detailed preview card, goal summary, and metadata for a session |
-| `aim resume <agent> <profile> [id]` | Resume conversation verbatim (`--exact`) or via Catalyst handoff (`--catalyst`) |
+| `aim resume <agent> <profile> [id] [-- args...]` | Resume conversation verbatim (`--exact`) or via Catalyst (`--catalyst`); pass flags via `--` |
 | `aim sessions import <agent> <profile> [id]`| Import or hydrate conversation from host into profile (`--all`, `--fork`) |
 | `aim usage [agent] [profile] [-r] [--json]` | Display remaining quota, reset timers, and credits |
 | `aim list [agent]` | List all configured profiles and inline quota badges |
@@ -157,6 +157,7 @@ Special thanks and credit to **[Catalyst](https://github.com/adrijshikhar/cataly
 ## Documentation
 
 - 📖 **[Wiki & Architecture Guide](wiki.md)** — In-depth guide to virtual home isolation, dotfile bridging rules, directory structures, and configuration schemas.
+- 🩺 **[Troubleshooting Guide](TROUBLESHOOTING.md)** — Actionable solutions for OAuth refresh tokens, cross-profile session resumption, SQLite migrations, and sidecar proxies.
 - 🎨 **[Design System](design.md)** — Atom One Dark color palette, design tokens, typography, and Lipgloss implementation standards.
 - 🛠️ **[Contributing Guide](CONTRIBUTING.md)** — Local development setup, test suite execution (`make test`, `make smoke`), and how to add new agent adapters.
 

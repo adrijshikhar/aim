@@ -268,3 +268,20 @@ To ensure Catalyst handoff hooks fire reliably inside isolated Codex profiles, A
 - `aim sessions import <agent> <target-profile> [session-id]`: Explicitly imports and hydrates conversations from host without launching them immediately (`--all`, `--fork`).
 - **Interactive TUI Drawer Preview**: In the TUI Sessions Drawer (`s`), an instant (0ms) preview box displays the full summary/goal of the currently highlighted session as you navigate with `↑`/`↓` (`k`/`j`), with a windowed list view preventing viewport overflow.
 
+---
+
+## 6. Troubleshooting & Diagnostics
+
+For common operational issues, edge cases, and step-by-step remedies:
+- OAuth refresh token revocation (`Your access token could not be refreshed...`)
+- Cross-profile session resumption and 0-turn history recovery
+- Codex SQLite migration collisions (`table threads already exists`)
+- TOML syntax & duplicate key parse errors
+- Caveman compression proxy sidecar connectivity
+- Skill descriptions context shortening notices
+- macOS Keychain isolation & developer tool authentication (`git`, `gh`)
+- Gatekeeper quarantine clearance
+
+See the complete **[Troubleshooting Guide](TROUBLESHOOTING.md)**.
+
+
