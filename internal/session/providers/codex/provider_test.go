@@ -420,4 +420,3 @@ func TestProvider_Hydrate_Fork_FullFidelity(t *testing.T) {
 		t.Errorf("forked rollout does not contain forkedID %s", forkedID)
 	}
 }
-
