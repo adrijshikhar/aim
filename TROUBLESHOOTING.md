@@ -13,6 +13,7 @@ This guide provides actionable diagnosis and resolution steps for real-world iss
   - [Antigravity Access Token Expired](#antigravity-access-token-expired)
 - [2. Session Resumption & Cross-Profile History](#2-session-resumption--cross-profile-history)
   - [Session Not Listed in Codex Native `/resume` Picker](#session-not-listed-in-codex-native-resume-picker)
+  - [Passing Custom Agent Flags on Resume (`--model`, `--sandbox`, etc.)](#passing-custom-agent-flags-on-resume---model---sandbox-etc)
   - [Resumed Session Has 0 Turns or Missing Conversation History](#resumed-session-has-0-turns-or-missing-conversation-history)
   - [Compacted / Continuation Session Loses Context](#compacted--continuation-session-loses-context)
   - [Ambiguous Session ID Prefix Error](#ambiguous-session-id-prefix-error)
@@ -157,6 +158,85 @@ Alternatively, in the TUI (`aim`):
 3. Press `Enter` to resume verbatim, or `c` for a Catalyst handoff.
 
 AIM's hydrator automatically clones the thread metadata, ancestor rollouts, and turn history into the target profile before launching.
+
+---
+
+### Passing Custom Agent Flags on Resume (`--model`, `--sandbox`, etc.)
+
+#### Symptom
+When attempting to pass agent flags directly to `aim resume`, you receive an unknown flag error:
+```bash
+aim resume codex work 01a0a581 -m gpt-5.6-terra
+# Error: unknown shorthand flag: 'm' in -m
+
+aim resume codex work 01a0a581 --search
+# Error: unknown flag: --search
+```
+
+#### Root Cause
+`aim resume` defines its own CLI flags (`--exact`, `-c`/`--catalyst`, `-b`/`--fork`, `-f`/`--force`). By default, the CLI argument parser interprets all preceding flags as AIM options. Agent-specific flags (like Codex's `-m`, `-s`, `--search`, or Antigravity's `--mode`) are not recognized by AIM's top-level parser.
+
+#### Resolution: The Double-Dash (`--`) Delimiter
+To pass flags and arguments directly to the underlying agent binary (`codex`, `agy`), use the POSIX standard **`--`** separator. Everything after `--` is forwarded verbatim to the agent CLI:
+
+```bash
+aim resume <agent> <profile> [session-id] [aim-flags] -- [agent-flags...]
+```
+
+#### Common Examples
+
+##### 1. Override the LLM Model on Resume
+```bash
+# Resume with a specific model (e.g. gpt-5.6-terra, gpt-6-astra, o3):
+aim resume codex work 01a0a581 -- -m gpt-5.6-terra
+```
+
+##### 2. Change the Execution Sandbox Policy
+```bash
+# Allow workspace file writes:
+aim resume codex work 01a0a581 -- -s workspace-write
+
+# Unrestricted execution mode (danger-full-access):
+aim resume codex work 01a0a581 -- -s danger-full-access
+```
+
+##### 3. Enable Live Web Search
+```bash
+aim resume codex work 01a0a581 -- --search
+```
+
+##### 4. Skip or Customize Human Approvals
+```bash
+# Bypass all approval prompts:
+aim resume codex work 01a0a581 -- --dangerously-bypass-approvals-and-sandbox
+
+# Never prompt for confirmation:
+aim resume codex work 01a0a581 -- -a never
+```
+
+##### 5. Provide an Initial Continuation Prompt Directly
+```bash
+aim resume codex work 01a0a581 -- "Continue refactoring and run make test"
+```
+
+##### 6. Combine AIM Flags with Agent Flags
+You can combine AIM flags (`--fork`, `--force`, `--catalyst`) with agent flags separated by `--`:
+```bash
+# Fork conversation into a new ID AND switch models:
+aim resume codex work 01a0a581 --fork -- -m gpt-5.6-terra
+
+# Force resume an active session with full access:
+aim resume codex work 01a0a581 --force -- -s danger-full-access
+
+# Resume via Catalyst handoff with custom model:
+aim resume codex work 01a0a581 --catalyst -- -m gpt-6-astra
+```
+
+##### 7. Antigravity CLI Custom Flags
+```bash
+# Resume an Antigravity conversation in plan mode:
+aim resume agy work 775e6ada -- --mode=plan
+```
 
 ---
 
@@ -506,6 +586,7 @@ xattr -d com.apple.quarantine $(which aim)
 |---|---|---|
 | `refresh token was revoked` | OAuth refresh token expired/revoked | `aim login codex <profile>` |
 | Session missing in `/resume` | Cross-profile sandbox isolation | `aim resume <agent> <profile> <id>` |
+| `unknown shorthand flag` on resume | Missing `--` delimiter | `aim resume <agent> <profile> <id> -- [flags...]` |
 | Resumed session has 0 turns | Missing `thread_history_1.sqlite` rows | Upgrade to AIM ≥ 0.4.0 & re-resume |
 | `migration 1 failed: table threads already exists` | `sqlx` migration version collision | `aim doctor codex` / clean DB init |
 | `duplicate table key: mcp_servers...` | Duplicate TOML headers in `config.toml` | Deduplicate headers in `config.toml` |
