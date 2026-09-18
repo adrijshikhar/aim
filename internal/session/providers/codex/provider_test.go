@@ -2,9 +2,11 @@ package codex_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,3 +181,243 @@ func TestProvider_SQLInjectionSafety(t *testing.T) {
 	}
 	_ = err
 }
+
+func setupMockCodexFull(t *testing.T) (string, string, string) {
+	t.Helper()
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	sessionsDir := filepath.Join(codexDir, "sessions", "2026", "09", "17")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("failed to create mock sessions dir: %v", err)
+	}
+
+	parentID := "01a0a91d-9187-7021-a499-0ff13f9df264"
+	childID := "01a0aedb-a8f2-71e2-85d8-cf0479089899"
+
+	parentRolloutPath := filepath.Join(sessionsDir, fmt.Sprintf("rollout-%s.jsonl", parentID))
+	childRolloutPath := filepath.Join(sessionsDir, fmt.Sprintf("rollout-%s.jsonl", childID))
+
+	parentContent := fmt.Sprintf("{\"type\":\"session_meta\",\"payload\":{\"id\":\"%s\"}}\n{\"type\":\"event_msg\",\"payload\":{\"thread_id\":\"%s\"}}\n", parentID, parentID)
+	childContent := fmt.Sprintf("{\"type\":\"session_meta\",\"payload\":{\"id\":\"%s\",\"history_base\":{\"thread_id\":\"%s\"}}}\n{\"type\":\"event_msg\",\"payload\":{\"thread_id\":\"%s\"}}\n", childID, parentID, childID)
+
+	_ = os.WriteFile(parentRolloutPath, []byte(parentContent), 0644)
+	_ = os.WriteFile(childRolloutPath, []byte(childContent), 0644)
+
+	// Create state_5.sqlite
+	dbPath := filepath.Join(codexDir, "state_5.sqlite")
+	stateSchema := fmt.Sprintf(`
+CREATE TABLE _sqlx_migrations (
+    version BIGINT PRIMARY KEY,
+    description TEXT NOT NULL,
+    installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    success BOOLEAN NOT NULL,
+    checksum BLOB NOT NULL,
+    execution_time BIGINT NOT NULL
+);
+INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (1, 'init', 1, X'00', 1);
+
+CREATE TABLE threads (
+    id TEXT PRIMARY KEY,
+    rollout_path TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    model_provider TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    title TEXT NOT NULL,
+    sandbox_policy TEXT NOT NULL,
+    approval_mode TEXT NOT NULL,
+    history_mode TEXT NOT NULL DEFAULT 'legacy'
+);
+
+INSERT INTO threads (id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode, history_mode)
+VALUES 
+('%s', '%s', 1726000000, 1726000000, 'cli', 'caveman', '/workspace/project', 'Parent Session', 'workspace-write', 'ask', 'paginated'),
+('%s', '%s', 1726100000, 1726100000, 'cli', 'caveman', '/workspace/project', 'Child Session', 'workspace-write', 'ask', 'paginated');
+`, parentID, parentRolloutPath, childID, childRolloutPath)
+
+	if err := exec.Command(sqliteBin, dbPath, stateSchema).Run(); err != nil {
+		t.Fatalf("failed to create mock state_5.sqlite: %v", err)
+	}
+
+	// Create thread_history_1.sqlite
+	historyDB := filepath.Join(codexDir, "thread_history_1.sqlite")
+	historySchema := fmt.Sprintf(`
+CREATE TABLE _sqlx_migrations (
+    version BIGINT PRIMARY KEY,
+    description TEXT NOT NULL,
+    installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    success BOOLEAN NOT NULL,
+    checksum BLOB NOT NULL,
+    execution_time BIGINT NOT NULL
+);
+INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (1, 'init', 1, X'00', 1);
+
+CREATE TABLE thread_turns (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    rollout_ordinal INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    PRIMARY KEY (thread_id, turn_id)
+);
+
+CREATE TABLE thread_items (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    rollout_ordinal INTEGER NOT NULL,
+    item_json TEXT NOT NULL,
+    PRIMARY KEY (thread_id, turn_id, item_id)
+);
+
+INSERT INTO thread_turns (thread_id, turn_id, rollout_ordinal, status)
+VALUES 
+('%s', 'turn-p1', 1, 'completed'),
+('%s', 'turn-c1', 1, 'completed');
+
+INSERT INTO thread_items (thread_id, turn_id, item_id, rollout_ordinal, item_json)
+VALUES
+('%s', 'turn-p1', 'item-p1', 1, '{"content":"parent message"}'),
+('%s', 'turn-c1', 'item-c1', 1, '{"content":"child message"}');
+`, parentID, childID, parentID, childID)
+
+	if err := exec.Command(sqliteBin, historyDB, historySchema).Run(); err != nil {
+		t.Fatalf("failed to create mock thread_history_1.sqlite: %v", err)
+	}
+
+	return tmpDir, parentID, childID
+}
+
+func TestProvider_Hydrate_FullFidelity(t *testing.T) {
+	srcDir, parentID, childID := setupMockCodexFull(t)
+	targetDir := t.TempDir()
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	childRollout := filepath.Join(srcDir, ".codex", "sessions", "2026", "09", "17", fmt.Sprintf("rollout-%s.jsonl", childID))
+	srcSession := session.NewSession(childID, "Child Session", "codex", "mockprofile", false, time.Now())
+	srcSession.StoragePath = childRollout
+
+	hydratedID, err := p.Hydrate(ctx, &srcSession, targetDir, false)
+	if err != nil {
+		t.Fatalf("Hydrate failed: %v", err)
+	}
+	if hydratedID != childID {
+		t.Errorf("expected hydratedID %s, got %s", childID, hydratedID)
+	}
+
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+	targetDB := filepath.Join(targetDir, ".codex", "state_5.sqlite")
+	targetHistoryDB := filepath.Join(targetDir, ".codex", "thread_history_1.sqlite")
+
+	// 1. Verify child thread in state_5.sqlite
+	out, err := exec.Command(sqliteBin, targetDB, fmt.Sprintf("SELECT cwd, model_provider, history_mode FROM threads WHERE id = '%s';", childID)).Output()
+	if err != nil {
+		t.Fatalf("failed to query target state_5: %v", err)
+	}
+	res := strings.TrimSpace(string(out))
+	if !strings.Contains(res, "/workspace/project") {
+		t.Errorf("expected preserved cwd /workspace/project, got %q", res)
+	}
+	if !strings.Contains(res, "caveman") {
+		t.Errorf("expected preserved model_provider caveman, got %q", res)
+	}
+	if !strings.Contains(res, "paginated") {
+		t.Errorf("expected preserved history_mode paginated, got %q", res)
+	}
+
+	// 2. Verify parent thread also copied into state_5.sqlite
+	out, err = exec.Command(sqliteBin, targetDB, fmt.Sprintf("SELECT COUNT(*) FROM threads WHERE id = '%s';", parentID)).Output()
+	if err != nil || strings.TrimSpace(string(out)) != "1" {
+		t.Errorf("expected parent thread in target state_5: %v, out: %s", err, string(out))
+	}
+
+	// 3. Verify turns and items copied into target thread_history_1.sqlite
+	out, err = exec.Command(sqliteBin, targetHistoryDB, fmt.Sprintf("SELECT COUNT(*) FROM thread_turns WHERE thread_id = '%s';", childID)).Output()
+	if err != nil || strings.TrimSpace(string(out)) != "1" {
+		t.Errorf("expected child turns in target thread_history_1: %v, out: %s", err, string(out))
+	}
+	out, err = exec.Command(sqliteBin, targetHistoryDB, fmt.Sprintf("SELECT COUNT(*) FROM thread_turns WHERE thread_id = '%s';", parentID)).Output()
+	if err != nil || strings.TrimSpace(string(out)) != "1" {
+		t.Errorf("expected parent turns in target thread_history_1: %v, out: %s", err, string(out))
+	}
+
+	// 4. Verify rollout files exist
+	destChildRollout := filepath.Join(targetDir, ".codex", "sessions", "2026", "09", "17", fmt.Sprintf("rollout-%s.jsonl", childID))
+	if _, err := os.Stat(destChildRollout); err != nil {
+		t.Errorf("expected dest child rollout file %s to exist: %v", destChildRollout, err)
+	}
+	destParentRollout := filepath.Join(targetDir, ".codex", "sessions", "2026", "09", "17", fmt.Sprintf("rollout-%s.jsonl", parentID))
+	if _, err := os.Stat(destParentRollout); err != nil {
+		t.Errorf("expected dest parent rollout file %s to exist: %v", destParentRollout, err)
+	}
+}
+
+func TestProvider_Hydrate_Fork_FullFidelity(t *testing.T) {
+	srcDir, _, childID := setupMockCodexFull(t)
+	targetDir := t.TempDir()
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	childRollout := filepath.Join(srcDir, ".codex", "sessions", "2026", "09", "17", fmt.Sprintf("rollout-%s.jsonl", childID))
+	srcSession := session.NewSession(childID, "Child Session", "codex", "mockprofile", false, time.Now())
+	srcSession.StoragePath = childRollout
+
+	forkedID, err := p.Hydrate(ctx, &srcSession, targetDir, true)
+	if err != nil {
+		t.Fatalf("Hydrate fork failed: %v", err)
+	}
+	if forkedID == childID {
+		t.Fatalf("expected forked ID different from child ID")
+	}
+
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+	targetDB := filepath.Join(targetDir, ".codex", "state_5.sqlite")
+	targetHistoryDB := filepath.Join(targetDir, ".codex", "thread_history_1.sqlite")
+
+	// 1. Verify forked thread in state_5.sqlite
+	out, err := exec.Command(sqliteBin, targetDB, fmt.Sprintf("SELECT cwd, model_provider FROM threads WHERE id = '%s';", forkedID)).Output()
+	if err != nil {
+		t.Fatalf("failed to query target state_5 for forked thread: %v", err)
+	}
+	res := strings.TrimSpace(string(out))
+	if !strings.Contains(res, "/workspace/project") {
+		t.Errorf("expected preserved cwd /workspace/project, got %q", res)
+	}
+	if !strings.Contains(res, "caveman") {
+		t.Errorf("expected preserved model_provider caveman, got %q", res)
+	}
+
+	// 2. Verify turns copied with new forked ID in thread_history_1.sqlite
+	out, err = exec.Command(sqliteBin, targetHistoryDB, fmt.Sprintf("SELECT COUNT(*) FROM thread_turns WHERE thread_id = '%s';", forkedID)).Output()
+	if err != nil || strings.TrimSpace(string(out)) != "1" {
+		t.Errorf("expected forked turns in target thread_history_1: %v, out: %s", err, string(out))
+	}
+
+	// 3. Verify forked rollout file has replaced ID
+	destForkedRollout := filepath.Join(targetDir, ".codex", "sessions", "2026", "09", "17", fmt.Sprintf("rollout-%s.jsonl", forkedID))
+	content, err := os.ReadFile(destForkedRollout)
+	if err != nil {
+		t.Fatalf("failed to read forked rollout file: %v", err)
+	}
+	if strings.Contains(string(content), childID) {
+		t.Errorf("forked rollout still contains original childID %s", childID)
+	}
+	if !strings.Contains(string(content), forkedID) {
+		t.Errorf("forked rollout does not contain forkedID %s", forkedID)
+	}
+}
+
