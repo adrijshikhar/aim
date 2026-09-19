@@ -576,6 +576,59 @@ func TestProfileManager_RenameProfile_RollbackOnConfigError(t *testing.T) {
 	}
 }
 
+func TestProfileManager_ProfileExists(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "aim-profile-exists-*")
+	if err != nil {
+		t.Fatalf("temp dir error: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	t.Setenv("AIM_HOME", tempDir)
+	pm := NewProfileManager(tempDir)
+
+	// nil receiver
+	var nilPm *ProfileManager
+	if nilPm.ProfileExists("work") {
+		t.Errorf("expected nil ProfileManager.ProfileExists to return false")
+	}
+
+	// empty name
+	if pm.ProfileExists("") {
+		t.Errorf("expected empty name to return false")
+	}
+
+	// non-existent profile
+	if pm.ProfileExists("nonexistent") {
+		t.Errorf("expected non-existent profile to return false")
+	}
+
+	// after EnsureProfile on disk
+	if _, err := pm.EnsureProfile("work"); err != nil {
+		t.Fatalf("EnsureProfile failed: %v", err)
+	}
+	if !pm.ProfileExists("work") {
+		t.Errorf("expected 'work' to exist after EnsureProfile")
+	}
+
+	// profile only in config.json
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("configonly", "agy")
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	if !pm.ProfileExists("configonly") {
+		t.Errorf("expected 'configonly' profile to exist via config")
+	}
+
+	// after removal
+	if err := pm.RemoveProfile("work"); err != nil {
+		t.Fatalf("RemoveProfile failed: %v", err)
+	}
+	if pm.ProfileExists("work") {
+		t.Errorf("expected 'work' to NOT exist after removal")
+	}
+}
+
 type mockAgentAdapter struct {
 	name string
 }

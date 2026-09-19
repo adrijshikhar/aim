@@ -18,6 +18,13 @@ func newShellCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 		Short: "Launch subshell with profile environment",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ok, err := confirmProfileExists(cmd, pm, args[1], "launch subshell", false)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
 			exitCode := executeShell(reg, pm, args[0], args[1])
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}

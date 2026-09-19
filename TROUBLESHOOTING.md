@@ -9,6 +9,7 @@ This guide provides actionable diagnosis and resolution steps for real-world iss
 - [Quick Diagnostics Toolkit](#quick-diagnostics-toolkit)
 - [1. Authentication & OAuth Issues](#1-authentication--oauth-issues)
   - [Revoked or Expired OAuth Refresh Token](#revoked-or-expired-oauth-refresh-token)
+  - [Accidental Profile Creation via Typo Prompting Re-Login (`office--yolo`)](#accidental-profile-creation-via-typo-prompting-re-login-office--yolo)
   - [OAuth Browser Does Not Open Automatically](#oauth-browser-does-not-open-automatically)
   - [Antigravity Access Token Expired](#antigravity-access-token-expired)
 - [2. Session Resumption & Cross-Profile History](#2-session-resumption--cross-profile-history)
@@ -94,6 +95,49 @@ This triggers the browser-based OAuth PKCE flow and writes new tokens directly i
 ```bash
 aim doctor codex
 ```
+
+---
+
+### Accidental Profile Creation via Typo Prompting Re-Login (`office--yolo`)
+
+#### Symptom
+You run a command like `aim run codex office--yolo`, and unexpectedly Codex prompts you to sign in with ChatGPT again. After signing in, there are zero past sessions to resume from, making it appear as if your original profile credentials and conversation history were wiped.
+
+#### Root Cause
+Missing a space before a flag (e.g. typing `office--yolo` instead of `office --yolo` or `office -- --yolo`) causes the shell and CLI parser to treat the whole string as a brand-new profile name (`"office--yolo"`).
+Because this profile never existed before:
+1. It has no `auth.json`, triggering a fresh login prompt.
+2. It has an empty SQLite database with 0 past sessions.
+
+Your real profile (e.g. `office` or `work`) is completely safe and untouched.
+
+#### AIM Safeguard
+AIM now validates profile existence before launching:
+- **Interactive Prompt**: If the profile does not exist, AIM stops and asks:
+  ```text
+  Warning: profile name "office--yolo" contains "--". Did you mean "office" with flag "--yolo"?
+  Profile "office--yolo" does not exist. Do you want to create it and start codex? [y/N]:
+  ```
+  Pressing Enter or `N` aborts cleanly without creating any phantom directory.
+- **Non-Interactive Guard**: In scripts or non-TTY environments, AIM immediately exits with an error rather than creating an unauthenticated sandbox.
+
+#### Recovery & Cleanup
+1. Remove the accidental profile:
+   ```bash
+   aim remove codex office--yolo
+   # or
+   aim remove office--yolo
+   ```
+2. Launch your real profile:
+   ```bash
+   aim run codex office
+   # or resume your previous session:
+   aim resume codex office <session-id>
+   ```
+3. To pass flags to Codex, always include a space and the `--` separator:
+   ```bash
+   aim run codex office -- --dangerously-bypass-approvals-and-sandbox
+   ```
 
 ---
 
@@ -585,6 +629,7 @@ xattr -d com.apple.quarantine $(which aim)
 | Symptom / Error | Primary Cause | Immediate Fix |
 |---|---|---|
 | `refresh token was revoked` | OAuth refresh token expired/revoked | `aim login codex <profile>` |
+| Asked to sign in & 0 sessions on resume | Accidental profile created via typo (e.g. `office--yolo`) | `aim remove <typo-profile>` & run real profile |
 | Session missing in `/resume` | Cross-profile sandbox isolation | `aim resume <agent> <profile> <id>` |
 | `unknown shorthand flag` on resume | Missing `--` delimiter | `aim resume <agent> <profile> <id> -- [flags...]` |
 | Resumed session has 0 turns | Missing `thread_history_1.sqlite` rows | Upgrade to AIM ≥ 0.4.0 & re-resume |
