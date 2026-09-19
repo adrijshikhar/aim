@@ -283,4 +283,3 @@ func TestRunCmd_ProfileDoesNotExist_EnvAutoCreate(t *testing.T) {
 		t.Errorf("expected profile directory %s to be created with AIM_AUTO_CREATE=1", pDir)
 	}
 }
-
