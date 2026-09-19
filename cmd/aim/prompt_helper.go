@@ -19,15 +19,29 @@ var isInteractiveFunc = func(r io.Reader) bool {
 	return false
 }
 
+func isAutoCreateEnv() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_AUTO_CREATE")))
+	if v == "1" || v == "true" || v == "yes" {
+		return true
+	}
+	y := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_YES")))
+	return y == "1" || y == "true" || y == "yes"
+}
+
 // confirmProfileExists checks if a profile exists.
 // If it does not exist:
+//   - If autoCreate is true or AIM_AUTO_CREATE=1 / AIM_YES=1 is set, creates without prompting.
 //   - If running interactively, prompts the user:
 //     "Profile \"<name>\" does not exist. Do you want to create it and <actionDesc>? [y/N]: "
 //     If profileName contains "--", prints a warning suggesting the user might have missed a space before a flag.
 //     Returns (true, nil) if the user confirms with "y"/"yes", or (false, nil) if the user cancels.
 //   - If non-interactive, returns an error to prevent silent profile pollution in automated scripts.
-func confirmProfileExists(cmd *cobra.Command, pm *profile.ProfileManager, profileName, actionDesc string) (bool, error) {
+func confirmProfileExists(cmd *cobra.Command, pm *profile.ProfileManager, profileName, actionDesc string, autoCreate bool) (bool, error) {
 	if pm.ProfileExists(profileName) {
+		return true, nil
+	}
+
+	if autoCreate || isAutoCreateEnv() {
 		return true, nil
 	}
 

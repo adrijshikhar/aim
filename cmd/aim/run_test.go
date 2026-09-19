@@ -214,3 +214,73 @@ func TestRunCmd_ProfileDoesNotExist_NonInteractive(t *testing.T) {
 		t.Errorf("expected profile directory %s to NOT exist", pDir)
 	}
 }
+
+func TestRunCmd_ProfileDoesNotExist_FlagYes(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{
+		name:       "mock",
+		binaryPath: "/bin/sh",
+		args:       []string{"-c", "exit 0"},
+	})
+	pm := profile.NewProfileManager(tempDir)
+
+	oldInteractive := isInteractiveFunc
+	isInteractiveFunc = func(r io.Reader) bool { return false }
+	defer func() { isInteractiveFunc = oldInteractive }()
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "mock", "newprof", "-y"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error with -y flag: %v", err)
+	}
+
+	pDir := filepath.Join(tempDir, "profiles", "newprof")
+	if _, err := os.Stat(pDir); os.IsNotExist(err) {
+		t.Errorf("expected profile directory %s to be created with -y", pDir)
+	}
+}
+
+func TestRunCmd_ProfileDoesNotExist_EnvAutoCreate(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_AUTO_CREATE", "1")
+
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{
+		name:       "mock",
+		binaryPath: "/bin/sh",
+		args:       []string{"-c", "exit 0"},
+	})
+	pm := profile.NewProfileManager(tempDir)
+
+	oldInteractive := isInteractiveFunc
+	isInteractiveFunc = func(r io.Reader) bool { return false }
+	defer func() { isInteractiveFunc = oldInteractive }()
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "mock", "envprof"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error with AIM_AUTO_CREATE=1: %v", err)
+	}
+
+	pDir := filepath.Join(tempDir, "profiles", "envprof")
+	if _, err := os.Stat(pDir); os.IsNotExist(err) {
+		t.Errorf("expected profile directory %s to be created with AIM_AUTO_CREATE=1", pDir)
+	}
+}
+

@@ -19,22 +19,31 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 		Short:              "Execute agent under isolated profile",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+			var autoCreate bool
+			var cleanArgs []string
+			for _, a := range args {
+				if a == "-y" || a == "--yes" || a == "--create" {
+					autoCreate = true
+				} else {
+					cleanArgs = append(cleanArgs, a)
+				}
+			}
+			if len(cleanArgs) > 0 && (cleanArgs[0] == "-h" || cleanArgs[0] == "--help") {
 				return cmd.Help()
 			}
-			if len(args) < 2 {
+			if len(cleanArgs) < 2 {
 				return fmt.Errorf("run requires <agent> and <profile>")
 			}
-			agentName := args[0]
-			profileName := args[1]
+			agentName := cleanArgs[0]
+			profileName := cleanArgs[1]
 			var extraArgs []string
-			if len(args) > 2 {
-				extraArgs = args[2:]
+			if len(cleanArgs) > 2 {
+				extraArgs = cleanArgs[2:]
 				if len(extraArgs) > 0 && extraArgs[0] == "--" {
 					extraArgs = extraArgs[1:]
 				}
 			}
-			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName))
+			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName), autoCreate)
 			if err != nil {
 				return err
 			}

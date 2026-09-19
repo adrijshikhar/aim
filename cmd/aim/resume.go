@@ -102,7 +102,7 @@ Flags:
 				}
 			}
 
-			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("resume %s", agentName))
+			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("resume %s", agentName), false)
 			if err != nil {
 				return err
 			}
