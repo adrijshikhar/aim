@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/adrijshikhar/aim/compare/v0.7.0...v0.8.0) (2026-09-19)
+
+
+### Features
+
+* **cli:** prompt before creating missing profiles and warn on dash typos ([#44](https://github.com/adrijshikhar/aim/issues/44)) ([fe80616](https://github.com/adrijshikhar/aim/commit/fe806162d4e49b47a4d5f4a7e937772b4a413a54))
+* **codex:** add sidecar daemon auto-start, hook trust rewriting, and agent onboarding skill ([#38](https://github.com/adrijshikhar/aim/issues/38)) ([1a82274](https://github.com/adrijshikhar/aim/commit/1a822741fd98a4716256bdde12e505d8138cc410))
+
+
+### Bug Fixes
+
+* **codex:** deduplicate TOML tables and auto-repair config in doctor ([#40](https://github.com/adrijshikhar/aim/issues/40)) ([5893cb7](https://github.com/adrijshikhar/aim/commit/5893cb710a5487264f9df7a8e3555e2125d39cec))
+* **session/codex:** full-fidelity session hydration and ancestor tree replication ([#42](https://github.com/adrijshikhar/aim/issues/42)) ([fd11d24](https://github.com/adrijshikhar/aim/commit/fd11d24873d6ebc72861d1b0dca729a8d34e7af8))
+
 ## [0.7.0](https://github.com/adrijshikhar/aim/compare/v0.6.0...v0.7.0) (2026-09-17)
 
 
