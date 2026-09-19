@@ -34,6 +34,13 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 					extraArgs = extraArgs[1:]
 				}
 			}
+			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName))
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
 			exitCode := executeRun(reg, pm, agentName, profileName, extraArgs)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}

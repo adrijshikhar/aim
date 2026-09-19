@@ -67,6 +67,24 @@ func (m *ProfileManager) ResolveProfile(name string) (string, error) {
 	return m.ProfileDir(name), nil
 }
 
+// ProfileExists returns true if the profile directory exists on disk or is registered in config.
+func (m *ProfileManager) ProfileExists(name string) bool {
+	if m == nil || strings.TrimSpace(name) == "" {
+		return false
+	}
+	pDir := m.ProfileDir(name)
+	if info, err := os.Stat(pDir); err == nil && info.IsDir() {
+		return true
+	}
+	cfg, err := config.LoadConfig()
+	if err == nil && cfg != nil && cfg.Profiles != nil {
+		if _, ok := cfg.Profiles[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // EnsureProfileHome ensures the profile directory and dotfiles exist, acting as an alias for EnsureProfile.
 func (m *ProfileManager) EnsureProfileHome(name string) (string, error) {
 	return m.EnsureProfile(name)

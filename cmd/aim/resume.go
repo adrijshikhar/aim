@@ -14,7 +14,6 @@ import (
 	"github.com/aim-cli/aim/internal/session/catalyst"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -101,6 +100,14 @@ Flags:
 				} else {
 					return fmt.Errorf("session %s is currently ACTIVE in PID %d; use --force to resume anyway", sess.ShortID, sess.PID)
 				}
+			}
+
+			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("resume %s", agentName))
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
 			}
 
 			pDir, err := pm.EnsureProfile(profileName)
@@ -221,8 +228,5 @@ func getGitBranch(repoRoot string) string {
 }
 
 func isInteractive(r io.Reader) bool {
-	if f, ok := r.(*os.File); ok {
-		return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
-	}
-	return false
+	return isInteractiveFunc(r)
 }
