@@ -346,7 +346,10 @@ func (p *Provider) hydrateAncestorSessions(ctx context.Context, srcCodexDir, tar
 		}
 		destParentRollout := filepath.Join(targetSessionsDir, destParentRel)
 
-		if _, err := os.Stat(destParentRollout); os.IsNotExist(err) {
+		srcStat, srcErr := os.Stat(parentRollout)
+		destStat, destErr := os.Stat(destParentRollout)
+		shouldCopy := destErr != nil || (srcErr == nil && (srcStat.Size() > destStat.Size() || srcStat.ModTime().After(destStat.ModTime())))
+		if shouldCopy {
 			if err := copyFileWithReplace(parentRollout, destParentRollout, "", ""); err != nil {
 				logger.Debug("[session/codex] failed to copy parent rollout %s: %v", parentRollout, err)
 			}
