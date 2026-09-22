@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/adrijshikhar/aim/compare/v0.8.0...v0.8.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **session/codex:** refresh stale ancestor rollout files during hydration ([#45](https://github.com/adrijshikhar/aim/issues/45)) ([fe45409](https://github.com/adrijshikhar/aim/commit/fe45409d1778027215dde3df1417243a3ec139a5))
+
 ## [0.8.0](https://github.com/adrijshikhar/aim/compare/v0.7.0...v0.8.0) (2026-09-19)
 
 
