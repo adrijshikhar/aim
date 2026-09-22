@@ -244,7 +244,7 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, idOrPrefix)
 	}
 
-	uniqueMatches := deduplicateMatches(matches)
+	uniqueMatches := DeduplicateMatches(matches)
 
 	if len(uniqueMatches) > 1 {
 		var ids []string
@@ -267,7 +267,10 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 	return &res, nil
 }
 
-func deduplicateMatches(matches []Session) []Session {
+// DeduplicateMatches collapses multiple instances of the same session ID across profiles,
+// keeping the most recently active snapshot. If timestamps are equal, isolated profiles take
+// precedence over host.
+func DeduplicateMatches(matches []Session) []Session {
 	idToSession := make(map[string]Session)
 	for _, match := range matches {
 		existing, exists := idToSession[match.ID]

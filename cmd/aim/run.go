@@ -197,6 +197,11 @@ func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mg
 		return nil
 	}
 
+	// If the latest copy is already native to the target profile, no hydration is needed
+	if latest.Profile == profileName && !latest.IsHost {
+		return nil
+	}
+
 	pDir, err := pm.EnsureProfile(profileName)
 	if err != nil {
 		return fmt.Errorf("failed to ensure profile %q: %w", profileName, err)

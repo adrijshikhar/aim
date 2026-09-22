@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -238,5 +239,96 @@ VALUES ('%s', '/tmp/fake-b.jsonl', 1700000000, 1800000000, 'Updated Title Profil
 	}
 	if !strings.Contains(string(checkOut), "Updated Title Profile B") {
 		t.Errorf("expected hydrated thread with title 'Updated Title Profile B' in profile A, got: %q", string(checkOut))
+	}
+}
+
+type testSessionProvider struct {
+	agent    string
+	sessions []session.Session
+}
+
+func (m *testSessionProvider) Agent() string { return m.agent }
+func (m *testSessionProvider) ListSessions(ctx context.Context, profileDir string, isHost bool) ([]session.Session, error) {
+	return m.sessions, nil
+}
+func (m *testSessionProvider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
+	profName := filepath.Base(profileDir)
+	for _, s := range m.sessions {
+		if s.Profile == profName && strings.HasPrefix(s.ID, idOrPrefix) {
+			res := s
+			return &res, nil
+		}
+	}
+	return nil, nil
+}
+func (m *testSessionProvider) Hydrate(ctx context.Context, srcSession *session.Session, destProfileDir string, fork bool) (string, error) {
+	return srcSession.ID, nil
+}
+
+func TestResume_AmbiguousPrefixAcrossProfiles(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("prof-a")
+	_, _ = pm.EnsureProfile("prof-b")
+
+	mgr := session.NewManager()
+	s1 := session.NewSession("ambig-1111-aaaa", "Session A", "mock", "prof-a", false, time.Now())
+	s2 := session.NewSession("ambig-2222-bbbb", "Session B", "mock", "prof-b", false, time.Now())
+
+	mockP := &testSessionProvider{
+		agent:    "mock",
+		sessions: []session.Session{s1, s2},
+	}
+	mgr.RegisterProvider(mockP)
+
+	ctx := context.Background()
+	_, err := findLatestSessionAcrossProfiles(ctx, mgr, "mock", "ambig")
+	if err == nil {
+		t.Fatalf("expected error for ambiguous prefix, got nil")
+	}
+	if !strings.Contains(err.Error(), "ambiguous prefix") {
+		t.Errorf("expected ambiguous prefix error, got: %v", err)
+	}
+}
+
+func TestResume_NilManager(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeCodex := filepath.Join(fakeBinDir, "codex")
+	_ = os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	reg := agents.NewRegistry()
+	reg.Register(codex.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	pDir, _ := pm.EnsureProfile("default")
+
+	var buf bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	sess := &session.Session{
+		ID:           "test-id-12345",
+		ShortID:      "test-id",
+		Title:        "Test",
+		Agent:        "codex",
+		Profile:      "default",
+		IsHost:       false,
+		LastActiveAt: time.Now(),
+		Status:       session.StatusIdle,
+	}
+
+	// executeExactResume should not panic with nil mgr
+	err := executeExactResume(cmd, reg, pm, nil, "codex", "default", pDir, sess, false, nil)
+	if err != nil {
+		t.Fatalf("executeExactResume with nil mgr returned unexpected error: %v", err)
 	}
 }

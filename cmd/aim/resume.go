@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -163,6 +164,10 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 }
 
 func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, mgr *session.Manager, agent, profile, pDir string, sess *session.Session, fork bool, extraArgs []string) error {
+	if mgr == nil {
+		mgr = defaultSessionManager()
+	}
+
 	resumeID := sess.ID
 
 	ctx := cmd.Context()
@@ -171,11 +176,9 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	}
 
 	// Check if another profile has a newer version of this session
-	if mgr != nil {
-		if latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agent, sess.ID); err == nil && latest != nil {
-			if latest.LastActiveAt.After(sess.LastActiveAt) {
-				sess = latest
-			}
+	if latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agent, sess.ID); err == nil && latest != nil {
+		if latest.LastActiveAt.After(sess.LastActiveAt) {
+			sess = latest
 		}
 	}
 
@@ -260,13 +263,16 @@ func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, 
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("%w: %s", session.ErrSessionNotFound, sessionID)
 	}
-	var latest *session.Session
-	for i := range matches {
-		s := &matches[i]
-		if latest == nil || s.LastActiveAt.After(latest.LastActiveAt) {
-			latest = s
+
+	uniqueMatches := session.DeduplicateMatches(matches)
+	if len(uniqueMatches) > 1 {
+		var ids []string
+		for _, s := range uniqueMatches {
+			ids = append(ids, s.ShortID)
 		}
+		sort.Strings(ids)
+		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", sessionID, strings.Join(ids, ", "))
 	}
-	return latest, nil
+	return &uniqueMatches[0], nil
 }
 

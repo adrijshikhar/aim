@@ -441,3 +441,63 @@ VALUES ('%s', '/tmp/fake-source.jsonl', 1600000000, 1700000000, 'Newer Source Th
 		t.Errorf("expected updated thread with title 'Newer Source Thread Title' in target_prof, got: %q", string(checkOut))
 	}
 }
+
+func TestRunCmd_NoSelfHydration(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not found in PATH")
+	}
+
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	reg.Register(codex.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("native_prof")
+
+	sessionID := "77776666-abcd-ef01-4321-abcdef012345"
+
+	// Session exists only in native_prof
+	nativeCodexDir := filepath.Join(tempDir, "profiles", "native_prof", ".codex")
+	_ = os.MkdirAll(nativeCodexDir, 0755)
+	dbNative := filepath.Join(nativeCodexDir, "state_5.sqlite")
+	schema := fmt.Sprintf(`
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	rollout_path TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	title TEXT NOT NULL,
+	preview TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO threads (id, rollout_path, created_at, updated_at, title, preview)
+VALUES ('%s', '/tmp/fake-native.jsonl', 1700000000, 1700000000, 'Native Thread Title', 'Preview');
+`, sessionID)
+	if err := exec.Command(sqliteBin, dbNative, schema).Run(); err != nil {
+		t.Fatalf("failed to seed native_prof codex DB: %v", err)
+	}
+
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeCodex := filepath.Join(fakeBinDir, "codex")
+	_ = os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "codex", "native_prof", "resume", "77776666"})
+
+	err = cmd.Execute()
+	if err != nil {
+		t.Fatalf("aim run failed: %v", err)
+	}
+
+	// Output must NOT contain "Syncing latest" because it already belongs to native_prof
+	if strings.Contains(stdout.String(), "Syncing latest") {
+		t.Errorf("expected no syncing output for native session, got: %s", stdout.String())
+	}
+}
