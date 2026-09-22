@@ -77,15 +77,42 @@ Flags:
 				}
 			}
 
-			if sessionID == "" {
-				return fmt.Errorf("missing session ID to resume; run 'aim sessions %s' to list available sessions", agentName)
-			}
-
 			mgr := defaultSessionManager()
 			ctx := cmd.Context()
-			sess, err := mgr.ResolveSession(ctx, agentName, sessionID)
-			if err != nil {
-				return err
+			if ctx == nil {
+				ctx = context.Background()
+			}
+
+			var sess *session.Session
+			if sessionID == "" {
+				if isInteractive(cmd.InOrStdin()) {
+					sessions, err := mgr.ListSessions(ctx, agentName, "", false)
+					if err != nil {
+						return fmt.Errorf("failed to list sessions: %w", err)
+					}
+					if len(sessions) == 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "No sessions found for %s across profiles.\n", agentName)
+						return nil
+					}
+					selected, err := promptSelectSession(cmd, sessions)
+					if err != nil {
+						return err
+					}
+					if selected == nil {
+						fmt.Fprintln(cmd.OutOrStdout(), "Resume aborted.")
+						return nil
+					}
+					sess = selected
+					sessionID = selected.ID
+				} else {
+					return fmt.Errorf("missing session ID to resume (use 'aim sessions %s' to browse or run interactively)", agentName)
+				}
+			} else {
+				var err error
+				sess, err = mgr.ResolveSession(ctx, agentName, sessionID)
+				if err != nil {
+					return err
+				}
 			}
 
 			// Active process check
