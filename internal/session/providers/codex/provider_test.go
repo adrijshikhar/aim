@@ -362,6 +362,52 @@ func TestProvider_Hydrate_FullFidelity(t *testing.T) {
 	}
 }
 
+func TestProvider_Hydrate_AncestorRolloutUpdated(t *testing.T) {
+	srcDir, parentID, childID := setupMockCodexFull(t)
+	targetDir := t.TempDir()
+
+	// Pre-create destination parent rollout with smaller/stale content
+	destParentDir := filepath.Join(targetDir, ".codex", "sessions", "2026", "09", "17")
+	if err := os.MkdirAll(destParentDir, 0755); err != nil {
+		t.Fatalf("failed to create destParentDir: %v", err)
+	}
+	destParentRollout := filepath.Join(destParentDir, fmt.Sprintf("rollout-%s.jsonl", parentID))
+	staleContent := `{"type":"event_msg","payload":{"type":"task_started"}}` + "\n"
+	if err := os.WriteFile(destParentRollout, []byte(staleContent), 0644); err != nil {
+		t.Fatalf("failed to write stale parent rollout: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	childRollout := filepath.Join(srcDir, ".codex", "sessions", "2026", "09", "17", fmt.Sprintf("rollout-%s.jsonl", childID))
+	srcSession := session.NewSession(childID, "Child Session", "codex", "mockprofile", false, time.Now())
+	srcSession.StoragePath = childRollout
+
+	hydratedID, err := p.Hydrate(ctx, &srcSession, targetDir, false)
+	if err != nil {
+		t.Fatalf("Hydrate failed: %v", err)
+	}
+	if hydratedID != childID {
+		t.Errorf("expected hydratedID %s, got %s", childID, hydratedID)
+	}
+
+	// Verify destParentRollout was updated to the full content from srcDir
+	srcParentRollout := filepath.Join(srcDir, ".codex", "sessions", "2026", "09", "17", fmt.Sprintf("rollout-%s.jsonl", parentID))
+	srcStat, err := os.Stat(srcParentRollout)
+	if err != nil {
+		t.Fatalf("failed to stat src parent rollout: %v", err)
+	}
+	destStat, err := os.Stat(destParentRollout)
+	if err != nil {
+		t.Fatalf("failed to stat dest parent rollout: %v", err)
+	}
+
+	if destStat.Size() != srcStat.Size() {
+		t.Errorf("expected dest parent rollout size %d, got stale size %d (stale was %d)", srcStat.Size(), destStat.Size(), len(staleContent))
+	}
+}
+
 func TestProvider_Hydrate_Fork_FullFidelity(t *testing.T) {
 	srcDir, _, childID := setupMockCodexFull(t)
 	targetDir := t.TempDir()

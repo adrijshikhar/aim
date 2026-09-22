@@ -205,6 +205,28 @@ AIM's hydrator automatically clones the thread metadata, ancestor rollouts, and 
 
 ---
 
+### Invalid Paginated History Lineage: Cutoff Byte Offset Past Source Rollout
+
+#### Symptom
+When resuming a session that was created as a continuation/compacted thread from an earlier session, Codex fails during bootstrap with:
+```text
+Error: Failed to resume session from .../rollout-...jsonl: thread/resume failed during TUI bootstrap: thread/resume failed: invalid paginated history lineage for <session-id>: cutoff byte offset is past the source rollout (code -32600)
+```
+
+#### Root Cause
+Codex uses `paginated` history mode for compacted sessions, where a child rollout contains a `history_base` reference pointing to an ancestor thread ID and an `end_byte_offset`. If the ancestor session was previously copied into the target profile at an earlier point when it had fewer turns, the target profile's copy of the ancestor rollout file is smaller than `end_byte_offset`. When Codex attempts to read the ancestor rollout up to that byte offset, it fails with code `-32600`.
+
+#### Resolution
+AIM automatically detects when a destination ancestor rollout is smaller or older than the source ancestor rollout and refreshes it with the complete file during `aim resume` and `aim sessions import`.
+
+If you encounter this manually, re-import the session to refresh all ancestor trees:
+```bash
+aim sessions import codex <target-profile> <session-id>
+```
+
+---
+
+
 ### Passing Custom Agent Flags on Resume (`--model`, `--sandbox`, etc.)
 
 #### Symptom
