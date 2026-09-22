@@ -244,5 +244,3 @@ func TestRunnerRun_TitleSetAndReset(t *testing.T) {
 		t.Errorf("stdout does not contain title reset sequence: %q (got %q)", expectedReset, out)
 	}
 }
-
-

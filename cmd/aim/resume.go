@@ -321,4 +321,3 @@ func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, 
 	}
 	return &uniqueMatches[0], nil
 }
-

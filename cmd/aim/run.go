@@ -232,4 +232,3 @@ func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mg
 
 	return nil
 }
-

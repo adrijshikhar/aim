@@ -425,5 +425,3 @@ func (m *mockForkProvider) Hydrate(ctx context.Context, srcSession *session.Sess
 	}
 	return srcSession.ID, nil
 }
-
-

@@ -490,6 +490,3 @@ func TestResumePicker_ReverseScrollingOffset(t *testing.T) {
 		t.Errorf("expected Session 00 to be visible at top, got:\n%s", viewTop)
 	}
 }
-
-
-
