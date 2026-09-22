@@ -174,13 +174,15 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 	return allSessions, nil
 }
 
-// ResolveSession resolves a full ID or short ID prefix to a concrete Session.
-func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) (*Session, error) {
+// FindAllSessionsByID returns all matching sessions across all profiles and host for the given ID or prefix.
+func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix string) ([]Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if idOrPrefix == "" {
 		return nil, fmt.Errorf("session ID or prefix cannot be empty")
 	}
 
-	// Fast-path: query registered provider directly via GetSession if agent is specified
 	if agent != "" {
 		if p, ok := m.providers[agent]; ok {
 			var matches []Session
@@ -203,27 +205,8 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 				s.IsHost = true
 				matches = append(matches, *s)
 			}
-
 			if len(matches) > 0 {
-				uniqueMatches := deduplicateMatches(matches)
-				if len(uniqueMatches) > 1 {
-					var ids []string
-					for _, s := range uniqueMatches {
-						ids = append(ids, s.ShortID)
-					}
-					sort.Strings(ids)
-					return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", idOrPrefix, strings.Join(ids, ", "))
-				}
-				res := uniqueMatches[0]
-				if m.scanner != nil {
-					if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
-						if active, ok := procs[res.ID]; ok {
-							res.Status = StatusActive
-							res.PID = active.PID
-						}
-					}
-				}
-				return &res, nil
+				return matches, nil
 			}
 		}
 	}
@@ -239,6 +222,22 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 		if s.ID == idOrPrefix || strings.HasPrefix(s.ID, idOrPrefix) {
 			matches = append(matches, s)
 		}
+	}
+	return matches, nil
+}
+
+// ResolveSession resolves a full ID or short ID prefix to a concrete Session.
+func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) (*Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if idOrPrefix == "" {
+		return nil, fmt.Errorf("session ID or prefix cannot be empty")
+	}
+
+	matches, err := m.FindAllSessionsByID(ctx, agent, idOrPrefix)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(matches) == 0 {
@@ -257,6 +256,14 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 	}
 
 	res := uniqueMatches[0]
+	if m.scanner != nil {
+		if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
+			if active, ok := procs[res.ID]; ok {
+				res.Status = StatusActive
+				res.PID = active.PID
+			}
+		}
+	}
 	return &res, nil
 }
 
@@ -268,18 +275,16 @@ func deduplicateMatches(matches []Session) []Session {
 			idToSession[match.ID] = match
 			continue
 		}
-		// If existing is host and new match is an isolated profile, prioritize the isolated profile
-		if existing.IsHost && !match.IsHost {
-			idToSession[match.ID] = match
-			continue
-		}
-		// If existing is an isolated profile and new match is host, keep existing isolated profile
-		if !existing.IsHost && match.IsHost {
-			continue
-		}
-		// If both are profiles or both are host, prioritize the more recently active one
+		// If match is more recently active, take it
 		if match.LastActiveAt.After(existing.LastActiveAt) {
 			idToSession[match.ID] = match
+			continue
+		}
+		// If timestamps are equal, prioritize isolated profile over host
+		if match.LastActiveAt.Equal(existing.LastActiveAt) {
+			if existing.IsHost && !match.IsHost {
+				idToSession[match.ID] = match
+			}
 		}
 	}
 

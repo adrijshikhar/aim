@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -164,11 +165,25 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, mgr *session.Manager, agent, profile, pDir string, sess *session.Session, fork bool, extraArgs []string) error {
 	resumeID := sess.ID
 
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Check if another profile has a newer version of this session
+	if mgr != nil {
+		if latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agent, sess.ID); err == nil && latest != nil {
+			if latest.LastActiveAt.After(sess.LastActiveAt) {
+				sess = latest
+			}
+		}
+	}
+
 	// If session belongs to host or a different profile, or fork requested, hydrate into dest profile
 	if sess.IsHost || sess.Profile != profile || fork {
 		prov := mgr.Provider(agent)
 		if prov != nil {
-			hydratedID, err := prov.Hydrate(cmd.Context(), sess, pDir, fork)
+			hydratedID, err := prov.Hydrate(ctx, sess, pDir, fork)
 			if err != nil {
 				return fmt.Errorf("failed to hydrate session into profile %q: %w", profile, err)
 			}
@@ -230,3 +245,28 @@ func getGitBranch(repoRoot string) string {
 func isInteractive(r io.Reader) bool {
 	return isInteractiveFunc(r)
 }
+
+func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, agent, sessionID string) (*session.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if mgr == nil {
+		return nil, fmt.Errorf("session manager cannot be nil")
+	}
+	matches, err := mgr.FindAllSessionsByID(ctx, agent, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sessions across profiles: %w", err)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("%w: %s", session.ErrSessionNotFound, sessionID)
+	}
+	var latest *session.Session
+	for i := range matches {
+		s := &matches[i]
+		if latest == nil || s.LastActiveAt.After(latest.LastActiveAt) {
+			latest = s
+		}
+	}
+	return latest, nil
+}
+

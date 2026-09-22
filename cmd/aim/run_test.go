@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/agents/codex"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -281,5 +284,160 @@ func TestRunCmd_ProfileDoesNotExist_EnvAutoCreate(t *testing.T) {
 	pDir := filepath.Join(tempDir, "profiles", "envprof")
 	if _, err := os.Stat(pDir); os.IsNotExist(err) {
 		t.Errorf("expected profile directory %s to be created with AIM_AUTO_CREATE=1", pDir)
+	}
+}
+
+func TestRunCmd_AutoHydrateOnResume(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not found in PATH")
+	}
+
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	reg.Register(codex.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("source_prof")
+	_, _ = pm.EnsureProfile("target_prof")
+
+	sessionID := "87654321-dcba-fe01-4321-abcdef012345"
+
+	// Create session only in source_prof
+	sourceCodexDir := filepath.Join(tempDir, "profiles", "source_prof", ".codex")
+	_ = os.MkdirAll(sourceCodexDir, 0755)
+	dbSource := filepath.Join(sourceCodexDir, "state_5.sqlite")
+	schema := fmt.Sprintf(`
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	rollout_path TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	title TEXT NOT NULL,
+	preview TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO threads (id, rollout_path, created_at, updated_at, title, preview)
+VALUES ('%s', '/tmp/fake-source.jsonl', 1700000000, 1700000000, 'Source Thread Title', 'Preview');
+`, sessionID)
+	if err := exec.Command(sqliteBin, dbSource, schema).Run(); err != nil {
+		t.Fatalf("failed to seed source_prof codex DB: %v", err)
+	}
+
+	// Fake codex binary
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeCodex := filepath.Join(fakeBinDir, "codex")
+	_ = os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "codex", "target_prof", "resume", "87654321"})
+
+	err = cmd.Execute()
+	if err != nil {
+		t.Fatalf("aim run failed: %v", err)
+	}
+
+	// Verify target_prof now has the thread hydrated from source_prof
+	targetDB := filepath.Join(tempDir, "profiles", "target_prof", ".codex", "state_5.sqlite")
+	checkCmd := exec.Command(sqliteBin, targetDB, fmt.Sprintf("SELECT title FROM threads WHERE id='%s';", sessionID))
+	checkOut, err := checkCmd.Output()
+	if err != nil {
+		t.Fatalf("failed to query target DB: %v", err)
+	}
+	if !strings.Contains(string(checkOut), "Source Thread Title") {
+		t.Errorf("expected hydrated thread with title 'Source Thread Title' in target_prof, got: %q", string(checkOut))
+	}
+}
+
+func TestRunCmd_AutoHydrateOnResume_SyncsNewer(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not found in PATH")
+	}
+
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	reg.Register(codex.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("source_prof")
+	_, _ = pm.EnsureProfile("target_prof")
+
+	sessionID := "99998888-abcd-ef01-4321-abcdef012345"
+
+	// Create older session in target_prof
+	targetCodexDir := filepath.Join(tempDir, "profiles", "target_prof", ".codex")
+	_ = os.MkdirAll(targetCodexDir, 0755)
+	dbTarget := filepath.Join(targetCodexDir, "state_5.sqlite")
+	schemaTarget := fmt.Sprintf(`
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	rollout_path TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	title TEXT NOT NULL,
+	preview TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO threads (id, rollout_path, created_at, updated_at, title, preview)
+VALUES ('%s', '/tmp/fake-target.jsonl', 1600000000, 1600000000, 'Older Target Thread Title', 'Preview');
+`, sessionID)
+	if err := exec.Command(sqliteBin, dbTarget, schemaTarget).Run(); err != nil {
+		t.Fatalf("failed to seed target_prof codex DB: %v", err)
+	}
+
+	// Create newer session in source_prof
+	sourceCodexDir := filepath.Join(tempDir, "profiles", "source_prof", ".codex")
+	_ = os.MkdirAll(sourceCodexDir, 0755)
+	dbSource := filepath.Join(sourceCodexDir, "state_5.sqlite")
+	schemaSource := fmt.Sprintf(`
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	rollout_path TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	title TEXT NOT NULL,
+	preview TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO threads (id, rollout_path, created_at, updated_at, title, preview)
+VALUES ('%s', '/tmp/fake-source.jsonl', 1600000000, 1700000000, 'Newer Source Thread Title', 'Preview');
+`, sessionID)
+	if err := exec.Command(sqliteBin, dbSource, schemaSource).Run(); err != nil {
+		t.Fatalf("failed to seed source_prof codex DB: %v", err)
+	}
+
+	// Fake codex binary
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeCodex := filepath.Join(fakeBinDir, "codex")
+	_ = os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "codex", "target_prof", "resume", "99998888"})
+
+	err = cmd.Execute()
+	if err != nil {
+		t.Fatalf("aim run failed: %v", err)
+	}
+
+	// Verify target_prof now has the newer thread hydrated from source_prof
+	checkCmd := exec.Command(sqliteBin, dbTarget, fmt.Sprintf("SELECT title FROM threads WHERE id='%s';", sessionID))
+	checkOut, err := checkCmd.Output()
+	if err != nil {
+		t.Fatalf("failed to query target DB: %v", err)
+	}
+	if !strings.Contains(string(checkOut), "Newer Source Thread Title") {
+		t.Errorf("expected updated thread with title 'Newer Source Thread Title' in target_prof, got: %q", string(checkOut))
 	}
 }

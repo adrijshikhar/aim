@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
+	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/tui"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -50,6 +54,18 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			if !ok {
 				return nil
 			}
+
+			if reg != nil {
+				if ad, err := reg.Get(agentName); err == nil {
+					agentName = ad.Name()
+				}
+			}
+
+			mgr := defaultSessionManager()
+			if err := ensureRunSessionHydrated(cmd, pm, mgr, agentName, profileName, extraArgs); err != nil {
+				return err
+			}
+
 			exitCode := executeRun(reg, pm, agentName, profileName, extraArgs)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
@@ -125,3 +141,103 @@ func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, pro
 
 	return code
 }
+
+func extractResumedSessionID(extraArgs []string) string {
+	for i := 0; i < len(extraArgs); i++ {
+		arg := extraArgs[i]
+		if arg == "resume" {
+			if i+1 < len(extraArgs) && !strings.HasPrefix(extraArgs[i+1], "-") {
+				return extraArgs[i+1]
+			}
+		}
+		if strings.HasPrefix(arg, "--conversation=") {
+			val := strings.TrimPrefix(arg, "--conversation=")
+			if val != "" {
+				return val
+			}
+		}
+		if arg == "--conversation" && i+1 < len(extraArgs) {
+			if !strings.HasPrefix(extraArgs[i+1], "-") {
+				return extraArgs[i+1]
+			}
+		}
+		if strings.HasPrefix(arg, "-c=") {
+			val := strings.TrimPrefix(arg, "-c=")
+			if val != "" {
+				return val
+			}
+		}
+		if arg == "-c" && i+1 < len(extraArgs) {
+			if !strings.HasPrefix(extraArgs[i+1], "-") {
+				return extraArgs[i+1]
+			}
+		}
+	}
+	return ""
+}
+
+func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mgr *session.Manager, agentName, profileName string, extraArgs []string) error {
+	sessionID := extractResumedSessionID(extraArgs)
+	if sessionID == "" {
+		return nil
+	}
+
+	if mgr == nil {
+		mgr = defaultSessionManager()
+	}
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agentName, sessionID)
+	if err != nil || latest == nil {
+		logger.Debug("[run] Session %q not found across profiles during auto-hydrate check: %v", sessionID, err)
+		return nil
+	}
+
+	pDir, err := pm.EnsureProfile(profileName)
+	if err != nil {
+		return fmt.Errorf("failed to ensure profile %q: %w", profileName, err)
+	}
+
+	prov := mgr.Provider(agentName)
+	if prov == nil {
+		logger.Debug("[run] No session provider registered for agent %q", agentName)
+		return nil
+	}
+
+	destSess, err := prov.GetSession(ctx, sessionID, pDir, false)
+	needsHydrate := false
+	if err != nil || destSess == nil {
+		needsHydrate = true
+	} else if latest.LastActiveAt.After(destSess.LastActiveAt) {
+		needsHydrate = true
+	}
+
+	if needsHydrate {
+		arrowStyle := lipgloss.NewStyle().Foreground(tui.AccentBlue).Bold(true)
+		cyanStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan)
+		boldStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+		sourceDesc := latest.Profile
+		if latest.IsHost {
+			sourceDesc = "host"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "%s Syncing latest %s session %s from %s into %q...\n",
+			arrowStyle.Render("➜"),
+			boldStyle.Render(agentName),
+			cyanStyle.Render(latest.ShortID),
+			sourceDesc,
+			profileName,
+		)
+
+		_, err = prov.Hydrate(ctx, latest, pDir, false)
+		if err != nil {
+			return fmt.Errorf("failed to auto-hydrate session %q into profile %q: %w", sessionID, profileName, err)
+		}
+	}
+
+	return nil
+}
+
