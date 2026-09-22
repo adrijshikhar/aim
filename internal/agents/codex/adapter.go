@@ -217,6 +217,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	envMap["AIM_AGENT"] = a.Name()
 	envMap["AIM_PROFILE"] = profileName
 	envMap["AIM_HOME"] = config.BaseDir()
+	delete(envMap, "AIM_SESSION_ID")
 
 	logger.Debug("[codex] Launch env: HOME=%s, CODEX_HOME=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, codexDir, a.Name(), profileName)

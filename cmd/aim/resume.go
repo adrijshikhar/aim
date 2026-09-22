@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -75,15 +77,42 @@ Flags:
 				}
 			}
 
-			if sessionID == "" {
-				return fmt.Errorf("missing session ID to resume; run 'aim sessions %s' to list available sessions", agentName)
-			}
-
 			mgr := defaultSessionManager()
 			ctx := cmd.Context()
-			sess, err := mgr.ResolveSession(ctx, agentName, sessionID)
-			if err != nil {
-				return err
+			if ctx == nil {
+				ctx = context.Background()
+			}
+
+			var sess *session.Session
+			if sessionID == "" {
+				if isInteractive(cmd.InOrStdin()) {
+					sessions, err := mgr.ListSessions(ctx, agentName, "", false)
+					if err != nil {
+						return fmt.Errorf("failed to list sessions: %w", err)
+					}
+					if len(sessions) == 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "No sessions found for %s across profiles.\n", agentName)
+						return nil
+					}
+					selected, err := promptSelectSession(cmd, sessions)
+					if err != nil {
+						return err
+					}
+					if selected == nil {
+						fmt.Fprintln(cmd.OutOrStdout(), "Resume aborted.")
+						return nil
+					}
+					sess = selected
+					sessionID = selected.ID
+				} else {
+					return fmt.Errorf("missing session ID to resume (use 'aim sessions %s' to browse or run interactively)", agentName)
+				}
+			} else {
+				var err error
+				sess, err = mgr.ResolveSession(ctx, agentName, sessionID)
+				if err != nil {
+					return err
+				}
 			}
 
 			// Active process check
@@ -122,7 +151,7 @@ Flags:
 			return executeExactResume(cmd, reg, pm, mgr, agentName, profileName, pDir, sess, forkFlag, extraArgs)
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return completeAgentAndProfile(reg, pm, args, toComplete)
+			return completeAgentProfileAndSession(reg, pm, args, toComplete)
 		},
 	}
 
@@ -152,9 +181,13 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 		cyanStyle.Render(handoffPath),
 	)
 
+	sessID := sess.ShortID
+	if sessID == "" {
+		sessID = sess.ID
+	}
 	// Launch agent primed with Catalyst handoff resume
 	launchArgs := append([]string{"handoff resume"}, extraArgs...)
-	code := executeRun(reg, pm, agent, profile, launchArgs)
+	code := executeRunWithSession(reg, pm, agent, profile, sessID, launchArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -162,13 +195,29 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 }
 
 func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, mgr *session.Manager, agent, profile, pDir string, sess *session.Session, fork bool, extraArgs []string) error {
+	if mgr == nil {
+		mgr = defaultSessionManager()
+	}
+
 	resumeID := sess.ID
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Check if another profile has a newer version of this session
+	if latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agent, sess.ID); err == nil && latest != nil {
+		if latest.LastActiveAt.After(sess.LastActiveAt) {
+			sess = latest
+		}
+	}
 
 	// If session belongs to host or a different profile, or fork requested, hydrate into dest profile
 	if sess.IsHost || sess.Profile != profile || fork {
 		prov := mgr.Provider(agent)
 		if prov != nil {
-			hydratedID, err := prov.Hydrate(cmd.Context(), sess, pDir, fork)
+			hydratedID, err := prov.Hydrate(ctx, sess, pDir, fork)
 			if err != nil {
 				return fmt.Errorf("failed to hydrate session into profile %q: %w", profile, err)
 			}
@@ -189,14 +238,29 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	arrowStyle := lipgloss.NewStyle().Foreground(tui.AccentBlue).Bold(true)
 	cyanStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan)
 	boldStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
-	fmt.Fprintf(cmd.OutOrStdout(), "%s Resuming %s session %s under profile %q...\n",
+
+	displayID := sess.ShortID
+	forkInfo := ""
+	if fork {
+		displayID = session.ComputeShortID(resumeID)
+		if displayID == "" {
+			displayID = resumeID
+		}
+		if sess.ShortID != "" {
+			forkInfo = fmt.Sprintf(" (forked from %s)", sess.ShortID)
+		}
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "%s Resuming %s session %s%s under profile %q...\n",
 		arrowStyle.Render("➜"),
 		boldStyle.Render(agent),
-		cyanStyle.Render(sess.ShortID),
+		cyanStyle.Render(displayID),
+		forkInfo,
 		profile,
 	)
 
-	code := executeRun(reg, pm, agent, profile, resumeArgs)
+	sessID := displayID
+	code := executeRunWithSession(reg, pm, agent, profile, sessID, resumeArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -229,4 +293,31 @@ func getGitBranch(repoRoot string) string {
 
 func isInteractive(r io.Reader) bool {
 	return isInteractiveFunc(r)
+}
+
+func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, agent, sessionID string) (*session.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if mgr == nil {
+		return nil, fmt.Errorf("session manager cannot be nil")
+	}
+	matches, err := mgr.FindAllSessionsByID(ctx, agent, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sessions across profiles: %w", err)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("%w: %s", session.ErrSessionNotFound, sessionID)
+	}
+
+	uniqueMatches := session.DeduplicateMatches(matches)
+	if len(uniqueMatches) > 1 {
+		var ids []string
+		for _, s := range uniqueMatches {
+			ids = append(ids, s.ShortID)
+		}
+		sort.Strings(ids)
+		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", sessionID, strings.Join(ids, ", "))
+	}
+	return &uniqueMatches[0], nil
 }

@@ -18,7 +18,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func defaultSessionManager() *session.Manager {
+var defaultSessionManager = func() *session.Manager {
 	mgr := session.NewManager()
 	mgr.RegisterProvider(agy.NewProvider())
 	mgr.RegisterProvider(codex.NewProvider())

@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
+	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/tui"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +54,25 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			if !ok {
 				return nil
 			}
-			exitCode := executeRun(reg, pm, agentName, profileName, extraArgs)
+
+			if reg != nil {
+				if ad, err := reg.Get(agentName); err == nil {
+					agentName = ad.Name()
+				}
+			}
+
+			mgr := defaultSessionManager()
+			resolvedID, err := ensureRunSessionHydrated(cmd, pm, mgr, agentName, profileName, extraArgs)
+			if err != nil {
+				return err
+			}
+			if resolvedID != "" {
+				sessID := extractResumedSessionID(extraArgs)
+				extraArgs = replaceResumedSessionID(extraArgs, sessID, resolvedID)
+			}
+
+			sessID := extractResumedSessionID(extraArgs)
+			exitCode := executeRunWithSession(reg, pm, agentName, profileName, sessID, extraArgs)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
 			}
@@ -64,7 +86,11 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 }
 
 func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string, extraArgs []string) int {
-	logger.Debug("[run] Executing agent %q with profile %q (extraArgs=%v)", agentName, profileName, extraArgs)
+	return executeRunWithSession(reg, pm, agentName, profileName, "", extraArgs)
+}
+
+func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName, sessionID string, extraArgs []string) int {
+	logger.Debug("[run] Executing agent %q with profile %q (sessionID=%s, extraArgs=%v)", agentName, profileName, sessionID, extraArgs)
 	adapter, err := reg.Get(agentName)
 	if err != nil {
 		logger.Debug("[run] Failed to get adapter for agent %q: %v", agentName, err)
@@ -92,6 +118,19 @@ func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, pro
 		return 1
 	}
 	logger.Debug("[run] LaunchEnv: binary=%s, workingDir=%s, args=%v, envVars=%d", launchEnv.BinaryPath, launchEnv.WorkingDir, launchEnv.Args, len(launchEnv.Env))
+
+	// Ensure AIM_SESSION_ID is set in launchEnv if resuming or running with a known session ID
+	if sessionID == "" {
+		sessionID = extractResumedSessionID(extraArgs)
+	}
+	if sessionID != "" {
+		if launchEnv.Env == nil {
+			launchEnv.Env = make(map[string]string)
+		}
+		if launchEnv.Env["AIM_SESSION_ID"] == "" {
+			launchEnv.Env["AIM_SESSION_ID"] = sessionID
+		}
+	}
 
 	// Apply profile configuration overrides (custom environment variables & launch arguments)
 	if cfg != nil {
@@ -124,4 +163,110 @@ func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, pro
 	triggerPrewarmAsync(config.BaseDir(), adapter.Name())
 
 	return code
+}
+
+func extractResumedSessionID(extraArgs []string) string {
+	return runner.ExtractSessionID(extraArgs)
+}
+
+func replaceResumedSessionID(extraArgs []string, oldID, newID string) []string {
+	if oldID == "" || newID == "" || oldID == newID {
+		return extraArgs
+	}
+	res := make([]string, len(extraArgs))
+	copy(res, extraArgs)
+	for i := 0; i < len(res); i++ {
+		if res[i] == "resume" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if res[i] == "-c" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if strings.HasPrefix(res[i], "-c=") && res[i][3:] == oldID {
+			res[i] = "-c=" + newID
+			break
+		}
+		if res[i] == "--conversation" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if strings.HasPrefix(res[i], "--conversation=") && res[i][15:] == oldID {
+			res[i] = "--conversation=" + newID
+			break
+		}
+	}
+	return res
+}
+
+func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mgr *session.Manager, agentName, profileName string, extraArgs []string) (string, error) {
+	sessionID := extractResumedSessionID(extraArgs)
+	if sessionID == "" {
+		return "", nil
+	}
+
+	if mgr == nil {
+		mgr = defaultSessionManager()
+	}
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agentName, sessionID)
+	if err != nil || latest == nil {
+		logger.Debug("[run] Session %q not found across profiles during auto-hydrate check: %v", sessionID, err)
+		return "", nil
+	}
+
+	// If the latest copy is already native to the target profile, no hydration is needed,
+	// but return the resolved full ID so caller can expand short prefixes in extraArgs.
+	if latest.Profile == profileName && !latest.IsHost {
+		return latest.ID, nil
+	}
+
+	pDir, err := pm.EnsureProfile(profileName)
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure profile %q: %w", profileName, err)
+	}
+
+	prov := mgr.Provider(agentName)
+	if prov == nil {
+		logger.Debug("[run] No session provider registered for agent %q", agentName)
+		return latest.ID, nil
+	}
+
+	destSess, err := prov.GetSession(ctx, sessionID, pDir, false)
+	needsHydrate := false
+	if err != nil || destSess == nil {
+		needsHydrate = true
+	} else if latest.LastActiveAt.After(destSess.LastActiveAt) {
+		needsHydrate = true
+	}
+
+	if needsHydrate {
+		arrowStyle := lipgloss.NewStyle().Foreground(tui.AccentBlue).Bold(true)
+		cyanStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan)
+		boldStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+		sourceDesc := latest.Profile
+		if latest.IsHost {
+			sourceDesc = "host"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "%s Syncing latest %s session %s from %s into %q...\n",
+			arrowStyle.Render("➜"),
+			boldStyle.Render(agentName),
+			cyanStyle.Render(latest.ShortID),
+			sourceDesc,
+			profileName,
+		)
+
+		_, err = prov.Hydrate(ctx, latest, pDir, false)
+		if err != nil {
+			return "", fmt.Errorf("failed to auto-hydrate session %q into profile %q: %w", sessionID, profileName, err)
+		}
+	}
+
+	return latest.ID, nil
 }

@@ -442,7 +442,7 @@ func (p *Provider) resolveSrcCodexDir(srcSession *session.Session) string {
 	if srcSession.IsHost {
 		return filepath.Join(config.RealHomeDir(), ".codex")
 	}
-	if srcSession.Profile != "" && srcSession.Profile != "<host>" && isValidIdentifier(srcSession.Profile) {
+	if srcSession.Profile != "" && srcSession.Profile != "<host>" && isValidProfileName(srcSession.Profile) {
 		baseProfilesDir := filepath.Clean(filepath.Join(config.BaseDir(), "profiles"))
 		cand := filepath.Clean(filepath.Join(baseProfilesDir, srcSession.Profile, ".codex"))
 		if strings.HasPrefix(cand, baseProfilesDir+string(filepath.Separator)) {
@@ -817,6 +817,21 @@ func copyFileWithReplace(src, dst, oldID, newID string) (err error) {
 		return fmt.Errorf("failed to sync destination %s: %w", dst, err)
 	}
 	return nil
+}
+
+func isValidProfileName(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	if s == "." || s == ".." {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func isValidIdentifier(s string) bool {

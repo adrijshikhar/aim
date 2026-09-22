@@ -226,3 +226,56 @@ func TestManager_DeduplicateAndAmbiguity(t *testing.T) {
 		t.Errorf("expected ambiguous prefix error message, got: %v", errAmbig)
 	}
 }
+
+func TestManager_FindAllSessionsByID(t *testing.T) {
+	setupTestProfiles(t)
+	mgr := session.NewManager()
+	ctx := context.Background()
+
+	sWork := session.NewSession("shared-uuid-1111", "Work Session", "agy", "work", false, time.Now().Add(-1*time.Hour))
+	sBby := session.NewSession("shared-uuid-1111", "Bby Session", "agy", "bby", false, time.Now())
+	sOther := session.NewSession("different-uuid-2222", "Other Session", "agy", "work", false, time.Now())
+
+	mockAgy := &mockProvider{
+		agent:    "agy",
+		sessions: []session.Session{sWork, sBby, sOther},
+	}
+	mgr.RegisterProvider(mockAgy)
+
+	// 1. Matches all instances across profiles without deduplication
+	matches, err := mgr.FindAllSessionsByID(ctx, "agy", "shared-uuid-1111")
+	if err != nil {
+		t.Fatalf("FindAllSessionsByID failed: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches for shared-uuid-1111 across profiles, got %d", len(matches))
+	}
+
+	// 2. Prefix matching
+	prefixMatches, err := mgr.FindAllSessionsByID(ctx, "agy", "shared-")
+	if err != nil {
+		t.Fatalf("FindAllSessionsByID prefix failed: %v", err)
+	}
+	if len(prefixMatches) != 2 {
+		t.Fatalf("expected 2 matches for shared- prefix, got %d", len(prefixMatches))
+	}
+
+	// 3. Empty ID validation
+	_, errEmpty := mgr.FindAllSessionsByID(ctx, "agy", "")
+	if errEmpty == nil {
+		t.Errorf("expected error for empty session ID, got nil")
+	}
+
+	// 4. Ambiguous prefix within a profile surfaces error
+	sAmbig1 := session.NewSession("dup-ambig-1111", "Ambig 1", "agy", "work", false, time.Now())
+	sAmbig2 := session.NewSession("dup-ambig-2222", "Ambig 2", "agy", "work", false, time.Now())
+	mockAgy.sessions = append(mockAgy.sessions, sAmbig1, sAmbig2)
+
+	_, errAmbig := mgr.FindAllSessionsByID(ctx, "agy", "dup-ambig")
+	if errAmbig == nil {
+		t.Fatalf("expected error for ambiguous prefix, got nil")
+	}
+	if !strings.Contains(errAmbig.Error(), "ambiguous") {
+		t.Errorf("expected error message to contain 'ambiguous', got: %v", errAmbig)
+	}
+}
