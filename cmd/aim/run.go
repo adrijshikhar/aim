@@ -66,7 +66,8 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 				return err
 			}
 
-			exitCode := executeRun(reg, pm, agentName, profileName, extraArgs)
+			sessID := extractResumedSessionID(extraArgs)
+			exitCode := executeRunWithSession(reg, pm, agentName, profileName, sessID, extraArgs)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
 			}
@@ -80,7 +81,11 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 }
 
 func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string, extraArgs []string) int {
-	logger.Debug("[run] Executing agent %q with profile %q (extraArgs=%v)", agentName, profileName, extraArgs)
+	return executeRunWithSession(reg, pm, agentName, profileName, "", extraArgs)
+}
+
+func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName, sessionID string, extraArgs []string) int {
+	logger.Debug("[run] Executing agent %q with profile %q (sessionID=%s, extraArgs=%v)", agentName, profileName, sessionID, extraArgs)
 	adapter, err := reg.Get(agentName)
 	if err != nil {
 		logger.Debug("[run] Failed to get adapter for agent %q: %v", agentName, err)
@@ -108,6 +113,19 @@ func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, pro
 		return 1
 	}
 	logger.Debug("[run] LaunchEnv: binary=%s, workingDir=%s, args=%v, envVars=%d", launchEnv.BinaryPath, launchEnv.WorkingDir, launchEnv.Args, len(launchEnv.Env))
+
+	// Ensure AIM_SESSION_ID is set in launchEnv if resuming or running with a known session ID
+	if sessionID == "" {
+		sessionID = extractResumedSessionID(extraArgs)
+	}
+	if sessionID != "" {
+		if launchEnv.Env == nil {
+			launchEnv.Env = make(map[string]string)
+		}
+		if launchEnv.Env["AIM_SESSION_ID"] == "" {
+			launchEnv.Env["AIM_SESSION_ID"] = sessionID
+		}
+	}
 
 	// Apply profile configuration overrides (custom environment variables & launch arguments)
 	if cfg != nil {

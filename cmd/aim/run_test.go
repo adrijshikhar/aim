@@ -501,3 +501,64 @@ VALUES ('%s', '/tmp/fake-native.jsonl', 1700000000, 1700000000, 'Native Thread T
 		t.Errorf("expected no syncing output for native session, got: %s", stdout.String())
 	}
 }
+
+func TestRunAndResume_AIMSessionIDPropagation(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	reg.Register(codex.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	dumpFile := filepath.Join(tempDir, "env_dump.txt")
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeCodex := filepath.Join(fakeBinDir, "codex")
+	fakeScript := fmt.Sprintf("#!/bin/sh\necho \"SESSION=$AIM_SESSION_ID\" > %q\nexit 0\n", dumpFile)
+	_ = os.WriteFile(fakeCodex, []byte(fakeScript), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	// Case 1: aim run with resume argument
+	_ = os.Remove(dumpFile)
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "codex", "work", "resume", "test-session-123"})
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("aim run failed: %v", err)
+	}
+
+	content, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("failed to read env dump: %v", err)
+	}
+	if strings.TrimSpace(string(content)) != "SESSION=test-session-123" {
+		t.Errorf("expected SESSION=test-session-123, got %q", string(content))
+	}
+
+	// Case 2: aim run without session ID -> AIM_SESSION_ID should be empty
+	_ = os.Remove(dumpFile)
+	stdout.Reset()
+	stderr.Reset()
+	cmd = newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "codex", "work"})
+	err = cmd.Execute()
+	if err != nil {
+		t.Fatalf("aim run without session failed: %v", err)
+	}
+
+	content, err = os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("failed to read env dump: %v", err)
+	}
+	if strings.TrimSpace(string(content)) != "SESSION=" {
+		t.Errorf("expected empty SESSION, got %q", string(content))
+	}
+}
+

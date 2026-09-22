@@ -332,3 +332,52 @@ func TestResume_NilManager(t *testing.T) {
 		t.Fatalf("executeExactResume with nil mgr returned unexpected error: %v", err)
 	}
 }
+
+func TestResume_AIMSessionIDPropagation(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	dumpFile := filepath.Join(tempDir, "env_dump.txt")
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeCodex := filepath.Join(fakeBinDir, "codex")
+	fakeScript := fmt.Sprintf("#!/bin/sh\necho \"SESSION=$AIM_SESSION_ID\" > %q\nexit 0\n", dumpFile)
+	_ = os.WriteFile(fakeCodex, []byte(fakeScript), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	reg := agents.NewRegistry()
+	reg.Register(codex.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	pDir, _ := pm.EnsureProfile("default")
+
+	var buf bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	sess := &session.Session{
+		ID:           "test-uuid-99999999",
+		ShortID:      "test-short-99",
+		Title:        "Test Title",
+		Agent:        "codex",
+		Profile:      "default",
+		IsHost:       false,
+		LastActiveAt: time.Now(),
+		Status:       session.StatusIdle,
+	}
+
+	err := executeExactResume(cmd, reg, pm, nil, "codex", "default", pDir, sess, false, nil)
+	if err != nil {
+		t.Fatalf("executeExactResume failed: %v", err)
+	}
+
+	content, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("failed to read env dump: %v", err)
+	}
+	if strings.TrimSpace(string(content)) != "SESSION=test-short-99" {
+		t.Errorf("expected SESSION=test-short-99, got %q", string(content))
+	}
+}
+

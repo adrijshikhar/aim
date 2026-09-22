@@ -181,9 +181,13 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 		cyanStyle.Render(handoffPath),
 	)
 
+	sessID := sess.ShortID
+	if sessID == "" {
+		sessID = sess.ID
+	}
 	// Launch agent primed with Catalyst handoff resume
 	launchArgs := append([]string{"handoff resume"}, extraArgs...)
-	code := executeRun(reg, pm, agent, profile, launchArgs)
+	code := executeRunWithSession(reg, pm, agent, profile, sessID, launchArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -241,7 +245,11 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		profile,
 	)
 
-	code := executeRun(reg, pm, agent, profile, resumeArgs)
+	sessID := sess.ShortID
+	if sessID == "" {
+		sessID = resumeID
+	}
+	code := executeRunWithSession(reg, pm, agent, profile, sessID, resumeArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}

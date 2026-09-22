@@ -39,7 +39,12 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	profileName := launch.Env["AIM_PROFILE"]
 	agentName := launch.Env["AIM_AGENT"]
 	if agentName != "" && profileName != "" {
-		fmt.Fprintf(os.Stdout, "\033]0;AIM: [%s] %s\007", agentName, profileName)
+		sessionID := launch.Env["AIM_SESSION_ID"]
+		if sessionID == "" {
+			sessionID = extractSessionID(args)
+		}
+		_ = SetTerminalTitle(os.Stdout, FormatTitle(agentName, profileName, sessionID))
+		defer ResetTerminalTitle(os.Stdout)
 	}
 
 	if agentName != "" {
@@ -161,7 +166,7 @@ func BuildEnv(environ []string, launchEnv map[string]string) []string {
 			continue
 		}
 		key := e[:idx]
-		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" {
+		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" || key == "AIM_SESSION_ID" {
 			continue
 		}
 		if _, overridden := launchEnv[key]; overridden {
