@@ -111,9 +111,9 @@ func TestTerminalTitle_ExtractSessionID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := extractSessionID(tt.args)
+		got := ExtractSessionID(tt.args)
 		if got != tt.expected {
-			t.Errorf("extractSessionID(%v) = %q; want %q", tt.args, got, tt.expected)
+			t.Errorf("ExtractSessionID(%v) = %q; want %q", tt.args, got, tt.expected)
 		}
 	}
 }
@@ -156,11 +156,52 @@ func TestBuildEnv_AIMSessionID(t *testing.T) {
 	}
 }
 
+func TestTerminalTitle_Sanitize(t *testing.T) {
+	var buf bytes.Buffer
+	err := SetTerminalTitle(&buf, "AIM: [codex]\r\nwork\007evil\033hacked\007")
+	if err != nil {
+		t.Fatalf("SetTerminalTitle failed: %v", err)
+	}
+	expected := "\033]0;AIM: [codex]workevilhacked\007"
+	if buf.String() != expected {
+		t.Errorf("expected %q, got %q", expected, buf.String())
+	}
+}
+
+func TestTerminalTitle_NonTerminalFileIgnored(t *testing.T) {
+	rPipe, wPipe, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	defer rPipe.Close()
+
+	// wPipe is a pipe, so isatty is false by default
+	err = SetTerminalTitle(wPipe, "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	err = ResetTerminalTitle(wPipe)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = wPipe.Close()
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(rPipe)
+	if buf.Len() != 0 {
+		t.Errorf("expected no output for non-terminal file, got %q", buf.String())
+	}
+}
+
 func TestRunnerRun_TitleSetAndReset(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("sh not available")
 	}
+
+	origIsTerminal := isTerminalFunc
+	isTerminalFunc = func(fd uintptr) bool { return true }
+	defer func() { isTerminalFunc = origIsTerminal }()
 
 	r := NewRunner()
 	env := agents.LaunchEnv{
@@ -178,11 +219,11 @@ func TestRunnerRun_TitleSetAndReset(t *testing.T) {
 		t.Fatalf("os.Pipe failed: %v", err)
 	}
 	os.Stdout = wPipe
+	defer func() { os.Stdout = oldStdout }()
 
 	code, err := r.Run(context.Background(), env, []string{"-c", "exit 0"})
 
 	_ = wPipe.Close()
-	os.Stdout = oldStdout
 
 	if err != nil || code != 0 {
 		t.Fatalf("Run failed: %v (code %d)", err, code)
@@ -203,4 +244,5 @@ func TestRunnerRun_TitleSetAndReset(t *testing.T) {
 		t.Errorf("stdout does not contain title reset sequence: %q (got %q)", expectedReset, out)
 	}
 }
+
 

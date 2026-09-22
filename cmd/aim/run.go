@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -161,37 +160,7 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 }
 
 func extractResumedSessionID(extraArgs []string) string {
-	for i := 0; i < len(extraArgs); i++ {
-		arg := extraArgs[i]
-		if arg == "resume" {
-			if i+1 < len(extraArgs) && !strings.HasPrefix(extraArgs[i+1], "-") {
-				return extraArgs[i+1]
-			}
-		}
-		if strings.HasPrefix(arg, "--conversation=") {
-			val := strings.TrimPrefix(arg, "--conversation=")
-			if val != "" {
-				return val
-			}
-		}
-		if arg == "--conversation" && i+1 < len(extraArgs) {
-			if !strings.HasPrefix(extraArgs[i+1], "-") {
-				return extraArgs[i+1]
-			}
-		}
-		if strings.HasPrefix(arg, "-c=") {
-			val := strings.TrimPrefix(arg, "-c=")
-			if val != "" {
-				return val
-			}
-		}
-		if arg == "-c" && i+1 < len(extraArgs) {
-			if !strings.HasPrefix(extraArgs[i+1], "-") {
-				return extraArgs[i+1]
-			}
-		}
-	}
-	return ""
+	return runner.ExtractSessionID(extraArgs)
 }
 
 func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mgr *session.Manager, agentName, profileName string, extraArgs []string) error {

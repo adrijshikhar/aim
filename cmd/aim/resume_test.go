@@ -379,5 +379,44 @@ func TestResume_AIMSessionIDPropagation(t *testing.T) {
 	if strings.TrimSpace(string(content)) != "SESSION=test-short-99" {
 		t.Errorf("expected SESSION=test-short-99, got %q", string(content))
 	}
+
+	// Case 2: forked resume with custom session ID
+	_ = os.Remove(dumpFile)
+	forkMgr := session.NewManager()
+	forkProv := &mockForkProvider{agent: "codex"}
+	forkMgr.RegisterProvider(forkProv)
+
+	err = executeExactResume(cmd, reg, pm, forkMgr, "codex", "default", pDir, sess, true, nil)
+	if err != nil {
+		t.Fatalf("executeExactResume with fork failed: %v", err)
+	}
+
+	content, err = os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("failed to read env dump for fork: %v", err)
+	}
+	expectedForkShort := session.ComputeShortID("forked-uuid-11112222")
+	if strings.TrimSpace(string(content)) != "SESSION="+expectedForkShort {
+		t.Errorf("expected SESSION=%s, got %q", expectedForkShort, string(content))
+	}
 }
+
+type mockForkProvider struct {
+	agent string
+}
+
+func (m *mockForkProvider) Agent() string { return m.agent }
+func (m *mockForkProvider) ListSessions(ctx context.Context, profileDir string, isHost bool) ([]session.Session, error) {
+	return nil, nil
+}
+func (m *mockForkProvider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
+	return nil, nil
+}
+func (m *mockForkProvider) Hydrate(ctx context.Context, srcSession *session.Session, destProfileDir string, fork bool) (string, error) {
+	if fork {
+		return "forked-uuid-11112222", nil
+	}
+	return srcSession.ID, nil
+}
+
 

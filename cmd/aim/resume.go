@@ -246,6 +246,9 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	)
 
 	sessID := sess.ShortID
+	if fork {
+		sessID = session.ComputeShortID(resumeID)
+	}
 	if sessID == "" {
 		sessID = resumeID
 	}

@@ -41,7 +41,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	if agentName != "" && profileName != "" {
 		sessionID := launch.Env["AIM_SESSION_ID"]
 		if sessionID == "" {
-			sessionID = extractSessionID(args)
+			sessionID = ExtractSessionID(args)
 		}
 		_ = SetTerminalTitle(os.Stdout, FormatTitle(agentName, profileName, sessionID))
 		defer ResetTerminalTitle(os.Stdout)
