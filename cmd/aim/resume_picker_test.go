@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -405,5 +407,89 @@ func TestResumeCmd_NonInteractive_MissingSessionIDError(t *testing.T) {
 		t.Errorf("expected error %q, got: %q", expected, err.Error())
 	}
 }
+
+func TestResumePicker_ReverseScrollingOffset(t *testing.T) {
+	var sessions []session.Session
+	for i := 0; i < 25; i++ {
+		sessions = append(sessions, session.Session{
+			ID:           fmt.Sprintf("session-%02d-uuid", i),
+			ShortID:      fmt.Sprintf("%08d", i),
+			Title:        fmt.Sprintf("Session Number %02d", i),
+			Agent:        "agy",
+			Profile:      "work",
+			LastActiveAt: time.Now().Add(-time.Duration(i) * time.Minute),
+		})
+	}
+
+	m := newSessionPickerModel(sessions)
+	if m.offset != 0 || m.cursor != 0 {
+		t.Fatalf("expected initial offset=0, cursor=0; got offset=%d, cursor=%d", m.offset, m.cursor)
+	}
+
+	// 1. Move down past maxVisible (10)
+	// Pressing 'j' 12 times brings cursor to 12. offset should become 12 - 10 + 1 = 3.
+	for i := 0; i < 12; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		m = newM.(sessionPickerModel)
+	}
+	if m.cursor != 12 {
+		t.Errorf("expected cursor 12, got %d", m.cursor)
+	}
+	if m.offset != 3 {
+		t.Errorf("expected offset 3 after scrolling down to 12, got %d", m.offset)
+	}
+
+	viewDown := m.View()
+	if !strings.Contains(viewDown, "(showing 4-13 of 25 sessions)") {
+		t.Errorf("expected view to show 'showing 4-13 of 25 sessions', got:\n%s", viewDown)
+	}
+	if strings.Contains(viewDown, "Session Number 00") {
+		t.Errorf("expected Session 00 to be scrolled out of view, got:\n%s", viewDown)
+	}
+	if !strings.Contains(viewDown, "Session Number 12") {
+		t.Errorf("expected Session 12 to be visible, got:\n%s", viewDown)
+	}
+
+	// 2. Reverse scroll up within the visible window: offset should remain unchanged
+	for i := 0; i < 5; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		m = newM.(sessionPickerModel)
+	}
+	if m.cursor != 7 {
+		t.Errorf("expected cursor 7 after moving up 5 times, got %d", m.cursor)
+	}
+	if m.offset != 3 {
+		t.Errorf("expected offset to stay 3 while cursor (7) >= offset (3), got %d", m.offset)
+	}
+
+	// 3. Reverse scroll up past the top of the visible window: offset should follow cursor
+	// Moving up 6 more times brings cursor to 1, offset should become 1.
+	for i := 0; i < 6; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		m = newM.(sessionPickerModel)
+	}
+	if m.cursor != 1 {
+		t.Errorf("expected cursor 1, got %d", m.cursor)
+	}
+	if m.offset != 1 {
+		t.Errorf("expected offset 1 when cursor < previous offset, got %d", m.offset)
+	}
+
+	// Move up once more to reach index 0
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m = newM.(sessionPickerModel)
+	if m.cursor != 0 || m.offset != 0 {
+		t.Errorf("expected cursor=0, offset=0, got cursor=%d, offset=%d", m.cursor, m.offset)
+	}
+
+	viewTop := m.View()
+	if !strings.Contains(viewTop, "(showing 1-10 of 25 sessions)") {
+		t.Errorf("expected view to show 'showing 1-10 of 25 sessions', got:\n%s", viewTop)
+	}
+	if !strings.Contains(viewTop, "Session Number 00") {
+		t.Errorf("expected Session 00 to be visible at top, got:\n%s", viewTop)
+	}
+}
+
 
 

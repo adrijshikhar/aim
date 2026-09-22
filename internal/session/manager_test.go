@@ -265,4 +265,17 @@ func TestManager_FindAllSessionsByID(t *testing.T) {
 	if errEmpty == nil {
 		t.Errorf("expected error for empty session ID, got nil")
 	}
+
+	// 4. Ambiguous prefix within a profile surfaces error
+	sAmbig1 := session.NewSession("dup-ambig-1111", "Ambig 1", "agy", "work", false, time.Now())
+	sAmbig2 := session.NewSession("dup-ambig-2222", "Ambig 2", "agy", "work", false, time.Now())
+	mockAgy.sessions = append(mockAgy.sessions, sAmbig1, sAmbig2)
+
+	_, errAmbig := mgr.FindAllSessionsByID(ctx, "agy", "dup-ambig")
+	if errAmbig == nil {
+		t.Fatalf("expected error for ambiguous prefix, got nil")
+	}
+	if !strings.Contains(errAmbig.Error(), "ambiguous") {
+		t.Errorf("expected error message to contain 'ambiguous', got: %v", errAmbig)
+	}
 }

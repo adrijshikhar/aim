@@ -193,14 +193,26 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 					continue
 				}
 				profDir := filepath.Join(profilesDir, entry.Name())
-				if s, err := p.GetSession(ctx, idOrPrefix, profDir, false); err == nil && s != nil {
+				s, err := p.GetSession(ctx, idOrPrefix, profDir, false)
+				if err != nil {
+					logger.Debug("[session] error querying session %q in profile %q: %v", idOrPrefix, entry.Name(), err)
+					if strings.Contains(err.Error(), "ambiguous") {
+						return nil, err
+					}
+				} else if s != nil {
 					s.Profile = entry.Name()
 					s.IsHost = false
 					matches = append(matches, *s)
 				}
 			}
 			hostDir := config.RealHomeDir()
-			if s, err := p.GetSession(ctx, idOrPrefix, hostDir, true); err == nil && s != nil {
+			s, err := p.GetSession(ctx, idOrPrefix, hostDir, true)
+			if err != nil {
+				logger.Debug("[session] error querying session %q in host: %v", idOrPrefix, err)
+				if strings.Contains(err.Error(), "ambiguous") {
+					return nil, err
+				}
+			} else if s != nil {
 				s.Profile = "<host>"
 				s.IsHost = true
 				matches = append(matches, *s)

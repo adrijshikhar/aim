@@ -379,9 +379,13 @@ func TestResume_AIMSessionIDPropagation(t *testing.T) {
 	if strings.TrimSpace(string(content)) != "SESSION=test-short-99" {
 		t.Errorf("expected SESSION=test-short-99, got %q", string(content))
 	}
+	if !strings.Contains(buf.String(), "Resuming codex session test-short-99 under profile \"default\"") {
+		t.Errorf("expected regular resuming output, got: %s", buf.String())
+	}
 
 	// Case 2: forked resume with custom session ID
 	_ = os.Remove(dumpFile)
+	buf.Reset()
 	forkMgr := session.NewManager()
 	forkProv := &mockForkProvider{agent: "codex"}
 	forkMgr.RegisterProvider(forkProv)
@@ -398,6 +402,9 @@ func TestResume_AIMSessionIDPropagation(t *testing.T) {
 	expectedForkShort := session.ComputeShortID("forked-uuid-11112222")
 	if strings.TrimSpace(string(content)) != "SESSION="+expectedForkShort {
 		t.Errorf("expected SESSION=%s, got %q", expectedForkShort, string(content))
+	}
+	if !strings.Contains(buf.String(), expectedForkShort+" (forked from test-short-99)") {
+		t.Errorf("expected forked output with fork info, got: %s", buf.String())
 	}
 }
 

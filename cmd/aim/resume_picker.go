@@ -17,10 +17,25 @@ import (
 type sessionPickerModel struct {
 	sessions     []session.Session
 	cursor       int
+	offset       int
 	filterActive bool
 	filterInput  textinput.Model
 	selected     *session.Session
 	cancelled    bool
+}
+
+const maxVisible = 10
+
+func (m *sessionPickerModel) updateOffset() {
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+maxVisible {
+		m.offset = m.cursor - maxVisible + 1
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
 }
 
 func newSessionPickerModel(sessions []session.Session) sessionPickerModel {
@@ -34,6 +49,7 @@ func newSessionPickerModel(sessions []session.Session) sessionPickerModel {
 		sessions:    sessions,
 		filterInput: ti,
 		cursor:      0,
+		offset:      0,
 	}
 }
 
@@ -92,17 +108,20 @@ func (m sessionPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterInput.Blur()
 				m.filterInput.SetValue("")
 				m.cursor = 0
+				m.updateOffset()
 				return m, nil
 			case tea.KeyUp:
 				if m.cursor > 0 {
 					m.cursor--
 				}
+				m.updateOffset()
 				return m, nil
 			case tea.KeyDown:
 				filtered := m.filteredSessions()
 				if m.cursor < len(filtered)-1 {
 					m.cursor++
 				}
+				m.updateOffset()
 				return m, nil
 			default:
 				var cmd tea.Cmd
@@ -115,6 +134,7 @@ func (m sessionPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.cursor = 0
 					}
 				}
+				m.updateOffset()
 				return m, cmd
 			}
 		}
@@ -135,6 +155,7 @@ func (m sessionPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterInput.SetValue(string(msg.Runes[1:]))
 				m.cursor = 0
 			}
+			m.updateOffset()
 			return m, cmd
 		}
 
@@ -156,6 +177,7 @@ func (m sessionPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor >= len(filtered) {
 					m.cursor = len(filtered) - 1
 				}
+				m.updateOffset()
 				return m, nil
 			}
 			if allK {
@@ -163,6 +185,7 @@ func (m sessionPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
+				m.updateOffset()
 				return m, nil
 			}
 		}
@@ -175,12 +198,14 @@ func (m sessionPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor > 0 {
 				m.cursor--
 			}
+			m.updateOffset()
 			return m, nil
 		case "down":
 			filtered := m.filteredSessions()
 			if m.cursor < len(filtered)-1 {
 				m.cursor++
 			}
+			m.updateOffset()
 			return m, nil
 		}
 	}
@@ -207,19 +232,9 @@ func (m sessionPickerModel) View() string {
 		return b.String()
 	}
 
-	const maxVisible = 10
-	start := 0
-	if m.cursor >= maxVisible {
-		start = m.cursor - maxVisible + 1
-	}
-	end := start + maxVisible
-	if end > len(filtered) {
-		end = len(filtered)
-		start = end - maxVisible
-		if start < 0 {
-			start = 0
-		}
-	}
+	m.updateOffset()
+	start := m.offset
+	end := min(len(filtered), m.offset+maxVisible)
 
 	for i := start; i < end; i++ {
 		s := filtered[i]

@@ -238,20 +238,28 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	arrowStyle := lipgloss.NewStyle().Foreground(tui.AccentBlue).Bold(true)
 	cyanStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan)
 	boldStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
-	fmt.Fprintf(cmd.OutOrStdout(), "%s Resuming %s session %s under profile %q...\n",
+
+	displayID := sess.ShortID
+	forkInfo := ""
+	if fork {
+		displayID = session.ComputeShortID(resumeID)
+		if displayID == "" {
+			displayID = resumeID
+		}
+		if sess.ShortID != "" {
+			forkInfo = fmt.Sprintf(" (forked from %s)", sess.ShortID)
+		}
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "%s Resuming %s session %s%s under profile %q...\n",
 		arrowStyle.Render("➜"),
 		boldStyle.Render(agent),
-		cyanStyle.Render(sess.ShortID),
+		cyanStyle.Render(displayID),
+		forkInfo,
 		profile,
 	)
 
-	sessID := sess.ShortID
-	if fork {
-		sessID = session.ComputeShortID(resumeID)
-	}
-	if sessID == "" {
-		sessID = resumeID
-	}
+	sessID := displayID
 	code := executeRunWithSession(reg, pm, agent, profile, sessID, resumeArgs)
 	if code != 0 {
 		return &ExitError{Code: code}

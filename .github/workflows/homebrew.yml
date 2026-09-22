@@ -25,11 +25,14 @@ jobs:
     steps:
       - name: Determine Release Tag and Version
         id: meta
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          if [ -n "${{ github.event.release.tag_name }}" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          elif [ -n "${{ github.event.inputs.tag }}" ]; then
-            TAG="${{ github.event.inputs.tag }}"
+          if [ -n "$RELEASE_TAG" ]; then
+            TAG="$RELEASE_TAG"
+          elif [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
           else
             echo "Error: Neither release.tag_name nor inputs.tag was provided." >&2
             exit 1
@@ -46,10 +49,12 @@ jobs:
 
       - name: Download & Verify Release Checksums
         id: checksum
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          GITHUB_REPO: ${{ github.repository }}
         run: |
-          TAG="${{ steps.meta.outputs.tag }}"
-          VERSION="${{ steps.meta.outputs.version }}"
-          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}"
           CHECKSUMS_URL="${BASE_URL}/checksums.txt"
 
           echo "Downloading checksums.txt from $CHECKSUMS_URL"
@@ -100,13 +105,13 @@ jobs:
           path: tap
 
       - name: Update Cask Definition
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          SHA_DARWIN_ARM64: ${{ steps.checksum.outputs.sha_darwin_arm64 }}
+          SHA_DARWIN_AMD64: ${{ steps.checksum.outputs.sha_darwin_amd64 }}
+          SHA_LINUX_ARM64: ${{ steps.checksum.outputs.sha_linux_arm64 }}
+          SHA_LINUX_AMD64: ${{ steps.checksum.outputs.sha_linux_amd64 }}
         run: |
-          VERSION="${{ steps.meta.outputs.version }}"
-          SHA_DARWIN_ARM64="${{ steps.checksum.outputs.sha_darwin_arm64 }}"
-          SHA_DARWIN_AMD64="${{ steps.checksum.outputs.sha_darwin_amd64 }}"
-          SHA_LINUX_ARM64="${{ steps.checksum.outputs.sha_linux_arm64 }}"
-          SHA_LINUX_AMD64="${{ steps.checksum.outputs.sha_linux_amd64 }}"
-
           CASK_PATH="tap/Casks/aim.rb"
           mkdir -p tap/Casks
 
@@ -166,6 +171,8 @@ jobs:
           aim -v
 
       - name: Commit and Push to Tap
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
         run: |
           cd tap
           git config user.name "github-actions[bot]"
@@ -174,6 +181,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes detected in tap definition, skipping push."
           else
-            git commit -m "feat(aim): update to ${{ steps.meta.outputs.version }} (verified & audited)"
+            git commit -m "feat(aim): update to ${VERSION} (verified & audited)"
             git push origin main
           fi
