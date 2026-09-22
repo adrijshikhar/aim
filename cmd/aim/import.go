@@ -127,7 +127,7 @@ Flags:
 			return nil
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return completeAgentAndProfile(reg, pm, args, toComplete)
+			return completeAgentProfileAndSession(reg, pm, args, toComplete)
 		},
 	}
 

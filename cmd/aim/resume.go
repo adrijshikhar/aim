@@ -151,7 +151,7 @@ Flags:
 			return executeExactResume(cmd, reg, pm, mgr, agentName, profileName, pDir, sess, forkFlag, extraArgs)
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return completeAgentAndProfile(reg, pm, args, toComplete)
+			return completeAgentProfileAndSession(reg, pm, args, toComplete)
 		},
 	}
 
