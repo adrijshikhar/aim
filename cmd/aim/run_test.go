@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,10 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/codex"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/session"
 )
 
 func TestRunCmd_ProfileExists_NoPrompt(t *testing.T) {
@@ -559,5 +562,87 @@ func TestRunAndResume_AIMSessionIDPropagation(t *testing.T) {
 	}
 	if strings.TrimSpace(string(content)) != "SESSION=" {
 		t.Errorf("expected empty SESSION, got %q", string(content))
+	}
+}
+
+type testRunProvider struct {
+	agent   string
+	session session.Session
+}
+
+func (p *testRunProvider) Agent() string { return p.agent }
+func (p *testRunProvider) ListSessions(ctx context.Context, profileDir string, isHost bool) ([]session.Session, error) {
+	return []session.Session{p.session}, nil
+}
+func (p *testRunProvider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
+	if strings.HasPrefix(p.session.ID, idOrPrefix) || strings.HasPrefix(p.session.ShortID, idOrPrefix) {
+		copy := p.session
+		return &copy, nil
+	}
+	return nil, nil
+}
+func (p *testRunProvider) Hydrate(ctx context.Context, srcSession *session.Session, destProfileDir string, fork bool) (string, error) {
+	return srcSession.ID, nil
+}
+
+func TestRunCmd_ExpandsShortPrefixToFullUUID(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	reg.Register(codex.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	fullUUID := "01a0c8fe-ec30-7b22-bf66-1edcc7516885"
+	shortID := "01a0c8fe"
+
+	sess := session.Session{
+		ID:           fullUUID,
+		ShortID:      shortID,
+		Agent:        "codex",
+		Profile:      "work",
+		LastActiveAt: time.Now(),
+	}
+
+	mockMgr := session.NewManager()
+	mockMgr.RegisterProvider(&testRunProvider{
+		agent:   "codex",
+		session: sess,
+	})
+	oldMgrFunc := defaultSessionManager
+	defaultSessionManager = func() *session.Manager {
+		return mockMgr
+	}
+	t.Cleanup(func() {
+		defaultSessionManager = oldMgrFunc
+	})
+
+	dumpFile := filepath.Join(tempDir, "args_dump.txt")
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeCodex := filepath.Join(fakeBinDir, "codex")
+	fakeScript := fmt.Sprintf("#!/bin/sh\necho \"$@\" > %q\nexit 0\n", dumpFile)
+	_ = os.WriteFile(fakeCodex, []byte(fakeScript), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "codex", "work", "resume", shortID})
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("aim run failed: %v", err)
+	}
+
+	content, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("failed to read args dump: %v", err)
+	}
+	expected := "resume " + fullUUID + "\n"
+	if string(content) != expected {
+		t.Errorf("expected args %q, got %q", expected, string(content))
 	}
 }

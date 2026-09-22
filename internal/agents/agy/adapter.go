@@ -456,6 +456,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	envMap["AIM_PROFILE"] = profileName
 	envMap["AIM_HOME"] = config.BaseDir()
 	delete(envMap, "GEMINI_CLI_HOME")
+	delete(envMap, "AIM_SESSION_ID")
 
 	logger.Debug("[agy] Launch env: HOME=%s, AIM_AGENT=%s, AIM_PROFILE=%s, AIM_HOME=%s", profileDir, a.Name(), profileName, config.BaseDir())
 

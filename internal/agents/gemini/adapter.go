@@ -62,6 +62,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	envMap["GEMINI_CLI_HOME"] = filepath.Join(profileDir, ".gemini")
 	envMap["AIM_AGENT"] = a.Name()
 	envMap["AIM_PROFILE"] = profileName
+	delete(envMap, "AIM_SESSION_ID")
 	cwd, _ := os.Getwd()
 	return agents.LaunchEnv{
 		BinaryPath: bin,

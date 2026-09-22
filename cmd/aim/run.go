@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -61,8 +62,13 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			}
 
 			mgr := defaultSessionManager()
-			if err := ensureRunSessionHydrated(cmd, pm, mgr, agentName, profileName, extraArgs); err != nil {
+			resolvedID, err := ensureRunSessionHydrated(cmd, pm, mgr, agentName, profileName, extraArgs)
+			if err != nil {
 				return err
+			}
+			if resolvedID != "" {
+				sessID := extractResumedSessionID(extraArgs)
+				extraArgs = replaceResumedSessionID(extraArgs, sessID, resolvedID)
 			}
 
 			sessID := extractResumedSessionID(extraArgs)
@@ -163,10 +169,41 @@ func extractResumedSessionID(extraArgs []string) string {
 	return runner.ExtractSessionID(extraArgs)
 }
 
-func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mgr *session.Manager, agentName, profileName string, extraArgs []string) error {
+func replaceResumedSessionID(extraArgs []string, oldID, newID string) []string {
+	if oldID == "" || newID == "" || oldID == newID {
+		return extraArgs
+	}
+	res := make([]string, len(extraArgs))
+	copy(res, extraArgs)
+	for i := 0; i < len(res); i++ {
+		if res[i] == "resume" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if res[i] == "-c" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if strings.HasPrefix(res[i], "-c=") && res[i][3:] == oldID {
+			res[i] = "-c=" + newID
+			break
+		}
+		if res[i] == "--conversation" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if strings.HasPrefix(res[i], "--conversation=") && res[i][15:] == oldID {
+			res[i] = "--conversation=" + newID
+			break
+		}
+	}
+	return res
+}
+
+func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mgr *session.Manager, agentName, profileName string, extraArgs []string) (string, error) {
 	sessionID := extractResumedSessionID(extraArgs)
 	if sessionID == "" {
-		return nil
+		return "", nil
 	}
 
 	if mgr == nil {
@@ -181,23 +218,24 @@ func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mg
 	latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agentName, sessionID)
 	if err != nil || latest == nil {
 		logger.Debug("[run] Session %q not found across profiles during auto-hydrate check: %v", sessionID, err)
-		return nil
+		return "", nil
 	}
 
-	// If the latest copy is already native to the target profile, no hydration is needed
+	// If the latest copy is already native to the target profile, no hydration is needed,
+	// but return the resolved full ID so caller can expand short prefixes in extraArgs.
 	if latest.Profile == profileName && !latest.IsHost {
-		return nil
+		return latest.ID, nil
 	}
 
 	pDir, err := pm.EnsureProfile(profileName)
 	if err != nil {
-		return fmt.Errorf("failed to ensure profile %q: %w", profileName, err)
+		return "", fmt.Errorf("failed to ensure profile %q: %w", profileName, err)
 	}
 
 	prov := mgr.Provider(agentName)
 	if prov == nil {
 		logger.Debug("[run] No session provider registered for agent %q", agentName)
-		return nil
+		return latest.ID, nil
 	}
 
 	destSess, err := prov.GetSession(ctx, sessionID, pDir, false)
@@ -226,9 +264,9 @@ func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mg
 
 		_, err = prov.Hydrate(ctx, latest, pDir, false)
 		if err != nil {
-			return fmt.Errorf("failed to auto-hydrate session %q into profile %q: %w", sessionID, profileName, err)
+			return "", fmt.Errorf("failed to auto-hydrate session %q into profile %q: %w", sessionID, profileName, err)
 		}
 	}
 
-	return nil
+	return latest.ID, nil
 }
