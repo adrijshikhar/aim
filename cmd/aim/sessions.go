@@ -11,6 +11,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/session/providers/agy"
+	claudesess "github.com/aim-cli/aim/internal/session/providers/claude"
 	"github.com/aim-cli/aim/internal/session/providers/codex"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
@@ -22,6 +23,7 @@ var defaultSessionManager = func() *session.Manager {
 	mgr := session.NewManager()
 	mgr.RegisterProvider(agy.NewProvider())
 	mgr.RegisterProvider(codex.NewProvider())
+	mgr.RegisterProvider(claudesess.NewProvider())
 	return mgr
 }
 
@@ -46,7 +48,7 @@ Aliases:
 
 Flags:
   -p, --profile <name>  Filter by profile name (use "host" for host-only)
-  -a, --agent <name>    Filter by agent (agy, codex, etc.)
+  -a, --agent <name>    Filter by agent (agy, codex, claude, etc.)
       --active          Show only currently active sessions
       --all             Show full history (default limits to 20 most recent)
       --json            Output raw JSON for scripting and automation`,
@@ -98,7 +100,7 @@ Flags:
 	}
 
 	cmd.Flags().StringVarP(&profileFlag, "profile", "p", "", "Filter by profile name (or 'host')")
-	cmd.Flags().StringVarP(&agentFlag, "agent", "a", "", "Filter by agent (agy, codex)")
+	cmd.Flags().StringVarP(&agentFlag, "agent", "a", "", "Filter by agent (agy, codex, claude)")
 	cmd.Flags().BoolVar(&activeFlag, "active", false, "Show only currently active sessions")
 	cmd.Flags().BoolVar(&allFlag, "all", false, "Show full history (default limits to 20)")
 	cmd.Flags().BoolVar(&jsonFlag, "json", false, "Output raw JSON for scripting")
@@ -258,7 +260,7 @@ func newSessionsShowCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra
 		Long: `Show detailed preview, goal summary, storage path, and status for a specific conversation session.
 
 Arguments:
-  [agent]       Optional agent filter (agy, codex)
+  [agent]       Optional agent filter (agy, codex, claude)
   <session-id>  Full UUID or short prefix (e.g. 8 chars)
 
 Aliases:
@@ -308,7 +310,7 @@ Aliases:
 		},
 	}
 
-	cmd.Flags().StringVarP(&agentFlag, "agent", "a", "", "Filter by agent (agy, codex)")
+	cmd.Flags().StringVarP(&agentFlag, "agent", "a", "", "Filter by agent (agy, codex, claude)")
 	cmd.Flags().BoolVar(&jsonFlag, "json", false, "Output raw JSON for scripting")
 
 	return cmd

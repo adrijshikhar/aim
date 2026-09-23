@@ -5,6 +5,10 @@ import (
 	"runtime/debug"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/agents/agy"
+	"github.com/aim-cli/aim/internal/agents/claude"
+	"github.com/aim-cli/aim/internal/agents/codex"
+	"github.com/aim-cli/aim/internal/agents/gemini"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
@@ -50,7 +54,20 @@ func (e *ExitError) Error() string {
 	return fmt.Sprintf("exit code %d", e.Code)
 }
 
+// defaultRegistry returns a new registry populated with all core agent adapters.
+func defaultRegistry() *agents.Registry {
+	reg := agents.NewRegistry()
+	reg.Register(agy.NewAdapter())
+	reg.Register(gemini.NewAdapter())
+	reg.Register(codex.NewAdapter())
+	reg.Register(claude.NewAdapter())
+	return reg
+}
+
 func newRootCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
+	if reg == nil {
+		reg = defaultRegistry()
+	}
 	rootCmd := &cobra.Command{
 		Use:   "aim [command] [agent] [profile] [flags] [-- args...]",
 		Short: "AIM (AI Multiplexer) - Isolated Profile Manager for AI Agents",

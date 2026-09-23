@@ -98,6 +98,39 @@ func ExtractSessionID(args []string) string {
 				return args[i+1]
 			}
 		}
+		if strings.HasPrefix(arg, "--resume=") {
+			val := strings.TrimPrefix(arg, "--resume=")
+			if val != "" {
+				return val
+			}
+		}
+		if arg == "--resume" && i+1 < len(args) {
+			if !strings.HasPrefix(args[i+1], "-") {
+				return args[i+1]
+			}
+		}
+		if strings.HasPrefix(arg, "-r=") {
+			val := strings.TrimPrefix(arg, "-r=")
+			if val != "" {
+				return val
+			}
+		}
+		if arg == "-r" && i+1 < len(args) {
+			if !strings.HasPrefix(args[i+1], "-") {
+				return args[i+1]
+			}
+		}
+		if strings.HasPrefix(arg, "--session-id=") {
+			val := strings.TrimPrefix(arg, "--session-id=")
+			if val != "" {
+				return val
+			}
+		}
+		if arg == "--session-id" && i+1 < len(args) {
+			if !strings.HasPrefix(args[i+1], "-") {
+				return args[i+1]
+			}
+		}
 	}
 	return ""
 }

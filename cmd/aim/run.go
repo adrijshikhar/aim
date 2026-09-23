@@ -196,6 +196,30 @@ func replaceResumedSessionID(extraArgs []string, oldID, newID string) []string {
 			res[i] = "--conversation=" + newID
 			break
 		}
+		if res[i] == "--resume" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if strings.HasPrefix(res[i], "--resume=") && res[i][9:] == oldID {
+			res[i] = "--resume=" + newID
+			break
+		}
+		if res[i] == "-r" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if strings.HasPrefix(res[i], "-r=") && res[i][3:] == oldID {
+			res[i] = "-r=" + newID
+			break
+		}
+		if res[i] == "--session-id" && i+1 < len(res) && res[i+1] == oldID {
+			res[i+1] = newID
+			break
+		}
+		if strings.HasPrefix(res[i], "--session-id=") && res[i][13:] == oldID {
+			res[i] = "--session-id=" + newID
+			break
+		}
 	}
 	return res
 }

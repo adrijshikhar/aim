@@ -9,6 +9,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
+	"github.com/aim-cli/aim/internal/agents/claude"
 	"github.com/aim-cli/aim/internal/agents/codex"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
@@ -60,6 +61,7 @@ func setupCompletionTestEnv(t *testing.T) (*agents.Registry, *profile.ProfileMan
 	reg := agents.NewRegistry()
 	reg.Register(codex.NewAdapter())
 	reg.Register(agy.NewAdapter())
+	reg.Register(claude.NewAdapter())
 
 	pm := profile.NewProfileManager(tempDir)
 	_, _ = pm.EnsureProfile("work")
@@ -217,14 +219,20 @@ func TestCompleteSessionIDs(t *testing.T) {
 			t.Errorf("expected NoFileComp directive, got %v", directive)
 		}
 		foundCodex := false
+		foundClaude := false
 		for _, c := range comps {
 			if strings.HasPrefix(c, "codex") {
 				foundCodex = true
-				break
+			}
+			if strings.HasPrefix(c, "claude") {
+				foundClaude = true
 			}
 		}
 		if !foundCodex {
 			t.Errorf("expected agent completions to include codex, got: %v", comps)
+		}
+		if !foundClaude {
+			t.Errorf("expected agent completions to include claude, got: %v", comps)
 		}
 
 		// 1 arg -> completes profiles
@@ -295,4 +303,18 @@ func TestCompleteSessionIDs(t *testing.T) {
 			t.Errorf("expected 3 completions even with nil pm, got: %v", comps)
 		}
 	})
+}
+
+func TestCompleteAgents_IncludesClaude(t *testing.T) {
+	comps := completeAgents(nil, "")
+	foundClaude := false
+	for _, c := range comps {
+		if strings.HasPrefix(c, "claude") {
+			foundClaude = true
+			break
+		}
+	}
+	if !foundClaude {
+		t.Errorf("expected completeAgents to include claude, got: %v", comps)
+	}
 }

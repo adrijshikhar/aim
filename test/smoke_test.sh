@@ -41,6 +41,20 @@ echo "mock codex executed with args: $@"
 MOCK
 chmod +x "$MOCK_BIN/codex"
 
+cat << 'MOCK' > "$MOCK_BIN/claude"
+#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "claude 1.0.0"
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "login" ]; then
+  echo "mock claude login successful"
+  exit 0
+fi
+echo "mock claude executed with args: $@"
+MOCK
+chmod +x "$MOCK_BIN/claude"
+
 export PATH="$MOCK_BIN:$PATH"
 
 echo "=== 1. Testing help & version ==="
@@ -51,6 +65,7 @@ echo "=== 2. Testing initial empty listing ==="
 "$AIM_BIN" list agy | grep "No profiles found"
 "$AIM_BIN" list gemini | grep "No profiles found"
 "$AIM_BIN" list codex | grep "No profiles found"
+"$AIM_BIN" list claude | grep "No profiles found"
 
 echo "=== 3. Testing dotfile isolation & running agy ==="
 mkdir -p "$TEST_AIM_HOME/fake_home/.agents/skills"
@@ -130,12 +145,15 @@ echo "=== 6. Testing shell completion ==="
 "$AIM_BIN" __complete run | grep "agy"
 "$AIM_BIN" __complete run | grep "gemini"
 "$AIM_BIN" __complete run | grep "codex"
+"$AIM_BIN" __complete run | grep "claude"
 "$AIM_BIN" __complete clone | grep "agy"
 "$AIM_BIN" __complete clone | grep "gemini"
 "$AIM_BIN" __complete clone | grep "codex"
+"$AIM_BIN" __complete clone | grep "claude"
 "$AIM_BIN" __complete mv | grep "agy"
 "$AIM_BIN" __complete mv | grep "gemini"
 "$AIM_BIN" __complete mv | grep "codex"
+"$AIM_BIN" __complete mv | grep "claude"
 
 # 6. aim __complete run emits configured profiles (e.g. smoke_profile)
 "$AIM_BIN" __complete run agy | grep "smoke_profile"
@@ -337,6 +355,7 @@ DOCTOR_EMPTY="$("$AIM_BIN" doctor)"
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"agy\""
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"gemini\""
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"codex\""
+echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"claude\""
 
 echo "=== 15. Testing sessions, resume & import CLI commands ==="
 # Test sessions help
@@ -361,5 +380,40 @@ if "$AIM_BIN" sessions import 2>/dev/null; then
   exit 1
 fi
 echo "Sessions, resume & import CLI commands OK!"
+
+echo "=== 16. Testing Claude Code adapter (run, doctor, sessions, resume) ==="
+# 1. Test aim run claude testprof
+RUN_CLAUDE="$("$AIM_BIN" run claude testprof -- echo "hello claude")"
+echo "$RUN_CLAUDE" | grep "mock claude executed with args: echo hello claude"
+[ -d "$TEST_AIM_HOME/profiles/testprof/.claude" ]
+"$AIM_BIN" list claude | grep "testprof"
+
+# 2. Test aim doctor claude testprof
+DOCTOR_CLAUDE="$("$AIM_BIN" doctor claude)"
+echo "$DOCTOR_CLAUDE" | grep "Claude installed (claude 1.0.0"
+echo "$DOCTOR_CLAUDE" | grep "Storage directory"
+
+# 3. Seed a session for claude in testprof
+PROJ_SLUG="-Users-test-projects-aim"
+mkdir -p "$TEST_AIM_HOME/profiles/testprof/.claude/projects/$PROJ_SLUG"
+CLAUDE_SESS_ID="c24699d0-820f-435f-b4e4-eaf8440311b4"
+cat << 'JSONL' > "$TEST_AIM_HOME/profiles/testprof/.claude/projects/$PROJ_SLUG/$CLAUDE_SESS_ID.jsonl"
+{"type":"last-prompt","leafUuid":"leaf-1","sessionId":"c24699d0-820f-435f-b4e4-eaf8440311b4"}
+{"type":"user","message":{"role":"user","content":"Claude smoke test session"},"timestamp":"2026-09-23T12:00:00.000Z","sessionId":"c24699d0-820f-435f-b4e4-eaf8440311b4"}
+JSONL
+
+# 4. Test aim sessions claude
+SESSIONS_CLAUDE="$("$AIM_BIN" sessions claude -p testprof)"
+echo "$SESSIONS_CLAUDE" | grep "c24699d0"
+echo "$SESSIONS_CLAUDE" | grep "Claude smoke test session"
+
+# 5. Test aim resume claude testprof c24699d0
+RESUME_CLAUDE="$("$AIM_BIN" resume claude testprof c24699d0)"
+echo "$RESUME_CLAUDE" | grep "mock claude executed with args: --resume c24699d0-820f-435f-b4e4-eaf8440311b4"
+
+# 6. Clean up testprof
+"$AIM_BIN" remove claude testprof
+[ ! -d "$TEST_AIM_HOME/profiles/testprof" ]
+echo "Claude Code adapter smoke tests OK!"
 
 echo "ALL SMOKE TESTS PASSED!"

@@ -14,7 +14,7 @@ import (
 
 func completeAgents(reg *agents.Registry, toComplete string) []string {
 	if reg == nil {
-		return nil
+		reg = defaultRegistry()
 	}
 	var res []string
 	toCompleteLower := strings.ToLower(toComplete)

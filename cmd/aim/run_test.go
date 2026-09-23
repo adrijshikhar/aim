@@ -646,3 +646,126 @@ func TestRunCmd_ExpandsShortPrefixToFullUUID(t *testing.T) {
 		t.Errorf("expected args %q, got %q", expected, string(content))
 	}
 }
+
+func TestReplaceResumedSessionID(t *testing.T) {
+	tests := []struct {
+		name      string
+		extraArgs []string
+		oldID     string
+		newID     string
+		expected  []string
+	}{
+		{
+			name:      "--resume space-separated",
+			extraArgs: []string{"--resume", "old-123", "--extra"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"--resume", "new-456", "--extra"},
+		},
+		{
+			name:      "--resume= equal-separated",
+			extraArgs: []string{"--resume=old-123", "--extra"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"--resume=new-456", "--extra"},
+		},
+		{
+			name:      "-r space-separated",
+			extraArgs: []string{"-r", "old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"-r", "new-456"},
+		},
+		{
+			name:      "-r= equal-separated",
+			extraArgs: []string{"-r=old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"-r=new-456"},
+		},
+		{
+			name:      "--session-id space-separated",
+			extraArgs: []string{"--session-id", "old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"--session-id", "new-456"},
+		},
+		{
+			name:      "--session-id= equal-separated",
+			extraArgs: []string{"--session-id=old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"--session-id=new-456"},
+		},
+		{
+			name:      "codex resume subcommand",
+			extraArgs: []string{"resume", "old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"resume", "new-456"},
+		},
+		{
+			name:      "-c space-separated",
+			extraArgs: []string{"-c", "old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"-c", "new-456"},
+		},
+		{
+			name:      "-c= equal-separated",
+			extraArgs: []string{"-c=old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"-c=new-456"},
+		},
+		{
+			name:      "--conversation space-separated",
+			extraArgs: []string{"--conversation", "old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"--conversation", "new-456"},
+		},
+		{
+			name:      "--conversation= equal-separated",
+			extraArgs: []string{"--conversation=old-123"},
+			oldID:     "old-123",
+			newID:     "new-456",
+			expected:  []string{"--conversation=new-456"},
+		},
+		{
+			name:      "empty oldID",
+			extraArgs: []string{"--resume", "old-123"},
+			oldID:     "",
+			newID:     "new-456",
+			expected:  []string{"--resume", "old-123"},
+		},
+		{
+			name:      "empty newID",
+			extraArgs: []string{"--resume", "old-123"},
+			oldID:     "old-123",
+			newID:     "",
+			expected:  []string{"--resume", "old-123"},
+		},
+		{
+			name:      "identical oldID and newID",
+			extraArgs: []string{"--resume", "same-123"},
+			oldID:     "same-123",
+			newID:     "same-123",
+			expected:  []string{"--resume", "same-123"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := replaceResumedSessionID(tt.extraArgs, tt.oldID, tt.newID)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("expected len %d, got %d: %v", len(tt.expected), len(got), got)
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Errorf("got[%d] = %q, want %q", i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
