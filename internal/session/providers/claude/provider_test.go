@@ -430,3 +430,61 @@ func TestProvider_MissingProjectsDirectory(t *testing.T) {
 		t.Fatalf("expected 0 sessions on nonexistent projects dir, got %d", len(sessions))
 	}
 }
+
+func TestProvider_Hydrate_SameFileNoTruncate(t *testing.T) {
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, "work")
+	projectSlug := "-Users-nemesis-Projects-aim"
+	projDir := filepath.Join(profileDir, ".claude", "projects", projectSlug)
+	if err := os.MkdirAll(projDir, 0755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+
+	sessionUUID := "d24699d0-820f-435f-b4e4-eaf8440311b4"
+	jsonlContent := `{"type":"user","message":{"role":"user","content":"Do not truncate me"},"sessionId":"` + sessionUUID + `"}` + "\n"
+	sessionFile := filepath.Join(projDir, sessionUUID+".jsonl")
+	if err := os.WriteFile(sessionFile, []byte(jsonlContent), 0644); err != nil {
+		t.Fatalf("failed to write session file: %v", err)
+	}
+
+	p := NewProvider()
+	ctx := context.Background()
+
+	sess, err := p.GetSession(ctx, sessionUUID, profileDir, false)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+
+	// Hydrate into the same profile directory without fork
+	returnedID, err := p.Hydrate(ctx, sess, profileDir, false)
+	if err != nil {
+		t.Fatalf("Hydrate on same file failed: %v", err)
+	}
+	if returnedID != sessionUUID {
+		t.Errorf("expected %s, got %s", sessionUUID, returnedID)
+	}
+
+	data, err := os.ReadFile(sessionFile)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if string(data) != jsonlContent {
+		t.Errorf("file was corrupted or truncated: got %q", string(data))
+	}
+}
+
+func TestProvider_ListSessions_ContextCanceled(t *testing.T) {
+	tempDir := t.TempDir()
+	projDir := filepath.Join(tempDir, ".claude", "projects", "slug1")
+	_ = os.MkdirAll(projDir, 0755)
+
+	p := NewProvider()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel context
+
+	_, err := p.ListSessions(ctx, tempDir, false)
+	if err == nil {
+		t.Fatalf("expected context cancellation error, got nil")
+	}
+}
+

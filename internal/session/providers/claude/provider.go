@@ -53,6 +53,9 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 
 	var results []session.Session
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !entry.IsDir() {
 			continue
 		}
@@ -196,6 +199,9 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 	}
 
 	destFile := filepath.Join(destDir, destID+".jsonl")
+	if !fork && filepath.Clean(srcFile) == filepath.Clean(destFile) {
+		return destID, nil
+	}
 	if fork {
 		if err := copyJSONLWithReplace(srcFile, destFile, srcSession.ID, destID); err != nil {
 			return "", fmt.Errorf("failed to copy forked session to %s: %w", destFile, err)
