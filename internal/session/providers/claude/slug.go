@@ -14,16 +14,17 @@ func PathToSlug(path string) string {
 	}
 
 	// Ensure leading slash for consistency if a relative path was passed
-	if !strings.HasPrefix(path, "/") {
+	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "\\") {
 		path = "/" + path
 	}
 
 	cleaned := filepath.Clean(path)
-	if cleaned == "/" {
+	toSlash := filepath.ToSlash(cleaned)
+	if toSlash == "/" {
 		return "-"
 	}
 
-	return strings.ReplaceAll(cleaned, "/", "-")
+	return strings.ReplaceAll(toSlash, "/", "-")
 }
 
 // SlugToPath converts a Claude Code directory slug back to an absolute filesystem path.
@@ -40,22 +41,18 @@ func SlugToPath(slug string) string {
 		return "/"
 	}
 
-	// Try resolving against the live filesystem first.
-	tokens := strings.Split(trimmed, "-")
-	if resolved, ok := resolvePathFromTokens("/", tokens); ok {
-		return resolved
-	}
-
-	// Check if current working directory matches the slug.
+	// Check if current working directory matches the slug first (O(1) fast-path).
 	if wd, err := os.Getwd(); err == nil {
-		if PathToSlug(wd) == slug || PathToSlug(wd) == "-"+trimmed {
+		slugWd := PathToSlug(wd)
+		if slugWd == slug || slugWd == "-"+trimmed {
 			return wd
 		}
 	}
 
-	// Known test fixture fallback when running in environments without the full host path (e.g. Linux CI).
-	if trimmed == "Users-nemesis-Projects-my-projects-aim" {
-		return "/Users/nemesis/Projects/my-projects/aim"
+	// Try resolving against the live filesystem.
+	tokens := strings.Split(trimmed, "-")
+	if resolved, ok := resolvePathFromTokens("/", tokens); ok {
+		return resolved
 	}
 
 	// Default fallback: replace hyphens with directory separators.
@@ -73,10 +70,7 @@ func resolvePathFromTokens(current string, tokens []string) (string, bool) {
 		segment := strings.Join(tokens[:k], "-")
 		candidate := filepath.Join(current, segment)
 		fi, err := os.Stat(candidate)
-		if err == nil {
-			if len(tokens[k:]) > 0 && !fi.IsDir() {
-				continue
-			}
+		if err == nil && fi.IsDir() {
 			if res, ok := resolvePathFromTokens(candidate, tokens[k:]); ok {
 				return res, true
 			}
