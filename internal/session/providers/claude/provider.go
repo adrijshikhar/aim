@@ -494,7 +494,10 @@ func copyJSONLWithReplace(src, dst, oldUUID, newUUID string) (err error) {
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			replaced := bytes.ReplaceAll(line, oldBytes, newBytes)
+			replaced := line
+			if bytes.Contains(line, oldBytes) {
+				replaced = bytes.ReplaceAll(line, oldBytes, newBytes)
+			}
 			if _, wErr := writer.Write(replaced); wErr != nil {
 				return fmt.Errorf("failed to write to %s: %w", dst, wErr)
 			}
