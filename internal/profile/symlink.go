@@ -48,6 +48,12 @@ var defaultBridgedPaths = []string{
 	// AI Agent Skills & Instructions
 	".agents",
 
+	// Claude Code ecosystem bridging
+	filepath.Join(".claude", "plugins"),
+	filepath.Join(".claude", "skills"),
+	filepath.Join(".claude", "rules"),
+	filepath.Join(".claude", "commands"),
+
 	// Terminal & Statusline Tooling
 	".config/cxstatusline",
 }
@@ -91,8 +97,19 @@ func isAllowedBridgedPath(clean string) bool {
 	if clean == ".gemini" || strings.HasPrefix(clean, ".gemini"+string(filepath.Separator)) {
 		return false
 	}
-	if clean == ".claude" || strings.HasPrefix(clean, ".claude"+string(filepath.Separator)) || clean == ".claude.json" {
+	if clean == ".claude" || clean == ".claude.json" {
 		return false
+	}
+	if strings.HasPrefix(clean, ".claude"+string(filepath.Separator)) {
+		// Allow specific non-credential Claude extensions to be bridged
+		rel := strings.TrimPrefix(clean, ".claude"+string(filepath.Separator))
+		top := strings.Split(rel, string(filepath.Separator))[0]
+		switch top {
+		case "plugins", "skills", "rules", "commands":
+			return true
+		default:
+			return false
+		}
 	}
 	if clean == ".codex" || strings.HasPrefix(clean, ".codex"+string(filepath.Separator)) {
 		return false

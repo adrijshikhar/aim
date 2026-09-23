@@ -58,6 +58,18 @@ var DefaultIgnoredKeychainEntries = []IgnoredKeychainEntry{
 	// Claude Code CLI
 	{
 		Agent:       "claude",
+		Service:     "Claude Safe Storage",
+		Account:     "",
+		Description: "Claude Safe Storage credentials",
+	},
+	{
+		Agent:       "claude",
+		Service:     "Claude Code-credentials",
+		Account:     "",
+		Description: "Claude Code credentials",
+	},
+	{
+		Agent:       "claude",
 		Service:     "claude",
 		Account:     "",
 		Description: "Claude CLI token",
@@ -73,12 +85,6 @@ var DefaultIgnoredKeychainEntries = []IgnoredKeychainEntry{
 		Service:     "@anthropic-ai/claude-code",
 		Account:     "",
 		Description: "Anthropic Claude Code token",
-	},
-	{
-		Agent:       "claude",
-		Service:     "Claude Code-credentials",
-		Account:     "",
-		Description: "Claude Code credentials",
 	},
 
 	// OpenAI Codex CLI
@@ -349,4 +355,49 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 	}
 
 	return false
+}
+
+var claudeKeychainServices = []string{
+	"Claude Safe Storage",
+	"Claude Code-credentials",
+}
+
+// KnownKeychainServices returns a list of known keychain service names.
+// If an agent is specified, only services associated with that agent are returned.
+// If no agent is specified, all known keychain services across all agents are returned.
+func KnownKeychainServices(agent ...string) []string {
+	var targetAgent string
+	if len(agent) > 0 {
+		targetAgent = agent[0]
+	}
+
+	var services []string
+	seen := make(map[string]bool)
+
+	for _, entry := range DefaultIgnoredKeychainEntries {
+		if targetAgent != "" && entry.Agent != targetAgent {
+			continue
+		}
+		if !seen[entry.Service] {
+			seen[entry.Service] = true
+			services = append(services, entry.Service)
+		}
+	}
+
+	// Ensure claudeKeychainServices are present when querying for claude or all
+	if targetAgent == "" || targetAgent == "claude" {
+		for _, s := range claudeKeychainServices {
+			if !seen[s] {
+				seen[s] = true
+				services = append(services, s)
+			}
+		}
+	}
+
+	return services
+}
+
+// PurgeAgentKeychain scrubs credentials for the specified agent from the macOS Keychain.
+func PurgeAgentKeychain(agent string) error {
+	return PurgeIgnoredKeychains(agent)
 }

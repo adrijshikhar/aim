@@ -373,3 +373,44 @@ func TestEnsureDotfiles_SecurityBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+
+	// Create host Claude directories
+	hostPlugins := filepath.Join(hostHome, ".claude", "plugins")
+	hostSkills := filepath.Join(hostHome, ".claude", "skills")
+	hostRules := filepath.Join(hostHome, ".claude", "rules")
+	hostCommands := filepath.Join(hostHome, ".claude", "commands")
+	for _, d := range []string{hostPlugins, hostSkills, hostRules, hostCommands} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatalf("failed to create host dir: %v", err)
+		}
+	}
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		t.Fatalf("failed to create profile dir: %v", err)
+	}
+
+	if err := EnsureDotfiles(hostHome, profileDir); err != nil {
+		t.Fatalf("EnsureDotfiles failed: %v", err)
+	}
+
+	for _, rel := range []string{
+		filepath.Join(".claude", "plugins"),
+		filepath.Join(".claude", "skills"),
+		filepath.Join(".claude", "rules"),
+		filepath.Join(".claude", "commands"),
+	} {
+		p := filepath.Join(profileDir, rel)
+		info, err := os.Lstat(p)
+		if err != nil {
+			t.Errorf("expected symlink at %s, got error: %v", p, err)
+			continue
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("expected %s to be a symlink", p)
+		}
+	}
+}
