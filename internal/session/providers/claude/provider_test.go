@@ -487,4 +487,3 @@ func TestProvider_ListSessions_ContextCanceled(t *testing.T) {
 		t.Fatalf("expected context cancellation error, got nil")
 	}
 }
-
