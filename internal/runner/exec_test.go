@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -255,5 +256,43 @@ func TestRunner_ExpiredToken_OmittedSSHConnection(t *testing.T) {
 	code, err := r.Run(context.Background(), envExpired, []string{checkScript})
 	if err != nil || code != 0 {
 		t.Fatalf("expected exit code 0 (SSH_CONNECTION omitted for expired token), got %d, err: %v", code, err)
+	}
+}
+
+func TestBuildEnv_ClaudeConfigDir(t *testing.T) {
+	environ := []string{
+		"CLAUDE_CONFIG_DIR=/host/unwanted/claude",
+		"CODEX_HOME=/host/unwanted/codex",
+		"OTHER_VAR=hello",
+	}
+
+	// Case 1: launchEnv does NOT contain CLAUDE_CONFIG_DIR - host value must be filtered out
+	launchEnv1 := map[string]string{
+		"HOME": "/profile/dir",
+	}
+	env1 := BuildEnv(environ, launchEnv1)
+	for _, e := range env1 {
+		if strings.HasPrefix(e, "CLAUDE_CONFIG_DIR=") {
+			t.Errorf("expected host CLAUDE_CONFIG_DIR to be filtered out, got %s", e)
+		}
+		if strings.HasPrefix(e, "CODEX_HOME=") {
+			t.Errorf("expected host CODEX_HOME to be filtered out, got %s", e)
+		}
+	}
+
+	// Case 2: launchEnv provides CLAUDE_CONFIG_DIR - it must be allowed through
+	launchEnv2 := map[string]string{
+		"HOME":              "/profile/dir",
+		"CLAUDE_CONFIG_DIR": "/profile/dir/.claude",
+	}
+	env2 := BuildEnv(environ, launchEnv2)
+	found := false
+	for _, e := range env2 {
+		if e == "CLAUDE_CONFIG_DIR=/profile/dir/.claude" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected CLAUDE_CONFIG_DIR=/profile/dir/.claude in built env, got %v", env2)
 	}
 }
