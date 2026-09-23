@@ -332,6 +332,8 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 	switch agent {
 	case "agy":
 		destTokenPath = filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	case "claude":
+		destTokenPath = filepath.Join(profileDir, ".claude", ".credentials.json")
 	default:
 		return false
 	}

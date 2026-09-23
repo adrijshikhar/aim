@@ -384,7 +384,8 @@ func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
 	hostSkills := filepath.Join(hostHome, ".claude", "skills")
 	hostRules := filepath.Join(hostHome, ".claude", "rules")
 	hostCommands := filepath.Join(hostHome, ".claude", "commands")
-	for _, d := range []string{hostPlugins, hostSkills, hostRules, hostCommands} {
+	hostHooks := filepath.Join(hostHome, ".claude", "hooks")
+	for _, d := range []string{hostPlugins, hostSkills, hostRules, hostCommands, hostHooks} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			t.Fatalf("failed to create host dir: %v", err)
 		}
@@ -402,6 +403,7 @@ func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
 		filepath.Join(".claude", "skills"),
 		filepath.Join(".claude", "rules"),
 		filepath.Join(".claude", "commands"),
+		filepath.Join(".claude", "hooks"),
 	} {
 		p := filepath.Join(profileDir, rel)
 		info, err := os.Lstat(p)

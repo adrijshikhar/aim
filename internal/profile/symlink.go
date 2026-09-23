@@ -53,6 +53,7 @@ var defaultBridgedPaths = []string{
 	filepath.Join(".claude", "skills"),
 	filepath.Join(".claude", "rules"),
 	filepath.Join(".claude", "commands"),
+	filepath.Join(".claude", "hooks"),
 
 	// Terminal & Statusline Tooling
 	".config/cxstatusline",
@@ -105,7 +106,7 @@ func isAllowedBridgedPath(clean string) bool {
 		rel := strings.TrimPrefix(clean, ".claude"+string(filepath.Separator))
 		top := strings.Split(rel, string(filepath.Separator))[0]
 		switch top {
-		case "plugins", "skills", "rules", "commands":
+		case "plugins", "skills", "rules", "commands", "hooks":
 			return true
 		default:
 			return false

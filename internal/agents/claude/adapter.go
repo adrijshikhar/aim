@@ -12,6 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -57,7 +58,8 @@ func (a *Adapter) ResolveBinary() string {
 }
 
 // HasCredentials returns true if ANTHROPIC_API_KEY is in the environment,
-// or if the profile has a valid auth.json or .claude.json credentials file.
+// or if the profile has a valid auth.json, .credentials.json, or .claude.json credentials file,
+// or if macOS Keychain credentials can be harvested.
 func (a *Adapter) HasCredentials(profileDir string) bool {
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		return true
@@ -66,11 +68,22 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 	if fi, err := os.Stat(authPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
 		return true
 	}
-	credsPath := filepath.Join(profileDir, ".claude.json")
-	if data, err := os.ReadFile(credsPath); err == nil && len(data) > 0 {
-		if strings.Contains(string(data), "oauthAccount") {
-			return true
+	credsPath := filepath.Join(profileDir, ".claude", ".credentials.json")
+	if fi, err := os.Stat(credsPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+		return true
+	}
+	for _, p := range []string{
+		filepath.Join(profileDir, ".claude.json"),
+		filepath.Join(profileDir, ".claude", ".claude.json"),
+	} {
+		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+			if strings.Contains(string(data), "oauthAccount") {
+				return true
+			}
 		}
+	}
+	if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
+		return true
 	}
 	return false
 }
@@ -124,6 +137,8 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}
 
 	rewriteSettingsHooks(config.RealHomeDir(), profileDir)
+	copyClaudeJSON(config.RealHomeDir(), profileDir)
+	_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
 
 	bin := a.ResolveBinary()
 	envMap := make(map[string]string)
@@ -180,6 +195,18 @@ func rewriteSettingsHooks(hostHome, profileDir string) {
 		content = strings.ReplaceAll(content, hostClaude, destClaude)
 	}
 	_ = os.WriteFile(destSettings, []byte(content), 0644)
+}
+
+// copyClaudeJSON copies .claude.json from host to the profile directory if it does not already exist.
+func copyClaudeJSON(hostHome, profileDir string) {
+	dest := filepath.Join(profileDir, ".claude.json")
+	if _, err := os.Stat(dest); err == nil {
+		return
+	}
+	src := filepath.Join(hostHome, ".claude.json")
+	if data, err := os.ReadFile(src); err == nil && len(data) > 0 {
+		_ = os.WriteFile(dest, data, 0600)
+	}
 }
 
 // Doctor performs diagnostics on the Claude Code installation and profile state.
