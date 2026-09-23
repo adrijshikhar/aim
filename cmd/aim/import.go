@@ -24,7 +24,7 @@ func newSessionsImportCmd(reg *agents.Registry, pm *profile.ProfileManager) *cob
 		Long: `Explicitly copy or hydrate a session from host into a target profile without immediately launching it.
 
 Arguments:
-  <agent>           Agent adapter (agy, codex)
+  <agent>           Agent adapter (agy, codex, claude)
   <target-profile>  Target profile name to receive the session
   [session-id]      Specific session ID or prefix to import
 

@@ -166,7 +166,7 @@ func BuildEnv(environ []string, launchEnv map[string]string) []string {
 			continue
 		}
 		key := e[:idx]
-		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" || key == "AIM_SESSION_ID" {
+		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "CODEX_HOME" || key == "CLAUDE_CONFIG_DIR" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" || key == "AIM_SESSION_ID" {
 			continue
 		}
 		if _, overridden := launchEnv[key]; overridden {

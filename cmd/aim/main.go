@@ -7,9 +7,6 @@ import (
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
-	"github.com/aim-cli/aim/internal/agents/agy"
-	"github.com/aim-cli/aim/internal/agents/codex"
-	"github.com/aim-cli/aim/internal/agents/gemini"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
@@ -67,10 +64,7 @@ func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) i
 }
 
 func main() {
-	reg := agents.NewRegistry()
-	reg.Register(agy.NewAdapter())
-	reg.Register(gemini.NewAdapter())
-	reg.Register(codex.NewAdapter())
+	reg := defaultRegistry()
 
 	pm := profile.NewProfileManager(config.BaseDir())
 

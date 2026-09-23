@@ -137,3 +137,73 @@ func TestHarvestKeychainTokenToProfile(t *testing.T) {
 		t.Errorf("expected second harvest to return true")
 	}
 }
+
+func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	origFn := getGenericPasswordFn
+	defer func() { getGenericPasswordFn = origFn }()
+
+	mockTokenJSON := `{"mcpOAuth":{"test":"token"}}`
+	getGenericPasswordFn = func(service, account string) (string, error) {
+		if service == "Claude Code-credentials" {
+			return mockTokenJSON, nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+
+	targetProfile := t.TempDir()
+	if !HarvestKeychainTokenToProfile("claude", targetProfile) {
+		t.Fatalf("expected HarvestKeychainTokenToProfile to return true for claude")
+	}
+
+	destFile := filepath.Join(targetProfile, ".claude", ".credentials.json")
+	data, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("failed to read harvested claude token file: %v", err)
+	}
+	if string(data) != mockTokenJSON {
+		t.Errorf("expected token content %s, got %s", mockTokenJSON, string(data))
+	}
+
+	fi, err := os.Stat(destFile)
+	if err != nil {
+		t.Fatalf("failed to stat harvested claude token file: %v", err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("expected file permissions 0600, got %#o", fi.Mode().Perm())
+	}
+}
+
+func TestClaudeKeychainServices(t *testing.T) {
+	services := KnownKeychainServices("claude")
+	expected := map[string]bool{
+		"Claude Safe Storage":     false,
+		"Claude Code-credentials": false,
+	}
+	for _, s := range services {
+		if _, ok := expected[s]; ok {
+			expected[s] = true
+		}
+	}
+	for s, found := range expected {
+		if !found {
+			t.Errorf("expected Claude keychain service %q not found in KnownKeychainServices", s)
+		}
+	}
+
+	allServices := KnownKeychainServices()
+	hasSafeStorage := false
+	for _, s := range allServices {
+		if s == "Claude Safe Storage" {
+			hasSafeStorage = true
+			break
+		}
+	}
+	if !hasSafeStorage {
+		t.Errorf("expected 'Claude Safe Storage' in KnownKeychainServices()")
+	}
+
+	if err := PurgeAgentKeychain("claude"); err != nil {
+		t.Errorf("PurgeAgentKeychain('claude') returned unexpected error: %v", err)
+	}
+}

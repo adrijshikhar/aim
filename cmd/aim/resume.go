@@ -33,7 +33,7 @@ func newResumeCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 		Long: `Resume an existing session under a specified profile.
 
 Arguments:
-  <agent>       Agent adapter (agy, codex)
+  <agent>       Agent adapter (agy, codex, claude)
   <profile>     Destination profile name
   [session-id]  Full UUID or short prefix (e.g. 8 chars)
 
@@ -231,6 +231,8 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		resumeArgs = append([]string{fmt.Sprintf("--conversation=%s", resumeID)}, extraArgs...)
 	case "codex":
 		resumeArgs = append([]string{"resume", resumeID}, extraArgs...)
+	case "claude":
+		resumeArgs = append([]string{"--resume", resumeID}, extraArgs...)
 	default:
 		resumeArgs = append([]string{resumeID}, extraArgs...)
 	}

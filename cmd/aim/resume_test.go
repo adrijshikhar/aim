@@ -13,6 +13,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
+	"github.com/aim-cli/aim/internal/agents/claude"
 	"github.com/aim-cli/aim/internal/agents/codex"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
@@ -424,4 +425,57 @@ func (m *mockForkProvider) Hydrate(ctx context.Context, srcSession *session.Sess
 		return "forked-uuid-11112222", nil
 	}
 	return srcSession.ID, nil
+}
+
+func TestResumeCmd_ClaudeResumeArgs(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	dumpFile := filepath.Join(tempDir, "args_dump.txt")
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeClaude := filepath.Join(fakeBinDir, "claude")
+	fakeScript := fmt.Sprintf("#!/bin/sh\necho \"$@\" > %q\nexit 0\n", dumpFile)
+	_ = os.WriteFile(fakeClaude, []byte(fakeScript), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	reg := agents.NewRegistry()
+	reg.Register(claude.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	pDir, _ := pm.EnsureProfile("default")
+
+	var buf bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	sessionID := "c24699d0-820f-435f-b4e4-eaf8440311b4"
+	sess := &session.Session{
+		ID:           sessionID,
+		ShortID:      sessionID[:8],
+		Title:        "Claude Test Session",
+		Agent:        "claude",
+		Profile:      "default",
+		IsHost:       false,
+		LastActiveAt: time.Now(),
+		Status:       session.StatusIdle,
+	}
+
+	err := executeExactResume(cmd, reg, pm, nil, "claude", "default", pDir, sess, false, []string{"--extra-flag"})
+	if err != nil {
+		t.Fatalf("executeExactResume failed: %v", err)
+	}
+
+	content, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("failed to read args dump: %v", err)
+	}
+	expected := fmt.Sprintf("--resume %s --extra-flag\n", sessionID)
+	if string(content) != expected {
+		t.Errorf("expected args %q, got %q", expected, string(content))
+	}
+	if !strings.Contains(buf.String(), fmt.Sprintf("Resuming claude session %s under profile \"default\"", sessionID[:8])) {
+		t.Errorf("expected resuming output, got: %s", buf.String())
+	}
 }
