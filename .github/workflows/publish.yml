@@ -1,9 +1,7 @@
-name: Release
+name: Publish
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*.*.*"
   workflow_dispatch:
@@ -13,36 +11,17 @@ on:
         required: false
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  release-please:
-    name: Release Please (PR & Tag)
-    runs-on: ubuntu-latest
-    if: github.repository == 'adrijshikhar/aim' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-    outputs:
-      releases_created: ${{ steps.release.outputs.releases_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - uses: googleapis/release-please-action@v5
-        id: release
-        with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-
   test-and-verify:
     name: Pre-Release Test Verification
     runs-on: ubuntu-latest
-    needs: release-please
-    if: |
-      github.repository == 'adrijshikhar/aim' &&
-      (needs.release-please.outputs.releases_created == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    if: github.repository == 'adrijshikhar/aim'
     outputs:
       tag: ${{ steps.target.outputs.ref }}
       version: ${{ steps.target.outputs.version }}
@@ -50,9 +29,7 @@ jobs:
       - name: Determine Target Git Ref
         id: target
         run: |
-          if [ -n "${{ needs.release-please.outputs.tag_name }}" ]; then
-            TAG="${{ needs.release-please.outputs.tag_name }}"
-          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
             TAG="${{ github.event.inputs.tag }}"
           else
             TAG="${{ github.ref_name }}"
@@ -89,10 +66,8 @@ jobs:
   goreleaser:
     name: Build & Publish Release Assets
     runs-on: ubuntu-latest
-    needs: [release-please, test-and-verify]
-    if: |
-      github.repository == 'adrijshikhar/aim' &&
-      (needs.release-please.outputs.releases_created == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    needs: test-and-verify
+    if: github.repository == 'adrijshikhar/aim'
     outputs:
       tag: ${{ steps.target.outputs.ref }}
       version: ${{ steps.target.outputs.version }}
@@ -102,8 +77,6 @@ jobs:
         run: |
           if [ -n "${{ needs.test-and-verify.outputs.tag }}" ]; then
             TAG="${{ needs.test-and-verify.outputs.tag }}"
-          elif [ -n "${{ needs.release-please.outputs.tag_name }}" ]; then
-            TAG="${{ needs.release-please.outputs.tag_name }}"
           elif [ -n "${{ github.event.inputs.tag }}" ]; then
             TAG="${{ github.event.inputs.tag }}"
           else
@@ -139,6 +112,7 @@ jobs:
     name: Verify Release Assets & Smoke Test
     needs: goreleaser
     runs-on: macos-latest
+    if: github.repository == 'adrijshikhar/aim'
     steps:
       - name: Download & Verify Release Checksums
         id: checksum
