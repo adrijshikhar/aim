@@ -29,6 +29,9 @@ type Session struct {
 	Summary      string    `json:"summary"`
 	StoragePath  string    `json:"storage_path"`
 	PID          int       `json:"pid,omitempty"`
+	Cwd          string    `json:"cwd,omitempty"`
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+	MessageCount int       `json:"message_count,omitempty"`
 }
 
 // ComputeShortID returns the 8-character prefix of an ID.
@@ -48,6 +51,8 @@ func NewSession(id, title, agent, profile string, isHost bool, lastActive time.T
 		Agent:        agent,
 		Profile:      profile,
 		IsHost:       isHost,
+		StartedAt:    lastActive,
+		CreatedAt:    lastActive,
 		LastActiveAt: lastActive,
 		Status:       StatusIdle,
 	}
