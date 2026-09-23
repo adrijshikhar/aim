@@ -197,11 +197,14 @@ func rewriteSettingsHooks(hostHome, profileDir string) {
 	_ = os.WriteFile(destSettings, []byte(content), 0644)
 }
 
-// copyClaudeJSON copies .claude.json from host to the profile directory if it does not already exist.
+// copyClaudeJSON copies .claude.json from host to the profile directory if it does not
+// already exist or if the destination file lacks oauthAccount.
 func copyClaudeJSON(hostHome, profileDir string) {
 	dest := filepath.Join(profileDir, ".claude.json")
-	if _, err := os.Stat(dest); err == nil {
-		return
+	if data, err := os.ReadFile(dest); err == nil && len(data) > 0 {
+		if strings.Contains(string(data), "oauthAccount") {
+			return
+		}
 	}
 	src := filepath.Join(hostHome, ".claude.json")
 	if data, err := os.ReadFile(src); err == nil && len(data) > 0 {
@@ -228,6 +231,7 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 		})
 	}
 
+	copyClaudeJSON(config.RealHomeDir(), profileDir)
 	if a.HasCredentials(profileDir) {
 		results = append(results, agents.DiagnosticResult{
 			Category: "Auth",
