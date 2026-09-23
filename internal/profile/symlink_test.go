@@ -379,13 +379,14 @@ func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
 	hostHome := filepath.Join(tempDir, "host")
 	profileDir := filepath.Join(tempDir, "profile")
 
-	// Create host Claude directories
+	// Create host Claude directories & ccstatusline
 	hostPlugins := filepath.Join(hostHome, ".claude", "plugins")
 	hostSkills := filepath.Join(hostHome, ".claude", "skills")
 	hostRules := filepath.Join(hostHome, ".claude", "rules")
 	hostCommands := filepath.Join(hostHome, ".claude", "commands")
 	hostHooks := filepath.Join(hostHome, ".claude", "hooks")
-	for _, d := range []string{hostPlugins, hostSkills, hostRules, hostCommands, hostHooks} {
+	hostCCStatusline := filepath.Join(hostHome, ".config", "ccstatusline")
+	for _, d := range []string{hostPlugins, hostSkills, hostRules, hostCommands, hostHooks, hostCCStatusline} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			t.Fatalf("failed to create host dir: %v", err)
 		}
@@ -404,6 +405,7 @@ func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
 		filepath.Join(".claude", "rules"),
 		filepath.Join(".claude", "commands"),
 		filepath.Join(".claude", "hooks"),
+		filepath.Join(".config", "ccstatusline"),
 	} {
 		p := filepath.Join(profileDir, rel)
 		info, err := os.Lstat(p)
@@ -414,5 +416,75 @@ func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
 		if info.Mode()&os.ModeSymlink == 0 {
 			t.Errorf("expected %s to be a symlink", p)
 		}
+	}
+}
+
+func TestEnsureDotfiles_ReplacesStubPluginDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+
+	// Host has real plugins
+	hostPlugins := filepath.Join(hostHome, ".claude", "plugins")
+	if err := os.MkdirAll(hostPlugins, 0755); err != nil {
+		t.Fatalf("failed to create host plugins dir: %v", err)
+	}
+
+	// Profile has stub plugin directory with 0 plugins
+	stubPluginDir := filepath.Join(profileDir, ".claude", "plugins")
+	if err := os.MkdirAll(stubPluginDir, 0755); err != nil {
+		t.Fatalf("failed to create stub plugin dir: %v", err)
+	}
+	stubManifest := `{"version": 2, "plugins": {}}`
+	if err := os.WriteFile(filepath.Join(stubPluginDir, "installed_plugins.json"), []byte(stubManifest), 0644); err != nil {
+		t.Fatalf("failed to write stub manifest: %v", err)
+	}
+
+	if err := EnsureDotfiles(hostHome, profileDir); err != nil {
+		t.Fatalf("EnsureDotfiles failed: %v", err)
+	}
+
+	info, err := os.Lstat(stubPluginDir)
+	if err != nil {
+		t.Fatalf("expected .claude/plugins to exist after EnsureDotfiles: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected stub plugin directory to be replaced with symlink")
+	}
+}
+
+func TestEnsureDotfiles_ReplacesStubStatuslineDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+
+	// Host has ccstatusline
+	hostStatusline := filepath.Join(hostHome, ".config", "ccstatusline")
+	if err := os.MkdirAll(hostStatusline, 0755); err != nil {
+		t.Fatalf("failed to create host ccstatusline dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hostStatusline, "settings.json"), []byte(`{"custom":true}`), 0644); err != nil {
+		t.Fatalf("failed to write host settings: %v", err)
+	}
+
+	// Profile has stub ccstatusline with only default settings.json
+	stubStatusline := filepath.Join(profileDir, ".config", "ccstatusline")
+	if err := os.MkdirAll(stubStatusline, 0755); err != nil {
+		t.Fatalf("failed to create stub statusline dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stubStatusline, "settings.json"), []byte(`{"default":true}`), 0644); err != nil {
+		t.Fatalf("failed to write stub settings: %v", err)
+	}
+
+	if err := EnsureDotfiles(hostHome, profileDir); err != nil {
+		t.Fatalf("EnsureDotfiles failed: %v", err)
+	}
+
+	info, err := os.Lstat(stubStatusline)
+	if err != nil {
+		t.Fatalf("expected .config/ccstatusline to exist: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected stub statusline directory to be replaced with symlink")
 	}
 }

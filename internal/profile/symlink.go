@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -57,6 +58,7 @@ var defaultBridgedPaths = []string{
 
 	// Terminal & Statusline Tooling
 	".config/cxstatusline",
+	".config/ccstatusline",
 }
 
 // bridgedDotfiles provides backwards compatibility with existing references.
@@ -141,8 +143,15 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 			continue
 		}
 		dest := filepath.Join(profileDir, cleanName)
-		if _, err := os.Lstat(dest); err == nil {
-			continue
+		if fi, err := os.Lstat(dest); err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
+			if fi.IsDir() && isStubOrEmptyDir(dest, cleanName) {
+				_ = os.RemoveAll(dest)
+			} else {
+				continue
+			}
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 			errs = append(errs, err)
@@ -157,4 +166,33 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func isStubOrEmptyDir(path, cleanName string) bool {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	if len(entries) == 0 {
+		return true
+	}
+	if cleanName == filepath.Join(".claude", "plugins") {
+		pluginFile := filepath.Join(path, "installed_plugins.json")
+		data, err := os.ReadFile(pluginFile)
+		if err != nil {
+			return false
+		}
+		var manifest struct {
+			Plugins map[string]any `json:"plugins"`
+		}
+		if err := json.Unmarshal(data, &manifest); err == nil {
+			return len(manifest.Plugins) == 0
+		}
+	}
+	if cleanName == ".config/ccstatusline" || cleanName == ".config/cxstatusline" {
+		if len(entries) == 1 && entries[0].Name() == "settings.json" {
+			return true
+		}
+	}
+	return false
 }
