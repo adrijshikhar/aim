@@ -253,7 +253,7 @@ func parseClaudeSessionFile(filePath, sessionUUID, slug, profileDir string, isHo
 
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	scanner.Buffer(buf, 50*1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -336,6 +336,9 @@ func isUserMessage(rawMsg json.RawMessage) bool {
 	if len(rawMsg) == 0 {
 		return false
 	}
+	if !bytes.Contains(rawMsg, []byte(`"user"`)) {
+		return false
+	}
 	var msg claudeMessage
 	if err := json.Unmarshal(rawMsg, &msg); err == nil {
 		return msg.Role == "user"
@@ -345,6 +348,9 @@ func isUserMessage(rawMsg json.RawMessage) bool {
 
 func isUserOrAssistantMessage(rawMsg json.RawMessage) bool {
 	if len(rawMsg) == 0 {
+		return false
+	}
+	if !bytes.Contains(rawMsg, []byte(`"user"`)) && !bytes.Contains(rawMsg, []byte(`"assistant"`)) {
 		return false
 	}
 	var msg claudeMessage

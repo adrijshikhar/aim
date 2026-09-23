@@ -179,7 +179,9 @@ func rewriteSettingsHooks(hostHome, profileDir string) {
 		destContent := string(destData)
 		if strings.Contains(destContent, hostClaude) {
 			destContent = strings.ReplaceAll(destContent, hostClaude, destClaude)
-			_ = os.WriteFile(destSettings, []byte(destContent), 0644)
+			if err := os.WriteFile(destSettings, []byte(destContent), 0644); err != nil {
+				logger.Debug("[claude] Failed to update rewritten settings.json at %s: %v", destSettings, err)
+			}
 		}
 		return
 	}
@@ -194,7 +196,9 @@ func rewriteSettingsHooks(hostHome, profileDir string) {
 	if strings.Contains(content, hostClaude) {
 		content = strings.ReplaceAll(content, hostClaude, destClaude)
 	}
-	_ = os.WriteFile(destSettings, []byte(content), 0644)
+	if err := os.WriteFile(destSettings, []byte(content), 0644); err != nil {
+		logger.Debug("[claude] Failed to write settings.json to %s: %v", destSettings, err)
+	}
 }
 
 // copyClaudeJSON copies .claude.json from host to the profile directory if it does not
@@ -208,7 +212,9 @@ func copyClaudeJSON(hostHome, profileDir string) {
 	}
 	src := filepath.Join(hostHome, ".claude.json")
 	if data, err := os.ReadFile(src); err == nil && len(data) > 0 {
-		_ = os.WriteFile(dest, data, 0600)
+		if err := os.WriteFile(dest, data, 0600); err != nil {
+			logger.Debug("[claude] Failed to copy .claude.json to %s: %v", dest, err)
+		}
 	}
 }
 
