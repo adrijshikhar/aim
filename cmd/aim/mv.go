@@ -21,7 +21,7 @@ func newMvCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 		Long: `Move an agent account, tokens, credentials, and session state from a source profile to a target profile.
 
 Arguments:
-  <agent>           Agent adapter (agy, codex, gemini)
+  <agent>           Agent adapter (agy, codex, claude, gemini)
   <src-profile>     Source profile currently holding the account
   <target-profile>  Destination profile to receive the account
 
