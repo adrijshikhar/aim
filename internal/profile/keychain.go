@@ -479,4 +479,3 @@ func PurgeProfileKeychain(agent, profileDir string) error {
 		return nil
 	}
 }
-

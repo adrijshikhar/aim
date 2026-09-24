@@ -338,4 +338,3 @@ func TestBuildEnv_ClaudeAuthTokensFiltered(t *testing.T) {
 		t.Errorf("expected profile CLAUDE_CODE_OAUTH_TOKEN to be present in built env, got %v", env2)
 	}
 }
-

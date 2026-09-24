@@ -273,4 +273,3 @@ func TestClaudeKeychainServices(t *testing.T) {
 		t.Errorf("PurgeAgentKeychain('claude') returned unexpected error: %v", err)
 	}
 }
-

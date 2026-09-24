@@ -68,7 +68,6 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		}
 	}()
 
-
 	if err := adapter.Login(context.Background(), profileName, pDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		return 1

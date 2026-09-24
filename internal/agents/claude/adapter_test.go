@@ -178,7 +178,6 @@ func TestAdapter_HasCredentials(t *testing.T) {
 	})
 }
 
-
 func TestAdapter_RewriteHooks(t *testing.T) {
 	tempDir := t.TempDir()
 	hostHome := filepath.Join(tempDir, "host")
@@ -290,4 +289,3 @@ func TestAdapter_PrepareEnv_StripsHostTokens(t *testing.T) {
 		}
 	}
 }
-

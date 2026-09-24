@@ -154,7 +154,6 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	delete(envMap, "ANTHROPIC_API_KEY")
 	delete(envMap, "CLAUDE_CODE_OAUTH_REFRESH_TOKEN")
 
-
 	logger.Debug("[claude] Launch env: HOME=%s, CLAUDE_CONFIG_DIR=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, claudeDir, a.Name(), profileName)
 
