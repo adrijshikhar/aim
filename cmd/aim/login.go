@@ -48,16 +48,24 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		cfg = config.NewDefaultConfig()
 	}
 
-	// Purge ignored agent keychains before and after login to ensure OAuth tokens
-	// are stored strictly in the profile directory rather than macOS Keychain.
 	var customServices []string
 	if cfg != nil {
 		customServices = cfg.CustomIgnoredKeychains
 	}
-	_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
+
+	// Purge ignored agent keychains before and after login for agents that use
+	// shared global keychain entries (like agy) so tokens live strictly in the profile.
+	// For agents with profile-scoped keychain entries (like claude), do NOT purge
+	// the keychain because the entry is scoped to the profile by hash (Claude Code-credentials-<hash>)
+	// and purging would delete the credentials or unrelated host entries.
+	if agentName != "claude" {
+		_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
+	}
 	defer func() {
 		_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
-		_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
+		if agentName != "claude" {
+			_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
+		}
 	}()
 
 	if err := adapter.Login(context.Background(), profileName, pDir); err != nil {

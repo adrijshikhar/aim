@@ -57,29 +57,24 @@ func (a *Adapter) ResolveBinary() string {
 	return a.BinaryName()
 }
 
-// HasCredentials returns true if ANTHROPIC_API_KEY is in the environment,
-// or if the profile has a valid auth.json, .credentials.json, or .claude.json credentials file,
-// or if macOS Keychain credentials can be harvested.
+// HasCredentials returns true if the profile has valid authentication credentials:
+// - ANTHROPIC_API_KEY in environment
+// - auth.json file exists and is non-empty
+// - .credentials.json exists and contains valid claudeAiOauth tokens
+// - Scoped Keychain service contains valid claudeAiOauth tokens
 func (a *Adapter) HasCredentials(profileDir string) bool {
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		return true
 	}
-	authPath := filepath.Join(profileDir, ".claude", "auth.json")
+	claudeDir := filepath.Join(profileDir, ".claude")
+	authPath := filepath.Join(claudeDir, "auth.json")
 	if fi, err := os.Stat(authPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
 		return true
 	}
-	credsPath := filepath.Join(profileDir, ".claude", ".credentials.json")
-	if fi, err := os.Stat(credsPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
-		return true
-	}
-	for _, p := range []string{
-		filepath.Join(profileDir, ".claude.json"),
-		filepath.Join(profileDir, ".claude", ".claude.json"),
-	} {
-		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
-			if strings.Contains(string(data), "oauthAccount") {
-				return true
-			}
+	credsPath := filepath.Join(claudeDir, ".credentials.json")
+	if data, err := os.ReadFile(credsPath); err == nil && len(data) > 0 {
+		if profile.HasClaudeCredentials(data) {
+			return true
 		}
 	}
 	if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
@@ -109,7 +104,8 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			continue
 		}
 		key := env[:idx]
-		if key == "HOME" || key == "CLAUDE_CONFIG_DIR" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" || key == "AIM_SESSION_ID" {
+		if key == "HOME" || key == "CLAUDE_CONFIG_DIR" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" || key == "AIM_SESSION_ID" ||
+			key == "CLAUDE_CODE_OAUTH_TOKEN" || key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
 			continue
 		}
 		cleanEnv = append(cleanEnv, env)
@@ -154,6 +150,9 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	envMap["AIM_PROFILE"] = profileName
 	envMap["AIM_HOME"] = config.BaseDir()
 	delete(envMap, "AIM_SESSION_ID")
+	delete(envMap, "CLAUDE_CODE_OAUTH_TOKEN")
+	delete(envMap, "ANTHROPIC_API_KEY")
+	delete(envMap, "CLAUDE_CODE_OAUTH_REFRESH_TOKEN")
 
 	logger.Debug("[claude] Launch env: HOME=%s, CLAUDE_CONFIG_DIR=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, claudeDir, a.Name(), profileName)

@@ -138,31 +138,89 @@ func TestHarvestKeychainTokenToProfile(t *testing.T) {
 	}
 }
 
+func TestClaudeScopedKeychainService(t *testing.T) {
+	// Verify exact 8-hex sha256 prefix hash matching Claude Code's RD() implementation
+	workService := ClaudeScopedKeychainService("/Users/nemesis/.aim/profiles/work/.claude")
+	if workService != "Claude Code-credentials-a937c299" {
+		t.Errorf("expected Claude Code-credentials-a937c299, got %s", workService)
+	}
+
+	officeService := ClaudeScopedKeychainService("/Users/nemesis/.aim/profiles/office/.claude")
+	if officeService != "Claude Code-credentials-47cc6b7e" {
+		t.Errorf("expected Claude Code-credentials-47cc6b7e, got %s", officeService)
+	}
+}
+
+func TestHasClaudeCredentials(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"empty", "", false},
+		{"invalid json", "not-json", false},
+		{"mcpOAuth only", `{"mcpOAuth":{"test":"token"}}`, false},
+		{"empty object", `{}`, false},
+		{"oauthAccount only (metadata)", `{"oauthAccount":{"email":"test@example.com"}}`, false},
+		{"claudeAiOauth empty tokens", `{"claudeAiOauth":{"accessToken":"","refreshToken":""}}`, false},
+		{"claudeAiOauth with accessToken", `{"claudeAiOauth":{"accessToken":"sk-ant-test"}}`, true},
+		{"claudeAiOauth with refreshToken", `{"claudeAiOauth":{"refreshToken":"sk-ant-ref"}}`, true},
+		{"claudeAiOauth complete team token", `{"claudeAiOauth":{"accessToken":"sk-ant-test","refreshToken":"ref","subscriptionType":"team"},"mcpOAuth":{"plugin":"abc"}}`, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := HasClaudeCredentials([]byte(tc.input))
+			if got != tc.expected {
+				t.Errorf("HasClaudeCredentials(%q) = %v; expected %v", tc.input, got, tc.expected)
+			}
+		})
+	}
+}
+
 func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
 	origFn := getGenericPasswordFn
 	defer func() { getGenericPasswordFn = origFn }()
 
-	mockTokenJSON := `{"mcpOAuth":{"test":"token"}}`
+	targetProfile := t.TempDir()
+	claudeDir := filepath.Join(targetProfile, ".claude")
+	scopedService := ClaudeScopedKeychainService(claudeDir)
+	destFile := filepath.Join(claudeDir, ".credentials.json")
+
+	// 1. With only mcpOAuth in scoped keychain: should return false and NOT write file
 	getGenericPasswordFn = func(service, account string) (string, error) {
-		if service == "Claude Code-credentials" {
-			return mockTokenJSON, nil
+		if service == scopedService {
+			return `{"mcpOAuth":{"test":"token"}}`, nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+	if HarvestKeychainTokenToProfile("claude", targetProfile) {
+		t.Fatalf("expected HarvestKeychainTokenToProfile to return false when only mcpOAuth is in keychain")
+	}
+	if _, err := os.Stat(destFile); err == nil {
+		t.Fatalf("expected credentials file not to be written when only mcpOAuth is in keychain")
+	}
+
+	// 2. With scoped service containing valid claudeAiOauth: should succeed and write file
+	validTokenJSON := `{"claudeAiOauth":{"accessToken":"sk-ant-access-123","refreshToken":"sk-ant-refresh-123","subscriptionType":"team"},"mcpOAuth":{"plugin":"ok"}}`
+	getGenericPasswordFn = func(service, account string) (string, error) {
+		if service == scopedService {
+			return validTokenJSON, nil
 		}
 		return "", fmt.Errorf("not found")
 	}
 
-	targetProfile := t.TempDir()
 	if !HarvestKeychainTokenToProfile("claude", targetProfile) {
-		t.Fatalf("expected HarvestKeychainTokenToProfile to return true for claude")
+		t.Fatalf("expected HarvestKeychainTokenToProfile to return true with scoped claudeAiOauth")
 	}
 
-	destFile := filepath.Join(targetProfile, ".claude", ".credentials.json")
 	data, err := os.ReadFile(destFile)
 	if err != nil {
 		t.Fatalf("failed to read harvested claude token file: %v", err)
 	}
-	if string(data) != mockTokenJSON {
-		t.Errorf("expected token content %s, got %s", mockTokenJSON, string(data))
+	if string(data) != validTokenJSON {
+		t.Errorf("expected token content %s, got %s", validTokenJSON, string(data))
 	}
 
 	fi, err := os.Stat(destFile)
@@ -171,6 +229,14 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	}
 	if fi.Mode().Perm() != 0600 {
 		t.Errorf("expected file permissions 0600, got %#o", fi.Mode().Perm())
+	}
+
+	// 3. Re-harvesting when file already exists on disk should return true even if keychain is empty
+	getGenericPasswordFn = func(service, account string) (string, error) {
+		return "", fmt.Errorf("not found")
+	}
+	if !HarvestKeychainTokenToProfile("claude", targetProfile) {
+		t.Fatalf("expected HarvestKeychainTokenToProfile to return true from existing valid file")
 	}
 }
 

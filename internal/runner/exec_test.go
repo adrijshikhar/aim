@@ -296,3 +296,45 @@ func TestBuildEnv_ClaudeConfigDir(t *testing.T) {
 		t.Errorf("expected CLAUDE_CONFIG_DIR=/profile/dir/.claude in built env, got %v", env2)
 	}
 }
+
+func TestBuildEnv_ClaudeAuthTokensFiltered(t *testing.T) {
+	environ := []string{
+		"CLAUDE_CODE_OAUTH_TOKEN=sk-ant-host-oat",
+		"ANTHROPIC_API_KEY=sk-ant-host-api-key",
+		"CLAUDE_CODE_OAUTH_REFRESH_TOKEN=host-refresh",
+		"NORMAL_VAR=preserved",
+	}
+
+	// Case 1: launchEnv does NOT explicitly configure tokens - host tokens must be stripped
+	launchEnv1 := map[string]string{
+		"HOME": "/profile/dir",
+	}
+	env1 := BuildEnv(environ, launchEnv1)
+	for _, e := range env1 {
+		if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
+			t.Errorf("expected host CLAUDE_CODE_OAUTH_TOKEN to be filtered, got %s", e)
+		}
+		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") {
+			t.Errorf("expected host ANTHROPIC_API_KEY to be filtered, got %s", e)
+		}
+		if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_REFRESH_TOKEN=") {
+			t.Errorf("expected host CLAUDE_CODE_OAUTH_REFRESH_TOKEN to be filtered, got %s", e)
+		}
+	}
+
+	// Case 2: launchEnv explicitly configures profile-bound token - it must be preserved
+	launchEnv2 := map[string]string{
+		"HOME":                    "/profile/dir",
+		"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-profile-token",
+	}
+	env2 := BuildEnv(environ, launchEnv2)
+	found := false
+	for _, e := range env2 {
+		if e == "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-profile-token" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected profile CLAUDE_CODE_OAUTH_TOKEN to be present in built env, got %v", env2)
+	}
+}

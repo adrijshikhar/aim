@@ -2,6 +2,7 @@ package profile
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,9 @@ type IgnoredKeychainEntry struct {
 
 // DefaultIgnoredKeychainEntries lists agent credentials known to store tokens
 // in the macOS Keychain which would otherwise lead to cross-profile token leakage.
+// Note: Host Claude Code credentials ("Claude Code-credentials") are NOT included here
+// because Claude Code profile credentials are isolated by scoped hash names (Claude Code-credentials-<hash>).
+// Purging unhashed host credentials would delete the user's host login outside AIM.
 var DefaultIgnoredKeychainEntries = []IgnoredKeychainEntry{
 	// Antigravity CLI / Gemini CLI
 	{
@@ -55,19 +59,7 @@ var DefaultIgnoredKeychainEntries = []IgnoredKeychainEntry{
 		Description: "Antigravity token key",
 	},
 
-	// Claude Code CLI
-	{
-		Agent:       "claude",
-		Service:     "Claude Safe Storage",
-		Account:     "",
-		Description: "Claude Safe Storage credentials",
-	},
-	{
-		Agent:       "claude",
-		Service:     "Claude Code-credentials",
-		Account:     "",
-		Description: "Claude Code credentials",
-	},
+	// Legacy Claude Code CLI services
 	{
 		Agent:       "claude",
 		Service:     "claude",
@@ -322,41 +314,110 @@ func GetAgentKeychainToken(agent string) ([]byte, error) {
 	return nil, fmt.Errorf("no keychain credentials found for agent %q", agent)
 }
 
+// ClaudeScopedKeychainService returns the macOS Keychain service name scoped to a Claude config dir.
+// Matches Claude Code's native hashing: "Claude Code-credentials-" + sha256(configDir)[:8].
+func ClaudeScopedKeychainService(claudeConfigDir string) string {
+	sum := sha256.Sum256([]byte(claudeConfigDir))
+	return fmt.Sprintf("Claude Code-credentials-%x", sum[:4])
+}
+
+// HasClaudeCredentials checks if the raw JSON payload contains usable Claude OAuth credentials.
+// Requires claudeAiOauth with a non-empty accessToken or refreshToken.
+// Metadata-only payloads (such as oauthAccount in .claude.json) or mcpOAuth-only entries return false.
+func HasClaudeCredentials(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	var creds struct {
+		ClaudeAiOauth *struct {
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return false
+	}
+	if creds.ClaudeAiOauth == nil {
+		return false
+	}
+	return strings.TrimSpace(creds.ClaudeAiOauth.AccessToken) != "" || strings.TrimSpace(creds.ClaudeAiOauth.RefreshToken) != ""
+}
+
+func writeProfileCredentials(destTokenPath string, data []byte) bool {
+	if err := os.MkdirAll(filepath.Dir(destTokenPath), 0700); err != nil {
+		logger.Debug("[keychain] Failed to create directory for token %s: %v", destTokenPath, err)
+		return false
+	}
+	if err := os.WriteFile(destTokenPath, data, 0600); err != nil {
+		logger.Debug("[keychain] Failed to write token to %s: %v", destTokenPath, err)
+		return false
+	}
+	return true
+}
+
 // HarvestKeychainTokenToProfile extracts any existing agent credentials from the macOS
 // Keychain and saves them into the isolated profile directory.
 func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
 		return false
 	}
-	var destTokenPath string
 	switch agent {
 	case "agy":
-		destTokenPath = filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+		destTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+		tokData, err := GetAgentKeychainToken(agent)
+		if err == nil && len(tokData) > 0 {
+			if writeProfileCredentials(destTokenPath, tokData) {
+				logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
+				return true
+			}
+			return false
+		}
+		if fi, err := os.Stat(destTokenPath); err == nil && fi.Size() > 0 {
+			return true
+		}
+		return false
+
 	case "claude":
-		destTokenPath = filepath.Join(profileDir, ".claude", ".credentials.json")
+		destTokenPath := filepath.Join(profileDir, ".claude", ".credentials.json")
+		claudeDir := filepath.Join(profileDir, ".claude")
+		scopedService := ClaudeScopedKeychainService(claudeDir)
+
+		// 1. Check scoped service in macOS Keychain first (Claude Code's primary store on macOS)
+		if raw, err := getGenericPasswordFn(scopedService, ""); err == nil && raw != "" {
+			data := DecodeKeychainPassword(raw)
+			if HasClaudeCredentials(data) {
+				if writeProfileCredentials(destTokenPath, data) {
+					logger.Debug("[keychain] Successfully harvested scoped token from %s into %s", scopedService, destTokenPath)
+					return true
+				}
+			}
+		}
+
+		// 2. Check legacy / host service in macOS Keychain (without deleting it)
+		for _, svc := range claudeKeychainServices {
+			if raw, err := getGenericPasswordFn(svc, ""); err == nil && raw != "" {
+				data := DecodeKeychainPassword(raw)
+				if HasClaudeCredentials(data) {
+					if writeProfileCredentials(destTokenPath, data) {
+						logger.Debug("[keychain] Successfully harvested token from %s into %s", svc, destTokenPath)
+						return true
+					}
+				}
+			}
+		}
+
+		// 3. If file already exists on disk, verify it contains valid credentials
+		if data, err := os.ReadFile(destTokenPath); err == nil && len(data) > 0 {
+			if HasClaudeCredentials(data) {
+				return true
+			}
+		}
+
+		return false
+
 	default:
 		return false
 	}
-
-	tokData, err := GetAgentKeychainToken(agent)
-	if err == nil && len(tokData) > 0 {
-		if err := os.MkdirAll(filepath.Dir(destTokenPath), 0700); err != nil {
-			logger.Debug("[keychain] Failed to create directory for token %s: %v", destTokenPath, err)
-			return false
-		}
-		if err := os.WriteFile(destTokenPath, tokData, 0600); err != nil {
-			logger.Debug("[keychain] Failed to write token to %s: %v", destTokenPath, err)
-			return false
-		}
-		logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
-		return true
-	}
-
-	if fi, err := os.Stat(destTokenPath); err == nil && fi.Size() > 0 {
-		return true
-	}
-
-	return false
 }
 
 var claudeKeychainServices = []string{
@@ -402,4 +463,19 @@ func KnownKeychainServices(agent ...string) []string {
 // PurgeAgentKeychain scrubs credentials for the specified agent from the macOS Keychain.
 func PurgeAgentKeychain(agent string) error {
 	return PurgeIgnoredKeychains(agent)
+}
+
+// PurgeProfileKeychain deletes agent credentials scoped specifically to a profile.
+func PurgeProfileKeychain(agent, profileDir string) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	switch agent {
+	case "claude":
+		claudeDir := filepath.Join(profileDir, ".claude")
+		scopedService := ClaudeScopedKeychainService(claudeDir)
+		return deleteGenericPassword(scopedService, "")
+	default:
+		return nil
+	}
 }
