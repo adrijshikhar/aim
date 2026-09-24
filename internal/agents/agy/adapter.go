@@ -281,6 +281,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		_ = bridgeSharedState(realHome, profileDir)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
+		storageEnv := config.StorageEnv()
 		cleanEnv := make([]string, 0, len(os.Environ())+4)
 		for _, env := range os.Environ() {
 			idx := strings.IndexByte(env, '=')
@@ -288,7 +289,8 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 				continue
 			}
 			key := env[:idx]
-			if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" {
+			_, storageKey := storageEnv[key]
+			if storageKey || key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" {
 				continue
 			}
 			cleanEnv = append(cleanEnv, env)
@@ -297,8 +299,10 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			"HOME="+profileDir,
 			"AIM_AGENT="+a.Name(),
 			"AIM_PROFILE="+profileName,
-			"AIM_HOME="+config.BaseDir(),
 		)
+		for key, value := range storageEnv {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -402,12 +406,10 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}
 	logger.Debug("[agy] Resolved binary: %s", bin)
 
-	envMap := map[string]string{
-		"HOME":        profileDir,
-		"AIM_AGENT":   a.Name(),
-		"AIM_PROFILE": profileName,
-		"AIM_HOME":    config.BaseDir(),
-	}
+	envMap := config.StorageEnv()
+	envMap["HOME"] = profileDir
+	envMap["AIM_AGENT"] = a.Name()
+	envMap["AIM_PROFILE"] = profileName
 	// Only set SSH_CONNECTION if profile has valid, healthy credentials on disk,
 	// to isolate file-based token reads without suppressing browser auto-open during login or re-auth.
 	if a.IsTokenHealthy(profileName, profileDir) {

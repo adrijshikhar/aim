@@ -44,13 +44,11 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	if bin == "" {
 		bin = a.BinaryName()
 	}
-	envMap := map[string]string{
-		"HOME":            profileDir,
-		"GEMINI_CLI_HOME": filepath.Join(profileDir, ".gemini"),
-		"AIM_AGENT":       a.Name(),
-		"AIM_PROFILE":     profileName,
-		"AIM_HOME":        config.BaseDir(),
-	}
+	envMap := config.StorageEnv()
+	envMap["HOME"] = profileDir
+	envMap["GEMINI_CLI_HOME"] = filepath.Join(profileDir, ".gemini")
+	envMap["AIM_AGENT"] = a.Name()
+	envMap["AIM_PROFILE"] = profileName
 	cwd, _ := os.Getwd()
 	return agents.LaunchEnv{
 		BinaryPath: bin,

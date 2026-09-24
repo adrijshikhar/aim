@@ -118,6 +118,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	cmd := exec.CommandContext(ctx, bin, "login")
 	cmd.Dir = profileDir
 
+	storageEnv := config.StorageEnv()
 	cleanEnv := make([]string, 0, len(os.Environ())+4)
 	for _, env := range os.Environ() {
 		idx := strings.IndexByte(env, '=')
@@ -125,7 +126,8 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			continue
 		}
 		key := env[:idx]
-		if key == "HOME" || key == "CODEX_HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" {
+		_, storageKey := storageEnv[key]
+		if storageKey || key == "HOME" || key == "CODEX_HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" {
 			continue
 		}
 		cleanEnv = append(cleanEnv, env)
@@ -136,8 +138,10 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		"CODEX_HOME="+codexDir,
 		"AIM_AGENT="+a.Name(),
 		"AIM_PROFILE="+profileName,
-		"AIM_HOME="+config.BaseDir(),
 	)
+	for key, value := range storageEnv {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -174,13 +178,11 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	bin := a.ResolveBinary()
 	logger.Debug("[codex] Resolved binary: %s", bin)
 
-	envMap := map[string]string{
-		"HOME":        profileDir,
-		"CODEX_HOME":  codexDir,
-		"AIM_AGENT":   a.Name(),
-		"AIM_PROFILE": profileName,
-		"AIM_HOME":    config.BaseDir(),
-	}
+	envMap := config.StorageEnv()
+	envMap["HOME"] = profileDir
+	envMap["CODEX_HOME"] = codexDir
+	envMap["AIM_AGENT"] = a.Name()
+	envMap["AIM_PROFILE"] = profileName
 
 	logger.Debug("[codex] Launch env: HOME=%s, CODEX_HOME=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, codexDir, a.Name(), profileName)
