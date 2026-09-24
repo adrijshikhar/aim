@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -120,6 +121,7 @@ func TestTerminalTitle_ExtractSessionID(t *testing.T) {
 		{args: []string{"--session-id", "--other"}, expected: ""},
 		{args: []string{"run", "something"}, expected: ""},
 		{args: []string{"resume", "--flag"}, expected: ""},
+		{args: []string{"resume=sess-123"}, expected: ""},
 	}
 
 	for _, tt := range tests {
@@ -127,6 +129,35 @@ func TestTerminalTitle_ExtractSessionID(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("ExtractSessionID(%v) = %q; want %q", tt.args, got, tt.expected)
 		}
+	}
+}
+
+func TestReplaceSessionID(t *testing.T) {
+	tests := []struct {
+		name, oldID, newID string
+		args, want         []string
+	}{
+		{"separate value", "old", "new", []string{"--resume", "old"}, []string{"--resume", "new"}},
+		{"attached value", "old", "new", []string{"--conversation=old"}, []string{"--conversation=new"}},
+		{"first matching value", "old", "new", []string{"--resume", "other", "-r=old", "--session-id", "old"}, []string{"--resume", "other", "-r=new", "--session-id", "old"}},
+		{"unrelated args", "old", "new", []string{"--flag", "old", "--resume", "other"}, []string{"--flag", "old", "--resume", "other"}},
+		{"flag value ignored", "old", "new", []string{"--resume", "--flag"}, []string{"--resume", "--flag"}},
+		{"no mutation when IDs invalid", "", "new", []string{"--resume", "old"}, []string{"--resume", "old"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := slices.Clone(tt.args)
+			got := ReplaceSessionID(tt.args, tt.oldID, tt.newID)
+			if !slices.Equal(tt.args, original) {
+				t.Errorf("ReplaceSessionID mutated input: got %v; want %v", tt.args, original)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("ReplaceSessionID(%v) = %v; want %v", tt.args, got, tt.want)
+			}
+			if tt.oldID == "" && len(tt.args) > 0 && &got[0] != &tt.args[0] {
+				t.Error("expected unchanged arguments to retain their original slice")
+			}
+		})
 	}
 }
 

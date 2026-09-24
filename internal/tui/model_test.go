@@ -438,11 +438,13 @@ func TestTUIUsageUpdateAndKeybinding(t *testing.T) {
 		FetchedAt: now,
 	}
 
-	// 1. Send usageBatchMsg to Update
-	updated, cmd := m.Update(usageBatchMsg{repDefault, repProd})
+	// Stream reports through the same message path used in production.
+	updated, cmd := m.Update(usageReportMsg(repDefault))
 	if cmd != nil {
-		t.Errorf("expected nil cmd on usageBatchMsg, got %v", cmd)
+		t.Errorf("expected nil cmd on usageReportMsg, got %v", cmd)
 	}
+	m = updated.(Model)
+	updated, _ = m.Update(usageReportMsg(repProd))
 	m = updated.(Model)
 
 	// Check reports stored in m.reports
@@ -547,7 +549,7 @@ func TestTUIUsage_SingleWindowBadge(t *testing.T) {
 		FetchedAt: now,
 	}
 
-	updated, _ := m.Update(usageBatchMsg{rep})
+	updated, _ := m.Update(usageReportMsg(rep))
 	m = updated.(Model)
 
 	view := m.View()
@@ -595,7 +597,7 @@ func TestTUIUsage_FullCapacityOmitResetCountdown(t *testing.T) {
 		FetchedAt: now,
 	}
 
-	updated, _ := m.Update(usageBatchMsg{rep})
+	updated, _ := m.Update(usageReportMsg(rep))
 	m = updated.(Model)
 
 	// Wide mode (default)
@@ -839,37 +841,30 @@ func TestTUI_PeriodicAutoRefreshTick(t *testing.T) {
 func TestTUI_SpinnerAnimation(t *testing.T) {
 	m := newTestModel(t, "work")
 	m.loading = true
-	m.spinnerIdx = 0
 
 	// View should render spinner next to [r] when loading
 	view := m.View()
-	if !strings.Contains(view, spinnerFrames[0]) {
-		t.Errorf("expected view to contain spinner frame '%s', got:\n%s", spinnerFrames[0], view)
+	if !strings.Contains(view, m.spinner.View()) {
+		t.Errorf("expected view to contain spinner, got:\n%s", view)
 	}
 
-	// spinnerTickMsg should advance spinner frame
-	updated, cmd := m.Update(spinnerTickMsg(time.Now()))
-	m2 := updated.(Model)
-	if m2.spinnerIdx != 1 {
-		t.Errorf("expected spinnerIdx to advance to 1, got %d", m2.spinnerIdx)
-	}
-	if cmd == nil {
-		t.Fatalf("expected next spinner tick command")
-	}
-
-	// spinner.Tick() should advance m.spinner.View() to next frame
+	// Bubble Tea's spinner tick advances the rendered spinner.
+	previousFrame := m.spinner.View()
 	updatedSpin, cmdSpin := m.Update(m.spinner.Tick())
 	mSpin := updatedSpin.(Model)
+	if mSpin.spinner.View() == previousFrame {
+		t.Error("expected spinner tick to advance the visible frame")
+	}
 	if cmdSpin == nil {
 		t.Fatalf("expected next spinner tick command from bubbles spinner")
 	}
 	viewSpin := mSpin.View()
-	if !strings.Contains(viewSpin, spinnerFrames[1]) {
-		t.Errorf("expected view to contain advanced spinner frame '%s', got:\n%s", spinnerFrames[1], viewSpin)
+	if !strings.Contains(viewSpin, mSpin.spinner.View()) {
+		t.Errorf("expected view to contain updated spinner, got:\n%s", viewSpin)
 	}
 
 	// usageStreamClosedMsg should stop loading
-	updatedDone, cmdDone := m2.Update(usageStreamClosedMsg{})
+	updatedDone, cmdDone := mSpin.Update(usageStreamClosedMsg{})
 	mDone := updatedDone.(Model)
 	if mDone.loading {
 		t.Errorf("expected loading to be false after stream closed")

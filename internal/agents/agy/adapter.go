@@ -186,25 +186,7 @@ func (a *Adapter) IsTokenHealthy(profileName, profileDir string) bool {
 }
 
 func isProfileEligibleForSeeding(profileName string) bool {
-	switch profileName {
-	case "personal", "p", "me", "main":
-		return true
-	}
-
-	cfg, err := config.LoadConfig()
-	if err == nil && cfg != nil {
-		if cfg.DefaultProfile != "" && cfg.DefaultProfile == profileName {
-			return true
-		}
-		if len(cfg.Profiles) == 1 {
-			for p := range cfg.Profiles {
-				if p == profileName {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return profile.ShouldSeedCredentials(profileName)
 }
 
 func copyHostSettings(realHome, tokenDir string) {
@@ -432,31 +414,17 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}
 	logger.Debug("[agy] Resolved binary: %s", bin)
 
-	envMap := make(map[string]string)
-	for _, e := range os.Environ() {
-		for i := 0; i < len(e); i++ {
-			if e[i] == '=' {
-				envMap[e[:i]] = e[i+1:]
-				break
-			}
-		}
+	envMap := map[string]string{
+		"HOME":        profileDir,
+		"AIM_AGENT":   a.Name(),
+		"AIM_PROFILE": profileName,
+		"AIM_HOME":    config.BaseDir(),
 	}
-
-	envMap["HOME"] = profileDir
 	// Only set SSH_CONNECTION if profile has valid, healthy credentials on disk,
 	// to isolate file-based token reads without suppressing browser auto-open during login or re-auth.
 	if a.IsTokenHealthy(profileName, profileDir) {
 		envMap["SSH_CONNECTION"] = "127.0.0.1 50000 127.0.0.1 22"
-	} else {
-		delete(envMap, "SSH_CONNECTION")
 	}
-	delete(envMap, "SSH_CLIENT")
-	delete(envMap, "SSH_TTY")
-	envMap["AIM_AGENT"] = a.Name()
-	envMap["AIM_PROFILE"] = profileName
-	envMap["AIM_HOME"] = config.BaseDir()
-	delete(envMap, "GEMINI_CLI_HOME")
-	delete(envMap, "AIM_SESSION_ID")
 
 	logger.Debug("[agy] Launch env: HOME=%s, AIM_AGENT=%s, AIM_PROFILE=%s, AIM_HOME=%s", profileDir, a.Name(), profileName, config.BaseDir())
 

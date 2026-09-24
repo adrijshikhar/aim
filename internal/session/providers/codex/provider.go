@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -214,7 +213,7 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 	targetID := srcSession.ID
 	if fork {
 		var err error
-		targetID, err = generateUUID()
+		targetID, err = session.GenerateUUID()
 		if err != nil {
 			return "", fmt.Errorf("failed to generate uuid for forked session: %w", err)
 		}
@@ -861,16 +860,6 @@ func isValidSessionID(s string) bool {
 func escapeSQL(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
 	return strings.ReplaceAll(s, "'", "''")
-}
-
-func generateUUID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("failed to read random bytes for UUID: %w", err)
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 
 func copyFile(src, dst string) (err error) {

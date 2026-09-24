@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -304,22 +303,9 @@ func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, 
 	if mgr == nil {
 		return nil, fmt.Errorf("session manager cannot be nil")
 	}
-	matches, err := mgr.FindAllSessionsByID(ctx, agent, sessionID)
+	sess, err := mgr.LatestSession(ctx, agent, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions across profiles: %w", err)
 	}
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("%w: %s", session.ErrSessionNotFound, sessionID)
-	}
-
-	uniqueMatches := session.DeduplicateMatches(matches)
-	if len(uniqueMatches) > 1 {
-		var ids []string
-		for _, s := range uniqueMatches {
-			ids = append(ids, s.ShortID)
-		}
-		sort.Strings(ids)
-		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", sessionID, strings.Join(ids, ", "))
-	}
-	return &uniqueMatches[0], nil
+	return sess, nil
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1647,6 +1648,35 @@ func TestCLI_Usage_AccountColumn(t *testing.T) {
 	}
 	if !strings.Contains(out, "user@example.com") {
 		t.Errorf("expected table body to contain 'user@example.com', got:\n%s", out)
+	}
+}
+
+func TestUsageTableColumns(t *testing.T) {
+	tests := []struct {
+		name                           string
+		hasAccount, hasCategory, has5h bool
+		wantHeaders, wantRow           []string
+	}{
+		{"weekly", false, false, false, []string{"AGENT", "PROFILE", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}, []string{"agent", "profile", "status", "weekly", "weekly reset", "checked"}},
+		{"weekly account", true, false, false, []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}, []string{"agent", "profile", "account", "status", "weekly", "weekly reset", "checked"}},
+		{"weekly category", false, true, false, []string{"AGENT", "PROFILE", "MODEL", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}, []string{"agent", "profile", "category", "status", "weekly", "weekly reset", "checked"}},
+		{"weekly account category", true, true, false, []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}, []string{"agent", "profile", "account", "category", "status", "weekly", "weekly reset", "checked"}},
+		{"hourly", false, false, true, []string{"AGENT", "PROFILE", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}, []string{"agent", "profile", "status", "primary", "primary reset", "weekly", "weekly reset", "checked"}},
+		{"hourly account", true, false, true, []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}, []string{"agent", "profile", "account", "status", "primary", "primary reset", "weekly", "weekly reset", "checked"}},
+		{"hourly category", false, true, true, []string{"AGENT", "PROFILE", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}, []string{"agent", "profile", "category", "status", "primary", "primary reset", "weekly", "weekly reset", "checked"}},
+		{"hourly account category", true, true, true, []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}, []string{"agent", "profile", "account", "category", "status", "primary", "primary reset", "weekly", "weekly reset", "checked"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			columns := usageTableColumns{hasAccount: tt.hasAccount, hasCategory: tt.hasCategory, has5h: tt.has5h}
+			if got := columns.headers(); !reflect.DeepEqual(got, tt.wantHeaders) {
+				t.Errorf("headers = %v; want %v", got, tt.wantHeaders)
+			}
+			got := columns.row(usageRowValues{agent: "agent", profile: "profile", account: "account", category: "category", status: "status", primary: "primary", primaryReset: "primary reset", weekly: "weekly", weeklyReset: "weekly reset", checked: "checked"})
+			if !reflect.DeepEqual(got, tt.wantRow) {
+				t.Errorf("row = %v; want %v", got, tt.wantRow)
+			}
+		})
 	}
 }
 

@@ -137,22 +137,13 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
 
 	bin := a.ResolveBinary()
-	envMap := make(map[string]string)
-	for _, e := range os.Environ() {
-		if idx := strings.IndexByte(e, '='); idx != -1 {
-			envMap[e[:idx]] = e[idx+1:]
-		}
+	envMap := map[string]string{
+		"HOME":              profileDir,
+		"CLAUDE_CONFIG_DIR": claudeDir,
+		"AIM_AGENT":         a.Name(),
+		"AIM_PROFILE":       profileName,
+		"AIM_HOME":          config.BaseDir(),
 	}
-
-	envMap["HOME"] = profileDir
-	envMap["CLAUDE_CONFIG_DIR"] = claudeDir
-	envMap["AIM_AGENT"] = a.Name()
-	envMap["AIM_PROFILE"] = profileName
-	envMap["AIM_HOME"] = config.BaseDir()
-	delete(envMap, "AIM_SESSION_ID")
-	delete(envMap, "CLAUDE_CODE_OAUTH_TOKEN")
-	delete(envMap, "ANTHROPIC_API_KEY")
-	delete(envMap, "CLAUDE_CODE_OAUTH_REFRESH_TOKEN")
 
 	logger.Debug("[claude] Launch env: HOME=%s, CLAUDE_CONFIG_DIR=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, claudeDir, a.Name(), profileName)

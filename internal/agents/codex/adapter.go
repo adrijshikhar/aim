@@ -103,25 +103,7 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 }
 
 func isProfileEligibleForSeeding(profileName string) bool {
-	switch profileName {
-	case "personal", "p", "me", "main":
-		return true
-	}
-
-	cfg, err := config.LoadConfig()
-	if err == nil && cfg != nil {
-		if cfg.DefaultProfile != "" && cfg.DefaultProfile == profileName {
-			return true
-		}
-		if len(cfg.Profiles) == 1 {
-			for p := range cfg.Profiles {
-				if p == profileName {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return profile.ShouldSeedCredentials(profileName)
 }
 
 // ResolveBinary locates the codex executable on the system.
@@ -204,20 +186,13 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	bin := a.ResolveBinary()
 	logger.Debug("[codex] Resolved binary: %s", bin)
 
-	envMap := make(map[string]string)
-	for _, e := range os.Environ() {
-		idx := strings.IndexByte(e, '=')
-		if idx != -1 {
-			envMap[e[:idx]] = e[idx+1:]
-		}
+	envMap := map[string]string{
+		"HOME":        profileDir,
+		"CODEX_HOME":  codexDir,
+		"AIM_AGENT":   a.Name(),
+		"AIM_PROFILE": profileName,
+		"AIM_HOME":    config.BaseDir(),
 	}
-
-	envMap["HOME"] = profileDir
-	envMap["CODEX_HOME"] = codexDir
-	envMap["AIM_AGENT"] = a.Name()
-	envMap["AIM_PROFILE"] = profileName
-	envMap["AIM_HOME"] = config.BaseDir()
-	delete(envMap, "AIM_SESSION_ID")
 
 	logger.Debug("[codex] Launch env: HOME=%s, CODEX_HOME=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, codexDir, a.Name(), profileName)

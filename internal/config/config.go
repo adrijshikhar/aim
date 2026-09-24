@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -268,11 +269,7 @@ func (c *Config) GetProfileEnv(profile string) map[string]string {
 	if !ok || p.Env == nil {
 		return nil
 	}
-	out := make(map[string]string, len(p.Env))
-	for k, v := range p.Env {
-		out[k] = v
-	}
-	return out
+	return maps.Clone(p.Env)
 }
 
 func (c *Config) SetProfileEnv(profile string, env map[string]string) {
@@ -283,14 +280,7 @@ func (c *Config) SetProfileEnv(profile string, env map[string]string) {
 		c.Profiles = make(map[string]ProfileConfig)
 	}
 	p := c.Profiles[profile]
-	if env == nil {
-		p.Env = nil
-	} else {
-		p.Env = make(map[string]string, len(env))
-		for k, v := range env {
-			p.Env[k] = v
-		}
-	}
+	p.Env = maps.Clone(env)
 	c.Profiles[profile] = p
 }
 

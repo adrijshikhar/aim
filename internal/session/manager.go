@@ -58,6 +58,30 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 
 	var allSessions []Session
 	seen := make(map[string]bool)
+	hostOnly := filterProfile == "host" || filterProfile == "<host>"
+	appendSession := func(s Session, profile string, isHost bool) {
+		key := fmt.Sprintf("%s:%s", s.Agent, s.ID)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		s.Profile, s.IsHost = profile, isHost
+		s.Status = StatusIdle
+		if active, ok := activeProcesses[s.ID]; ok {
+			s.Status, s.PID = StatusActive, active.PID
+			if active.Profile != "" {
+				s.Profile = active.Profile
+				s.IsHost = active.Profile == "<host>"
+			}
+		}
+		if hostOnly && !s.IsHost {
+			return
+		}
+		if filterProfile != "" && !hostOnly && s.Profile != filterProfile {
+			return
+		}
+		allSessions = append(allSessions, s)
+	}
 
 	// Collect providers to query
 	var targetProviders []SessionProvider
@@ -81,7 +105,7 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 				continue
 			}
 			profName := entry.Name()
-			if filterProfile != "" && filterProfile != "host" && filterProfile != "<host>" && profName != filterProfile {
+			if filterProfile != "" && !hostOnly && profName != filterProfile {
 				continue
 			}
 
@@ -93,63 +117,19 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 			}
 
 			for _, s := range sessions {
-				key := fmt.Sprintf("%s:%s", s.Agent, s.ID)
-				if !seen[key] {
-					seen[key] = true
-					s.Profile = profName
-					s.IsHost = false
-					if active, ok := activeProcesses[s.ID]; ok {
-						s.Status = StatusActive
-						s.PID = active.PID
-						if active.Profile != "" {
-							s.Profile = active.Profile
-							s.IsHost = (active.Profile == "<host>")
-						}
-					} else {
-						s.Status = StatusIdle
-					}
-					if filterProfile != "" && filterProfile != "host" && filterProfile != "<host>" && s.Profile != filterProfile {
-						continue
-					}
-					if (filterProfile == "host" || filterProfile == "<host>") && !s.IsHost {
-						continue
-					}
-					allSessions = append(allSessions, s)
-				}
+				appendSession(s, profName, false)
 			}
 		}
 
 		// 2. Scan host storage (unless specifically filtering for a non-host profile)
-		if filterProfile == "" || filterProfile == "host" || filterProfile == "<host>" {
+		if filterProfile == "" || hostOnly {
 			hostDir := config.RealHomeDir()
 			hostSessions, err := p.ListSessions(ctx, hostDir, true)
 			if err != nil {
 				logger.Debug("[session/manager] ListSessions error on host %s: %v", hostDir, err)
 			} else {
 				for _, s := range hostSessions {
-					key := fmt.Sprintf("%s:%s", s.Agent, s.ID)
-					if !seen[key] {
-						seen[key] = true
-						s.Profile = "<host>"
-						s.IsHost = true
-						if active, ok := activeProcesses[s.ID]; ok {
-							s.Status = StatusActive
-							s.PID = active.PID
-							if active.Profile != "" {
-								s.Profile = active.Profile
-								s.IsHost = (active.Profile == "<host>")
-							}
-						} else {
-							s.Status = StatusIdle
-						}
-						if filterProfile != "" && filterProfile != "host" && filterProfile != "<host>" && s.Profile != filterProfile {
-							continue
-						}
-						if (filterProfile == "host" || filterProfile == "<host>") && !s.IsHost {
-							continue
-						}
-						allSessions = append(allSessions, s)
-					}
+					appendSession(s, "<host>", true)
 				}
 			}
 		}
@@ -243,6 +223,27 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	res, err := m.LatestSession(ctx, agent, idOrPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if m.scanner != nil {
+		if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
+			if active, ok := procs[res.ID]; ok {
+				res.Status = StatusActive
+				res.PID = active.PID
+			}
+		}
+	}
+	return res, nil
+}
+
+// LatestSession resolves a full ID or prefix without additional active-process
+// enrichment. It is appropriate when callers need the most recently active stored snapshot.
+func (m *Manager) LatestSession(ctx context.Context, agent, idOrPrefix string) (*Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if idOrPrefix == "" {
 		return nil, fmt.Errorf("session ID or prefix cannot be empty")
 	}
@@ -268,14 +269,6 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 	}
 
 	res := uniqueMatches[0]
-	if m.scanner != nil {
-		if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
-			if active, ok := procs[res.ID]; ok {
-				res.Status = StatusActive
-				res.PID = active.PID
-			}
-		}
-	}
 	return &res, nil
 }
 

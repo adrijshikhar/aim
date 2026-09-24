@@ -29,7 +29,6 @@ const (
 
 type usageReportMsg usage.Report
 type usageStreamClosedMsg struct{}
-type usageBatchMsg []usage.Report
 
 type usageStream struct {
 	ch     <-chan usage.Report
@@ -52,13 +51,11 @@ type Model struct {
 	cache       *usage.CacheStore
 	reports     map[string]usage.Report
 	width       int
-	usageChan   <-chan usage.Report
 	usageStream *usageStream
 
-	loading    bool
-	spinner    spinner.Model
-	spinnerIdx int
-	version    string
+	loading bool
+	spinner spinner.Model
+	version string
 
 	deleteModal    deleteModalState
 	renameModal    renameModalState
@@ -351,16 +348,8 @@ func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
 	return waitForUsageReport(ch)
 }
 
-var spinnerFrames = spinner.MiniDot.Frames
-
-type spinnerTickMsg time.Time
-
 func (m Model) spinTickCmd() tea.Cmd {
 	return m.spinner.Tick
-}
-
-func spinTickCmd() tea.Cmd {
-	return spinner.Tick
 }
 
 type tickMsg time.Time
@@ -418,17 +407,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
-			m.spinnerIdx = (m.spinnerIdx + 1) % len(spinnerFrames)
 			return m, cmd
-		}
-		return m, nil
-
-	case spinnerTickMsg:
-		if m.loading {
-			m.spinnerIdx = (m.spinnerIdx + 1) % len(spinnerFrames)
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(spinner.TickMsg{})
-			return m, tea.Batch(cmd, m.spinTickCmd())
 		}
 		return m, nil
 
@@ -450,24 +429,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.usageStream != nil {
 			ch = m.usageStream.ch
 		}
-		m.usageChan = ch
 		return m, waitForUsageReport(ch)
 
 	case usageStreamClosedMsg:
 		m.loading = false
-		m.usageChan = nil
 		if m.usageStream != nil {
 			m.usageStream.ch = nil
-		}
-		return m, nil
-
-	case usageBatchMsg:
-		m.loading = false
-		if m.reports == nil {
-			m.reports = make(map[string]usage.Report)
-		}
-		for _, rep := range msg {
-			m.reports[fmt.Sprintf("%s:%s", rep.Agent, rep.Profile)] = rep
 		}
 		return m, nil
 

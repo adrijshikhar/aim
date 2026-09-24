@@ -67,11 +67,41 @@ func (m *mockProvider) Hydrate(ctx context.Context, srcSession *session.Session,
 }
 
 type mockProcessScanner struct {
-	active map[string]session.ActiveProcessInfo
+	active   map[string]session.ActiveProcessInfo
+	contexts []context.Context
 }
 
 func (s *mockProcessScanner) ScanActiveProcesses(ctx context.Context) (map[string]session.ActiveProcessInfo, error) {
+	s.contexts = append(s.contexts, ctx)
 	return s.active, nil
+}
+
+func TestLatestSessionAndResolveProcessEnrichment(t *testing.T) {
+	setupTestProfiles(t)
+	scanner := &mockProcessScanner{active: map[string]session.ActiveProcessInfo{
+		"session-1": {PID: 42},
+	}}
+	mgr := session.NewManagerWithScanner(scanner)
+	mgr.RegisterProvider(&mockProvider{agent: "agy", sessions: []session.Session{
+		session.NewSession("session-1", "Stored session", "agy", "work", false, time.Now()),
+	}})
+	stored, err := mgr.LatestSession(nil, "agy", "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != session.StatusIdle || len(scanner.contexts) != 0 {
+		t.Fatal("stored-session lookup unexpectedly enriched process state")
+	}
+	active, err := mgr.ResolveSession(nil, "agy", "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.Status != session.StatusActive || active.PID != 42 {
+		t.Fatalf("expected active process enrichment, got %+v", active)
+	}
+	if len(scanner.contexts) != 1 || scanner.contexts[0] == nil {
+		t.Fatal("expected one process scan with a non-nil context")
+	}
 }
 
 func setupTestProfiles(t *testing.T) string {

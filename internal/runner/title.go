@@ -69,68 +69,48 @@ func FormatTitle(agent, profile, sessionID string) string {
 
 // ExtractSessionID inspects command line arguments to detect a resumed session ID or conversation.
 func ExtractSessionID(args []string) string {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "resume" {
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				return args[i+1]
-			}
+	_, value, _ := sessionArgument(args, 0)
+	return value
+}
+
+// ReplaceSessionID replaces the first matching session argument value without
+// disturbing the spelling or position of unrelated arguments.
+func ReplaceSessionID(args []string, oldID, newID string) []string {
+	if oldID == "" || newID == "" || oldID == newID {
+		return args
+	}
+	result := append([]string(nil), args...)
+	for start := 0; start < len(result); {
+		index, value, prefix := sessionArgument(result, start)
+		if index < 0 {
+			break
 		}
-		if strings.HasPrefix(arg, "--conversation=") {
-			val := strings.TrimPrefix(arg, "--conversation=")
-			if val != "" {
-				return val
+		if value == oldID {
+			if prefix == "" {
+				result[index] = newID
+			} else {
+				result[index] = prefix + newID
 			}
+			break
 		}
-		if arg == "--conversation" && i+1 < len(args) {
-			if !strings.HasPrefix(args[i+1], "-") {
-				return args[i+1]
+		start = index + 1
+	}
+	return result
+}
+
+// sessionArgument returns a session value's argument index, value, and its
+// attached-value prefix (empty for a separate argument), starting at start.
+func sessionArgument(args []string, start int) (int, string, string) {
+	for i := start; i < len(args); i++ {
+		for _, flag := range []string{"resume", "--conversation", "-c", "--resume", "-r", "--session-id"} {
+			if args[i] == flag && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				return i + 1, args[i+1], ""
 			}
-		}
-		if strings.HasPrefix(arg, "-c=") {
-			val := strings.TrimPrefix(arg, "-c=")
-			if val != "" {
-				return val
-			}
-		}
-		if arg == "-c" && i+1 < len(args) {
-			if !strings.HasPrefix(args[i+1], "-") {
-				return args[i+1]
-			}
-		}
-		if strings.HasPrefix(arg, "--resume=") {
-			val := strings.TrimPrefix(arg, "--resume=")
-			if val != "" {
-				return val
-			}
-		}
-		if arg == "--resume" && i+1 < len(args) {
-			if !strings.HasPrefix(args[i+1], "-") {
-				return args[i+1]
-			}
-		}
-		if strings.HasPrefix(arg, "-r=") {
-			val := strings.TrimPrefix(arg, "-r=")
-			if val != "" {
-				return val
-			}
-		}
-		if arg == "-r" && i+1 < len(args) {
-			if !strings.HasPrefix(args[i+1], "-") {
-				return args[i+1]
-			}
-		}
-		if strings.HasPrefix(arg, "--session-id=") {
-			val := strings.TrimPrefix(arg, "--session-id=")
-			if val != "" {
-				return val
-			}
-		}
-		if arg == "--session-id" && i+1 < len(args) {
-			if !strings.HasPrefix(args[i+1], "-") {
-				return args[i+1]
+			prefix := flag + "="
+			if flag != "resume" && strings.HasPrefix(args[i], prefix) && len(args[i]) > len(prefix) {
+				return i, strings.TrimPrefix(args[i], prefix), prefix
 			}
 		}
 	}
-	return ""
+	return -1, "", ""
 }

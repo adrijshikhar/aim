@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -132,22 +131,7 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 		}
 	}
 
-	// Apply profile configuration overrides (custom environment variables & launch arguments)
-	if cfg != nil {
-		if profEnv := cfg.GetProfileEnv(profileName); len(profEnv) > 0 {
-			if launchEnv.Env == nil {
-				launchEnv.Env = make(map[string]string)
-			}
-			for k, v := range profEnv {
-				launchEnv.Env[k] = v
-			}
-			logger.Debug("[run] Applied %d profile env overrides", len(profEnv))
-		}
-		if profArgs := cfg.GetProfileArgs(profileName); len(profArgs) > 0 {
-			launchEnv.Args = append(launchEnv.Args, profArgs...)
-			logger.Debug("[run] Applied %d profile arg overrides", len(profArgs))
-		}
-	}
+	applyProfileOverrides(&launchEnv, cfg, profileName, true)
 
 	r := runner.NewRunner()
 	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", extraArgs)
@@ -165,63 +149,29 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 	return code
 }
 
+func applyProfileOverrides(launch *agents.LaunchEnv, cfg *config.Config, profileName string, includeArgs bool) {
+	if launch == nil || cfg == nil {
+		return
+	}
+	if env := cfg.GetProfileEnv(profileName); len(env) > 0 {
+		if launch.Env == nil {
+			launch.Env = make(map[string]string)
+		}
+		for key, value := range env {
+			launch.Env[key] = value
+		}
+	}
+	if includeArgs {
+		launch.Args = append(launch.Args, cfg.GetProfileArgs(profileName)...)
+	}
+}
+
 func extractResumedSessionID(extraArgs []string) string {
 	return runner.ExtractSessionID(extraArgs)
 }
 
 func replaceResumedSessionID(extraArgs []string, oldID, newID string) []string {
-	if oldID == "" || newID == "" || oldID == newID {
-		return extraArgs
-	}
-	res := make([]string, len(extraArgs))
-	copy(res, extraArgs)
-	for i := 0; i < len(res); i++ {
-		if res[i] == "resume" && i+1 < len(res) && res[i+1] == oldID {
-			res[i+1] = newID
-			break
-		}
-		if res[i] == "-c" && i+1 < len(res) && res[i+1] == oldID {
-			res[i+1] = newID
-			break
-		}
-		if strings.HasPrefix(res[i], "-c=") && res[i][3:] == oldID {
-			res[i] = "-c=" + newID
-			break
-		}
-		if res[i] == "--conversation" && i+1 < len(res) && res[i+1] == oldID {
-			res[i+1] = newID
-			break
-		}
-		if strings.HasPrefix(res[i], "--conversation=") && res[i][15:] == oldID {
-			res[i] = "--conversation=" + newID
-			break
-		}
-		if res[i] == "--resume" && i+1 < len(res) && res[i+1] == oldID {
-			res[i+1] = newID
-			break
-		}
-		if strings.HasPrefix(res[i], "--resume=") && res[i][9:] == oldID {
-			res[i] = "--resume=" + newID
-			break
-		}
-		if res[i] == "-r" && i+1 < len(res) && res[i+1] == oldID {
-			res[i+1] = newID
-			break
-		}
-		if strings.HasPrefix(res[i], "-r=") && res[i][3:] == oldID {
-			res[i] = "-r=" + newID
-			break
-		}
-		if res[i] == "--session-id" && i+1 < len(res) && res[i+1] == oldID {
-			res[i+1] = newID
-			break
-		}
-		if strings.HasPrefix(res[i], "--session-id=") && res[i][13:] == oldID {
-			res[i] = "--session-id=" + newID
-			break
-		}
-	}
-	return res
+	return runner.ReplaceSessionID(extraArgs, oldID, newID)
 }
 
 func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mgr *session.Manager, agentName, profileName string, extraArgs []string) (string, error) {
