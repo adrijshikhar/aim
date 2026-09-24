@@ -98,6 +98,7 @@ func TestAdapter_HasCredentials(t *testing.T) {
 		_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0755)
 
 		t.Setenv("ANTHROPIC_API_KEY", "")
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 		if a.HasCredentials(profileDir) {
 			t.Errorf("expected HasCredentials=false on empty profile")
 		}
@@ -110,6 +111,7 @@ func TestAdapter_HasCredentials(t *testing.T) {
 		_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0755)
 
 		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-123")
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 		if !a.HasCredentials(profileDir) {
 			t.Errorf("expected HasCredentials=true when ANTHROPIC_API_KEY is set")
 		}
@@ -121,6 +123,7 @@ func TestAdapter_HasCredentials(t *testing.T) {
 		profileDir := filepath.Join(tempDir, "profiles", "work")
 		_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0755)
 		t.Setenv("ANTHROPIC_API_KEY", "")
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 		// Zero byte file should return false
 		authFile := filepath.Join(profileDir, ".claude", "auth.json")
@@ -136,25 +139,45 @@ func TestAdapter_HasCredentials(t *testing.T) {
 		}
 	})
 
-	// 4. With .claude.json containing oauthAccount
-	t.Run("with .claude.json oauthAccount", func(t *testing.T) {
+	// 4. .claude.json containing oauthAccount does NOT establish credentials
+	t.Run("with .claude.json oauthAccount does not establish credentials", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles", "work")
 		_ = os.MkdirAll(profileDir, 0755)
 		t.Setenv("ANTHROPIC_API_KEY", "")
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 		credsFile := filepath.Join(profileDir, ".claude.json")
-		_ = os.WriteFile(credsFile, []byte(`{"someConfig": true}`), 0600)
+		_ = os.WriteFile(credsFile, []byte(`{"oauthAccount": {"email": "user@example.com", "accountUuid": "acc-123"}}`), 0600)
 		if a.HasCredentials(profileDir) {
-			t.Errorf("expected HasCredentials=false when .claude.json lacks oauthAccount")
+			t.Errorf("expected HasCredentials=false when only .claude.json oauthAccount is present")
+		}
+	})
+
+	// 5. With .credentials.json: mcpOAuth alone fails, claudeAiOauth succeeds
+	t.Run("with .credentials.json validation", func(t *testing.T) {
+		tempDir := t.TempDir()
+		profileDir := filepath.Join(tempDir, "profiles", "work")
+		_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0755)
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+		credsFile := filepath.Join(profileDir, ".claude", ".credentials.json")
+
+		// mcpOAuth only
+		_ = os.WriteFile(credsFile, []byte(`{"mcpOAuth":{"test":"token"}}`), 0600)
+		if a.HasCredentials(profileDir) {
+			t.Errorf("expected HasCredentials=false when .credentials.json contains only mcpOAuth")
 		}
 
-		_ = os.WriteFile(credsFile, []byte(`{"oauthAccount": {"email": "user@example.com"}}`), 0600)
+		// valid claudeAiOauth
+		_ = os.WriteFile(credsFile, []byte(`{"claudeAiOauth":{"accessToken":"sk-ant-access-123","refreshToken":"ref"}}`), 0600)
 		if !a.HasCredentials(profileDir) {
-			t.Errorf("expected HasCredentials=true when .claude.json contains oauthAccount")
+			t.Errorf("expected HasCredentials=true when .credentials.json contains claudeAiOauth")
 		}
 	})
 }
+
 
 func TestAdapter_RewriteHooks(t *testing.T) {
 	tempDir := t.TempDir()
@@ -245,3 +268,26 @@ func TestAdapter_GetUsage(t *testing.T) {
 		t.Errorf("expected StatusUnknown, got %v", report.Status)
 	}
 }
+
+func TestAdapter_PrepareEnv_StripsHostTokens(t *testing.T) {
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, "profiles", "work")
+	_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0755)
+
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-ambient-token")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-ambient-api-key")
+	t.Setenv("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "ambient-refresh")
+
+	a := NewAdapter()
+	launch, err := a.PrepareEnv("work", profileDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv returned error: %v", err)
+	}
+
+	for _, k := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"} {
+		if val, exists := launch.Env[k]; exists && val != "" {
+			t.Errorf("expected %s to be stripped from LaunchEnv, got %q", k, val)
+		}
+	}
+}
+

@@ -47,7 +47,9 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		defer ResetTerminalTitle(os.Stdout)
 	}
 
-	if agentName != "" {
+	// Keyring bypass and keychain harvesting for agents with global shared keychains (e.g. agy).
+	// Agents with profile-scoped keychain services (like claude) do not need or want host keychain purging.
+	if agentName == "agy" {
 		cfg, _ := config.LoadConfig()
 		var customServices []string
 		if cfg != nil {
@@ -55,13 +57,11 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		}
 
 		profileDir := launch.Env["HOME"]
-		// Check whether the profile is authenticated in keyring bypass mode.
-		// For agy, if SSH_CONNECTION is omitted, the session is unauthenticated, expired, or logging in.
 		hasCreds := false
 		if profileDir != "" {
 			if _, hasSSH := launch.Env["SSH_CONNECTION"]; hasSSH {
 				hasCreds = true
-			} else if agentName != "agy" {
+			} else {
 				tokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
 				if fi, err := os.Stat(tokenPath); err == nil && fi.Size() > 0 {
 					hasCreds = true
@@ -156,8 +156,8 @@ func (r *Runner) RunShell(ctx context.Context, launch agents.LaunchEnv) (int, er
 }
 
 // BuildEnv constructs the execution environment by filtering out sensitive/managed variables
-// (SSH variables, HOME, AIM_* variables) unless explicitly provided in launchEnv, and applying overrides.
-// This prevents the host environment from leaking SSH connection variables that would suppress browser auto-open.
+// (SSH variables, HOME, AIM_* variables, agent-specific ambient tokens) unless explicitly provided in launchEnv,
+// and applying overrides. This prevents host tokens from inadvertently leaking into profile executions.
 func BuildEnv(environ []string, launchEnv map[string]string) []string {
 	env := make([]string, 0, len(environ)+len(launchEnv))
 	for _, e := range environ {
@@ -166,7 +166,11 @@ func BuildEnv(environ []string, launchEnv map[string]string) []string {
 			continue
 		}
 		key := e[:idx]
-		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "CODEX_HOME" || key == "CLAUDE_CONFIG_DIR" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" || key == "AIM_SESSION_ID" {
+		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" ||
+			key == "GEMINI_CLI_HOME" || key == "CODEX_HOME" || key == "CLAUDE_CONFIG_DIR" ||
+			key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" ||
+			key == "AIM_SESSION_ID" || key == "CLAUDE_CODE_OAUTH_TOKEN" ||
+			key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
 			continue
 		}
 		if _, overridden := launchEnv[key]; overridden {
@@ -179,3 +183,4 @@ func BuildEnv(environ []string, launchEnv map[string]string) []string {
 	}
 	return env
 }
+
