@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -46,6 +45,20 @@ func TestAdapter_ResolveBinary(t *testing.T) {
 
 func TestAdapter_PrepareEnv(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", "")
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	for _, kind := range []string{"CONFIG", "DATA", "CACHE", "STATE"} {
+		t.Setenv("AIM_"+kind+"_DIR", "")
+		t.Setenv("XDG_"+kind+"_HOME", filepath.Join(tempDir, kind))
+	}
+	bin := filepath.Join(tempDir, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "security"), []byte("#!/bin/sh\nexit 44\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	profileDir := filepath.Join(tempDir, "profiles", "work")
 	_ = os.MkdirAll(profileDir, 0755)
 
@@ -68,8 +81,14 @@ func TestAdapter_PrepareEnv(t *testing.T) {
 	if launchEnv.Env["AIM_PROFILE"] != "work" {
 		t.Errorf("expected AIM_PROFILE=work, got %s", launchEnv.Env["AIM_PROFILE"])
 	}
-	if launchEnv.Env["AIM_HOME"] != config.BaseDir() {
-		t.Errorf("expected AIM_HOME=%s, got %s", config.BaseDir(), launchEnv.Env["AIM_HOME"])
+	if launchEnv.Env["AIM_HOME"] != "" {
+		t.Errorf("XDG launch must not select legacy AIM_HOME: %q", launchEnv.Env["AIM_HOME"])
+	}
+	for _, kind := range []string{"CONFIG", "DATA", "CACHE", "STATE"} {
+		key := "AIM_" + kind + "_DIR"
+		if got, want := launchEnv.Env[key], filepath.Join(tempDir, kind, "aim"); got != want {
+			t.Errorf("%s = %q; want %q", key, got, want)
+		}
 	}
 	if _, ok := launchEnv.Env["AIM_SESSION_ID"]; ok {
 		t.Errorf("AIM_SESSION_ID should be stripped from LaunchEnv")
