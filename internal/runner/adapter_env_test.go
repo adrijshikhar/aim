@@ -55,6 +55,9 @@ func TestAdapterEnvironmentIsolation(t *testing.T) {
 			if env["AIM_TEST_INHERITED"] != "keep-me" || env["HOME"] != profileDir || env["AIM_AGENT"] != adapter.Name() || env["AIM_PROFILE"] != "work" {
 				t.Fatal("benign inheritance or explicit profile identity was lost")
 			}
+			if env["AIM_HOME"] != os.Getenv("AIM_HOME") {
+				t.Errorf("AIM_HOME = %q; want parent profile store %q", env["AIM_HOME"], os.Getenv("AIM_HOME"))
+			}
 			for _, key := range managed {
 				if env[key] == "host-value" {
 					t.Errorf("host %s leaked through adapter and runner", key)

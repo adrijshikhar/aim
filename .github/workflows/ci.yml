@@ -41,3 +41,6 @@ jobs:
 
       - name: Run Integration Smoke Tests
         run: ./test/smoke_test.sh
+
+      - name: Run Live CLI Shell Tests
+        run: bash ./test/live_cli_test.sh

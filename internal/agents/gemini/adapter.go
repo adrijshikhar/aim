@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -48,6 +49,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 		"GEMINI_CLI_HOME": filepath.Join(profileDir, ".gemini"),
 		"AIM_AGENT":       a.Name(),
 		"AIM_PROFILE":     profileName,
+		"AIM_HOME":        config.BaseDir(),
 	}
 	cwd, _ := os.Getwd()
 	return agents.LaunchEnv{

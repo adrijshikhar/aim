@@ -39,12 +39,21 @@ make test
 # Run end-to-end integration smoke tests
 make smoke
 
+# Run the built AIM CLI through real shells and nested AIM commands
+make live-test
+
 # Format code
 gofmt -s -w .
 
 # Static analysis
 go vet ./...
 ```
+
+`make smoke` uses mocked agent binaries. `make live-test` launches real `/bin/sh`
+processes through each adapter and executes nested AIM commands against temporary
+profiles. It checks profile-store continuity, environment isolation, configuration
+overrides, and exit codes; only macOS Keychain access is stubbed. Neither suite
+authenticates with providers or verifies a live model response.
 
 ### Local Release Testing
 To verify cross-compilation across all target platforms (`darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`):
