@@ -66,11 +66,11 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 				return err
 			}
 			if resolvedID != "" {
-				sessID := extractResumedSessionID(extraArgs)
-				extraArgs = replaceResumedSessionID(extraArgs, sessID, resolvedID)
+				sessID := runner.ExtractSessionID(extraArgs)
+				extraArgs = runner.ReplaceSessionID(extraArgs, sessID, resolvedID)
 			}
 
-			sessID := extractResumedSessionID(extraArgs)
+			sessID := runner.ExtractSessionID(extraArgs)
 			exitCode := executeRunWithSession(reg, pm, agentName, profileName, sessID, extraArgs)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
@@ -120,7 +120,7 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 
 	// Ensure AIM_SESSION_ID is set in launchEnv if resuming or running with a known session ID
 	if sessionID == "" {
-		sessionID = extractResumedSessionID(extraArgs)
+		sessionID = runner.ExtractSessionID(extraArgs)
 	}
 	if sessionID != "" {
 		if launchEnv.Env == nil {
@@ -166,16 +166,8 @@ func applyProfileOverrides(launch *agents.LaunchEnv, cfg *config.Config, profile
 	}
 }
 
-func extractResumedSessionID(extraArgs []string) string {
-	return runner.ExtractSessionID(extraArgs)
-}
-
-func replaceResumedSessionID(extraArgs []string, oldID, newID string) []string {
-	return runner.ReplaceSessionID(extraArgs, oldID, newID)
-}
-
 func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mgr *session.Manager, agentName, profileName string, extraArgs []string) (string, error) {
-	sessionID := extractResumedSessionID(extraArgs)
+	sessionID := runner.ExtractSessionID(extraArgs)
 	if sessionID == "" {
 		return "", nil
 	}

@@ -75,7 +75,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		return nil
 	}
 	if reg == nil {
-		reg = agents.DefaultRegistry()
+		reg = defaultRegistry()
 	}
 
 	cfg, _ := config.LoadConfig()

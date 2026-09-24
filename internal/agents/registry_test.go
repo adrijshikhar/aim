@@ -114,12 +114,10 @@ func TestRegistryConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-func TestDefaultRegistry(t *testing.T) {
-	def := DefaultRegistry()
-	if def == nil {
-		t.Fatalf("expected DefaultRegistry() to be non-nil")
-	}
-	if DefaultRegistry() != def {
-		t.Fatalf("expected DefaultRegistry() to return a singleton")
+func TestNewRegistryIsIndependent(t *testing.T) {
+	first, second := NewRegistry(), NewRegistry()
+	first.Register(&mockAdapter{name: "first"})
+	if _, err := second.Get("first"); err == nil {
+		t.Fatal("registries must not share registrations")
 	}
 }

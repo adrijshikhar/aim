@@ -51,16 +51,8 @@ var _ agents.AgentAdapter = (*Adapter)(nil)
 
 type Adapter struct{}
 
-// AntigravityAdapter is an alias for Adapter.
-type AntigravityAdapter = Adapter
-
 func NewAdapter() *Adapter {
 	return &Adapter{}
-}
-
-// NewAntigravityAdapter creates a new AntigravityAdapter.
-func NewAntigravityAdapter() *AntigravityAdapter {
-	return NewAdapter()
 }
 
 func (a *Adapter) Name() string        { return "agy" }
@@ -185,10 +177,6 @@ func (a *Adapter) IsTokenHealthy(profileName, profileDir string) bool {
 	return true
 }
 
-func isProfileEligibleForSeeding(profileName string) bool {
-	return profile.ShouldSeedCredentials(profileName)
-}
-
 func copyHostSettings(realHome, tokenDir string) {
 	realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
 	destSettings := filepath.Join(tokenDir, "settings.json")
@@ -203,7 +191,7 @@ func copyHostSettings(realHome, tokenDir string) {
 // eligible profile (such as "personal", "default", "p", or the configured default profile)
 // if the profile doesn't have credentials yet.
 func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
-	if !isProfileEligibleForSeeding(profileName) {
+	if !profile.ShouldSeedCredentials(profileName) {
 		return false
 	}
 	p := a.TokenPath(profileDir)

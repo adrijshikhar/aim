@@ -682,7 +682,7 @@ func TestCLI_ExecuteRun_ContinueFlag(t *testing.T) {
 func TestCLI_AgentAwareListAndDoctor(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("AIM_HOME", tmpDir)
-	reg := agents.DefaultRegistry()
+	reg := defaultRegistry()
 	reg.Register(agy.NewAdapter())
 	pm := profile.NewProfileManager(tmpDir)
 
@@ -1703,7 +1703,7 @@ func TestCLI_List_MultiCategoryBadge(t *testing.T) {
 		FetchedAt: time.Now(),
 	})
 
-	reg := agents.DefaultRegistry()
+	reg := defaultRegistry()
 	out, _ := captureOutput(t, func() {
 		_ = runList(reg, pm, "agy")
 	})

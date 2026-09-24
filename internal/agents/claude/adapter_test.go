@@ -34,10 +34,6 @@ func TestAdapter_Metadata(t *testing.T) {
 		t.Errorf("missing aliases: %v", expectedAliases)
 	}
 
-	aliasAdapter := NewClaudeAdapter()
-	if aliasAdapter.Name() != "claude" {
-		t.Errorf("expected NewClaudeAdapter to return claude adapter")
-	}
 }
 
 func TestAdapter_ResolveBinary(t *testing.T) {

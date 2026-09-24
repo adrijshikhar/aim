@@ -21,16 +21,8 @@ var _ agents.AgentAdapter = (*Adapter)(nil)
 
 type Adapter struct{}
 
-// ClaudeAdapter is an alias for Adapter.
-type ClaudeAdapter = Adapter
-
 func NewAdapter() *Adapter {
 	return &Adapter{}
-}
-
-// NewClaudeAdapter creates a new ClaudeAdapter.
-func NewClaudeAdapter() *ClaudeAdapter {
-	return NewAdapter()
 }
 
 func (a *Adapter) Name() string        { return "claude" }

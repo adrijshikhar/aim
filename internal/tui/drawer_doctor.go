@@ -36,9 +36,6 @@ func (m Model) openDoctorDrawer() (Model, tea.Cmd) {
 
 func (m Model) fetchDoctorDiagnostics() Model {
 	reg := m.reg
-	if reg == nil {
-		reg = agents.DefaultRegistry()
-	}
 
 	if len(m.profiles) == 0 || m.cursor < 0 || m.cursor >= len(m.profiles) {
 		var results []agents.DiagnosticResult

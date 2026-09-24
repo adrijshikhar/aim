@@ -17,13 +17,7 @@ var _ agents.AgentAdapter = (*Adapter)(nil)
 
 type Adapter struct{}
 
-// GeminiAdapter is an alias for Adapter.
-type GeminiAdapter = Adapter
-
 func NewAdapter() *Adapter { return &Adapter{} }
-
-// NewGeminiAdapter creates a new GeminiAdapter.
-func NewGeminiAdapter() *GeminiAdapter { return NewAdapter() }
 
 func (a *Adapter) Name() string        { return "gemini" }
 func (a *Adapter) DisplayName() string { return "Gemini CLI" }

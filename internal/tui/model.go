@@ -71,6 +71,9 @@ type Model struct {
 }
 
 func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config) Model {
+	if reg == nil {
+		reg = agents.NewRegistry()
+	}
 	if cfg == nil {
 		cfg = config.NewDefaultConfig()
 	}
@@ -132,14 +135,6 @@ func (m Model) refreshProfiles() Model {
 	return m
 }
 
-// RunTUI runs the interactive TUI program and returns any execution error.
-func RunTUI(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config) error {
-	m := NewModel(reg, pm, cfg)
-	p := tea.NewProgram(m)
-	_, err := p.Run()
-	return err
-}
-
 func (m Model) Outcome() ActionOutcome {
 	return m.outcome
 }
@@ -178,11 +173,6 @@ func (m Model) IsFilterActive() bool {
 func (m Model) WithVersion(v string) Model {
 	m.version = v
 	return m
-}
-
-// SetVersion sets the version string displayed in the header on the model pointer.
-func (m *Model) SetVersion(v string) {
-	m.version = v
 }
 
 // Version returns the version displayed in the header, falling back to package Version.
@@ -312,9 +302,6 @@ func waitForUsageReport(ch <-chan usage.Report) tea.Cmd {
 
 func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
 	reg := m.reg
-	if reg == nil {
-		reg = agents.DefaultRegistry()
-	}
 
 	var targets []usage.TargetProfile
 	if reg != nil {

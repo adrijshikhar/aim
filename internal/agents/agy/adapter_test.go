@@ -216,7 +216,7 @@ func TestAgyDoctor(t *testing.T) {
 }
 
 func TestAntigravityAdapter_HasCredentials(t *testing.T) {
-	adapter := NewAntigravityAdapter()
+	adapter := NewAdapter()
 	tmpDir := t.TempDir()
 
 	// 1. Not present

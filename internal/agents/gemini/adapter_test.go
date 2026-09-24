@@ -91,7 +91,7 @@ func TestGeminiDoctor(t *testing.T) {
 }
 
 func TestGeminiTokenPath(t *testing.T) {
-	adapter := NewGeminiAdapter()
+	adapter := NewAdapter()
 	expected := filepath.Join("/fake/profile", ".gemini", "gemini-oauth-token")
 	if got := adapter.TokenPath("/fake/profile"); got != expected {
 		t.Errorf("expected TokenPath %s, got %s", expected, got)
@@ -99,7 +99,7 @@ func TestGeminiTokenPath(t *testing.T) {
 }
 
 func TestGeminiAdapter_HasCredentials(t *testing.T) {
-	adapter := NewGeminiAdapter()
+	adapter := NewAdapter()
 	tmpDir := t.TempDir()
 
 	// 1. Not present

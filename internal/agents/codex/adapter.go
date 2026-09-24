@@ -27,16 +27,8 @@ var _ agents.AgentAdapter = (*Adapter)(nil)
 
 type Adapter struct{}
 
-// CodexAdapter is an alias for Adapter.
-type CodexAdapter = Adapter
-
 func NewAdapter() *Adapter {
 	return &Adapter{}
-}
-
-// NewCodexAdapter creates a new CodexAdapter.
-func NewCodexAdapter() *CodexAdapter {
-	return NewAdapter()
 }
 
 func (a *Adapter) Name() string        { return "codex" }
@@ -71,7 +63,7 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 
 // SeedDefaultCredentials seeds host ~/.codex/auth.json into profile directory for eligible primary profiles.
 func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
-	if !isProfileEligibleForSeeding(profileName) {
+	if !profile.ShouldSeedCredentials(profileName) {
 		return false
 	}
 	realHome := config.RealHomeDir()
@@ -100,10 +92,6 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	}
 	logger.Debug("[codex] Successfully seeded credentials from %s to %s", hostAuthPath, destPath)
 	return true
-}
-
-func isProfileEligibleForSeeding(profileName string) bool {
-	return profile.ShouldSeedCredentials(profileName)
 }
 
 // ResolveBinary locates the codex executable on the system.
@@ -772,7 +760,7 @@ func getAllLatestCodexRateLimits(profileName, profileDir string) []*codexRateLim
 
 	// 2. If fewer than 2 models found, and profile is eligible for seeding (e.g. primary profile),
 	// also check host ~/.codex/sessions
-	if len(collected) < 2 && isProfileEligibleForSeeding(profileName) {
+	if len(collected) < 2 && profile.ShouldSeedCredentials(profileName) {
 		hostSessionsDir := filepath.Join(config.RealHomeDir(), ".codex", "sessions")
 		hostFiles := findRecentSessionFiles(hostSessionsDir)
 		hostLimit := maxCheck
