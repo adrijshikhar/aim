@@ -308,4 +308,60 @@ func TestManager_FindAllSessionsByID(t *testing.T) {
 	if !strings.Contains(errAmbig.Error(), "ambiguous") {
 		t.Errorf("expected error message to contain 'ambiguous', got: %v", errAmbig)
 	}
+
+	// 5. Title/name fallback matching
+	sNamed := session.NewSession("01a0b351-2f2f-7d22-8176-49e45bde8f9b", "cc-ov2", "agy", "work", false, time.Now())
+	mockAgy.sessions = append(mockAgy.sessions, sNamed)
+
+	namedMatches, err := mgr.FindAllSessionsByID(ctx, "agy", "cc-ov2")
+	if err != nil {
+		t.Fatalf("FindAllSessionsByID by name failed: %v", err)
+	}
+	if len(namedMatches) != 1 || namedMatches[0].ID != sNamed.ID {
+		t.Fatalf("expected 1 match by name cc-ov2, got %+v", namedMatches)
+	}
+
+	resolvedNamed, err := mgr.ResolveSession(ctx, "agy", "cc-ov2")
+	if err != nil {
+		t.Fatalf("ResolveSession by name failed: %v", err)
+	}
+	if resolvedNamed == nil || resolvedNamed.ID != sNamed.ID {
+		t.Fatalf("expected resolved session by name cc-ov2, got %+v", resolvedNamed)
+	}
 }
+
+func TestManager_ListSessions_CrossProfileLatestActivity(t *testing.T) {
+	setupTestProfiles(t)
+	mgr := session.NewManagerWithScanner(&mockProcessScanner{})
+	ctx := context.Background()
+
+	// Same session ID in work and office, but office has newer timestamp
+	tOld := time.Now().Add(-2 * time.Hour)
+	tNew := time.Now()
+
+	sWork := session.NewSession("mock-cross-profile-1111", "cc-ov2", "agy", "work", false, tOld)
+	sOffice := session.NewSession("mock-cross-profile-1111", "cc-ov2", "agy", "bby", false, tNew)
+
+	mockAgy := &mockProvider{
+		agent:    "agy",
+		sessions: []session.Session{sWork, sOffice},
+	}
+	mgr.RegisterProvider(mockAgy)
+
+	sessions, err := mgr.ListSessions(ctx, "agy", "", false)
+	if err != nil {
+		t.Fatalf("ListSessions failed: %v", err)
+	}
+
+	// Should deduplicate and keep sOffice
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 deduplicated session, got %d", len(sessions))
+	}
+	if sessions[0].Profile != "bby" {
+		t.Errorf("expected session from newer profile 'bby', got %s", sessions[0].Profile)
+	}
+	if !sessions[0].LastActiveAt.Equal(tNew) {
+		t.Errorf("expected newer LastActiveAt, got %v", sessions[0].LastActiveAt)
+	}
+}
+

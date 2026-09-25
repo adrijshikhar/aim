@@ -57,14 +57,9 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 	}
 
 	var allSessions []Session
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
 	hostOnly := filterProfile == "host" || filterProfile == "<host>"
 	appendSession := func(s Session, profile string, isHost bool) {
-		key := fmt.Sprintf("%s:%s", s.Agent, s.ID)
-		if seen[key] {
-			return
-		}
-		seen[key] = true
 		s.Profile, s.IsHost = profile, isHost
 		s.Status = StatusIdle
 		if active, ok := activeProcesses[s.ID]; ok {
@@ -80,6 +75,19 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 		if filterProfile != "" && !hostOnly && s.Profile != filterProfile {
 			return
 		}
+
+		key := fmt.Sprintf("%s:%s", s.Agent, s.ID)
+		if idx, exists := seen[key]; exists {
+			// When listing across profiles, prioritize the most recently active copy
+			if filterProfile == "" {
+				existing := allSessions[idx]
+				if s.LastActiveAt.After(existing.LastActiveAt) || (s.LastActiveAt.Equal(existing.LastActiveAt) && existing.IsHost && !s.IsHost) {
+					allSessions[idx] = s
+				}
+			}
+			return
+		}
+		seen[key] = len(allSessions)
 		allSessions = append(allSessions, s)
 	}
 
@@ -213,6 +221,33 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 	for _, s := range sessions {
 		if s.ID == idOrPrefix || strings.HasPrefix(s.ID, idOrPrefix) {
 			matches = append(matches, s)
+		}
+	}
+	if len(matches) == 0 {
+		lowerTarget := strings.ToLower(strings.TrimSpace(idOrPrefix))
+		if lowerTarget != "" {
+			for _, s := range sessions {
+				if strings.ToLower(strings.TrimSpace(s.Title)) == lowerTarget {
+					matches = append(matches, s)
+				}
+			}
+			if len(matches) > 0 {
+				sort.Slice(matches, func(i, j int) bool {
+					return matches[i].LastActiveAt.After(matches[j].LastActiveAt)
+				})
+				return []Session{matches[0]}, nil
+			}
+			for _, s := range sessions {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Title)), lowerTarget) {
+					matches = append(matches, s)
+				}
+			}
+			if len(matches) > 0 {
+				sort.Slice(matches, func(i, j int) bool {
+					return matches[i].LastActiveAt.After(matches[j].LastActiveAt)
+				})
+				return []Session{matches[0]}, nil
+			}
 		}
 	}
 	return matches, nil

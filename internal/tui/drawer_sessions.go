@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/session/providers/agy"
 	"github.com/aim-cli/aim/internal/session/providers/codex"
@@ -318,6 +319,16 @@ func (m Model) renderSessionsDrawer() string {
 				statusLabel,
 			)
 			pb.WriteString(previewHeader + "\n")
+			if sel.Cwd != "" {
+				displayCwd := sel.Cwd
+				if home := config.RealHomeDir(); strings.HasPrefix(displayCwd, home) {
+					displayCwd = "~" + displayCwd[len(home):]
+				}
+				pb.WriteString(fmt.Sprintf("%s %s\n",
+					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Workspace:"),
+					lipgloss.NewStyle().Foreground(AccentCyan).Render(truncateString(displayCwd, 76)),
+				))
+			}
 			for _, dl := range displayLines {
 				pb.WriteString(lipgloss.NewStyle().Foreground(TextPrimary).Render(dl) + "\n")
 			}

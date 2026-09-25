@@ -361,6 +361,9 @@ func renderSessionPreviewCard(w io.Writer, s *session.Session) {
 	if s.StoragePath != "" {
 		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Storage:"), mutedStyle.Render(s.StoragePath)))
 	}
+	if s.Cwd != "" {
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Workspace:"), valStyle.Render(s.Cwd)))
+	}
 
 	b.WriteString("\n" + labelStyle.Render("Title:") + "\n")
 	b.WriteString("  " + lipgloss.NewStyle().Bold(true).Render(s.Title) + "\n\n")
