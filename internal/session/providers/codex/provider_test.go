@@ -537,4 +537,84 @@ VALUES
 	if retrieved.Cwd != "/workspace/repo" {
 		t.Errorf("expected retrieved Cwd '/workspace/repo', got %q", retrieved.Cwd)
 	}
+
+	// Verify GetSession retrieves by session name 'cc-ov2'
+	retrievedByName, err := p.GetSession(ctx, "cc-ov2", tmpDir, false)
+	if err != nil {
+		t.Fatalf("GetSession by name failed: %v", err)
+	}
+	if retrievedByName == nil || retrievedByName.ID != "01a0b351-2f2f-7d22-8176-49e45bde8f9b" {
+		t.Fatalf("expected session 01a0b351 retrieved by name, got %+v", retrievedByName)
+	}
+}
+
+func TestProvider_MultilinePromptAndLookupByName(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatalf("failed to create mock codex dir: %v", err)
+	}
+
+	dbPath := filepath.Join(codexDir, "state_5.sqlite")
+	schema := `
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	name TEXT,
+	title TEXT,
+	first_user_message TEXT,
+	preview TEXT,
+	cwd TEXT,
+	thread_source TEXT,
+	archived INTEGER DEFAULT 0,
+	updated_at INTEGER NOT NULL,
+	rollout_path TEXT NOT NULL
+);
+INSERT INTO threads (id, name, title, first_user_message, preview, cwd, thread_source, archived, updated_at, rollout_path)
+VALUES 
+('01a0b8b4-3942-7912-a78e-a1cd76748eb7', 'dsl-delete', 'Review a three-repo change that adds DSL connector deletion to Hevo.\nIt replaces an earlier soft-delete design.\n\n## Read in this order\n1. Design + plan', 'First prompt\nwith multiple lines\nand markdown', 'Preview line 1\nPreview line 2', '/Users/nemesis/Projects/hevo-data/dsl-connector', 'user', 0, 1726744883, '/tmp/rollout-dsl.jsonl');
+`
+	if err := exec.Command(sqliteBin, dbPath, schema).Run(); err != nil {
+		t.Fatalf("failed to seed mock sqlite DB: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	// 1. Verify ListSessions returns the multiline session
+	sessions, err := p.ListSessions(ctx, tmpDir, false)
+	if err != nil {
+		t.Fatalf("ListSessions failed: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].ID != "01a0b8b4-3942-7912-a78e-a1cd76748eb7" {
+		t.Errorf("expected session 01a0b8b4..., got %s", sessions[0].ID)
+	}
+	if sessions[0].Title != "dsl-delete" {
+		t.Errorf("expected title 'dsl-delete', got %q", sessions[0].Title)
+	}
+
+	// 2. Verify GetSession by prefix
+	s1, err := p.GetSession(ctx, "01a0b8b4", tmpDir, false)
+	if err != nil {
+		t.Fatalf("GetSession by prefix failed: %v", err)
+	}
+	if s1 == nil || s1.ID != "01a0b8b4-3942-7912-a78e-a1cd76748eb7" {
+		t.Fatalf("expected session 01a0b8b4, got %+v", s1)
+	}
+
+	// 3. Verify GetSession by name
+	s2, err := p.GetSession(ctx, "dsl-delete", tmpDir, false)
+	if err != nil {
+		t.Fatalf("GetSession by name failed: %v", err)
+	}
+	if s2 == nil || s2.ID != "01a0b8b4-3942-7912-a78e-a1cd76748eb7" {
+		t.Fatalf("expected session 01a0b8b4, got %+v", s2)
+	}
 }
