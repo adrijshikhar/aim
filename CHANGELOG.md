@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/adrijshikhar/aim/compare/v0.9.0...v0.9.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **keychain:** eliminate destructive host keychain purging and isolate test runs ([#54](https://github.com/adrijshikhar/aim/issues/54)) ([c95ac8f](https://github.com/adrijshikhar/aim/commit/c95ac8f539db7a2f6bbb4e2d54bb22c1726e5bb3))
+
 ## [0.9.0](https://github.com/adrijshikhar/aim/compare/v0.8.1...v0.9.0) (2026-09-25)
 
 
