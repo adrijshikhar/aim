@@ -618,3 +618,100 @@ VALUES
 		t.Fatalf("expected session 01a0b8b4, got %+v", s2)
 	}
 }
+
+func TestProvider_SanitizeSession(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatalf("failed to create mock codex dir: %v", err)
+	}
+
+	historyDB := filepath.Join(codexDir, "thread_history_1.sqlite")
+	stateDB := filepath.Join(codexDir, "state_5.sqlite")
+	rolloutDir := filepath.Join(codexDir, "sessions", "2026", "09", "18")
+	_ = os.MkdirAll(rolloutDir, 0755)
+	rolloutPath := filepath.Join(rolloutDir, "rollout-test.jsonl")
+	// Write dummy rollout content (100 bytes)
+	_ = os.WriteFile(rolloutPath, []byte(strings.Repeat("a", 100)), 0644)
+
+	stateSchema := fmt.Sprintf(`
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	rollout_path TEXT NOT NULL
+);
+INSERT INTO threads (id, rollout_path) VALUES ('01a0b351-2f2f-7d22-8176-49e45bde8f9b', '%s');
+`, rolloutPath)
+	if err := exec.Command(sqliteBin, stateDB, stateSchema).Run(); err != nil {
+		t.Fatalf("failed to seed mock state DB: %v", err)
+	}
+
+	historySchema := `
+CREATE TABLE thread_history_projection_state (
+	thread_id TEXT PRIMARY KEY,
+	next_rollout_bytes_offset INTEGER NOT NULL,
+	next_rollout_ordinal INTEGER NOT NULL
+);
+CREATE TABLE thread_items (
+	thread_id TEXT NOT NULL,
+	rollout_ordinal INTEGER NOT NULL,
+	item_id TEXT NOT NULL,
+	PRIMARY KEY (thread_id, rollout_ordinal)
+);
+CREATE TABLE thread_turns (
+	thread_id TEXT NOT NULL,
+	rollout_ordinal INTEGER NOT NULL,
+	turn_id TEXT NOT NULL,
+	PRIMARY KEY (thread_id, rollout_ordinal)
+);
+CREATE TABLE thread_realtime_items (
+	thread_id TEXT NOT NULL,
+	item_id TEXT NOT NULL
+);
+
+-- Seed with conflicting stale rows ahead of next_rollout_ordinal (10)
+INSERT INTO thread_history_projection_state (thread_id, next_rollout_bytes_offset, next_rollout_ordinal)
+VALUES ('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 50, 10);
+
+INSERT INTO thread_items (thread_id, rollout_ordinal, item_id) VALUES
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 5, 'item-5'),
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 9, 'item-9'),
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 10, 'item-10-stale'),
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 15, 'item-15-stale');
+
+INSERT INTO thread_turns (thread_id, rollout_ordinal, turn_id) VALUES
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 5, 'turn-5'),
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 10, 'turn-10-stale');
+`
+	if err := exec.Command(sqliteBin, historyDB, historySchema).Run(); err != nil {
+		t.Fatalf("failed to seed mock history DB: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	// Run SanitizeSession
+	if err := p.SanitizeSession(ctx, "01a0b351-2f2f-7d22-8176-49e45bde8f9b", tmpDir); err != nil {
+		t.Fatalf("SanitizeSession failed: %v", err)
+	}
+
+	// Verify items with ordinal >= 10 were pruned
+	out, err := exec.Command(sqliteBin, historyDB, "SELECT COUNT(*) FROM thread_items WHERE thread_id = '01a0b351-2f2f-7d22-8176-49e45bde8f9b' AND rollout_ordinal >= 10;").Output()
+	if err != nil {
+		t.Fatalf("failed to query history DB: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "0" {
+		t.Errorf("expected 0 stale items, got %s", strings.TrimSpace(string(out)))
+	}
+
+	// Verify valid items < 10 remain
+	outValid, _ := exec.Command(sqliteBin, historyDB, "SELECT COUNT(*) FROM thread_items WHERE thread_id = '01a0b351-2f2f-7d22-8176-49e45bde8f9b';").Output()
+	if strings.TrimSpace(string(outValid)) != "2" {
+		t.Errorf("expected 2 valid items remaining, got %s", strings.TrimSpace(string(outValid)))
+	}
+}
+

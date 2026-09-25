@@ -129,6 +129,14 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 		if launchEnv.Env["AIM_SESSION_ID"] == "" {
 			launchEnv.Env["AIM_SESSION_ID"] = sessionID
 		}
+		mgr := defaultSessionManager()
+		if prov := mgr.Provider(agentName); prov != nil {
+			if sanitizable, ok := prov.(interface {
+				SanitizeSession(context.Context, string, string) error
+			}); ok {
+				_ = sanitizable.SanitizeSession(context.Background(), sessionID, pDir)
+			}
+		}
 	}
 
 	applyProfileOverrides(&launchEnv, cfg, profileName, true)

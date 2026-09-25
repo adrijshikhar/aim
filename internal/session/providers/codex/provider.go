@@ -602,7 +602,7 @@ func (p *Provider) hydrateAncestorSessions(ctx context.Context, srcCodexDir, tar
 			srcHistoryDB := filepath.Join(srcCodexDir, "thread_history_1.sqlite")
 			targetHistoryDB := filepath.Join(targetCodexDir, "thread_history_1.sqlite")
 			if _, err := os.Stat(srcHistoryDB); err == nil {
-				if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, currentParentID, currentParentID); err != nil {
+				if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, currentParentID, currentParentID, destParentRollout); err != nil {
 					logger.Debug("[session/codex] failed to copy ancestor thread history %s to %s: %v", currentParentID, targetHistoryDB, err)
 				}
 			}
@@ -640,7 +640,7 @@ func (p *Provider) hydrateDatabases(ctx context.Context, srcCodexDir, targetCode
 		srcHistoryDB := filepath.Join(srcCodexDir, "thread_history_1.sqlite")
 		targetHistoryDB := filepath.Join(targetCodexDir, "thread_history_1.sqlite")
 		if _, err := os.Stat(srcHistoryDB); err == nil {
-			if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, srcID, targetID); err != nil {
+			if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, srcID, targetID, targetRolloutPath); err != nil {
 				logger.Debug("[session/codex] copyThreadHistoryDB error: %v", err)
 			}
 		}
@@ -858,7 +858,7 @@ DETACH DATABASE src;
 	return nil
 }
 
-func (p *Provider) copyThreadHistoryDB(ctx context.Context, srcHistoryDB, destHistoryDB, srcID, targetID string) error {
+func (p *Provider) copyThreadHistoryDB(ctx context.Context, srcHistoryDB, destHistoryDB, srcID, targetID, targetRolloutPath string) error {
 	if _, err := os.Stat(srcHistoryDB); err != nil {
 		return nil // No source history DB, nothing to copy
 	}
@@ -915,6 +915,33 @@ func (p *Provider) copyThreadHistoryDB(ctx context.Context, srcHistoryDB, destHi
 		return nil
 	}
 
+	var rolloutSize int64 = -1
+	if targetRolloutPath != "" {
+		if fi, err := os.Stat(targetRolloutPath); err == nil {
+			rolloutSize = fi.Size()
+		}
+	}
+
+	if rolloutSize >= 0 {
+		// If next_rollout_bytes_offset points beyond the actual rollout file,
+		// the projection state is invalid. Purge it so Codex re-projects cleanly from offset 0.
+		purgeSQL := fmt.Sprintf(`
+DELETE FROM thread_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_turns WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_realtime_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d;`,
+			escapeSQL(targetID), rolloutSize)
+		sqlParts = append(sqlParts, purgeSQL)
+	}
+
+	// Always prune any stale items or turns with rollout_ordinal >= next_rollout_ordinal
+	// to prevent SQLite UNIQUE constraint failures during Codex thread resumption.
+	pruneSQL := fmt.Sprintf(`
+DELETE FROM thread_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s') AND rollout_ordinal >= (SELECT next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = '%[1]s');
+DELETE FROM thread_turns WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s') AND rollout_ordinal >= (SELECT next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = '%[1]s');`,
+		escapeSQL(targetID))
+	sqlParts = append(sqlParts, pruneSQL)
+
 	fullSQL := fmt.Sprintf(`
 PRAGMA foreign_keys = OFF;
 ATTACH DATABASE '%s' AS src;
@@ -928,6 +955,53 @@ DETACH DATABASE src;
 	cmd.Stdin = strings.NewReader(fullSQL)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to copy thread history for %s: %s: %w", srcID, string(out), err)
+	}
+	return nil
+}
+
+// SanitizeSession cleans up stale or desynchronized projection state in Codex's thread_history_1.sqlite.
+// It ensures that no thread items or turns exist with rollout_ordinal >= next_rollout_ordinal,
+// and resets broken projections where the rollout file is smaller than next_rollout_bytes_offset.
+func (p *Provider) SanitizeSession(ctx context.Context, sessionID, profileDir string) error {
+	if p.sqliteBin == "" || sessionID == "" || !isValidSessionID(sessionID) {
+		return nil
+	}
+	historyDB := filepath.Join(p.codexDir(profileDir, false), "thread_history_1.sqlite")
+	if _, err := os.Stat(historyDB); err != nil {
+		return nil
+	}
+
+	rolloutPath := p.findRolloutPath(ctx, p.codexDir(profileDir, false), sessionID)
+	var rolloutSize int64 = -1
+	if rolloutPath != "" {
+		if fi, err := os.Stat(rolloutPath); err == nil {
+			rolloutSize = fi.Size()
+		}
+	}
+
+	var sqlParts []string
+	if rolloutSize >= 0 {
+		purgeSQL := fmt.Sprintf(`
+DELETE FROM thread_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_turns WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_realtime_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d;`,
+			escapeSQL(sessionID), rolloutSize)
+		sqlParts = append(sqlParts, purgeSQL)
+	}
+
+	pruneSQL := fmt.Sprintf(`
+DELETE FROM thread_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s') AND rollout_ordinal >= (SELECT next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = '%[1]s');
+DELETE FROM thread_turns WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s') AND rollout_ordinal >= (SELECT next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = '%[1]s');`,
+		escapeSQL(sessionID))
+	sqlParts = append(sqlParts, pruneSQL)
+
+	fullSQL := fmt.Sprintf("BEGIN TRANSACTION;\n%s\nCOMMIT;\n", strings.Join(sqlParts, "\n"))
+	cmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
+	cmd.Stdin = strings.NewReader(fullSQL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		logger.Debug("[session/codex] SanitizeSession error for %s: %s: %v", sessionID, string(out), err)
+		return err
 	}
 	return nil
 }

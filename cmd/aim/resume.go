@@ -255,6 +255,15 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		}
 	}
 
+	// Sanitize provider session state if applicable (e.g. prune conflicting SQLite projections in Codex)
+	if prov := mgr.Provider(agent); prov != nil {
+		if sanitizable, ok := prov.(interface {
+			SanitizeSession(context.Context, string, string) error
+		}); ok {
+			_ = sanitizable.SanitizeSession(ctx, resumeID, pDir)
+		}
+	}
+
 	var resumeArgs []string
 	switch agent {
 	case "agy":
