@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -48,16 +49,41 @@ func TestGetIgnoredKeychainEntries(t *testing.T) {
 }
 
 func TestPurgeIgnoredKeychains_NonDarwinOrMissing(t *testing.T) {
+	origDeleteGen := deleteGenericPasswordFn
+	origDeleteNet := deleteInternetPasswordFn
+	defer func() {
+		deleteGenericPasswordFn = origDeleteGen
+		deleteInternetPasswordFn = origDeleteNet
+	}()
+
+	var (
+		mu      sync.Mutex
+		deleted []string
+	)
+	deleteGenericPasswordFn = func(service, account string) error {
+		mu.Lock()
+		deleted = append(deleted, service)
+		mu.Unlock()
+		return nil
+	}
+	deleteInternetPasswordFn = func(service, account string) error {
+		return nil
+	}
+
 	// Calling PurgeIgnoredKeychains should not error out even if items do not exist
 	err := PurgeIgnoredKeychains("non-existent-agent")
 	if err != nil {
 		t.Errorf("unexpected error purging non-existent agent keychains: %v", err)
 	}
 
-	// Purge all should succeed (items missing will return exit code 44, handled cleanly)
+	// Purge all should succeed
 	err = PurgeIgnoredKeychains("")
 	if err != nil {
 		t.Errorf("unexpected error purging keychains: %v", err)
+	}
+
+	if runtime.GOOS == "darwin" && len(deleted) == 0 {
+		t.Errorf("expected mock deletions on darwin, got 0")
 	}
 }
 

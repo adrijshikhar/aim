@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
-	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 )
@@ -48,14 +47,8 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	}
 
 	// Keyring bypass and keychain harvesting for agents with global shared keychains (e.g. agy).
-	// Agents with profile-scoped keychain services (like claude) do not need or want host keychain purging.
+	// Profiles use file-based credentials and never purge host keychains.
 	if agentName == "agy" {
-		cfg, _ := config.LoadConfig()
-		var customServices []string
-		if cfg != nil {
-			customServices = cfg.CustomIgnoredKeychains
-		}
-
 		profileDir := launch.Env["HOME"]
 		hasCreds := false
 		if profileDir != "" {
@@ -74,15 +67,12 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 			}
 		}
 
-		// Only unauthenticated sessions interact with the macOS Keychain.
+		// Only unauthenticated sessions might need to harvest credentials from the macOS Keychain.
 		// Authenticated profiles run with SSH_CONNECTION (keyring bypass mode) and never touch the Keychain.
-		// Skipping purge for authenticated profiles prevents destroying active sessions or concurrent logins!
+		// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
 		if !hasCreds {
-			_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
-
-			// Start background watcher that harvests the token into the profile immediately
-			// once the user completes authentication in the browser, and immediately purges
-			// the token from the host Keychain so it never lingers or races with other profiles.
+			// Start background watcher that harvests the token into the profile once
+			// the user completes authentication in the browser.
 			stopWatcher := make(chan struct{})
 			doneWatcher := make(chan struct{})
 			go func() {
@@ -95,8 +85,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 						return
 					case <-ticker.C:
 						if profile.HarvestKeychainTokenToProfile(agentName, profileDir) {
-							_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
-							logger.Debug("[runner] Successfully harvested token and purged host keychain during active session")
+							logger.Debug("[runner] Successfully harvested token during active session")
 							return
 						}
 					}
@@ -109,7 +98,6 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 				if profileDir != "" {
 					_ = profile.HarvestKeychainTokenToProfile(agentName, profileDir)
 				}
-				_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
 			}()
 		}
 	}

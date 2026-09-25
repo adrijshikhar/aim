@@ -48,24 +48,10 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		cfg = config.NewDefaultConfig()
 	}
 
-	var customServices []string
-	if cfg != nil {
-		customServices = cfg.CustomIgnoredKeychains
-	}
-
-	// Purge ignored agent keychains before and after login for agents that use
-	// shared global keychain entries (like agy) so tokens live strictly in the profile.
-	// For agents with profile-scoped keychain entries (like claude), do NOT purge
-	// the keychain because the entry is scoped to the profile by hash (Claude Code-credentials-<hash>)
-	// and purging would delete the credentials or unrelated host entries.
-	if agentName != "claude" {
-		_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
-	}
+	// Harvest any agent credentials into the profile directory after login completes.
+	// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
 	defer func() {
 		_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
-		if agentName != "claude" {
-			_ = profile.PurgeIgnoredKeychains(agentName, customServices...)
-		}
 	}()
 
 	if err := adapter.Login(context.Background(), profileName, pDir); err != nil {

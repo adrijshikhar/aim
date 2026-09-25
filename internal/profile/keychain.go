@@ -162,7 +162,20 @@ func PurgeIgnoredKeychains(agent string, customServices ...string) error {
 	return nil
 }
 
+var (
+	deleteGenericPasswordFn  = deleteGenericPasswordReal
+	deleteInternetPasswordFn = deleteInternetPasswordReal
+)
+
 func deleteGenericPassword(service, account string) error {
+	return deleteGenericPasswordFn(service, account)
+}
+
+func deleteInternetPassword(service, account string) error {
+	return deleteInternetPasswordFn(service, account)
+}
+
+func deleteGenericPasswordReal(service, account string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -187,7 +200,7 @@ func deleteGenericPassword(service, account string) error {
 	return nil
 }
 
-func deleteInternetPassword(service, account string) error {
+func deleteInternetPasswordReal(service, account string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -394,13 +407,16 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 		}
 
 		// 2. Check legacy / host service in macOS Keychain (without deleting it)
-		for _, svc := range claudeKeychainServices {
-			if raw, err := getGenericPasswordFn(svc, ""); err == nil && raw != "" {
-				data := DecodeKeychainPassword(raw)
-				if HasClaudeCredentials(data) {
-					if writeProfileCredentials(destTokenPath, data) {
-						logger.Debug("[keychain] Successfully harvested token from %s into %s", svc, destTokenPath)
-						return true
+		// Only seed from host credentials if this is the primary/default profile.
+		if ShouldSeedCredentials(filepath.Base(profileDir)) {
+			for _, svc := range claudeKeychainServices {
+				if raw, err := getGenericPasswordFn(svc, ""); err == nil && raw != "" {
+					data := DecodeKeychainPassword(raw)
+					if HasClaudeCredentials(data) {
+						if writeProfileCredentials(destTokenPath, data) {
+							logger.Debug("[keychain] Successfully harvested token from %s into %s", svc, destTokenPath)
+							return true
+						}
 					}
 				}
 			}

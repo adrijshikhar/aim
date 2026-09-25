@@ -69,8 +69,10 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 			return true
 		}
 	}
-	if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
-		return true
+	if profile.ShouldSeedCredentials(filepath.Base(profileDir)) {
+		if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
+			return true
+		}
 	}
 	return false
 }
