@@ -538,4 +538,3 @@ VALUES
 		t.Errorf("expected retrieved Cwd '/workspace/repo', got %q", retrieved.Cwd)
 	}
 }
-

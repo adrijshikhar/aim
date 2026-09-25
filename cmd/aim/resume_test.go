@@ -528,4 +528,3 @@ func TestResumeCmd_DirectSessionIDWithoutProfile(t *testing.T) {
 		t.Errorf("expected --resume %s in args dump, got %q", sessionID, string(content))
 	}
 }
-

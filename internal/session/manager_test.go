@@ -364,4 +364,3 @@ func TestManager_ListSessions_CrossProfileLatestActivity(t *testing.T) {
 		t.Errorf("expected newer LastActiveAt, got %v", sessions[0].LastActiveAt)
 	}
 }
-
