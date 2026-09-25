@@ -78,10 +78,10 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 
 	lingering := profile.FindIgnoredKeychains(agentName, customServices...)
 	if len(lingering) > 0 {
-		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
+		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
 		keychainCat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain:")
-		fmt.Printf("  %s %s %d agent token(s) detected in macOS Keychain (potential profile isolation risk):\n",
-			warnBadge,
+		fmt.Printf("  %s %s %d host agent token(s) detected in macOS Keychain (AIM uses file-based profile isolation):\n",
+			okBadge,
 			keychainCat,
 			len(lingering),
 		)
@@ -91,24 +91,10 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 				lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("(service: %q)", entry.Service)),
 			)
 		}
-		fmt.Println(lipgloss.NewStyle().Foreground(tui.TextMuted).Render("         Auto-purging ignored agent keychains to enforce profile isolation..."))
-		if err := profile.PurgeIgnoredKeychains(agentName, customServices...); err != nil {
-			fmt.Printf("  %s %s Could not purge some entries: %v\n",
-				warnBadge,
-				keychainCat,
-				err,
-			)
-		} else {
-			okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
-			fmt.Printf("  %s %s Agent credentials successfully purged from macOS Keychain.\n",
-				okBadge,
-				keychainCat,
-			)
-		}
 	} else {
 		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
 		keychainCat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain:")
-		fmt.Printf("  %s %s No lingering agent tokens in macOS Keychain (clean isolation).\n",
+		fmt.Printf("  %s %s No host agent tokens in macOS Keychain.\n",
 			okBadge,
 			keychainCat,
 		)

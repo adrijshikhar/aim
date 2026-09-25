@@ -96,6 +96,7 @@ func TestProvider_ListSessions(t *testing.T) {
 func TestProvider_ListSessions_HostDirectory(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
+	t.Setenv("AIM_REAL_HOME", tempHome)
 
 	projDir := filepath.Join(tempHome, ".claude", "projects", "-test-host-project")
 	if err := os.MkdirAll(projDir, 0755); err != nil {
