@@ -48,8 +48,6 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		cfg = config.NewDefaultConfig()
 	}
 
-
-
 	// Harvest any agent credentials into the profile directory after login completes.
 	// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
 	defer func() {
