@@ -562,15 +562,19 @@ func (p *Provider) hydrateRolloutFile(srcCodexDir, targetSessionsDir, srcRollout
 
 func (p *Provider) hydrateAncestorSessions(ctx context.Context, srcCodexDir, targetCodexDir, targetSessionsDir, srcRolloutPath, targetID string) error {
 	srcSessionsDir := filepath.Join(srcCodexDir, "sessions")
-	visitedAncestors := map[string]bool{targetID: true}
-	currentParentID := extractParentThreadID(srcRolloutPath)
+	visitedRollouts := map[string]bool{srcRolloutPath: true}
+	currentRollout := srcRolloutPath
 
-	for currentParentID != "" && !visitedAncestors[currentParentID] {
-		visitedAncestors[currentParentID] = true
-		parentRollout := p.findRolloutPath(ctx, srcCodexDir, currentParentID)
-		if parentRollout == "" {
+	for {
+		parentID := extractParentThreadID(currentRollout)
+		if parentID == "" {
 			break
 		}
+		parentRollout := p.findBaseRolloutPath(ctx, srcCodexDir, parentID, currentRollout)
+		if parentRollout == "" || visitedRollouts[parentRollout] {
+			break
+		}
+		visitedRollouts[parentRollout] = true
 
 		var destParentRel string
 		if rel, err := filepath.Rel(srcSessionsDir, parentRollout); err == nil && !strings.HasPrefix(rel, "..") {
@@ -594,23 +598,46 @@ func (p *Provider) hydrateAncestorSessions(ctx context.Context, srcCodexDir, tar
 			srcDB := filepath.Join(srcCodexDir, "state_5.sqlite")
 			targetDB := filepath.Join(targetCodexDir, "state_5.sqlite")
 			if _, err := os.Stat(srcDB); err == nil {
-				if err := p.copyThreadInStateDB(ctx, srcDB, targetDB, currentParentID, currentParentID, destParentRollout); err != nil {
-					logger.Debug("[session/codex] failed to copy ancestor thread %s to %s: %v", currentParentID, targetDB, err)
+				if err := p.copyThreadInStateDB(ctx, srcDB, targetDB, parentID, parentID, destParentRollout); err != nil {
+					logger.Debug("[session/codex] failed to copy ancestor thread %s to %s: %v", parentID, targetDB, err)
 				}
 			}
 
 			srcHistoryDB := filepath.Join(srcCodexDir, "thread_history_1.sqlite")
 			targetHistoryDB := filepath.Join(targetCodexDir, "thread_history_1.sqlite")
 			if _, err := os.Stat(srcHistoryDB); err == nil {
-				if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, currentParentID, currentParentID, destParentRollout); err != nil {
-					logger.Debug("[session/codex] failed to copy ancestor thread history %s to %s: %v", currentParentID, targetHistoryDB, err)
+				if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, parentID, parentID, destParentRollout); err != nil {
+					logger.Debug("[session/codex] failed to copy ancestor thread history %s to %s: %v", parentID, targetHistoryDB, err)
 				}
 			}
 		}
 
-		currentParentID = extractParentThreadID(parentRollout)
+		currentRollout = parentRollout
 	}
 	return nil
+}
+
+func (p *Provider) findBaseRolloutPath(ctx context.Context, codexDir, parentID, currentRolloutPath string) string {
+	cand := p.findRolloutPath(ctx, codexDir, parentID)
+	if cand != "" && cand != currentRolloutPath {
+		return cand
+	}
+	// Fallback: search sessions dir for another rollout containing parentID
+	sessionsDir := filepath.Join(codexDir, "sessions")
+	var fallbackMatch string
+	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if path != currentRolloutPath && strings.HasSuffix(info.Name(), ".jsonl") && strings.Contains(info.Name(), parentID) {
+			fallbackMatch = path
+			if strings.HasSuffix(info.Name(), "-"+parentID+".jsonl") {
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return fallbackMatch
 }
 
 func (p *Provider) hydrateDatabases(ctx context.Context, srcCodexDir, targetCodexDir, srcID, targetID, targetRolloutPath, destProfileDir string, srcSession *session.Session) error {
@@ -1057,17 +1084,19 @@ func extractParentThreadID(rolloutPath string) string {
 	defer f.Close()
 
 	reader := bufio.NewReader(f)
-	firstLine, err := reader.ReadBytes('\n')
-	if err != nil && len(firstLine) == 0 {
-		return ""
-	}
-
-	var meta rolloutMetaHeader
-	if err := json.Unmarshal(firstLine, &meta); err != nil {
-		return ""
-	}
-	if meta.Payload.HistoryBase != nil && isValidSessionID(meta.Payload.HistoryBase.ThreadID) {
-		return meta.Payload.HistoryBase.ThreadID
+	for i := 0; i < 5; i++ {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			var meta rolloutMetaHeader
+			if jsonErr := json.Unmarshal(line, &meta); jsonErr == nil {
+				if meta.Payload.HistoryBase != nil && isValidSessionID(meta.Payload.HistoryBase.ThreadID) {
+					return meta.Payload.HistoryBase.ThreadID
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
 	}
 	return ""
 }
