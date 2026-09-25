@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/adrijshikhar/aim/compare/v0.8.1...v0.9.0) (2026-09-25)
+
+
+### Features
+
+* add first-class Claude Code adapter and session provider ([#49](https://github.com/adrijshikhar/aim/issues/49)) ([df75233](https://github.com/adrijshikhar/aim/commit/df75233f9413ec54e1df265afd600df01bcfb193))
+* implicit cross-profile resume sync, in-line session picker, dynamic autocompletion, terminal tab title, and decoupled homebrew release ([#47](https://github.com/adrijshikhar/aim/issues/47)) ([e51b825](https://github.com/adrijshikhar/aim/commit/e51b8255efadbc5cff1cee8417bc54243fba9215))
+
+
+### Bug Fixes
+
+* **claude:** persist profile-scoped authentication and prevent host token leakage ([#51](https://github.com/adrijshikhar/aim/issues/51)) ([5c1421c](https://github.com/adrijshikhar/aim/commit/5c1421c88de885fcb39de6cdddd09c929c7b2a50))
+* **codex:** session resume sync, SQLite projection deduplication, and ancestor lineage hydration ([#53](https://github.com/adrijshikhar/aim/issues/53)) ([bc2c395](https://github.com/adrijshikhar/aim/commit/bc2c395b22756fab9392fd3565c5684633859a0f))
+
 ## [0.8.1](https://github.com/adrijshikhar/aim/compare/v0.8.0...v0.8.1) (2026-09-22)
 
 
