@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -55,9 +56,14 @@ func TestPurgeIgnoredKeychains_NonDarwinOrMissing(t *testing.T) {
 		deleteInternetPasswordFn = origDeleteNet
 	}()
 
-	var deleted []string
+	var (
+		mu      sync.Mutex
+		deleted []string
+	)
 	deleteGenericPasswordFn = func(service, account string) error {
+		mu.Lock()
 		deleted = append(deleted, service)
+		mu.Unlock()
 		return nil
 	}
 	deleteInternetPasswordFn = func(service, account string) error {
