@@ -714,4 +714,3 @@ INSERT INTO thread_turns (thread_id, rollout_ordinal, turn_id) VALUES
 		t.Errorf("expected 2 valid items remaining, got %s", strings.TrimSpace(string(outValid)))
 	}
 }
-
