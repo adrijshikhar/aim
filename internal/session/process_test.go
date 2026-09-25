@@ -16,6 +16,8 @@ func TestParseProcessLines(t *testing.T) {
 33523 agy --dangerously-skip-permissions --conversation=c49a97be-0342-43cc-a90f-85a359959aaf
 74382 codex --yolo resume 01a09eb7-2f6c-7c52-895f-218f9ac9eecd
 55746 /Applications/ChatGPT.app/Contents/Resources/codex app-server --listen stdio://
+21081 aim run codex office --yolo resume 01a0b351-2f2f-7d22-8176-49e45bde8f9b
+66778 aim run claude work --resume 55555555-6666-7777-8888-999999999999
 `
 	active := session.ParseProcessOutput(strings.NewReader(sampleOutput))
 	if len(active) == 0 {
@@ -64,6 +66,38 @@ func TestParseProcessLines(t *testing.T) {
 		}
 		if info3.PID != 74382 {
 			t.Errorf("expected PID 74382, got %d", info3.PID)
+		}
+	}
+
+	// Verify aim run codex office resume
+	info4, ok := active["01a0b351-2f2f-7d22-8176-49e45bde8f9b"]
+	if !ok {
+		t.Errorf("expected 01a0b351-2f2f-7d22-8176-49e45bde8f9b to be active")
+	} else {
+		if info4.Agent != "codex" {
+			t.Errorf("expected agent 'codex', got %q", info4.Agent)
+		}
+		if info4.Profile != "office" {
+			t.Errorf("expected profile 'office', got %q", info4.Profile)
+		}
+		if info4.PID != 21081 {
+			t.Errorf("expected PID 21081, got %d", info4.PID)
+		}
+	}
+
+	// Verify aim run claude work --resume
+	info5, ok := active["55555555-6666-7777-8888-999999999999"]
+	if !ok {
+		t.Errorf("expected 55555555-6666-7777-8888-999999999999 to be active")
+	} else {
+		if info5.Agent != "claude" {
+			t.Errorf("expected agent 'claude', got %q", info5.Agent)
+		}
+		if info5.Profile != "work" {
+			t.Errorf("expected profile 'work', got %q", info5.Profile)
+		}
+		if info5.PID != 66778 {
+			t.Errorf("expected PID 66778, got %d", info5.PID)
 		}
 	}
 }

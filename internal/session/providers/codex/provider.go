@@ -92,29 +92,29 @@ func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName strin
 	var selectCols []string
 	selectCols = append(selectCols, "id")
 	if colSet["name"] {
-		selectCols = append(selectCols, "COALESCE(name, '')")
+		selectCols = append(selectCols, "COALESCE(name, '') AS name")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS name")
 	}
 	if colSet["title"] {
-		selectCols = append(selectCols, "COALESCE(title, '')")
+		selectCols = append(selectCols, "COALESCE(title, '') AS title")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS title")
 	}
 	if colSet["first_user_message"] {
-		selectCols = append(selectCols, "COALESCE(first_user_message, '')")
+		selectCols = append(selectCols, "COALESCE(first_user_message, '') AS first_user_message")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS first_user_message")
 	}
 	if colSet["preview"] {
-		selectCols = append(selectCols, "COALESCE(preview, '')")
+		selectCols = append(selectCols, "COALESCE(preview, '') AS preview")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS preview")
 	}
 	if colSet["cwd"] {
-		selectCols = append(selectCols, "COALESCE(cwd, '')")
+		selectCols = append(selectCols, "COALESCE(cwd, '') AS cwd")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS cwd")
 	}
 	selectCols = append(selectCols, "updated_at", "rollout_path")
 
@@ -132,76 +132,14 @@ func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName strin
 	}
 	query += " ORDER BY updated_at DESC LIMIT 100;\n"
 
-	cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath, "-separator", "|||")
-	cmd.Stdin = strings.NewReader(query)
-	out, err := cmd.Output()
+	matches, err := p.queryThreadsSQLite(ctx, dbPath, query, profileName, isHost)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
+		return nil, err
 	}
-
 	var sessions []session.Session
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		parts := strings.Split(line, "|||")
-		if len(parts) < 8 {
-			continue
-		}
-
-		id := strings.TrimSpace(parts[0])
-		name := strings.TrimSpace(parts[1])
-		title := strings.TrimSpace(parts[2])
-		firstUserMsg := strings.TrimSpace(parts[3])
-		preview := strings.TrimSpace(parts[4])
-		cwd := strings.TrimSpace(parts[5])
-		rawUnix := strings.TrimSpace(parts[6])
-		rolloutPath := strings.TrimSpace(parts[7])
-
-		displayTitle := name
-		if displayTitle == "" {
-			displayTitle = title
-		}
-		if displayTitle == "" && firstUserMsg != "" {
-			firstLine := strings.Split(firstUserMsg, "\n")[0]
-			displayTitle = strings.TrimSpace(firstLine)
-		}
-		if displayTitle == "" && preview != "" {
-			firstLine := strings.Split(preview, "\n")[0]
-			displayTitle = strings.TrimSpace(firstLine)
-		}
-		if displayTitle == "" {
-			displayTitle = "Untitled Session"
-		}
-
-		summary := firstUserMsg
-		if summary == "" {
-			summary = preview
-		}
-		if summary == "" && title != "" && title != displayTitle {
-			summary = title
-		}
-		if summary == "" {
-			summary = displayTitle
-		}
-
-		sec, _ := strconv.ParseInt(rawUnix, 10, 64)
-		modTime := time.Unix(sec, 0)
-		if rolloutPath != "" {
-			if fi, err := os.Stat(rolloutPath); err == nil && fi.ModTime().After(modTime) {
-				modTime = fi.ModTime()
-			}
-		}
-
-		s := session.NewSession(id, displayTitle, "codex", profileName, isHost, modTime)
-		s.Summary = summary
-		s.StoragePath = rolloutPath
-		s.Cwd = cwd
-		sessions = append(sessions, s)
+	for _, m := range matches {
+		sessions = append(sessions, *m)
 	}
-
 	return sessions, nil
 }
 
@@ -286,7 +224,7 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 }
 
 func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profileName string, isHost bool) (*session.Session, error) {
-	if !isValidSessionID(idOrPrefix) {
+	if !isValidSessionQuery(idOrPrefix) {
 		return nil, nil
 	}
 
@@ -302,113 +240,56 @@ func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profil
 	var selectCols []string
 	selectCols = append(selectCols, "id")
 	if colSet["name"] {
-		selectCols = append(selectCols, "COALESCE(name, '')")
+		selectCols = append(selectCols, "COALESCE(name, '') AS name")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS name")
 	}
 	if colSet["title"] {
-		selectCols = append(selectCols, "COALESCE(title, '')")
+		selectCols = append(selectCols, "COALESCE(title, '') AS title")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS title")
 	}
 	if colSet["first_user_message"] {
-		selectCols = append(selectCols, "COALESCE(first_user_message, '')")
+		selectCols = append(selectCols, "COALESCE(first_user_message, '') AS first_user_message")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS first_user_message")
 	}
 	if colSet["preview"] {
-		selectCols = append(selectCols, "COALESCE(preview, '')")
+		selectCols = append(selectCols, "COALESCE(preview, '') AS preview")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS preview")
 	}
 	if colSet["cwd"] {
-		selectCols = append(selectCols, "COALESCE(cwd, '')")
+		selectCols = append(selectCols, "COALESCE(cwd, '') AS cwd")
 	} else {
-		selectCols = append(selectCols, "''")
+		selectCols = append(selectCols, "'' AS cwd")
 	}
 	selectCols = append(selectCols, "updated_at", "rollout_path")
 
-	query := fmt.Sprintf("SELECT %s FROM threads WHERE id = '%s' OR id LIKE '%s%%' ORDER BY updated_at DESC LIMIT 5;\n",
-		strings.Join(selectCols, ", "), escapeSQL(idOrPrefix), escapeSQL(idOrPrefix))
-
-	cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath, "-separator", "|||")
-	cmd.Stdin = strings.NewReader(query)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
+	var matchClauses []string
+	matchClauses = append(matchClauses, fmt.Sprintf("id = '%s'", escapeSQL(idOrPrefix)))
+	matchClauses = append(matchClauses, fmt.Sprintf("id LIKE '%s%%'", escapeSQL(idOrPrefix)))
+	if colSet["name"] {
+		matchClauses = append(matchClauses, fmt.Sprintf("name = '%s'", escapeSQL(idOrPrefix)))
+		matchClauses = append(matchClauses, fmt.Sprintf("name LIKE '%s%%'", escapeSQL(idOrPrefix)))
+	}
+	if colSet["title"] {
+		matchClauses = append(matchClauses, fmt.Sprintf("title = '%s'", escapeSQL(idOrPrefix)))
+	}
+	whereClause := "(" + strings.Join(matchClauses, " OR ") + ")"
+	if colSet["thread_source"] {
+		whereClause += " AND (thread_source IS NULL OR thread_source != 'subagent')"
+	}
+	if colSet["archived"] {
+		whereClause += " AND (archived IS NULL OR archived = 0)"
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var matches []*session.Session
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		parts := strings.Split(line, "|||")
-		if len(parts) < 8 {
-			continue
-		}
-		id := strings.TrimSpace(parts[0])
-		name := strings.TrimSpace(parts[1])
-		title := strings.TrimSpace(parts[2])
-		firstUserMsg := strings.TrimSpace(parts[3])
-		preview := strings.TrimSpace(parts[4])
-		cwd := strings.TrimSpace(parts[5])
-		rawUnix := strings.TrimSpace(parts[6])
-		rolloutPath := strings.TrimSpace(parts[7])
+	query := fmt.Sprintf("SELECT %s FROM threads WHERE %s ORDER BY updated_at DESC LIMIT 5;\n",
+		strings.Join(selectCols, ", "), whereClause)
 
-		displayTitle := name
-		if displayTitle == "" {
-			displayTitle = title
-		}
-		if displayTitle == "" && firstUserMsg != "" {
-			displayTitle = strings.TrimSpace(strings.Split(firstUserMsg, "\n")[0])
-		}
-		if displayTitle == "" && preview != "" {
-			displayTitle = strings.TrimSpace(strings.Split(preview, "\n")[0])
-		}
-		if displayTitle == "" {
-			displayTitle = "Untitled Session"
-		}
-
-		summary := firstUserMsg
-		if summary == "" {
-			summary = preview
-		}
-		if summary == "" && title != "" && title != displayTitle {
-			summary = title
-		}
-		if summary == "" {
-			summary = displayTitle
-		}
-
-		sec, _ := strconv.ParseInt(rawUnix, 10, 64)
-		modTime := time.Unix(sec, 0)
-		if rolloutPath != "" {
-			if fi, err := os.Stat(rolloutPath); err == nil && fi.ModTime().After(modTime) {
-				modTime = fi.ModTime()
-			}
-		}
-		historyDB := filepath.Join(filepath.Dir(dbPath), "thread_history_1.sqlite")
-		if fi, err := os.Stat(historyDB); err == nil && fi.Size() > 0 {
-			turnQuery := fmt.Sprintf("SELECT MAX(COALESCE(completed_at, started_at, 0)) FROM thread_turns WHERE thread_id = '%s';\n", escapeSQL(id))
-			tCmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
-			tCmd.Stdin = strings.NewReader(turnQuery)
-			if tOut, err := tCmd.Output(); err == nil {
-				if tSec, err := strconv.ParseInt(strings.TrimSpace(string(tOut)), 10, 64); err == nil && tSec > 0 {
-					tTime := time.Unix(tSec, 0)
-					if tTime.After(modTime) {
-						modTime = tTime
-					}
-				}
-			}
-		}
-
-		s := session.NewSession(id, displayTitle, "codex", profileName, isHost, modTime)
-		s.Summary = summary
-		s.StoragePath = rolloutPath
-		s.Cwd = cwd
-		matches = append(matches, &s)
+	matches, err := p.queryThreadsSQLite(ctx, dbPath, query, profileName, isHost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
 	}
 
 	if len(matches) > 1 {
@@ -429,6 +310,105 @@ func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profil
 	}
 
 	return nil, nil
+}
+
+type sqliteThreadRow struct {
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Title            string          `json:"title"`
+	FirstUserMessage string          `json:"first_user_message"`
+	Preview          string          `json:"preview"`
+	Cwd              string          `json:"cwd"`
+	UpdatedAt        json.RawMessage `json:"updated_at"`
+	RolloutPath      string          `json:"rollout_path"`
+}
+
+func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profileName string, isHost bool) ([]*session.Session, error) {
+	cmd := exec.CommandContext(ctx, p.sqliteBin, "-json", dbPath)
+	cmd.Stdin = strings.NewReader(query)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
+	}
+
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" || trimmed == "[]" {
+		return nil, nil
+	}
+
+	var rows []sqliteThreadRow
+	if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
+		return nil, fmt.Errorf("failed to parse json output from sqlite: %w", err)
+	}
+
+	historyDB := filepath.Join(filepath.Dir(dbPath), "thread_history_1.sqlite")
+	hasHistory := false
+	if fi, err := os.Stat(historyDB); err == nil && fi.Size() > 0 {
+		hasHistory = true
+	}
+
+	var sessions []*session.Session
+	for _, row := range rows {
+		displayTitle := row.Name
+		if displayTitle == "" {
+			displayTitle = row.Title
+		}
+		if displayTitle == "" && row.FirstUserMessage != "" {
+			displayTitle = strings.TrimSpace(strings.Split(row.FirstUserMessage, "\n")[0])
+		}
+		if displayTitle == "" && row.Preview != "" {
+			displayTitle = strings.TrimSpace(strings.Split(row.Preview, "\n")[0])
+		}
+		if displayTitle == "" {
+			displayTitle = "Untitled Session"
+		}
+
+		summary := row.FirstUserMessage
+		if summary == "" {
+			summary = row.Preview
+		}
+		if summary == "" && row.Title != "" && row.Title != displayTitle {
+			summary = row.Title
+		}
+		if summary == "" {
+			summary = displayTitle
+		}
+
+		var sec int64
+		if len(row.UpdatedAt) > 0 {
+			raw := strings.Trim(string(row.UpdatedAt), `"`)
+			sec, _ = strconv.ParseInt(raw, 10, 64)
+		}
+		modTime := time.Unix(sec, 0)
+
+		if row.RolloutPath != "" {
+			if fi, err := os.Stat(row.RolloutPath); err == nil && fi.ModTime().After(modTime) {
+				modTime = fi.ModTime()
+			}
+		}
+
+		if hasHistory {
+			turnQuery := fmt.Sprintf("SELECT MAX(COALESCE(completed_at, started_at, 0)) FROM thread_turns WHERE thread_id = '%s';\n", escapeSQL(row.ID))
+			tCmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
+			tCmd.Stdin = strings.NewReader(turnQuery)
+			if tOut, err := tCmd.Output(); err == nil {
+				if tSec, err := strconv.ParseInt(strings.TrimSpace(string(tOut)), 10, 64); err == nil && tSec > 0 {
+					tTime := time.Unix(tSec, 0)
+					if tTime.After(modTime) {
+						modTime = tTime
+					}
+				}
+			}
+		}
+
+		s := session.NewSession(row.ID, displayTitle, "codex", profileName, isHost, modTime)
+		s.Summary = summary
+		s.StoragePath = row.RolloutPath
+		s.Cwd = row.Cwd
+		sessions = append(sessions, &s)
+	}
+
+	return sessions, nil
 }
 
 func (p *Provider) getFromJSONL(indexPath, idOrPrefix, profileName string, isHost bool) (*session.Session, error) {
@@ -582,15 +562,19 @@ func (p *Provider) hydrateRolloutFile(srcCodexDir, targetSessionsDir, srcRollout
 
 func (p *Provider) hydrateAncestorSessions(ctx context.Context, srcCodexDir, targetCodexDir, targetSessionsDir, srcRolloutPath, targetID string) error {
 	srcSessionsDir := filepath.Join(srcCodexDir, "sessions")
-	visitedAncestors := map[string]bool{targetID: true}
-	currentParentID := extractParentThreadID(srcRolloutPath)
+	visitedRollouts := map[string]bool{srcRolloutPath: true}
+	currentRollout := srcRolloutPath
 
-	for currentParentID != "" && !visitedAncestors[currentParentID] {
-		visitedAncestors[currentParentID] = true
-		parentRollout := p.findRolloutPath(ctx, srcCodexDir, currentParentID)
-		if parentRollout == "" {
+	for {
+		parentID := extractParentThreadID(currentRollout)
+		if parentID == "" {
 			break
 		}
+		parentRollout := p.findBaseRolloutPath(ctx, srcCodexDir, parentID, currentRollout)
+		if parentRollout == "" || visitedRollouts[parentRollout] {
+			break
+		}
+		visitedRollouts[parentRollout] = true
 
 		var destParentRel string
 		if rel, err := filepath.Rel(srcSessionsDir, parentRollout); err == nil && !strings.HasPrefix(rel, "..") {
@@ -614,23 +598,46 @@ func (p *Provider) hydrateAncestorSessions(ctx context.Context, srcCodexDir, tar
 			srcDB := filepath.Join(srcCodexDir, "state_5.sqlite")
 			targetDB := filepath.Join(targetCodexDir, "state_5.sqlite")
 			if _, err := os.Stat(srcDB); err == nil {
-				if err := p.copyThreadInStateDB(ctx, srcDB, targetDB, currentParentID, currentParentID, destParentRollout); err != nil {
-					logger.Debug("[session/codex] failed to copy ancestor thread %s to %s: %v", currentParentID, targetDB, err)
+				if err := p.copyThreadInStateDB(ctx, srcDB, targetDB, parentID, parentID, destParentRollout); err != nil {
+					logger.Debug("[session/codex] failed to copy ancestor thread %s to %s: %v", parentID, targetDB, err)
 				}
 			}
 
 			srcHistoryDB := filepath.Join(srcCodexDir, "thread_history_1.sqlite")
 			targetHistoryDB := filepath.Join(targetCodexDir, "thread_history_1.sqlite")
 			if _, err := os.Stat(srcHistoryDB); err == nil {
-				if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, currentParentID, currentParentID); err != nil {
-					logger.Debug("[session/codex] failed to copy ancestor thread history %s to %s: %v", currentParentID, targetHistoryDB, err)
+				if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, parentID, parentID, destParentRollout); err != nil {
+					logger.Debug("[session/codex] failed to copy ancestor thread history %s to %s: %v", parentID, targetHistoryDB, err)
 				}
 			}
 		}
 
-		currentParentID = extractParentThreadID(parentRollout)
+		currentRollout = parentRollout
 	}
 	return nil
+}
+
+func (p *Provider) findBaseRolloutPath(ctx context.Context, codexDir, parentID, currentRolloutPath string) string {
+	cand := p.findRolloutPath(ctx, codexDir, parentID)
+	if cand != "" && cand != currentRolloutPath {
+		return cand
+	}
+	// Fallback: search sessions dir for another rollout containing parentID
+	sessionsDir := filepath.Join(codexDir, "sessions")
+	var fallbackMatch string
+	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if path != currentRolloutPath && strings.HasSuffix(info.Name(), ".jsonl") && strings.Contains(info.Name(), parentID) {
+			fallbackMatch = path
+			if strings.HasSuffix(info.Name(), "-"+parentID+".jsonl") {
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return fallbackMatch
 }
 
 func (p *Provider) hydrateDatabases(ctx context.Context, srcCodexDir, targetCodexDir, srcID, targetID, targetRolloutPath, destProfileDir string, srcSession *session.Session) error {
@@ -660,7 +667,7 @@ func (p *Provider) hydrateDatabases(ctx context.Context, srcCodexDir, targetCode
 		srcHistoryDB := filepath.Join(srcCodexDir, "thread_history_1.sqlite")
 		targetHistoryDB := filepath.Join(targetCodexDir, "thread_history_1.sqlite")
 		if _, err := os.Stat(srcHistoryDB); err == nil {
-			if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, srcID, targetID); err != nil {
+			if err := p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, srcID, targetID, targetRolloutPath); err != nil {
 				logger.Debug("[session/codex] copyThreadHistoryDB error: %v", err)
 			}
 		}
@@ -878,7 +885,7 @@ DETACH DATABASE src;
 	return nil
 }
 
-func (p *Provider) copyThreadHistoryDB(ctx context.Context, srcHistoryDB, destHistoryDB, srcID, targetID string) error {
+func (p *Provider) copyThreadHistoryDB(ctx context.Context, srcHistoryDB, destHistoryDB, srcID, targetID, targetRolloutPath string) error {
 	if _, err := os.Stat(srcHistoryDB); err != nil {
 		return nil // No source history DB, nothing to copy
 	}
@@ -935,6 +942,33 @@ func (p *Provider) copyThreadHistoryDB(ctx context.Context, srcHistoryDB, destHi
 		return nil
 	}
 
+	var rolloutSize int64 = -1
+	if targetRolloutPath != "" {
+		if fi, err := os.Stat(targetRolloutPath); err == nil {
+			rolloutSize = fi.Size()
+		}
+	}
+
+	if rolloutSize >= 0 {
+		// If next_rollout_bytes_offset points beyond the actual rollout file,
+		// the projection state is invalid. Purge it so Codex re-projects cleanly from offset 0.
+		purgeSQL := fmt.Sprintf(`
+DELETE FROM thread_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_turns WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_realtime_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d;`,
+			escapeSQL(targetID), rolloutSize)
+		sqlParts = append(sqlParts, purgeSQL)
+	}
+
+	// Always prune any stale items or turns with rollout_ordinal >= next_rollout_ordinal
+	// to prevent SQLite UNIQUE constraint failures during Codex thread resumption.
+	pruneSQL := fmt.Sprintf(`
+DELETE FROM thread_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s') AND rollout_ordinal >= (SELECT next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = '%[1]s');
+DELETE FROM thread_turns WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s') AND rollout_ordinal >= (SELECT next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = '%[1]s');`,
+		escapeSQL(targetID))
+	sqlParts = append(sqlParts, pruneSQL)
+
 	fullSQL := fmt.Sprintf(`
 PRAGMA foreign_keys = OFF;
 ATTACH DATABASE '%s' AS src;
@@ -948,6 +982,53 @@ DETACH DATABASE src;
 	cmd.Stdin = strings.NewReader(fullSQL)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to copy thread history for %s: %s: %w", srcID, string(out), err)
+	}
+	return nil
+}
+
+// SanitizeSession cleans up stale or desynchronized projection state in Codex's thread_history_1.sqlite.
+// It ensures that no thread items or turns exist with rollout_ordinal >= next_rollout_ordinal,
+// and resets broken projections where the rollout file is smaller than next_rollout_bytes_offset.
+func (p *Provider) SanitizeSession(ctx context.Context, sessionID, profileDir string) error {
+	if p.sqliteBin == "" || sessionID == "" || !isValidSessionID(sessionID) {
+		return nil
+	}
+	historyDB := filepath.Join(p.codexDir(profileDir, false), "thread_history_1.sqlite")
+	if _, err := os.Stat(historyDB); err != nil {
+		return nil
+	}
+
+	rolloutPath := p.findRolloutPath(ctx, p.codexDir(profileDir, false), sessionID)
+	var rolloutSize int64 = -1
+	if rolloutPath != "" {
+		if fi, err := os.Stat(rolloutPath); err == nil {
+			rolloutSize = fi.Size()
+		}
+	}
+
+	var sqlParts []string
+	if rolloutSize >= 0 {
+		purgeSQL := fmt.Sprintf(`
+DELETE FROM thread_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_turns WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_realtime_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d);
+DELETE FROM thread_history_projection_state WHERE thread_id = '%[1]s' AND next_rollout_bytes_offset > %[2]d;`,
+			escapeSQL(sessionID), rolloutSize)
+		sqlParts = append(sqlParts, purgeSQL)
+	}
+
+	pruneSQL := fmt.Sprintf(`
+DELETE FROM thread_items WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s') AND rollout_ordinal >= (SELECT next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = '%[1]s');
+DELETE FROM thread_turns WHERE thread_id = '%[1]s' AND EXISTS (SELECT 1 FROM thread_history_projection_state WHERE thread_id = '%[1]s') AND rollout_ordinal >= (SELECT next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = '%[1]s');`,
+		escapeSQL(sessionID))
+	sqlParts = append(sqlParts, pruneSQL)
+
+	fullSQL := fmt.Sprintf("BEGIN TRANSACTION;\n%s\nCOMMIT;\n", strings.Join(sqlParts, "\n"))
+	cmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
+	cmd.Stdin = strings.NewReader(fullSQL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		logger.Debug("[session/codex] SanitizeSession error for %s: %s: %v", sessionID, string(out), err)
+		return err
 	}
 	return nil
 }
@@ -1003,17 +1084,19 @@ func extractParentThreadID(rolloutPath string) string {
 	defer f.Close()
 
 	reader := bufio.NewReader(f)
-	firstLine, err := reader.ReadBytes('\n')
-	if err != nil && len(firstLine) == 0 {
-		return ""
-	}
-
-	var meta rolloutMetaHeader
-	if err := json.Unmarshal(firstLine, &meta); err != nil {
-		return ""
-	}
-	if meta.Payload.HistoryBase != nil && isValidSessionID(meta.Payload.HistoryBase.ThreadID) {
-		return meta.Payload.HistoryBase.ThreadID
+	for i := 0; i < 5; i++ {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			var meta rolloutMetaHeader
+			if jsonErr := json.Unmarshal(line, &meta); jsonErr == nil {
+				if meta.Payload.HistoryBase != nil && isValidSessionID(meta.Payload.HistoryBase.ThreadID) {
+					return meta.Payload.HistoryBase.ThreadID
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
 	}
 	return ""
 }
@@ -1109,6 +1192,16 @@ func isValidSessionID(s string) bool {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
 			return false
 		}
+	}
+	return true
+}
+
+func isValidSessionQuery(s string) bool {
+	if s == "" || len(s) > 256 {
+		return false
+	}
+	if strings.ContainsAny(s, "\x00;'\"\n\r") {
+		return false
 	}
 	return true
 }

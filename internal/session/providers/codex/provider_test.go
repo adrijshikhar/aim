@@ -537,4 +537,180 @@ VALUES
 	if retrieved.Cwd != "/workspace/repo" {
 		t.Errorf("expected retrieved Cwd '/workspace/repo', got %q", retrieved.Cwd)
 	}
+
+	// Verify GetSession retrieves by session name 'cc-ov2'
+	retrievedByName, err := p.GetSession(ctx, "cc-ov2", tmpDir, false)
+	if err != nil {
+		t.Fatalf("GetSession by name failed: %v", err)
+	}
+	if retrievedByName == nil || retrievedByName.ID != "01a0b351-2f2f-7d22-8176-49e45bde8f9b" {
+		t.Fatalf("expected session 01a0b351 retrieved by name, got %+v", retrievedByName)
+	}
+}
+
+func TestProvider_MultilinePromptAndLookupByName(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatalf("failed to create mock codex dir: %v", err)
+	}
+
+	dbPath := filepath.Join(codexDir, "state_5.sqlite")
+	schema := `
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	name TEXT,
+	title TEXT,
+	first_user_message TEXT,
+	preview TEXT,
+	cwd TEXT,
+	thread_source TEXT,
+	archived INTEGER DEFAULT 0,
+	updated_at INTEGER NOT NULL,
+	rollout_path TEXT NOT NULL
+);
+INSERT INTO threads (id, name, title, first_user_message, preview, cwd, thread_source, archived, updated_at, rollout_path)
+VALUES 
+('01a0b8b4-3942-7912-a78e-a1cd76748eb7', 'dsl-delete', 'Review a three-repo change that adds DSL connector deletion to Hevo.\nIt replaces an earlier soft-delete design.\n\n## Read in this order\n1. Design + plan', 'First prompt\nwith multiple lines\nand markdown', 'Preview line 1\nPreview line 2', '/Users/nemesis/Projects/hevo-data/dsl-connector', 'user', 0, 1726744883, '/tmp/rollout-dsl.jsonl');
+`
+	if err := exec.Command(sqliteBin, dbPath, schema).Run(); err != nil {
+		t.Fatalf("failed to seed mock sqlite DB: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	// 1. Verify ListSessions returns the multiline session
+	sessions, err := p.ListSessions(ctx, tmpDir, false)
+	if err != nil {
+		t.Fatalf("ListSessions failed: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].ID != "01a0b8b4-3942-7912-a78e-a1cd76748eb7" {
+		t.Errorf("expected session 01a0b8b4..., got %s", sessions[0].ID)
+	}
+	if sessions[0].Title != "dsl-delete" {
+		t.Errorf("expected title 'dsl-delete', got %q", sessions[0].Title)
+	}
+
+	// 2. Verify GetSession by prefix
+	s1, err := p.GetSession(ctx, "01a0b8b4", tmpDir, false)
+	if err != nil {
+		t.Fatalf("GetSession by prefix failed: %v", err)
+	}
+	if s1 == nil || s1.ID != "01a0b8b4-3942-7912-a78e-a1cd76748eb7" {
+		t.Fatalf("expected session 01a0b8b4, got %+v", s1)
+	}
+
+	// 3. Verify GetSession by name
+	s2, err := p.GetSession(ctx, "dsl-delete", tmpDir, false)
+	if err != nil {
+		t.Fatalf("GetSession by name failed: %v", err)
+	}
+	if s2 == nil || s2.ID != "01a0b8b4-3942-7912-a78e-a1cd76748eb7" {
+		t.Fatalf("expected session 01a0b8b4, got %+v", s2)
+	}
+}
+
+func TestProvider_SanitizeSession(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatalf("failed to create mock codex dir: %v", err)
+	}
+
+	historyDB := filepath.Join(codexDir, "thread_history_1.sqlite")
+	stateDB := filepath.Join(codexDir, "state_5.sqlite")
+	rolloutDir := filepath.Join(codexDir, "sessions", "2026", "09", "18")
+	_ = os.MkdirAll(rolloutDir, 0755)
+	rolloutPath := filepath.Join(rolloutDir, "rollout-test.jsonl")
+	// Write dummy rollout content (100 bytes)
+	_ = os.WriteFile(rolloutPath, []byte(strings.Repeat("a", 100)), 0644)
+
+	stateSchema := fmt.Sprintf(`
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	rollout_path TEXT NOT NULL
+);
+INSERT INTO threads (id, rollout_path) VALUES ('01a0b351-2f2f-7d22-8176-49e45bde8f9b', '%s');
+`, rolloutPath)
+	if err := exec.Command(sqliteBin, stateDB, stateSchema).Run(); err != nil {
+		t.Fatalf("failed to seed mock state DB: %v", err)
+	}
+
+	historySchema := `
+CREATE TABLE thread_history_projection_state (
+	thread_id TEXT PRIMARY KEY,
+	next_rollout_bytes_offset INTEGER NOT NULL,
+	next_rollout_ordinal INTEGER NOT NULL
+);
+CREATE TABLE thread_items (
+	thread_id TEXT NOT NULL,
+	rollout_ordinal INTEGER NOT NULL,
+	item_id TEXT NOT NULL,
+	PRIMARY KEY (thread_id, rollout_ordinal)
+);
+CREATE TABLE thread_turns (
+	thread_id TEXT NOT NULL,
+	rollout_ordinal INTEGER NOT NULL,
+	turn_id TEXT NOT NULL,
+	PRIMARY KEY (thread_id, rollout_ordinal)
+);
+CREATE TABLE thread_realtime_items (
+	thread_id TEXT NOT NULL,
+	item_id TEXT NOT NULL
+);
+
+-- Seed with conflicting stale rows ahead of next_rollout_ordinal (10)
+INSERT INTO thread_history_projection_state (thread_id, next_rollout_bytes_offset, next_rollout_ordinal)
+VALUES ('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 50, 10);
+
+INSERT INTO thread_items (thread_id, rollout_ordinal, item_id) VALUES
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 5, 'item-5'),
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 9, 'item-9'),
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 10, 'item-10-stale'),
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 15, 'item-15-stale');
+
+INSERT INTO thread_turns (thread_id, rollout_ordinal, turn_id) VALUES
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 5, 'turn-5'),
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 10, 'turn-10-stale');
+`
+	if err := exec.Command(sqliteBin, historyDB, historySchema).Run(); err != nil {
+		t.Fatalf("failed to seed mock history DB: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	// Run SanitizeSession
+	if err := p.SanitizeSession(ctx, "01a0b351-2f2f-7d22-8176-49e45bde8f9b", tmpDir); err != nil {
+		t.Fatalf("SanitizeSession failed: %v", err)
+	}
+
+	// Verify items with ordinal >= 10 were pruned
+	out, err := exec.Command(sqliteBin, historyDB, "SELECT COUNT(*) FROM thread_items WHERE thread_id = '01a0b351-2f2f-7d22-8176-49e45bde8f9b' AND rollout_ordinal >= 10;").Output()
+	if err != nil {
+		t.Fatalf("failed to query history DB: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "0" {
+		t.Errorf("expected 0 stale items, got %s", strings.TrimSpace(string(out)))
+	}
+
+	// Verify valid items < 10 remain
+	outValid, _ := exec.Command(sqliteBin, historyDB, "SELECT COUNT(*) FROM thread_items WHERE thread_id = '01a0b351-2f2f-7d22-8176-49e45bde8f9b';").Output()
+	if strings.TrimSpace(string(outValid)) != "2" {
+		t.Errorf("expected 2 valid items remaining, got %s", strings.TrimSpace(string(outValid)))
+	}
 }

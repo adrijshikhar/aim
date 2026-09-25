@@ -15,12 +15,14 @@ import (
 )
 
 var (
-	// Matches: aim run <agent> <profile> ... --conversation[= ]<id>
-	aimRunConvRegex = regexp.MustCompile(`aim\s+run\s+([a-zA-Z0-9_-]+)\s+([a-zA-Z0-9_-]+).*?--conversation[=\s]([a-zA-Z0-9_-]+)`)
+	// Matches: aim run <agent> <profile> ... (--conversation[= ]<id> | --resume[= ]<id> | resume <id>)
+	aimRunConvRegex = regexp.MustCompile(`aim\s+run\s+([a-zA-Z0-9_-]+)\s+([a-zA-Z0-9_-]+).*?(?:--conversation[=\s]|--resume[=\s]|resume\s+)([a-zA-Z0-9_-]+)`)
 	// Matches: agy ... --conversation[= ]<id>
 	agyConvRegex = regexp.MustCompile(`(?:^|/|\s)agy(?:\.exe)?\s+.*?--conversation[=\s]([a-zA-Z0-9_-]+)`)
 	// Matches: codex ... resume <id>
 	codexResumeRegex = regexp.MustCompile(`(?:^|/|\s)codex(?:\.exe)?\s+.*?resume\s+([a-zA-Z0-9_-]+)`)
+	// Matches: claude ... --resume[= ]<id>
+	claudeResumeRegex = regexp.MustCompile(`(?:^|/|\s)claude(?:\.exe)?\s+.*?--resume[=\s]([a-zA-Z0-9_-]+)`)
 )
 
 // DefaultProcessScanner scans local OS processes via `ps -eo pid,command`.
@@ -104,6 +106,20 @@ func ParseProcessOutput(r io.Reader) map[string]ActiveProcessInfo {
 				result[convID] = ActiveProcessInfo{
 					PID:            pid,
 					Agent:          "codex",
+					Profile:        "<host>",
+					ConversationID: convID,
+				}
+			}
+			continue
+		}
+
+		// 4. Check for `claude ... --resume <id>`
+		if matches := claudeResumeRegex.FindStringSubmatch(cmdline); len(matches) >= 2 {
+			convID := matches[1]
+			if _, exists := result[convID]; !exists {
+				result[convID] = ActiveProcessInfo{
+					PID:            pid,
+					Agent:          "claude",
 					Profile:        "<host>",
 					ConversationID: convID,
 				}
