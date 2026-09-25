@@ -75,7 +75,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		return nil
 	}
 	if reg == nil {
-		reg = agents.DefaultRegistry()
+		reg = defaultRegistry()
 	}
 
 	cfg, _ := config.LoadConfig()
@@ -236,28 +236,8 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		}
 	}
 
-	var headers []string
-	if has5h {
-		if hasAccount && hasCategory {
-			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-		} else if hasAccount {
-			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-		} else if hasCategory {
-			headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-		} else {
-			headers = []string{"AGENT", "PROFILE", "STATUS", "5H LIMIT", "5H RESET", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-		}
-	} else {
-		if hasAccount && hasCategory {
-			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "MODEL", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-		} else if hasAccount {
-			headers = []string{"AGENT", "PROFILE", "ACCOUNT", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-		} else if hasCategory {
-			headers = []string{"AGENT", "PROFILE", "MODEL", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-		} else {
-			headers = []string{"AGENT", "PROFILE", "STATUS", "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED"}
-		}
-	}
+	columns := usageTableColumns{hasAccount: hasAccount, hasCategory: hasCategory, has5h: has5h}
+	headers := columns.headers()
 
 	var rows [][]string
 	for _, r := range reports {
@@ -273,28 +253,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		}
 
 		if len(r.Windows) == 0 {
-			st := renderCLIStatus(r.Status, useColor)
-			if has5h {
-				if hasAccount && hasCategory {
-					rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", "—", "—", checked})
-				} else if hasAccount {
-					rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", "—", "—", checked})
-				} else if hasCategory {
-					rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", "—", "—", checked})
-				} else {
-					rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", "—", "—", checked})
-				}
-			} else {
-				if hasAccount && hasCategory {
-					rows = append(rows, []string{r.Agent, r.Profile, accStr, "—", st, "—", "—", checked})
-				} else if hasAccount {
-					rows = append(rows, []string{r.Agent, r.Profile, accStr, st, "—", "—", checked})
-				} else if hasCategory {
-					rows = append(rows, []string{r.Agent, r.Profile, "—", st, "—", "—", checked})
-				} else {
-					rows = append(rows, []string{r.Agent, r.Profile, st, "—", "—", checked})
-				}
-			}
+			rows = append(rows, columns.row(usageRowValues{agent: r.Agent, profile: r.Profile, account: accStr, category: "—", status: renderCLIStatus(r.Status, useColor), primary: "—", primaryReset: "—", weekly: "—", weeklyReset: "—", checked: checked}))
 			continue
 		}
 
@@ -318,7 +277,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 
 		for _, g := range groups {
 			catStatus := usage.CalculateStatus(g.windows)
-			catName := cleanModelCategory(g.category)
+			catName := usage.CleanModelCategory(g.category)
 			primary, weekly := findCategoryWindows(g.windows)
 
 			pStr := "—"
@@ -340,27 +299,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			}
 
 			statusStr := renderCLIStatus(catStatus, useColor)
-			if has5h {
-				if hasAccount && hasCategory {
-					rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, pStr, pReset, wStr, wReset, checked})
-				} else if hasAccount {
-					rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, pStr, pReset, wStr, wReset, checked})
-				} else if hasCategory {
-					rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, pStr, pReset, wStr, wReset, checked})
-				} else {
-					rows = append(rows, []string{r.Agent, r.Profile, statusStr, pStr, pReset, wStr, wReset, checked})
-				}
-			} else {
-				if hasAccount && hasCategory {
-					rows = append(rows, []string{r.Agent, r.Profile, accStr, catName, statusStr, wStr, wReset, checked})
-				} else if hasAccount {
-					rows = append(rows, []string{r.Agent, r.Profile, accStr, statusStr, wStr, wReset, checked})
-				} else if hasCategory {
-					rows = append(rows, []string{r.Agent, r.Profile, catName, statusStr, wStr, wReset, checked})
-				} else {
-					rows = append(rows, []string{r.Agent, r.Profile, statusStr, wStr, wReset, checked})
-				}
-			}
+			rows = append(rows, columns.row(usageRowValues{agent: r.Agent, profile: r.Profile, account: accStr, category: catName, status: statusStr, primary: pStr, primaryReset: pReset, weekly: wStr, weeklyReset: wReset, checked: checked}))
 		}
 	}
 
@@ -375,24 +314,40 @@ func isTerminal() bool {
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }
 
-func cleanModelCategory(cat string) string {
-	c := strings.TrimSpace(cat)
-	lower := strings.ToLower(c)
-	if strings.Contains(lower, "spark") {
-		return "Codex Spark"
+type usageTableColumns struct{ hasAccount, hasCategory, has5h bool }
+
+type usageRowValues struct {
+	agent, profile, account, category, status, primary, primaryReset, weekly, weeklyReset, checked string
+}
+
+func (c usageTableColumns) headers() []string {
+	headers := []string{"AGENT", "PROFILE"}
+	if c.hasAccount {
+		headers = append(headers, "ACCOUNT")
 	}
-	if strings.Contains(lower, "claude") || strings.Contains(lower, "gpt") {
-		if !strings.Contains(lower, "codex") {
-			return "Claude & GPT"
-		}
+	if c.hasCategory {
+		headers = append(headers, "MODEL")
 	}
-	if strings.Contains(lower, "gemini") {
-		return "Gemini"
+	headers = append(headers, "STATUS")
+	if c.has5h {
+		headers = append(headers, "5H LIMIT", "5H RESET")
 	}
-	if c == "" {
-		return "—"
+	return append(headers, "WEEKLY LIMIT", "WEEKLY RESET", "CHECKED")
+}
+
+func (c usageTableColumns) row(v usageRowValues) []string {
+	row := []string{v.agent, v.profile}
+	if c.hasAccount {
+		row = append(row, v.account)
 	}
-	return c
+	if c.hasCategory {
+		row = append(row, v.category)
+	}
+	row = append(row, v.status)
+	if c.has5h {
+		row = append(row, v.primary, v.primaryReset)
+	}
+	return append(row, v.weekly, v.weeklyReset, v.checked)
 }
 
 func findCategoryWindows(windows []usage.LimitWindow) (*usage.LimitWindow, *usage.LimitWindow) {

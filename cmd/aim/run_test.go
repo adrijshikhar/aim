@@ -15,6 +15,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/codex"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/runner"
 	"github.com/aim-cli/aim/internal/session"
 )
 
@@ -757,7 +758,7 @@ func TestReplaceResumedSessionID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := replaceResumedSessionID(tt.extraArgs, tt.oldID, tt.newID)
+			got := runner.ReplaceSessionID(tt.extraArgs, tt.oldID, tt.newID)
 			if len(got) != len(tt.expected) {
 				t.Fatalf("expected len %d, got %d: %v", len(tt.expected), len(got), got)
 			}

@@ -61,9 +61,6 @@ var defaultBridgedPaths = []string{
 	".config/ccstatusline",
 }
 
-// bridgedDotfiles provides backwards compatibility with existing references.
-var bridgedDotfiles = defaultBridgedPaths
-
 var baseBridgedPaths = func() []string {
 	paths := make([]string, len(defaultBridgedPaths), len(defaultBridgedPaths)+1)
 	copy(paths, defaultBridgedPaths)

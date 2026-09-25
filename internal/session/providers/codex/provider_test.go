@@ -466,3 +466,75 @@ func TestProvider_Hydrate_Fork_FullFidelity(t *testing.T) {
 		t.Errorf("forked rollout does not contain forkedID %s", forkedID)
 	}
 }
+
+func TestProvider_ListSessions_SchemaDetectionAndFilterSubagents(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatalf("failed to create codex dir: %v", err)
+	}
+
+	dbPath := filepath.Join(codexDir, "state_5.sqlite")
+	schema := `
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	name TEXT,
+	title TEXT NOT NULL,
+	first_user_message TEXT,
+	preview TEXT NOT NULL DEFAULT '',
+	cwd TEXT,
+	thread_source TEXT,
+	archived INTEGER DEFAULT 0,
+	updated_at INTEGER NOT NULL,
+	rollout_path TEXT NOT NULL
+);
+INSERT INTO threads (id, name, title, first_user_message, preview, cwd, thread_source, archived, updated_at, rollout_path)
+VALUES 
+('01a0b351-2f2f-7d22-8176-49e45bde8f9b', 'cc-ov2', 'Model Generated Title', 'First prompt text', 'Preview text', '/workspace/repo', 'user', 0, 1726000000, '/tmp/rollout1.jsonl'),
+('01a0sub1-1111-2222-3333-444444444444', NULL, 'Subagent Maxwell', 'Subagent prompt', '', '/workspace/repo', 'subagent', 0, 1726100000, '/tmp/rollout2.jsonl'),
+('01a0arch-5555-6666-7777-888888888888', 'archived-sess', 'Old Session', 'Old prompt', '', '/workspace/repo', 'user', 1, 1726050000, '/tmp/rollout3.jsonl');
+`
+	if err := exec.Command(sqliteBin, dbPath, schema).Run(); err != nil {
+		t.Fatalf("failed to seed mock sqlite DB: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	sessions, err := p.ListSessions(ctx, tmpDir, false)
+	if err != nil {
+		t.Fatalf("ListSessions failed: %v", err)
+	}
+
+	if len(sessions) != 1 {
+		t.Fatalf("expected exactly 1 session (subagent and archived filtered out), got %d", len(sessions))
+	}
+
+	s := sessions[0]
+	if s.ID != "01a0b351-2f2f-7d22-8176-49e45bde8f9b" {
+		t.Errorf("expected session ID 01a0b351..., got %s", s.ID)
+	}
+	if s.Title != "cc-ov2" {
+		t.Errorf("expected custom name 'cc-ov2' as title, got %q", s.Title)
+	}
+	if s.Cwd != "/workspace/repo" {
+		t.Errorf("expected Cwd '/workspace/repo', got %q", s.Cwd)
+	}
+
+	// Also verify GetSession retrieves it directly with title 'cc-ov2'
+	retrieved, err := p.GetSession(ctx, "01a0b351", tmpDir, false)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if retrieved == nil || retrieved.Title != "cc-ov2" {
+		t.Fatalf("expected retrieved session with title 'cc-ov2', got %+v", retrieved)
+	}
+	if retrieved.Cwd != "/workspace/repo" {
+		t.Errorf("expected retrieved Cwd '/workspace/repo', got %q", retrieved.Cwd)
+	}
+}

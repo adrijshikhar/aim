@@ -31,6 +31,18 @@ func newTestModel(t *testing.T, profileNames ...string) Model {
 	return NewModel(nil, pm, cfg)
 }
 
+func TestNewModelNilRegistryIsIndependent(t *testing.T) {
+	t.Setenv("AIM_HOME", t.TempDir())
+	first := NewModel(nil, nil, nil)
+	second := NewModel(nil, nil, nil)
+	if first.reg == nil || second.reg == nil {
+		t.Fatal("nil registry must be normalized")
+	}
+	if first.reg == second.reg {
+		t.Fatal("models must not share a fallback registry")
+	}
+}
+
 func TestTUI_TabSwitchingFiltersProfiles(t *testing.T) {
 	baseDir := t.TempDir()
 	pm := profile.NewProfileManager(baseDir)
@@ -42,7 +54,7 @@ func TestTUI_TabSwitchingFiltersProfiles(t *testing.T) {
 	cfg.AddProfileAgent("work", "agy")
 	cfg.AddProfileAgent("work", "gemini")
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	// Default agent is agy: should have bot and work
@@ -396,7 +408,7 @@ func TestTUIUsageUpdateAndKeybinding(t *testing.T) {
 	cfg.AddProfileAgent("default", "agy")
 	cfg.AddProfileAgent("prod", "agy")
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	now := time.Now()
@@ -438,11 +450,13 @@ func TestTUIUsageUpdateAndKeybinding(t *testing.T) {
 		FetchedAt: now,
 	}
 
-	// 1. Send usageBatchMsg to Update
-	updated, cmd := m.Update(usageBatchMsg{repDefault, repProd})
+	// Stream reports through the same message path used in production.
+	updated, cmd := m.Update(usageReportMsg(repDefault))
 	if cmd != nil {
-		t.Errorf("expected nil cmd on usageBatchMsg, got %v", cmd)
+		t.Errorf("expected nil cmd on usageReportMsg, got %v", cmd)
 	}
+	m = updated.(Model)
+	updated, _ = m.Update(usageReportMsg(repProd))
 	m = updated.(Model)
 
 	// Check reports stored in m.reports
@@ -528,7 +542,7 @@ func TestTUIUsage_SingleWindowBadge(t *testing.T) {
 	_, _ = pm.EnsureProfile("gemini-only")
 	cfg.AddProfileAgent("gemini-only", "agy")
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	now := time.Now()
@@ -547,7 +561,7 @@ func TestTUIUsage_SingleWindowBadge(t *testing.T) {
 		FetchedAt: now,
 	}
 
-	updated, _ := m.Update(usageBatchMsg{rep})
+	updated, _ := m.Update(usageReportMsg(rep))
 	m = updated.(Model)
 
 	view := m.View()
@@ -570,7 +584,7 @@ func TestTUIUsage_FullCapacityOmitResetCountdown(t *testing.T) {
 	_, _ = pm.EnsureProfile("full-cap")
 	cfg.AddProfileAgent("full-cap", "agy")
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	now := time.Now()
@@ -595,7 +609,7 @@ func TestTUIUsage_FullCapacityOmitResetCountdown(t *testing.T) {
 		FetchedAt: now,
 	}
 
-	updated, _ := m.Update(usageBatchMsg{rep})
+	updated, _ := m.Update(usageReportMsg(rep))
 	m = updated.(Model)
 
 	// Wide mode (default)
@@ -661,7 +675,7 @@ func TestTUIUsage_TabSwitchTriggersRefresh(t *testing.T) {
 	cfg.AddProfileAgent("p1", "agy")
 	cfg.AddProfileAgent("p1", "gemini")
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	// Init() should return refreshCmd
@@ -697,7 +711,7 @@ func TestTUIUsage_TrueStreaming(t *testing.T) {
 	cfg.AddProfileAgent("p1", "agy")
 	cfg.AddProfileAgent("p2", "agy")
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	ch := make(chan usage.Report, 2)
@@ -839,37 +853,30 @@ func TestTUI_PeriodicAutoRefreshTick(t *testing.T) {
 func TestTUI_SpinnerAnimation(t *testing.T) {
 	m := newTestModel(t, "work")
 	m.loading = true
-	m.spinnerIdx = 0
 
 	// View should render spinner next to [r] when loading
 	view := m.View()
-	if !strings.Contains(view, spinnerFrames[0]) {
-		t.Errorf("expected view to contain spinner frame '%s', got:\n%s", spinnerFrames[0], view)
+	if !strings.Contains(view, m.spinner.View()) {
+		t.Errorf("expected view to contain spinner, got:\n%s", view)
 	}
 
-	// spinnerTickMsg should advance spinner frame
-	updated, cmd := m.Update(spinnerTickMsg(time.Now()))
-	m2 := updated.(Model)
-	if m2.spinnerIdx != 1 {
-		t.Errorf("expected spinnerIdx to advance to 1, got %d", m2.spinnerIdx)
-	}
-	if cmd == nil {
-		t.Fatalf("expected next spinner tick command")
-	}
-
-	// spinner.Tick() should advance m.spinner.View() to next frame
+	// Bubble Tea's spinner tick advances the rendered spinner.
+	previousFrame := m.spinner.View()
 	updatedSpin, cmdSpin := m.Update(m.spinner.Tick())
 	mSpin := updatedSpin.(Model)
+	if mSpin.spinner.View() == previousFrame {
+		t.Error("expected spinner tick to advance the visible frame")
+	}
 	if cmdSpin == nil {
 		t.Fatalf("expected next spinner tick command from bubbles spinner")
 	}
 	viewSpin := mSpin.View()
-	if !strings.Contains(viewSpin, spinnerFrames[1]) {
-		t.Errorf("expected view to contain advanced spinner frame '%s', got:\n%s", spinnerFrames[1], viewSpin)
+	if !strings.Contains(viewSpin, mSpin.spinner.View()) {
+		t.Errorf("expected view to contain updated spinner, got:\n%s", viewSpin)
 	}
 
 	// usageStreamClosedMsg should stop loading
-	updatedDone, cmdDone := m2.Update(usageStreamClosedMsg{})
+	updatedDone, cmdDone := mSpin.Update(usageStreamClosedMsg{})
 	mDone := updatedDone.(Model)
 	if mDone.loading {
 		t.Errorf("expected loading to be false after stream closed")
@@ -1141,7 +1148,7 @@ func TestTUI_DoctorDrawer_TabSwitchUpdatesDiagnostics(t *testing.T) {
 	cfg.AddProfileAgent("work", "agy")
 	cfg.AddProfileAgent("work", "gemini")
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	// Open drawer on agy
@@ -1209,7 +1216,7 @@ func TestTUI_DoctorDrawer_ConfigOverrides(t *testing.T) {
 	})
 	cfg.SetProfileArgs("overridden", []string{"--flag1", "--flag2"})
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 
 	m := NewModel(reg, pm, cfg)
 	mOpen, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
@@ -1461,7 +1468,7 @@ func TestTUI_ProfileDetails_AccountEmailDisplay(t *testing.T) {
 	_ = os.MkdirAll(filepath.Dir(tokenFile), 0700)
 	_ = os.WriteFile(tokenFile, []byte(mockToken), 0600)
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	view := m.View()
@@ -1485,7 +1492,7 @@ func TestTUI_NoProfiles_NoDefaultProfileLoaded(t *testing.T) {
 	pm := profile.NewProfileManager(emptyDir)
 	cfg := config.NewDefaultConfig()
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 	m := NewModel(reg, pm, cfg)
 
 	if len(m.Profiles()) != 0 {
@@ -1520,7 +1527,7 @@ func TestTUI_Header_VersionDisplay(t *testing.T) {
 	baseDir := t.TempDir()
 	pm := profile.NewProfileManager(baseDir)
 	cfg := config.NewDefaultConfig()
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 
 	// Default model inherits package Version
 	m := NewModel(reg, pm, cfg)
@@ -1560,14 +1567,12 @@ func TestTUI_Header_VersionDisplay(t *testing.T) {
 		t.Errorf("expected version in narrow view, got:\n%s", viewNarrow)
 	}
 
-	// SetVersion pointer method
-	m4 := NewModel(reg, pm, cfg)
-	m4.SetVersion("2.0.0")
+	m4 := NewModel(reg, pm, cfg).WithVersion("2.0.0")
 	if m4.Version() != "2.0.0" {
 		t.Errorf("expected version '2.0.0', got %q", m4.Version())
 	}
 	if !strings.Contains(m4.View(), "v2.0.0") {
-		t.Errorf("expected 'v2.0.0' in view after SetVersion")
+		t.Errorf("expected 'v2.0.0' in view after WithVersion")
 	}
 }
 
@@ -1583,7 +1588,7 @@ func TestTUI_ProfilesHeader_NoAgentParentheses(t *testing.T) {
 	cfg.AddProfileAgent("rs", "codex")
 	cfg.AddProfileAgent("bby", "agy")
 
-	reg := agents.DefaultRegistry()
+	reg := agents.NewRegistry()
 
 	// Tab: agy
 	mAgy := NewModel(reg, pm, cfg)

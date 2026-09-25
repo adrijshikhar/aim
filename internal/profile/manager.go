@@ -85,11 +85,6 @@ func (m *ProfileManager) ProfileExists(name string) bool {
 	return false
 }
 
-// EnsureProfileHome ensures the profile directory and dotfiles exist, acting as an alias for EnsureProfile.
-func (m *ProfileManager) EnsureProfileHome(name string) (string, error) {
-	return m.EnsureProfile(name)
-}
-
 func (m *ProfileManager) EnsureProfile(name string) (string, error) {
 	if err := validateProfileName(name); err != nil {
 		return "", err

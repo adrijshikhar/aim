@@ -57,7 +57,39 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 	}
 
 	var allSessions []Session
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
+	hostOnly := filterProfile == "host" || filterProfile == "<host>"
+	appendSession := func(s Session, profile string, isHost bool) {
+		s.Profile, s.IsHost = profile, isHost
+		s.Status = StatusIdle
+		if active, ok := activeProcesses[s.ID]; ok {
+			s.Status, s.PID = StatusActive, active.PID
+			if active.Profile != "" {
+				s.Profile = active.Profile
+				s.IsHost = active.Profile == "<host>"
+			}
+		}
+		if hostOnly && !s.IsHost {
+			return
+		}
+		if filterProfile != "" && !hostOnly && s.Profile != filterProfile {
+			return
+		}
+
+		key := fmt.Sprintf("%s:%s", s.Agent, s.ID)
+		if idx, exists := seen[key]; exists {
+			// When listing across profiles, prioritize the most recently active copy
+			if filterProfile == "" {
+				existing := allSessions[idx]
+				if s.LastActiveAt.After(existing.LastActiveAt) || (s.LastActiveAt.Equal(existing.LastActiveAt) && existing.IsHost && !s.IsHost) {
+					allSessions[idx] = s
+				}
+			}
+			return
+		}
+		seen[key] = len(allSessions)
+		allSessions = append(allSessions, s)
+	}
 
 	// Collect providers to query
 	var targetProviders []SessionProvider
@@ -81,7 +113,7 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 				continue
 			}
 			profName := entry.Name()
-			if filterProfile != "" && filterProfile != "host" && filterProfile != "<host>" && profName != filterProfile {
+			if filterProfile != "" && !hostOnly && profName != filterProfile {
 				continue
 			}
 
@@ -93,63 +125,19 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 			}
 
 			for _, s := range sessions {
-				key := fmt.Sprintf("%s:%s", s.Agent, s.ID)
-				if !seen[key] {
-					seen[key] = true
-					s.Profile = profName
-					s.IsHost = false
-					if active, ok := activeProcesses[s.ID]; ok {
-						s.Status = StatusActive
-						s.PID = active.PID
-						if active.Profile != "" {
-							s.Profile = active.Profile
-							s.IsHost = (active.Profile == "<host>")
-						}
-					} else {
-						s.Status = StatusIdle
-					}
-					if filterProfile != "" && filterProfile != "host" && filterProfile != "<host>" && s.Profile != filterProfile {
-						continue
-					}
-					if (filterProfile == "host" || filterProfile == "<host>") && !s.IsHost {
-						continue
-					}
-					allSessions = append(allSessions, s)
-				}
+				appendSession(s, profName, false)
 			}
 		}
 
 		// 2. Scan host storage (unless specifically filtering for a non-host profile)
-		if filterProfile == "" || filterProfile == "host" || filterProfile == "<host>" {
+		if filterProfile == "" || hostOnly {
 			hostDir := config.RealHomeDir()
 			hostSessions, err := p.ListSessions(ctx, hostDir, true)
 			if err != nil {
 				logger.Debug("[session/manager] ListSessions error on host %s: %v", hostDir, err)
 			} else {
 				for _, s := range hostSessions {
-					key := fmt.Sprintf("%s:%s", s.Agent, s.ID)
-					if !seen[key] {
-						seen[key] = true
-						s.Profile = "<host>"
-						s.IsHost = true
-						if active, ok := activeProcesses[s.ID]; ok {
-							s.Status = StatusActive
-							s.PID = active.PID
-							if active.Profile != "" {
-								s.Profile = active.Profile
-								s.IsHost = (active.Profile == "<host>")
-							}
-						} else {
-							s.Status = StatusIdle
-						}
-						if filterProfile != "" && filterProfile != "host" && filterProfile != "<host>" && s.Profile != filterProfile {
-							continue
-						}
-						if (filterProfile == "host" || filterProfile == "<host>") && !s.IsHost {
-							continue
-						}
-						allSessions = append(allSessions, s)
-					}
+					appendSession(s, "<host>", true)
 				}
 			}
 		}
@@ -235,11 +223,59 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 			matches = append(matches, s)
 		}
 	}
+	if len(matches) == 0 {
+		lowerTarget := strings.ToLower(strings.TrimSpace(idOrPrefix))
+		if lowerTarget != "" {
+			for _, s := range sessions {
+				if strings.ToLower(strings.TrimSpace(s.Title)) == lowerTarget {
+					matches = append(matches, s)
+				}
+			}
+			if len(matches) > 0 {
+				sort.Slice(matches, func(i, j int) bool {
+					return matches[i].LastActiveAt.After(matches[j].LastActiveAt)
+				})
+				return []Session{matches[0]}, nil
+			}
+			for _, s := range sessions {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Title)), lowerTarget) {
+					matches = append(matches, s)
+				}
+			}
+			if len(matches) > 0 {
+				sort.Slice(matches, func(i, j int) bool {
+					return matches[i].LastActiveAt.After(matches[j].LastActiveAt)
+				})
+				return []Session{matches[0]}, nil
+			}
+		}
+	}
 	return matches, nil
 }
 
 // ResolveSession resolves a full ID or short ID prefix to a concrete Session.
 func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) (*Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	res, err := m.LatestSession(ctx, agent, idOrPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if m.scanner != nil {
+		if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
+			if active, ok := procs[res.ID]; ok {
+				res.Status = StatusActive
+				res.PID = active.PID
+			}
+		}
+	}
+	return res, nil
+}
+
+// LatestSession resolves a full ID or prefix without additional active-process
+// enrichment. It is appropriate when callers need the most recently active stored snapshot.
+func (m *Manager) LatestSession(ctx context.Context, agent, idOrPrefix string) (*Session, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -268,14 +304,6 @@ func (m *Manager) ResolveSession(ctx context.Context, agent, idOrPrefix string) 
 	}
 
 	res := uniqueMatches[0]
-	if m.scanner != nil {
-		if procs, err := m.scanner.ScanActiveProcesses(ctx); err == nil {
-			if active, ok := procs[res.ID]; ok {
-				res.Status = StatusActive
-				res.PID = active.PID
-			}
-		}
-	}
 	return &res, nil
 }
 

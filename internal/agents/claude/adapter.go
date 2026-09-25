@@ -21,16 +21,8 @@ var _ agents.AgentAdapter = (*Adapter)(nil)
 
 type Adapter struct{}
 
-// ClaudeAdapter is an alias for Adapter.
-type ClaudeAdapter = Adapter
-
 func NewAdapter() *Adapter {
 	return &Adapter{}
-}
-
-// NewClaudeAdapter creates a new ClaudeAdapter.
-func NewClaudeAdapter() *ClaudeAdapter {
-	return NewAdapter()
 }
 
 func (a *Adapter) Name() string        { return "claude" }
@@ -97,6 +89,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	storageEnv := config.StorageEnv()
 	cleanEnv := make([]string, 0, len(os.Environ())+5)
 	for _, env := range os.Environ() {
 		idx := strings.IndexByte(env, '=')
@@ -104,7 +97,8 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			continue
 		}
 		key := env[:idx]
-		if key == "HOME" || key == "CLAUDE_CONFIG_DIR" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" || key == "AIM_SESSION_ID" ||
+		_, storageKey := storageEnv[key]
+		if storageKey || key == "HOME" || key == "CLAUDE_CONFIG_DIR" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_SESSION_ID" ||
 			key == "CLAUDE_CODE_OAUTH_TOKEN" || key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
 			continue
 		}
@@ -116,8 +110,10 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		"CLAUDE_CONFIG_DIR="+claudeDir,
 		"AIM_AGENT="+a.Name(),
 		"AIM_PROFILE="+profileName,
-		"AIM_HOME="+config.BaseDir(),
 	)
+	for key, value := range storageEnv {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("claude login failed: %w", err)
@@ -137,22 +133,11 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
 
 	bin := a.ResolveBinary()
-	envMap := make(map[string]string)
-	for _, e := range os.Environ() {
-		if idx := strings.IndexByte(e, '='); idx != -1 {
-			envMap[e[:idx]] = e[idx+1:]
-		}
-	}
-
+	envMap := config.StorageEnv()
 	envMap["HOME"] = profileDir
 	envMap["CLAUDE_CONFIG_DIR"] = claudeDir
 	envMap["AIM_AGENT"] = a.Name()
 	envMap["AIM_PROFILE"] = profileName
-	envMap["AIM_HOME"] = config.BaseDir()
-	delete(envMap, "AIM_SESSION_ID")
-	delete(envMap, "CLAUDE_CODE_OAUTH_TOKEN")
-	delete(envMap, "ANTHROPIC_API_KEY")
-	delete(envMap, "CLAUDE_CODE_OAUTH_REFRESH_TOKEN")
 
 	logger.Debug("[claude] Launch env: HOME=%s, CLAUDE_CONFIG_DIR=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, claudeDir, a.Name(), profileName)

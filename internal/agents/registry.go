@@ -12,19 +12,6 @@ type Registry struct {
 	adapters map[string]AgentAdapter
 }
 
-var (
-	defaultRegistry     *Registry
-	defaultRegistryOnce sync.Once
-)
-
-// DefaultRegistry returns the singleton default agent registry.
-func DefaultRegistry() *Registry {
-	defaultRegistryOnce.Do(func() {
-		defaultRegistry = NewRegistry()
-	})
-	return defaultRegistry
-}
-
 // NewRegistry creates a new empty agent registry.
 func NewRegistry() *Registry {
 	return &Registry{adapters: make(map[string]AgentAdapter)}

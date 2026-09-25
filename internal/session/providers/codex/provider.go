@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -80,7 +79,59 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 }
 
 func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName string, isHost bool) ([]session.Session, error) {
-	query := "SELECT id, title, preview, updated_at, rollout_path FROM threads ORDER BY updated_at DESC LIMIT 50;\n"
+	cols, err := p.getTableColumns(ctx, dbPath, "threads")
+	if err != nil || len(cols) == 0 {
+		return nil, fmt.Errorf("failed to inspect threads table at %s: %w", dbPath, err)
+	}
+
+	colSet := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		colSet[c] = true
+	}
+
+	var selectCols []string
+	selectCols = append(selectCols, "id")
+	if colSet["name"] {
+		selectCols = append(selectCols, "COALESCE(name, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	if colSet["title"] {
+		selectCols = append(selectCols, "COALESCE(title, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	if colSet["first_user_message"] {
+		selectCols = append(selectCols, "COALESCE(first_user_message, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	if colSet["preview"] {
+		selectCols = append(selectCols, "COALESCE(preview, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	if colSet["cwd"] {
+		selectCols = append(selectCols, "COALESCE(cwd, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	selectCols = append(selectCols, "updated_at", "rollout_path")
+
+	var whereClauses []string
+	if colSet["thread_source"] {
+		whereClauses = append(whereClauses, "(thread_source IS NULL OR thread_source != 'subagent')")
+	}
+	if colSet["archived"] {
+		whereClauses = append(whereClauses, "(archived IS NULL OR archived = 0)")
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM threads", strings.Join(selectCols, ", "))
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+	query += " ORDER BY updated_at DESC LIMIT 100;\n"
+
 	cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath, "-separator", "|||")
 	cmd.Stdin = strings.NewReader(query)
 	out, err := cmd.Output()
@@ -96,32 +147,58 @@ func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName strin
 			continue
 		}
 		parts := strings.Split(line, "|||")
-		if len(parts) < 5 {
+		if len(parts) < 8 {
 			continue
 		}
 
 		id := strings.TrimSpace(parts[0])
-		title := strings.TrimSpace(parts[1])
-		preview := strings.TrimSpace(parts[2])
-		rawUnix := strings.TrimSpace(parts[3])
-		rolloutPath := strings.TrimSpace(parts[4])
+		name := strings.TrimSpace(parts[1])
+		title := strings.TrimSpace(parts[2])
+		firstUserMsg := strings.TrimSpace(parts[3])
+		preview := strings.TrimSpace(parts[4])
+		cwd := strings.TrimSpace(parts[5])
+		rawUnix := strings.TrimSpace(parts[6])
+		rolloutPath := strings.TrimSpace(parts[7])
 
-		if title == "" {
-			if preview != "" {
-				firstLine := strings.Split(preview, "\n")[0]
-				title = strings.TrimSpace(firstLine)
-			}
-			if title == "" {
-				title = "Untitled Session"
-			}
+		displayTitle := name
+		if displayTitle == "" {
+			displayTitle = title
+		}
+		if displayTitle == "" && firstUserMsg != "" {
+			firstLine := strings.Split(firstUserMsg, "\n")[0]
+			displayTitle = strings.TrimSpace(firstLine)
+		}
+		if displayTitle == "" && preview != "" {
+			firstLine := strings.Split(preview, "\n")[0]
+			displayTitle = strings.TrimSpace(firstLine)
+		}
+		if displayTitle == "" {
+			displayTitle = "Untitled Session"
+		}
+
+		summary := firstUserMsg
+		if summary == "" {
+			summary = preview
+		}
+		if summary == "" && title != "" && title != displayTitle {
+			summary = title
+		}
+		if summary == "" {
+			summary = displayTitle
 		}
 
 		sec, _ := strconv.ParseInt(rawUnix, 10, 64)
 		modTime := time.Unix(sec, 0)
+		if rolloutPath != "" {
+			if fi, err := os.Stat(rolloutPath); err == nil && fi.ModTime().After(modTime) {
+				modTime = fi.ModTime()
+			}
+		}
 
-		s := session.NewSession(id, title, "codex", profileName, isHost, modTime)
-		s.Summary = preview
+		s := session.NewSession(id, displayTitle, "codex", profileName, isHost, modTime)
+		s.Summary = summary
 		s.StoragePath = rolloutPath
+		s.Cwd = cwd
 		sessions = append(sessions, s)
 	}
 
@@ -178,11 +255,187 @@ func (p *Provider) listFromJSONL(indexPath, profileName string, isHost bool) ([]
 }
 
 func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
-	sessions, err := p.ListSessions(ctx, profileDir, isHost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list sessions for codex: %w", err)
+	if idOrPrefix == "" {
+		return nil, nil
+	}
+	cDir := p.codexDir(profileDir, isHost)
+	profileName := filepath.Base(profileDir)
+	if isHost {
+		profileName = "<host>"
 	}
 
+	dbPath := filepath.Join(cDir, "state_5.sqlite")
+	if p.sqliteBin != "" {
+		if fi, err := os.Stat(dbPath); err == nil && fi.Size() > 0 {
+			s, err := p.getFromSQLite(ctx, dbPath, idOrPrefix, profileName, isHost)
+			if err != nil {
+				return nil, err
+			}
+			if s != nil {
+				return s, nil
+			}
+		}
+	}
+
+	indexPath := filepath.Join(cDir, "session_index.jsonl")
+	if fi, err := os.Stat(indexPath); err == nil && fi.Size() > 0 {
+		return p.getFromJSONL(indexPath, idOrPrefix, profileName, isHost)
+	}
+
+	return nil, nil
+}
+
+func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profileName string, isHost bool) (*session.Session, error) {
+	if !isValidSessionID(idOrPrefix) {
+		return nil, nil
+	}
+
+	cols, err := p.getTableColumns(ctx, dbPath, "threads")
+	if err != nil || len(cols) == 0 {
+		return nil, nil
+	}
+	colSet := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		colSet[c] = true
+	}
+
+	var selectCols []string
+	selectCols = append(selectCols, "id")
+	if colSet["name"] {
+		selectCols = append(selectCols, "COALESCE(name, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	if colSet["title"] {
+		selectCols = append(selectCols, "COALESCE(title, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	if colSet["first_user_message"] {
+		selectCols = append(selectCols, "COALESCE(first_user_message, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	if colSet["preview"] {
+		selectCols = append(selectCols, "COALESCE(preview, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	if colSet["cwd"] {
+		selectCols = append(selectCols, "COALESCE(cwd, '')")
+	} else {
+		selectCols = append(selectCols, "''")
+	}
+	selectCols = append(selectCols, "updated_at", "rollout_path")
+
+	query := fmt.Sprintf("SELECT %s FROM threads WHERE id = '%s' OR id LIKE '%s%%' ORDER BY updated_at DESC LIMIT 5;\n",
+		strings.Join(selectCols, ", "), escapeSQL(idOrPrefix), escapeSQL(idOrPrefix))
+
+	cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath, "-separator", "|||")
+	cmd.Stdin = strings.NewReader(query)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var matches []*session.Session
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.Split(line, "|||")
+		if len(parts) < 8 {
+			continue
+		}
+		id := strings.TrimSpace(parts[0])
+		name := strings.TrimSpace(parts[1])
+		title := strings.TrimSpace(parts[2])
+		firstUserMsg := strings.TrimSpace(parts[3])
+		preview := strings.TrimSpace(parts[4])
+		cwd := strings.TrimSpace(parts[5])
+		rawUnix := strings.TrimSpace(parts[6])
+		rolloutPath := strings.TrimSpace(parts[7])
+
+		displayTitle := name
+		if displayTitle == "" {
+			displayTitle = title
+		}
+		if displayTitle == "" && firstUserMsg != "" {
+			displayTitle = strings.TrimSpace(strings.Split(firstUserMsg, "\n")[0])
+		}
+		if displayTitle == "" && preview != "" {
+			displayTitle = strings.TrimSpace(strings.Split(preview, "\n")[0])
+		}
+		if displayTitle == "" {
+			displayTitle = "Untitled Session"
+		}
+
+		summary := firstUserMsg
+		if summary == "" {
+			summary = preview
+		}
+		if summary == "" && title != "" && title != displayTitle {
+			summary = title
+		}
+		if summary == "" {
+			summary = displayTitle
+		}
+
+		sec, _ := strconv.ParseInt(rawUnix, 10, 64)
+		modTime := time.Unix(sec, 0)
+		if rolloutPath != "" {
+			if fi, err := os.Stat(rolloutPath); err == nil && fi.ModTime().After(modTime) {
+				modTime = fi.ModTime()
+			}
+		}
+		historyDB := filepath.Join(filepath.Dir(dbPath), "thread_history_1.sqlite")
+		if fi, err := os.Stat(historyDB); err == nil && fi.Size() > 0 {
+			turnQuery := fmt.Sprintf("SELECT MAX(COALESCE(completed_at, started_at, 0)) FROM thread_turns WHERE thread_id = '%s';\n", escapeSQL(id))
+			tCmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
+			tCmd.Stdin = strings.NewReader(turnQuery)
+			if tOut, err := tCmd.Output(); err == nil {
+				if tSec, err := strconv.ParseInt(strings.TrimSpace(string(tOut)), 10, 64); err == nil && tSec > 0 {
+					tTime := time.Unix(tSec, 0)
+					if tTime.After(modTime) {
+						modTime = tTime
+					}
+				}
+			}
+		}
+
+		s := session.NewSession(id, displayTitle, "codex", profileName, isHost, modTime)
+		s.Summary = summary
+		s.StoragePath = rolloutPath
+		s.Cwd = cwd
+		matches = append(matches, &s)
+	}
+
+	if len(matches) > 1 {
+		for _, m := range matches {
+			if m.ID == idOrPrefix {
+				return m, nil
+			}
+		}
+		var ids []string
+		for _, m := range matches {
+			ids = append(ids, m.ShortID)
+		}
+		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions in %s: %s", idOrPrefix, profileName, strings.Join(ids, ", "))
+	}
+
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	return nil, nil
+}
+
+func (p *Provider) getFromJSONL(indexPath, idOrPrefix, profileName string, isHost bool) (*session.Session, error) {
+	sessions, err := p.listFromJSONL(indexPath, profileName, isHost)
+	if err != nil {
+		return nil, err
+	}
 	var matches []*session.Session
 	for _, s := range sessions {
 		if strings.HasPrefix(s.ID, idOrPrefix) {
@@ -190,19 +443,21 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 			matches = append(matches, &match)
 		}
 	}
-
 	if len(matches) > 1 {
+		for _, m := range matches {
+			if m.ID == idOrPrefix {
+				return m, nil
+			}
+		}
 		var ids []string
 		for _, m := range matches {
 			ids = append(ids, m.ShortID)
 		}
-		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions in %s: %s", idOrPrefix, profileDir, strings.Join(ids, ", "))
+		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions in %s: %s", idOrPrefix, profileName, strings.Join(ids, ", "))
 	}
-
 	if len(matches) == 1 {
 		return matches[0], nil
 	}
-
 	return nil, nil
 }
 
@@ -214,7 +469,7 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 	targetID := srcSession.ID
 	if fork {
 		var err error
-		targetID, err = generateUUID()
+		targetID, err = session.GenerateUUID()
 		if err != nil {
 			return "", fmt.Errorf("failed to generate uuid for forked session: %w", err)
 		}
@@ -671,8 +926,8 @@ func (p *Provider) copyThreadHistoryDB(ctx context.Context, srcHistoryDB, destHi
 			continue
 		}
 
-		part := fmt.Sprintf("INSERT OR REPLACE INTO %s (%s)\nSELECT %s\nFROM src.%s WHERE thread_id = '%s';",
-			tbl, strings.Join(insertCols, ", "), strings.Join(selectExprs, ", "), tbl, escapeSQL(srcID))
+		part := fmt.Sprintf("DELETE FROM %s WHERE thread_id = '%s';\nINSERT OR REPLACE INTO %s (%s)\nSELECT %s\nFROM src.%s WHERE thread_id = '%s';",
+			tbl, escapeSQL(targetID), tbl, strings.Join(insertCols, ", "), strings.Join(selectExprs, ", "), tbl, escapeSQL(srcID))
 		sqlParts = append(sqlParts, part)
 	}
 
@@ -861,16 +1116,6 @@ func isValidSessionID(s string) bool {
 func escapeSQL(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
 	return strings.ReplaceAll(s, "'", "''")
-}
-
-func generateUUID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("failed to read random bytes for UUID: %w", err)
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 
 func copyFile(src, dst string) (err error) {

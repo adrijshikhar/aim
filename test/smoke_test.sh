@@ -55,6 +55,14 @@ echo "mock claude executed with args: $@"
 MOCK
 chmod +x "$MOCK_BIN/claude"
 
+# AIM may inspect or purge macOS Keychain entries while exercising profile
+# isolation. Keep this live CLI test entirely inside its temporary sandbox.
+cat << 'MOCK' > "$MOCK_BIN/security"
+#!/bin/sh
+exit 44
+MOCK
+chmod +x "$MOCK_BIN/security"
+
 export PATH="$MOCK_BIN:$PATH"
 
 echo "=== 1. Testing help & version ==="

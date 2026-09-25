@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -191,7 +190,7 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 
 	destID := srcSession.ID
 	if fork {
-		newUUID, err := generateUUID()
+		newUUID, err := session.GenerateUUID()
 		if err != nil {
 			return "", fmt.Errorf("failed to generate fork UUID: %w", err)
 		}
@@ -431,16 +430,6 @@ func parseTimestamp(ts string) (time.Time, bool) {
 		return t, true
 	}
 	return time.Time{}, false
-}
-
-func generateUUID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("failed to read random bytes for UUID: %w", err)
-	}
-	b[6] = (b[6] & 0x0f) | 0x40 // Version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // Variant 10xx
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 
 func copyFile(src, dst string) (err error) {

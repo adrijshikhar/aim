@@ -479,3 +479,52 @@ func TestResumeCmd_ClaudeResumeArgs(t *testing.T) {
 		t.Errorf("expected resuming output, got: %s", buf.String())
 	}
 }
+
+func TestResumeCmd_DirectSessionIDWithoutProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	dumpFile := filepath.Join(tempDir, "claude_args.txt")
+	fakeScript := fmt.Sprintf("#!/bin/sh\necho \"$@\" > %s\nexit 0\n", dumpFile)
+	fakeClaude := filepath.Join(fakeBinDir, "claude")
+	_ = os.WriteFile(fakeClaude, []byte(fakeScript), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	reg := agents.NewRegistry()
+	reg.Register(claude.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	pDir, _ := pm.EnsureProfile("work")
+
+	sessionID := "c24699d0-820f-435f-b4e4-eaf8440311b4"
+	// Create mock Claude session on disk in work profile
+	claudeDir := filepath.Join(pDir, ".claude")
+	_ = os.MkdirAll(claudeDir, 0755)
+	projDir := filepath.Join(claudeDir, "projects", "testproj")
+	_ = os.MkdirAll(projDir, 0755)
+	sessFile := filepath.Join(projDir, sessionID+".jsonl")
+	sessContent := fmt.Sprintf("{\"type\":\"user\",\"sessionId\":\"%s\",\"message\":{\"content\":\"test prompt\"}}\n", sessionID)
+	_ = os.WriteFile(sessFile, []byte(sessContent), 0644)
+
+	var buf bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	// User runs: aim resume claude c24699d0 (omitting profile name)
+	cmd.SetArgs([]string{"resume", "claude", "c24699d0"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("cmd.Execute failed: %v", err)
+	}
+
+	content, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("failed to read args dump: %v", err)
+	}
+	if !strings.Contains(string(content), "--resume "+sessionID) {
+		t.Errorf("expected --resume %s in args dump, got %q", sessionID, string(content))
+	}
+}

@@ -29,10 +29,6 @@ func TestCodexAdapter_Metadata(t *testing.T) {
 		t.Errorf("expected aliases to include 'codex-cli', got %v", aliases)
 	}
 
-	aliasAdapter := NewCodexAdapter()
-	if aliasAdapter.Name() != "codex" {
-		t.Errorf("expected NewCodexAdapter to return codex adapter")
-	}
 }
 
 func TestCodexAdapter_HasCredentials(t *testing.T) {

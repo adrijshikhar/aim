@@ -39,12 +39,27 @@ make test
 # Run end-to-end integration smoke tests
 make smoke
 
+# Run the built AIM CLI through real shells and nested AIM commands
+make live-test
+
 # Format code
 gofmt -s -w .
 
 # Static analysis
 go vet ./...
 ```
+
+`make smoke` uses mocked agent binaries. `make live-test` launches real `/bin/sh`
+processes through each adapter and executes nested AIM commands against temporary
+profiles. It checks profile-store continuity, environment isolation, configuration
+overrides, and exit codes in custom `AIM_HOME`, legacy `.aim`, custom XDG, and
+platform-default layouts; only macOS Keychain access is stubbed. Neither suite
+authenticates with providers or verifies a live model response.
+
+Profile children carry resolved AIM paths in `AIM_CONFIG_DIR`, `AIM_DATA_DIR`,
+`AIM_CACHE_DIR`, and `AIM_STATE_DIR`, plus `AIM_REAL_HOME`. These preserve nested
+AIM commands without changing the provider's global `XDG_*` environment.
+`AIM_HOME` still selects the legacy layout and takes precedence over these paths.
 
 ### Local Release Testing
 To verify cross-compilation across all target platforms (`darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`):

@@ -148,8 +148,3 @@ func newVersionCmd() *cobra.Command {
 		},
 	}
 }
-
-func printUsage() {
-	cmd := newRootCmd(nil, nil)
-	_ = cmd.Help()
-}

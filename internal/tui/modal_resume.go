@@ -111,13 +111,7 @@ func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
 						val = "default"
 					}
 				}
-				m.selected = val
-				m.selectedSession = m.resumeModal.session
-				m.outcome = m.resumeModal.outcome
-				m.sessionsDrawer.fork = m.resumeModal.fork
-				m.resumeModal.active = false
-				m.cancelStream()
-				return m, tea.Quit
+				return m.finishResumeSelection(val)
 			default:
 				var cmd tea.Cmd
 				m.resumeModal.input, cmd = m.resumeModal.input.Update(msg)
@@ -152,18 +146,21 @@ func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
 			}
 
 			// User selected an existing profile
-			chosen := m.resumeModal.profiles[m.resumeModal.cursor]
-			m.selected = chosen
-			m.selectedSession = m.resumeModal.session
-			m.outcome = m.resumeModal.outcome
-			m.sessionsDrawer.fork = m.resumeModal.fork
-			m.resumeModal.active = false
-			m.cancelStream()
-			return m, tea.Quit
+			return m.finishResumeSelection(m.resumeModal.profiles[m.resumeModal.cursor])
 		}
 	}
 
 	return m, nil
+}
+
+func (m Model) finishResumeSelection(profile string) (Model, tea.Cmd) {
+	m.selected = profile
+	m.selectedSession = m.resumeModal.session
+	m.outcome = m.resumeModal.outcome
+	m.sessionsDrawer.fork = m.resumeModal.fork
+	m.resumeModal.active = false
+	m.cancelStream()
+	return m, tea.Quit
 }
 
 func (m Model) renderResumeModal() string {

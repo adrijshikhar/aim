@@ -54,18 +54,8 @@ func executeShell(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		return 1
 	}
 
-	// Apply profile configuration environment overrides
 	cfg, _ := config.LoadConfig()
-	if cfg != nil {
-		if profEnv := cfg.GetProfileEnv(profileName); len(profEnv) > 0 {
-			if launchEnv.Env == nil {
-				launchEnv.Env = make(map[string]string)
-			}
-			for k, v := range profEnv {
-				launchEnv.Env[k] = v
-			}
-		}
-	}
+	applyProfileOverrides(&launchEnv, cfg, profileName, false)
 
 	r := runner.NewRunner()
 	code, err := r.RunShell(context.Background(), launchEnv)

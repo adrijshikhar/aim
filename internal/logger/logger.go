@@ -148,11 +148,6 @@ func Debug(format string, args ...any) {
 	}
 }
 
-// Debugf is an alias for Debug.
-func Debugf(format string, args ...any) {
-	Debug(format, args...)
-}
-
 // Close flushes and closes the underlying log file if open.
 func Close() {
 	mu.Lock()

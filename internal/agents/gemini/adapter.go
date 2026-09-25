@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -17,13 +18,7 @@ var _ agents.AgentAdapter = (*Adapter)(nil)
 
 type Adapter struct{}
 
-// GeminiAdapter is an alias for Adapter.
-type GeminiAdapter = Adapter
-
 func NewAdapter() *Adapter { return &Adapter{} }
-
-// NewGeminiAdapter creates a new GeminiAdapter.
-func NewGeminiAdapter() *GeminiAdapter { return NewAdapter() }
 
 func (a *Adapter) Name() string        { return "gemini" }
 func (a *Adapter) DisplayName() string { return "Gemini CLI" }
@@ -49,20 +44,11 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	if bin == "" {
 		bin = a.BinaryName()
 	}
-	envMap := make(map[string]string)
-	for _, e := range os.Environ() {
-		for i := 0; i < len(e); i++ {
-			if e[i] == '=' {
-				envMap[e[:i]] = e[i+1:]
-				break
-			}
-		}
-	}
+	envMap := config.StorageEnv()
 	envMap["HOME"] = profileDir
 	envMap["GEMINI_CLI_HOME"] = filepath.Join(profileDir, ".gemini")
 	envMap["AIM_AGENT"] = a.Name()
 	envMap["AIM_PROFILE"] = profileName
-	delete(envMap, "AIM_SESSION_ID")
 	cwd, _ := os.Getwd()
 	return agents.LaunchEnv{
 		BinaryPath: bin,

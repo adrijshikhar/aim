@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,9 @@ func ConfigDir() string {
 	if isLegacy() {
 		return legacyBaseDir()
 	}
+	if dir := os.Getenv("AIM_CONFIG_DIR"); dir != "" {
+		return dir
+	}
 	if custom := os.Getenv("XDG_CONFIG_HOME"); custom != "" {
 		p := filepath.Join(custom, "aim")
 		_ = os.MkdirAll(p, 0700)
@@ -97,6 +101,9 @@ func DataDir() string {
 	if isLegacy() {
 		return legacyBaseDir()
 	}
+	if dir := os.Getenv("AIM_DATA_DIR"); dir != "" {
+		return dir
+	}
 	if custom := os.Getenv("XDG_DATA_HOME"); custom != "" {
 		p := filepath.Join(custom, "aim")
 		_ = os.MkdirAll(p, 0700)
@@ -113,6 +120,9 @@ func DataDir() string {
 func CacheDir() string {
 	if isLegacy() {
 		return filepath.Join(legacyBaseDir(), "cache")
+	}
+	if dir := os.Getenv("AIM_CACHE_DIR"); dir != "" {
+		return dir
 	}
 	if custom := os.Getenv("XDG_CACHE_HOME"); custom != "" {
 		p := filepath.Join(custom, "aim")
@@ -135,6 +145,9 @@ func StateDir() string {
 	if isLegacy() {
 		return legacyBaseDir()
 	}
+	if dir := os.Getenv("AIM_STATE_DIR"); dir != "" {
+		return dir
+	}
 	if custom := os.Getenv("XDG_STATE_HOME"); custom != "" {
 		p := filepath.Join(custom, "aim")
 		_ = os.MkdirAll(p, 0700)
@@ -153,6 +166,24 @@ func BaseDir() string {
 		return legacyBaseDir()
 	}
 	return DataDir()
+}
+
+// StorageEnv preserves AIM's resolved storage paths when a child gets a profile
+// HOME. AIM-specific overrides leave the provider's XDG defaults isolated.
+// AIM_HOME remains a legacy-layout selector, not an alias for DataDir.
+func StorageEnv() map[string]string {
+	env := map[string]string{
+		"AIM_HOME":       "",
+		"AIM_REAL_HOME":  RealHomeDir(),
+		"AIM_CONFIG_DIR": ConfigDir(),
+		"AIM_DATA_DIR":   DataDir(),
+		"AIM_CACHE_DIR":  CacheDir(),
+		"AIM_STATE_DIR":  StateDir(),
+	}
+	if isLegacy() {
+		env["AIM_HOME"] = legacyBaseDir()
+	}
+	return env
 }
 
 // ConfigFilePath returns the path to config.json within ConfigDir().
@@ -268,11 +299,7 @@ func (c *Config) GetProfileEnv(profile string) map[string]string {
 	if !ok || p.Env == nil {
 		return nil
 	}
-	out := make(map[string]string, len(p.Env))
-	for k, v := range p.Env {
-		out[k] = v
-	}
-	return out
+	return maps.Clone(p.Env)
 }
 
 func (c *Config) SetProfileEnv(profile string, env map[string]string) {
@@ -283,14 +310,7 @@ func (c *Config) SetProfileEnv(profile string, env map[string]string) {
 		c.Profiles = make(map[string]ProfileConfig)
 	}
 	p := c.Profiles[profile]
-	if env == nil {
-		p.Env = nil
-	} else {
-		p.Env = make(map[string]string, len(env))
-		for k, v := range env {
-			p.Env[k] = v
-		}
-	}
+	p.Env = maps.Clone(env)
 	c.Profiles[profile] = p
 }
 

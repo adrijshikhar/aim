@@ -58,29 +58,52 @@ Flags:
 				}
 			}
 
+			mgr := defaultSessionManager()
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+
 			var sessionID string
 			var extraArgs []string
 
-			// Parse sessionID and extraArgs
-			if len(args) > 2 {
-				if args[2] == "--" {
-					extraArgs = args[3:]
-				} else {
-					sessionID = args[2]
-					if len(args) > 3 {
-						if args[3] == "--" {
-							extraArgs = args[4:]
-						} else {
+			// If args[1] is not an existing profile, check if it's a session ID or title
+			if pm != nil && !pm.ProfileExists(profileName) {
+				if matches, err := mgr.FindAllSessionsByID(ctx, agentName, profileName); err == nil && len(matches) > 0 {
+					sessionID = profileName
+					sort.Slice(matches, func(i, j int) bool {
+						return matches[i].LastActiveAt.After(matches[j].LastActiveAt)
+					})
+					profileName = matches[0].Profile
+					if profileName == "" || profileName == "<host>" {
+						profileName = "default"
+					}
+					if len(args) > 2 {
+						if args[2] == "--" {
 							extraArgs = args[3:]
+						} else {
+							extraArgs = args[2:]
 						}
 					}
 				}
 			}
 
-			mgr := defaultSessionManager()
-			ctx := cmd.Context()
-			if ctx == nil {
-				ctx = context.Background()
+			if sessionID == "" {
+				// Parse sessionID and extraArgs normally (args[1] is profile, args[2] is session ID)
+				if len(args) > 2 {
+					if args[2] == "--" {
+						extraArgs = args[3:]
+					} else {
+						sessionID = args[2]
+						if len(args) > 3 {
+							if args[3] == "--" {
+								extraArgs = args[4:]
+							} else {
+								extraArgs = args[3:]
+							}
+						}
+					}
+				}
 			}
 
 			var sess *session.Session
@@ -209,6 +232,13 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	// Check if another profile has a newer version of this session
 	if latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agent, sess.ID); err == nil && latest != nil {
 		if latest.LastActiveAt.After(sess.LastActiveAt) {
+			if !latest.IsHost && latest.Profile != profile {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s Syncing newer session updates from profile %q into %q...\n",
+					lipgloss.NewStyle().Foreground(tui.AccentCyan).Render("⚡"),
+					latest.Profile,
+					profile,
+				)
+			}
 			sess = latest
 		}
 	}
@@ -304,22 +334,9 @@ func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, 
 	if mgr == nil {
 		return nil, fmt.Errorf("session manager cannot be nil")
 	}
-	matches, err := mgr.FindAllSessionsByID(ctx, agent, sessionID)
+	sess, err := mgr.LatestSession(ctx, agent, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions across profiles: %w", err)
 	}
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("%w: %s", session.ErrSessionNotFound, sessionID)
-	}
-
-	uniqueMatches := session.DeduplicateMatches(matches)
-	if len(uniqueMatches) > 1 {
-		var ids []string
-		for _, s := range uniqueMatches {
-			ids = append(ids, s.ShortID)
-		}
-		sort.Strings(ids)
-		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions: %s", sessionID, strings.Join(ids, ", "))
-	}
-	return &uniqueMatches[0], nil
+	return sess, nil
 }

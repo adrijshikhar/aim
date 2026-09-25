@@ -66,7 +66,7 @@ func TestDebug_FileLogging(t *testing.T) {
 	SetConsoleOutput(false)
 
 	Debug("testing message with arg: %s", "foo")
-	Debugf("another message %d", 42)
+	Debug("another message %d", 42)
 
 	Close()
 
