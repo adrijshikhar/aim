@@ -487,6 +487,9 @@ func TestEngine_MigrationBackupAndMessage(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("migration must back up the profile file once: %v", matches)
 	}
+	if !strings.Contains(f.out.String(), "claude: 1 server(s) in work matched the host's (a) and were removed; backup: "+matches[0]+"\n") {
+		t.Fatalf("the removal must name the backup: %q", f.out.String())
+	}
 	ch, _ := s.Diff()
 	_ = s.Finish(ch, keepAll)
 	if names := f.profileNames(); strings.Join(names, ",") != "b,own" {
@@ -494,8 +497,8 @@ func TestEngine_MigrationBackupAndMessage(t *testing.T) {
 	}
 	f.out.Reset()
 	s2 := f.start()
-	if strings.Contains(f.out.String(), "differ from the host") {
-		t.Fatal("the migration message is printed once")
+	if strings.Contains(f.out.String(), "differ from the host") || strings.Contains(f.out.String(), "backup:") {
+		t.Fatal("the migration messages are printed once")
 	}
 	if matches, _ := filepath.Glob(f.pf + ".aim-backup-*"); len(matches) != 1 {
 		t.Fatalf("no second backup: %v", matches)

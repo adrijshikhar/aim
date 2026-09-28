@@ -124,6 +124,10 @@ to the host or keep it in that profile; without a terminal the change is kept. A
 host server comes back next session. Background launches (`claude --bg`, `codex app-server`,
 `agy remote-control`) get the host servers too; the next launch of that profile cleans up.
 
+The first launch of an existing profile removes servers that are identical copies of the
+host's. Before it does, aim writes a backup next to the profile file, named
+`<file>.aim-backup-<UTC timestamp>`; delete those backups once the profile looks right.
+
 To add a server to one profile only, run the agent's own command inside the profile:
 `aim shell claude work` then `claude mcp add -s user foo -- npx foo`.
 

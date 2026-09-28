@@ -139,7 +139,7 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 	if !opt.Enabled {
 		return s, e.Store.Save(profile, st)
 	}
-	backedUp := map[string]bool{} // one migration backup per profile file per Start
+	backedUp := map[string]string{} // profile file → its one migration backup per Start
 	var undo []stripWrite
 	for _, c := range cols {
 		w, err := e.startCollection(profile, c, st, alone, backedUp)
@@ -174,7 +174,7 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 // startCollection merges one collection and returns the write that undoes it
 // (skip when nothing was written). State is recorded only once the file holds
 // the merge.
-func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, backedUp map[string]bool) (stripWrite, error) {
+func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, backedUp map[string]string) (stripWrite, error) {
 	none := stripWrite{c: c, skip: true}
 	if fi, err := os.Lstat(c.ProfilePath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return none, errors.New(c.ProfilePath + " is a symlink; not merging into a shared file")
@@ -247,29 +247,33 @@ func (e *Engine) startCollection(profile string, c Collection, st *State, alone 
 
 // migrate runs once per collection: profile servers identical to the host's are
 // old copy-once leftovers (T4) and are removed after a backup; servers that
-// differ stay the profile's own (conflict rule) and are listed once.
-func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entries, st *State, backedUp map[string]bool) error {
+// differ stay the profile's own (conflict rule). Both are listed once.
+func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entries, st *State, backedUp map[string]string) error {
 	id := c.ID()
 	norm := c.norm()
-	var differing []string
-	removed := false
+	var removed, differing []string
 	for _, n := range slices.Clone(prof.Order) {
 		if !host.Has(n) {
 			continue
 		}
 		if Hash(norm, prof.Values[n]) == Hash(norm, host.Values[n]) {
 			prof.Delete(n)
-			removed = true
+			removed = append(removed, n)
 		} else {
 			differing = append(differing, n)
 		}
 	}
-	if removed {
-		if err := e.backup(c.ProfilePath, backedUp); err != nil {
+	if len(removed) > 0 {
+		name, err := e.backup(c.ProfilePath, backedUp)
+		if err != nil {
 			return err
 		}
 		if _, err := c.Write(c.ProfilePath, *prof); err != nil {
 			return err
+		}
+		if name != "" {
+			e.warnf("%s: %d server(s) in %s matched the host's (%s) and were removed; backup: %s",
+				c.Agent, len(removed), profile, strings.Join(removed, ", "), name)
 		}
 	}
 	if len(differing) > 0 {
@@ -281,17 +285,18 @@ func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entri
 }
 
 // backup copies path to <path>.aim-backup-<UTC>[-n] (0600) once per Start and
-// never overwrites an existing backup.
-func (e *Engine) backup(path string, done map[string]bool) error {
-	if done[path] {
-		return nil
+// never overwrites an existing backup. It returns the backup's name ("" when
+// path does not exist).
+func (e *Engine) backup(path string, done map[string]string) (string, error) {
+	if name, ok := done[path]; ok {
+		return name, nil
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return "", nil
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	base := fmt.Sprintf("%s.aim-backup-%s", path, e.now().UTC().Format("20060102T150405Z"))
 	for i := 1; ; i++ {
@@ -304,17 +309,17 @@ func (e *Engine) backup(path string, done map[string]bool) error {
 			continue
 		}
 		if err != nil {
-			return err
+			return "", err
 		}
 		_, werr := f.Write(data)
 		if cerr := f.Close(); werr == nil {
 			werr = cerr
 		}
 		if werr != nil {
-			return werr
+			return "", werr
 		}
-		done[path] = true
-		return nil
+		done[path] = name
+		return name, nil
 	}
 }
 
