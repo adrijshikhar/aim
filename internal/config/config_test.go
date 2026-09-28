@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -464,5 +466,38 @@ func TestMCPGlobalEnabled_DefaultTrue(t *testing.T) {
 	var nilCfg *Config
 	if !nilCfg.MCPGlobalEnabled("a") {
 		t.Fatal("a missing config means merge on")
+	}
+}
+
+func TestPluginsGlobalEnabled_DefaultTrue(t *testing.T) {
+	f := false
+	c := &Config{Profiles: map[string]ProfileConfig{"a": {}, "b": {PluginsGlobal: &f}}}
+	if !c.PluginsGlobalEnabled("a") || c.PluginsGlobalEnabled("b") || !c.PluginsGlobalEnabled("missing") {
+		t.Fatal("plugins_global default must be true")
+	}
+	var nilCfg *Config
+	if !nilCfg.PluginsGlobalEnabled("a") {
+		t.Fatal("a missing config means merge on")
+	}
+}
+
+func TestPluginsGlobal_RoundTrip(t *testing.T) {
+	var p ProfileConfig
+	if err := json.Unmarshal([]byte(`{"agents":["claude"],"mcp_global":true,"plugins_global":false}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.PluginsGlobal == nil || *p.PluginsGlobal || p.MCPGlobal == nil || !*p.MCPGlobal {
+		t.Fatalf("plugins_global not decoded: %+v", p)
+	}
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"plugins_global":false`) {
+		t.Fatalf("plugins_global not encoded: %s", out)
+	}
+	out, _ = json.Marshal(ProfileConfig{})
+	if strings.Contains(string(out), "plugins_global") {
+		t.Fatalf("absent plugins_global must be omitted: %s", out)
 	}
 }

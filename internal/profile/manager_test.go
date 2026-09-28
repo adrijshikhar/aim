@@ -674,6 +674,22 @@ func TestCloneProfile_CopiesMCPGlobal(t *testing.T) {
 	}
 }
 
+func TestCloneProfile_CopiesPluginsGlobal(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("AIM_HOME", base)
+	pm := NewProfileManager(base)
+	_, _ = pm.EnsureProfile("src")
+	off := false
+	cfg := &config.Config{Profiles: map[string]config.ProfileConfig{"src": {PluginsGlobal: &off}}}
+	if err := pm.CloneProfile("src", "dst", "", cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Profiles["dst"].PluginsGlobal
+	if got == nil || *got || got == cfg.Profiles["src"].PluginsGlobal {
+		t.Fatalf("clone must copy plugins_global by value, got %v", got)
+	}
+}
+
 func TestMergeStateStore_DefaultsUnderStateDir(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("AIM_HOME", base)

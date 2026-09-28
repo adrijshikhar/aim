@@ -383,6 +383,10 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 		v := *srcProf.MCPGlobal
 		dstProf.MCPGlobal = &v
 	}
+	if srcProf.PluginsGlobal != nil {
+		v := *srcProf.PluginsGlobal
+		dstProf.PluginsGlobal = &v
+	}
 	cfg.Profiles[newProfile] = dstProf
 
 	return config.SaveConfig(cfg)
