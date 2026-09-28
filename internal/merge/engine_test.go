@@ -644,3 +644,29 @@ func TestEngine_JoinerSkipsCollectionTheFirstSessionSkipped(t *testing.T) {
 		t.Fatalf("at rest = %v", got)
 	}
 }
+
+func TestEngine_PromoteFollowsSymlinkedHost(t *testing.T) {
+	f := newFixture(t)
+	target := filepath.Join(t.TempDir(), "dotfiles.json")
+	_ = os.WriteFile(target, []byte(`{"mcpServers":{"jev":{"command":"npx"}}}`), 0o600)
+	if err := os.Symlink(target, f.host); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(f.pf, []byte(`{"mcpServers":{}}`), 0o600)
+	s := f.start()
+	_ = os.WriteFile(f.pf, []byte(`{"mcpServers":{"jev":{"command":"npx"},"foo":{"command":"f"}}}`), 0o600)
+	ch, _ := s.Diff()
+	if err := s.Finish(ch, decideBy(map[string]Decision{"foo": Promote})); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(f.host); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("promote must keep a symlinked host a symlink")
+	}
+	e, _, err := f.col.Read(target)
+	if err != nil || !e.Has("foo") {
+		t.Fatalf("the link target must hold the promoted foo: %v %v", e.Order, err)
+	}
+	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("target mode = %v", fi.Mode().Perm())
+	}
+}

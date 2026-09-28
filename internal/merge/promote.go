@@ -1,8 +1,26 @@
 package merge
 
-import "errors"
+import (
+	"errors"
+	"os"
+	"path/filepath"
+)
 
 var errHostChanged = errors.New("host changed since the session started")
+
+// hostTarget resolves a symlinked host file (stow, chezmoi) so the write
+// replaces the link's target, not the link. A missing host is written at path;
+// a dangling link is refused.
+func hostTarget(path string) (string, error) {
+	p, err := filepath.EvalSymlinks(path)
+	if !errors.Is(err, os.ErrNotExist) {
+		return p, err
+	}
+	if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New(path + " is a dangling symlink")
+	}
+	return path, nil
+}
 
 // promote writes one change to the host file through the collection's helper
 // (never a native command, so no secret reaches argv), under the host lock. It
@@ -16,7 +34,11 @@ func (e *Engine) promote(ch Change, st *State) error {
 		return err
 	}
 	defer hl.Unlock()
-	host, _, err := c.Read(c.HostPath)
+	path, err := hostTarget(c.HostPath)
+	if err != nil {
+		return err
+	}
+	host, _, err := c.Read(path)
 	if err != nil {
 		return err
 	}
@@ -40,10 +62,10 @@ func (e *Engine) promote(ch Change, st *State) error {
 	} else {
 		host.Set(ch.Name, ch.Value, ch.Raw)
 	}
-	if _, err := c.Write(c.HostPath, host); err != nil {
+	if _, err := c.Write(path, host); err != nil {
 		return err
 	}
-	host, _, err = c.Read(c.HostPath)
+	host, _, err = c.Read(path)
 	if err != nil {
 		return err
 	}
