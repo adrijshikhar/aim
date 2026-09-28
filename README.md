@@ -123,6 +123,8 @@ When a session adds, edits or removes one, aim asks at exit whether to promote t
 to the host or keep it in that profile; without a terminal the change is kept. A removed
 host server comes back next session. Background launches (`claude --bg`, `codex app-server`,
 `agy remote-control`) get the host servers too; the next launch of that profile cleans up.
+`--version`, `-v`, `--help`, `-h`, `help` and `version` skip the merge entirely, so they
+also leave cleanup of a crashed or background session to the next real session.
 
 The first launch of an existing profile removes servers that are identical copies of the
 host's. Before it does, aim writes a backup next to the profile file, named

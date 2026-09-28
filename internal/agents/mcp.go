@@ -29,3 +29,10 @@ func BackgroundMatch(args, flags, firstWords []string) bool {
 	}
 	return len(args) > 0 && !strings.HasPrefix(args[0], "-") && slices.Contains(firstWords, args[0])
 }
+
+// IsSession is false for an invocation that prints version or help and exits
+// (every MCP adapter's CLI spells it the same way): there is nothing to merge.
+// A native `mcp …` subcommand is a session, so `mcp list` shows the merged set.
+func IsSession(args []string) bool {
+	return !BackgroundMatch(args, []string{"--version", "-v", "--help", "-h"}, []string{"help", "version"})
+}

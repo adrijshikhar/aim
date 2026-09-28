@@ -301,6 +301,19 @@ func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 			write(c.HostPath, "hostsrv")
 			write(c.ProfilePath, "own")
 
+			// 0. non-session (--version): runs with no merge, no strip, no merge state
+			before, _ := os.ReadFile(c.ProfilePath)
+			ran := false
+			if code := launch([]string{"--version"}, func() int { ran = true; return 0 }); code != 0 || !ran {
+				t.Fatalf("--version launch: ran=%v code=%d, want ran=true code=0", ran, code)
+			}
+			if after, _ := os.ReadFile(c.ProfilePath); string(after) != string(before) {
+				t.Errorf("--version launch rewrote the profile file:\n%s\n%s", before, after)
+			}
+			if _, err := os.Stat(filepath.Join(store.Dir, "work.json")); !os.IsNotExist(err) {
+				t.Errorf("--version launch created merge state (stat err = %v)", err)
+			}
+
 			// 1. foreground: host merged for the session; a native add is kept at rest
 			var during string
 			launch(nil, func() int {

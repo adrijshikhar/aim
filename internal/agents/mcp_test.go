@@ -24,3 +24,29 @@ func TestBackgroundMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestIsSession(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{"--resume", "x"}, true},
+		{[]string{"mcp", "list"}, true}, // shows the merged set, so it merges
+		{[]string{"--version"}, false},
+		{[]string{"-v"}, false},
+		{[]string{"--help"}, false},
+		{[]string{"-h"}, false},
+		{[]string{"--model", "opus", "--version"}, false}, // profile args precede the CLI's
+		{[]string{"help"}, false},
+		{[]string{"version"}, false},
+		{[]string{"-p", "version"}, true},       // a prompt that happens to say "version"
+		{[]string{"fix", "--", "--help"}, true}, // after "--" belongs to the agent
+		{[]string{"--", "-v"}, true},
+	}
+	for _, c := range cases {
+		if got := IsSession(c.args); got != c.want {
+			t.Fatalf("%v: got %v want %v", c.args, got, c.want)
+		}
+	}
+}
