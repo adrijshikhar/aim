@@ -54,6 +54,7 @@ type Session struct {
 	profile  string
 	agent    string
 	cols     []Collection // collections this session merged or joined
+	all      []Collection // every collection passed to Start: the last-session strip
 	sessions *Lock
 	active   bool // a foreground session with an exit step
 }
@@ -111,7 +112,7 @@ func hasSessionState(st *State, cols []Collection) bool {
 // lock for (profile, agent) when Start returns with active=true; a background
 // launch merges and returns a session whose Diff and Finish do nothing.
 func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOptions) (*Session, error) {
-	s := &Session{eng: e, profile: profile, agent: agent}
+	s := &Session{eng: e, profile: profile, agent: agent, all: cols}
 	ml, err := LockExclusive(e.Store.MergeLockPath(profile), lockTimeout)
 	if err != nil {
 		e.warnf("aim: host merge skipped for %s (%v)", profile, err)
@@ -507,9 +508,13 @@ func (s *Session) Finish(changes []Change, decide func([]Change) []Decision) err
 	}
 	_ = probe.Unlock()
 	// Last session: plan the strip, save state first, then write (spec §5 End 4).
+	// It covers every collection a running session merged, not only this
+	// session's: a joiner with a group switched off can still be the last out.
 	var writes []stripWrite
-	for _, c := range s.cols {
-		writes = append(writes, e.planStrip(c, st))
+	for _, c := range s.all {
+		if _, ok := st.Active[c.ID()]; ok || st.AddedKey[c.ID()] {
+			writes = append(writes, e.planStrip(c, st))
+		}
 	}
 	if err := e.Store.Save(s.profile, st); err != nil {
 		return err

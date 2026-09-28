@@ -955,3 +955,41 @@ func TestEngine_MigrationBackupIsThePreStartFile(t *testing.T) {
 	ch, _ := s.Diff()
 	_ = s.Finish(ch, keepAll)
 }
+
+// A joiner with fewer groups switched on can be the last session out: its
+// strip must cover every group the running sessions merged, not just its own.
+func TestEngine_LastSessionStripsGroupsItDidNotJoin(t *testing.T) {
+	f := newFixture(t)
+	f.col.Group = "mcp"
+	plug := f.pluginsCol()
+	src := `{"mcpServers":{}}`
+	f.files(`{"mcpServers":{"jev":{"command":"npx"}},"enabledPlugins":{"x@m":true}}`, src)
+	cols := []Collection{f.col, plug}
+	a, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: allOn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpOnly := func(c Collection) bool { return c.Group != "plugins" }
+	b, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: mcpOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.cols) != 1 || b.cols[0].ID() != f.col.ID() {
+		t.Fatalf("the joiner diffs its own groups only: %+v", b.cols)
+	}
+	cha, _ := a.Diff()
+	if err := a.Finish(cha, keepAll); err != nil {
+		t.Fatal(err)
+	}
+	chb, _ := b.Diff()
+	if err := b.Finish(chb, keepAll); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(f.pf); string(got) != src {
+		t.Fatalf("at rest =\n%s\nwant\n%s", got, src)
+	}
+	st, _ := f.eng.Store.Load("work")
+	if len(st.Active) != 0 || len(st.AddedKey) != 0 {
+		t.Fatalf("session state left behind: Active=%+v AddedKey=%+v", st.Active, st.AddedKey)
+	}
+}
