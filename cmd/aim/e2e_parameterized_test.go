@@ -223,7 +223,8 @@ func TestParameterized_SessionAdapters_ListingAndHydration(t *testing.T) {
 // TestParameterized_AllAdapters_MCPSessionMerge drives the launch wrapper the
 // way `aim run` does: adapters with an MCPProvider see the host's servers for
 // the session only, keep their own additions at rest, honour mcp_global:false,
-// and recover a background launch on the next one; the rest launch untouched.
+// and recover a background launch (from CLI or profile args) on the next one;
+// the rest launch untouched.
 func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("AIM_HOME", t.TempDir())
@@ -335,6 +336,17 @@ func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 			}
 			expect("at rest after recovery", c.ProfilePath, "newsrv,own")
 			expect("host after recovery", c.HostPath, "hostsrv")
+
+			// 4. background via profiles.work.args, no CLI args: still no exit step
+			cfg.Profiles["work"] = config.ProfileConfig{Args: tc.bgArgs}
+			launch(nil, func() int { return 0 })
+			expect("after background launch from profile args", c.ProfilePath, "hostsrv,newsrv,own")
+			delete(cfg.Profiles, "work")
+			launch(nil, func() int { during = names(c.ProfilePath); return 0 })
+			if during != "hostsrv,newsrv,own" {
+				t.Errorf("recovered session (profile args): servers = %q, want %q", during, "hostsrv,newsrv,own")
+			}
+			expect("at rest after profile-args recovery", c.ProfilePath, "newsrv,own")
 		})
 	}
 }

@@ -16,7 +16,8 @@ set -euo pipefail
 # 8. Size-Aware Deduplication & Sync (larger source rollout overwrites stale/truncated touch)
 # 9. Session Forking (--fork with UUID regeneration and ref replacement)
 # 10. Session-Scoped MCP Server Merge (host servers merged per session, keep / promote,
-#     mcp_global:false, background launch + recovery; adapters without MCP untouched)
+#     mcp_global:false, background launch (CLI or profile args) + recovery; adapters
+#     without MCP untouched)
 # ==============================================================================
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -649,6 +650,21 @@ json.dump(cfg, open(path, "w"), indent=2)
 PYEOF
 }
 
+# Helper: Set profiles.<p>.args in aim's config.json to the remaining arguments, or clear it with "unset"
+set_profile_args() {
+  python3 - "$AIM_HOME/config.json" "$@" << 'PYEOF'
+import json, sys
+path, prof, args = sys.argv[1], sys.argv[2], sys.argv[3:]
+cfg = json.load(open(path))
+p = cfg.setdefault("profiles", {}).setdefault(prof, {})
+if args == ["unset"]:
+    p.pop("args", None)
+else:
+    p["args"] = args
+json.dump(cfg, open(path, "w"), indent=2)
+PYEOF
+}
+
 # Helper: Run a command on a PTY, answer once when EXPECT appears, print output
 pty_run() {
   local expect="$1" answer="$2"; shift 2
@@ -728,7 +744,7 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   cp "$HOST_FILE" "$TEST_DIR/${AGENT}_host_before"
 
   # 1. Global merge visible during the session; a native add is kept in the profile on exit
-  echo "  [1/5] Testing global merge, one-time migration and keep-on-exit (non-interactive)..."
+  echo "  [1/6] Testing global merge, one-time migration and keep-on-exit (non-interactive)..."
   export AIM_AUTO_CREATE=1
   export E2E_MCP_ADD=newsrv
   RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
@@ -750,7 +766,7 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   echo "  ✔ Host servers merged for the session only; 'newsrv' kept, 'shared' leftover migrated with backup"
 
   # 2. Promote: answer [p] at the exit prompt on a PTY; the host gains the server
-  echo "  [2/5] Testing promote to host via exit prompt (PTY)..."
+  echo "  [2/6] Testing promote to host via exit prompt (PTY)..."
   export E2E_MCP_ADD=promoted
   PTY_OUT=$(pty_run "(default: k)" "p" "$AIM_BIN" run "$AGENT" "$PROF")
   CLEAN_PTY=$(echo "$PTY_OUT" | sed -E $'s/\x1b\\[[0-9;]*m//g')
@@ -764,7 +780,7 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   echo "  ✔ 'promoted' written to the host and stripped from the profile"
 
   # 3. mcp_global: false — the profile runs on its own servers only
-  echo "  [3/5] Testing profiles.$PROF.mcp_global = false..."
+  echo "  [3/6] Testing profiles.$PROF.mcp_global = false..."
   set_mcp_global "$PROF" false
   unset E2E_MCP_ADD
   "$AIM_BIN" run "$AGENT" "$PROF" < /dev/null
@@ -773,25 +789,40 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   echo "  ✔ Host servers not merged when mcp_global is false"
 
   # 4. Background launch: merge, run, no exit step — host items stay until the next launch
-  echo "  [4/5] Testing background launch ('aim run $AGENT $PROF $(mcp_bg_args "$AGENT")')..."
+  echo "  [4/6] Testing background launch ('aim run $AGENT $PROF $(mcp_bg_args "$AGENT")')..."
   export E2E_MCP_ADD=bgsrv
   "$AIM_BIN" run "$AGENT" "$PROF" $(mcp_bg_args "$AGENT") < /dev/null
   unset E2E_MCP_ADD
   assert_mcp_names "$AGENT" "$PROF_FILE" "profile config after background launch" own newsrv bgsrv hostsrv shared promoted
   echo "  ✔ Background launch left the merged config in place"
 
-  # 5. The next foreground launch recovers: keeps the background session's change, strips host items
-  echo "  [5/5] Testing recovery on the next launch..."
+  # 5. Background via profiles.<p>.args with no CLI args: recovers step 4, merges, no exit step
+  echo "  [5/6] Testing background launch from profiles.$PROF.args = [$(mcp_bg_args "$AGENT")]..."
+  set_profile_args "$PROF" $(mcp_bg_args "$AGENT")
+  export E2E_MCP_ADD=profbgsrv
+  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+  unset E2E_MCP_ADD
+  set_profile_args "$PROF" unset
+  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
+    echo "FAIL [$AGENT]: launch from profile args did not recover the previous background session"
+    echo "$RUN_OUT"
+    exit 1
+  fi
+  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config after background launch from profile args" own newsrv bgsrv profbgsrv hostsrv shared promoted
+  echo "  ✔ Profile args made the launch a background one: host items left in place"
+
+  # 6. The next foreground launch recovers: keeps the background session's change, strips host items
+  echo "  [6/6] Testing recovery on the next launch..."
   RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
   if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
     echo "FAIL [$AGENT]: recovery did not report the background session's change"
     echo "$RUN_OUT"
     exit 1
   fi
-  assert_mcp_names "$AGENT" "$SNAP" "profile config during recovered session" own newsrv bgsrv hostsrv shared promoted
-  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config at rest after recovery" own newsrv bgsrv
+  assert_mcp_names "$AGENT" "$SNAP" "profile config during recovered session" own newsrv bgsrv profbgsrv hostsrv shared promoted
+  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config at rest after recovery" own newsrv bgsrv profbgsrv
   assert_mcp_names "$AGENT" "$HOST_FILE" "host config after recovery" hostsrv shared promoted
-  echo "  ✔ Recovered: 'bgsrv' kept, host items stripped, host untouched"
+  echo "  ✔ Recovered: 'bgsrv' and 'profbgsrv' kept, host items stripped, host untouched"
 done
 
 unset E2E_HOOK E2E_MCP_ADD E2E_MCP_REL E2E_MCP_KEY E2E_MCP_FORMAT E2E_SNAP
