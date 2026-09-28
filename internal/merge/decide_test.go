@@ -39,7 +39,7 @@ func TestPrompter_PromoteAll(t *testing.T) {
 	if d[0] != Promote || d[1] != Promote {
 		t.Fatalf("got %v", d)
 	}
-	if !strings.Contains(out.String(), "+ foo") || !strings.Contains(out.String(), "~ jev") {
+	if !strings.Contains(out.String(), "+ mcpServers/foo") || !strings.Contains(out.String(), "~ mcpServers/jev") {
 		t.Fatalf("listing missing:\n%s", out.String())
 	}
 }
@@ -74,5 +74,31 @@ func TestPrompter_HostChangedIsLabelled(t *testing.T) {
 	Prompter(strings.NewReader("k\n"), &out, true, "work", "claude")(c)
 	if !strings.Contains(out.String(), "host changed since start") {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestLabel_PrefixesCollectionAndShowsScalarValue(t *testing.T) {
+	plug := Collection{Agent: "claude", Name: "enabledPlugins"}
+	cases := []struct {
+		c    Change
+		want string
+	}{
+		{Change{Collection: plug, Name: "x@m", Kind: Edited, Value: map[string]any{"value": false}},
+			"  ~ enabledPlugins/x@m" + strings.Repeat(" ", 34-len("enabledPlugins/x@m")) + " edited (host item) → false"},
+		{Change{Collection: plug, Name: "y@m", Kind: Added, Value: map[string]any{"value": true}},
+			"  + enabledPlugins/y@m" + strings.Repeat(" ", 34-len("enabledPlugins/y@m")) + " added → true"},
+		{Change{Collection: plug, Name: "z@m", Kind: Removed, Value: map[string]any{"value": true}},
+			"  − enabledPlugins/z@m" + strings.Repeat(" ", 34-len("enabledPlugins/z@m")) + " removed (host item)"},
+		{Change{Collection: Collection{Name: "mcpServers"}, Name: "jev", Kind: Edited, Value: map[string]any{"command": "npx"}},
+			"  ~ mcpServers/jev" + strings.Repeat(" ", 34-len("mcpServers/jev")) + " edited (host item)"},
+	}
+	for _, tc := range cases {
+		if got := label(tc.c); got != tc.want {
+			t.Errorf("label =\n%q\nwant\n%q", got, tc.want)
+		}
+	}
+	hc := label(Change{Collection: plug, Name: "x@m", Kind: Edited, Value: map[string]any{"value": false}, HostChanged: true})
+	if !strings.Contains(hc, "edited (host item) → false   host changed since start") {
+		t.Fatalf("the value goes before the host-changed note: %q", hc)
 	}
 }
