@@ -775,9 +775,14 @@ func TestAgyBridgeSharedState_PluginsAndConfig(t *testing.T) {
 	if fi, err := os.Lstat(pConfig); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("expected profile config.json to be a symlink")
 	}
+	// mcp_config.json is no longer bridged (T6): the legacy 0-byte file becomes a
+	// regular 0600 file holding an empty server map; the session merge adds host servers.
 	pMcp := filepath.Join(profConfigDir, "mcp_config.json")
-	if fi, err := os.Lstat(pMcp); err != nil || fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected profile mcp_config.json to be a symlink")
+	if fi, err := os.Lstat(pMcp); err != nil || fi.Mode()&os.ModeSymlink != 0 || fi.Mode().Perm() != 0o600 {
+		t.Errorf("expected profile mcp_config.json to be a regular 0600 file, got %v (err %v)", fi.Mode(), err)
+	}
+	if b, _ := os.ReadFile(pMcp); string(b) != `{"mcpServers":{}}` {
+		t.Errorf("expected empty server map in profile mcp_config.json, got %q", b)
 	}
 
 	// 8. Verify projects and skills symlinks

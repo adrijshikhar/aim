@@ -2,8 +2,10 @@ package agy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +17,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
@@ -500,7 +503,9 @@ func bridgeSharedState(realHome, profileDir string) error {
 
 	// 6d. config.json & mcp_config.json
 	bridgeFile(filepath.Join(profileConfigDir, "config.json"), filepath.Join(sharedDirCfg, "config.json"))
-	bridgeFile(filepath.Join(profileConfigDir, "mcp_config.json"), filepath.Join(sharedDirCfg, "mcp_config.json"))
+	if err := regularizeMCPConfig(profileConfigDir); err != nil {
+		logger.Debug("[agy] mcp_config.json: %v", err)
+	}
 
 	// 6e. projects
 	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "projects"), 0755)
@@ -514,6 +519,44 @@ func bridgeSharedState(realHome, profileDir string) error {
 	}
 
 	return nil
+}
+
+// emptyMCPConfig is what an absent, dangling or empty mcp_config.json becomes.
+const emptyMCPConfig = `{"mcpServers":{}}`
+
+// regularizeMCPConfig makes the profile's mcp_config.json a regular 0600 file,
+// so agy's own writes are never replaced by a re-link (T6). A symlink becomes a
+// copy of its target; the session merge (package merge) supplies host servers.
+func regularizeMCPConfig(profileConfigDir string) error {
+	p := filepath.Join(profileConfigDir, "mcp_config.json")
+	fi, err := os.Lstat(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return merge.AtomicWrite(p, []byte(emptyMCPConfig), 0o600)
+	}
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if len(bytes.TrimSpace(data)) == 0 {
+			return merge.AtomicWrite(p, []byte(emptyMCPConfig), 0o600)
+		}
+		if fi.Mode().Perm()&0o077 != 0 {
+			return os.Chmod(p, 0o600)
+		}
+		return nil
+	}
+	data, rerr := os.ReadFile(p) // follows the link
+	if rerr != nil || len(bytes.TrimSpace(data)) == 0 {
+		data = []byte(emptyMCPConfig)
+	}
+	if err := os.Remove(p); err != nil {
+		return err
+	}
+	return merge.AtomicWrite(p, data, 0o600)
 }
 
 func bridgeDir(profilePath, sharedPath string) {
