@@ -44,8 +44,9 @@ func splitRunFlags(args []string) (bool, []string) {
 // withSessionMerge merges the host's MCP servers into the profile around run
 // (spec §5): Start before, Diff + decide + Finish after. A background launch
 // (IsBackground) merges and skips the exit step. profiles.<p>.args precede
-// extraArgs in the launched command, so a background arg there counts too. A
-// non-session invocation (the adapter's version or help spelling) runs without
+// extraArgs in the launched command, so both checks see them separately: a
+// background arg there counts too, and profile flags such as `--model o3` do
+// not hide a first word like `app-server` in extraArgs. A non-session invocation (the adapter's version or help spelling) runs without
 // Start at all, so a crashed or background session is recovered by the next
 // real session.
 func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileName, pDir string, cfg *config.Config, extraArgs []string, run func() int) int {
@@ -53,13 +54,13 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 	if !ok {
 		return run()
 	}
-	native := append(cfg.GetProfileArgs(profileName), extraArgs...) // a copy: extraArgs is not aliased
-	if !mp.IsSession(native) {
+	profileArgs := cfg.GetProfileArgs(profileName)
+	if !mp.IsSession(profileArgs, extraArgs) {
 		return run()
 	}
 	eng := &merge.Engine{Store: store, Out: os.Stderr, Now: nowFunc}
 	cols := mp.MCPCollections(pDir, config.RealHomeDir())
-	opt := merge.StartOptions{Enabled: cfg.MCPGlobalEnabled(profileName), Background: mp.IsBackground(native)}
+	opt := merge.StartOptions{Enabled: cfg.MCPGlobalEnabled(profileName), Background: mp.IsBackground(profileArgs, extraArgs)}
 	sess, err := eng.Start(profileName, adapter.Name(), cols, opt)
 	if err != nil {
 		fmtWarn("aim: MCP merge: %v", err)

@@ -24,7 +24,7 @@ func TestMCPCollections_Claude(t *testing.T) {
 	if merge.Hash(c.Normalise, written) != merge.Hash(c.Normalise, rewritten) {
 		t.Fatal("Claude's normalisation noise must not change the hash")
 	}
-	if !a.IsBackground([]string{"--bg"}) || !a.IsBackground([]string{"agents"}) || a.IsBackground([]string{"--resume", "x"}) {
+	if !a.IsBackground(nil, []string{"--bg"}) || !a.IsBackground(nil, []string{"agents"}) || a.IsBackground(nil, []string{"--resume", "x"}) {
 		t.Fatal("background forms")
 	}
 }
@@ -52,7 +52,7 @@ func TestIsSession_Claude(t *testing.T) {
 		{[]string{"fix", "--", "--help"}, true}, // after "--" belongs to the agent
 	}
 	for _, c := range cases {
-		if got := a.IsSession(c.args); got != c.want {
+		if got := a.IsSession(nil, c.args); got != c.want {
 			t.Errorf("%v: got %v want %v", c.args, got, c.want)
 		}
 	}

@@ -16,15 +16,18 @@ import (
 // collectionMock is a mockAdapter with an MCP collection.
 type collectionMock struct {
 	mockAdapter
-	cols []merge.Collection
-	bg   bool
+	cols    []merge.Collection
+	bg      bool
+	bgWords []string // background first words, matched like a real adapter
 }
 
 func (m *collectionMock) MCPCollections(profileDir, realHome string) []merge.Collection {
 	return m.cols
 }
-func (m *collectionMock) IsBackground(args []string) bool { return m.bg }
-func (m *collectionMock) IsSession(args []string) bool    { return true }
+func (m *collectionMock) IsBackground(profileArgs, args []string) bool {
+	return m.bg || agents.ArgsMatch(profileArgs, args, nil, m.bgWords)
+}
+func (m *collectionMock) IsSession(profileArgs, args []string) bool { return true }
 
 // isolate points every aim and agent path at temp dirs (this machine has a
 // legacy ~/.aim that config.StateDir() would otherwise resolve to).
@@ -116,6 +119,21 @@ func TestWithSessionMerge_BackgroundKeepsMerge(t *testing.T) {
 	st, _ := store.Load("work")
 	if st.Active["mock/mcpServers"]["jev"] == "" {
 		t.Fatal("state must remember the merge so the next launch recovers")
+	}
+}
+
+// A background first word on the CLI still counts when profiles.<p>.args
+// (here flags) precede it in the launched command: `codex --model o3
+// app-server` must keep the merge, not strip it under the running daemon.
+func TestWithSessionMerge_BackgroundFirstWordAfterProfileArgs(t *testing.T) {
+	d := isolate(t)
+	ad, _, prof := mockWithFiles(t, d)
+	ad.bgWords = []string{"app-server"}
+	cfg := &config.Config{Profiles: map[string]config.ProfileConfig{"work": {Args: []string{"--model", "o3"}}}}
+	store := merge.Store{Dir: filepath.Join(d, "state")}
+	withSessionMerge(ad, store, "work", d, cfg, []string{"app-server"}, func() int { return 0 })
+	if b, _ := os.ReadFile(prof); !strings.Contains(string(b), `"jev"`) {
+		t.Fatalf("a background launch after profile args keeps the merge in place: %s", b)
 	}
 }
 

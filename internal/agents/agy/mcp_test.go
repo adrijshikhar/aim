@@ -24,7 +24,7 @@ func TestMCPCollections_Agy(t *testing.T) {
 	if merge.Hash(c.Normalise, map[string]any{"command": "x", "disabled": false}) != merge.Hash(c.Normalise, map[string]any{"command": "x"}) {
 		t.Fatal(`"disabled": false is agy noise`)
 	}
-	if !a.IsBackground([]string{"remote-control"}) || a.IsBackground([]string{"chat"}) {
+	if !a.IsBackground(nil, []string{"remote-control"}) || a.IsBackground(nil, []string{"chat"}) {
 		t.Fatal("background forms")
 	}
 }
@@ -61,7 +61,7 @@ func TestIsSession_Agy(t *testing.T) {
 		{[]string{"-p", "x", "--", "--help"}, true},
 	}
 	for _, c := range cases {
-		if got := a.IsSession(c.args); got != c.want {
+		if got := a.IsSession(nil, c.args); got != c.want {
 			t.Errorf("%v: got %v want %v", c.args, got, c.want)
 		}
 	}
