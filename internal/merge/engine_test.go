@@ -670,3 +670,67 @@ func TestEngine_PromoteFollowsSymlinkedHost(t *testing.T) {
 		t.Fatalf("target mode = %v", fi.Mode().Perm())
 	}
 }
+
+func TestEngine_SaveFailureRollsBackMerge(t *testing.T) {
+	f := newFixture(t)
+	sabotage := false
+	f.col.Normalise = func(v map[string]any) map[string]any {
+		if sabotage {
+			// The state file becomes a directory after Load: Save cannot rename over it.
+			sabotage = false
+			st := f.eng.Store.path("work")
+			_ = os.Remove(st)
+			_ = os.MkdirAll(filepath.Join(st, "x"), 0o700)
+		}
+		return DropEmpty(v)
+	}
+	f.files(`{"mcpServers":{"jev":{"command":"npx"}}}`, `{"mcpServers":{"own":{"command":"o"}}}`)
+	s := f.start() // migrates
+	ch, _ := s.Diff()
+	if err := s.Finish(ch, keepAll); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(f.pf)
+	sabotage = true
+	if _, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: true}); err == nil {
+		t.Fatal("Start must report the failed Save")
+	}
+	if after, _ := os.ReadFile(f.pf); string(after) != string(before) {
+		t.Fatalf("an unrecorded merge must be rolled back:\n%s\n%s", before, after)
+	}
+}
+
+func TestEngine_FailedProfileWriteRecordsNoState(t *testing.T) {
+	d := t.TempDir()
+	host := filepath.Join(d, "host.toml")
+	prof := filepath.Join(d, "config.toml")
+	_ = os.WriteFile(host, []byte("[mcp_servers.jev]\ncommand = \"npx\"\n"), 0o600)
+	// an inline table cannot be extended by a spliced [mcp_servers.jev] block
+	_ = os.WriteFile(prof, []byte("mcp_servers = {}\n"), 0o600)
+	col := Collection{Agent: "codex", Name: "mcp_servers", Format: TOML, Key: "mcp_servers", HostPath: host, ProfilePath: prof}
+	out := &bytes.Buffer{}
+	eng := &Engine{Store: Store{Dir: filepath.Join(d, "state")}, Out: out, Now: time.Now}
+	s, err := eng.Start("work", "codex", []Collection{col}, StartOptions{Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "skipped") {
+		t.Fatalf("want a write-failure warning, got %q", out.String())
+	}
+	st, _ := eng.Store.Load("work")
+	if _, ok := st.Active[col.ID()]; ok {
+		t.Fatalf("a failed write must record no Active names: %+v", st.Active)
+	}
+	ch, _ := s.Diff()
+	_ = s.Finish(ch, keepAll)
+	out.Reset()
+	s2, err := eng.Start("work", "codex", []Collection{col}, StartOptions{Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "did not exit through aim") {
+		t.Fatalf("no spurious recovery: %q", out.String())
+	}
+	ch2, _ := s2.Diff()
+	_ = s2.Finish(ch2, keepAll)
+}

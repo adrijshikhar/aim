@@ -140,16 +140,24 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 		return s, e.Store.Save(profile, st)
 	}
 	backedUp := map[string]bool{} // one migration backup per profile file per Start
+	var undo []stripWrite
 	for _, c := range cols {
-		if err := e.startCollection(profile, c, st, alone, backedUp); err != nil {
+		w, err := e.startCollection(profile, c, st, alone, backedUp)
+		if err != nil {
 			if !errors.Is(err, errNoHost) && !errors.Is(err, errNotMerged) {
 				e.warnf("aim: %s: %v — skipped", c.ID(), err)
 			}
 			continue
 		}
 		s.cols = append(s.cols, c)
+		undo = append(undo, w)
 	}
 	if err := e.Store.Save(profile, st); err != nil {
+		// Nothing records the merge: take the host items out again, or they
+		// become the profile's own for good.
+		for _, w := range undo {
+			e.writeStrip(w)
+		}
 		return s, err
 	}
 	if opt.Background {
@@ -163,39 +171,45 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 	return s, nil
 }
 
-func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, backedUp map[string]bool) error {
+// startCollection merges one collection and returns the write that undoes it
+// (skip when nothing was written). State is recorded only once the file holds
+// the merge.
+func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, backedUp map[string]bool) (stripWrite, error) {
+	none := stripWrite{c: c, skip: true}
 	if fi, err := os.Lstat(c.ProfilePath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return errors.New(c.ProfilePath + " is a symlink; not merging into a shared file")
+		return none, errors.New(c.ProfilePath + " is a symlink; not merging into a shared file")
 	}
 	if !alone {
 		if _, ok := st.Active[c.ID()]; !ok {
-			return errNotMerged
+			return none, errNotMerged
 		}
-		return nil // another running session of this agent already merged; join it
+		return none, nil // another running session of this agent already merged; join it
 	}
 	host, hostOK, err := readRetry(c, c.HostPath)
 	if err != nil {
-		return err
+		return none, err
 	}
 	if !hostOK {
-		return errNoHost
+		return none, errNoHost
 	}
 	prof, _, err := readRetry(c, c.ProfilePath)
 	if err != nil {
-		return err
+		return none, err
 	}
 	id := c.ID()
 	norm := c.norm()
 	if _, done := st.Migrated[id]; !done {
 		if err := e.migrate(profile, c, host, &prof, st, backedUp); err != nil {
-			return err
+			return none, err
 		}
 	}
 	// Every profile item is the profile's own; a name the profile defines wins
 	// over the host's (conflict rule) and is never merged over or stripped.
 	start, active := map[string]string{}, map[string]string{}
+	pre := NewEntries()
 	for _, n := range prof.Order {
 		start[n] = Hash(norm, prof.Values[n])
+		pre.Set(n, prof.Values[n], prof.Raw[n])
 	}
 	changed := false
 	for _, n := range host.Order {
@@ -206,24 +220,29 @@ func (e *Engine) startCollection(profile string, c Collection, st *State, alone 
 		active[n] = Hash(norm, host.Values[n])
 		changed = true
 	}
-	st.StartProfile[id] = start
-	st.Active[id] = active
 	if !changed {
-		return nil
+		st.StartProfile[id] = start
+		st.Active[id] = active
+		return none, nil
 	}
 	hadKey, err := c.HasKey(c.ProfilePath)
 	if err != nil {
-		return err
+		return none, err
 	}
 	skipped, err := c.Write(c.ProfilePath, prof)
 	for _, n := range skipped {
 		delete(active, n)
 		e.warnf("aim: %s: %s is defined inline and was not merged", id, n)
 	}
-	if err == nil && !hadKey {
+	if err != nil {
+		return none, err
+	}
+	st.StartProfile[id] = start
+	st.Active[id] = active
+	if !hadKey {
 		st.AddedKey[id] = true
 	}
-	return err
+	return stripWrite{c: c, prof: pre, removeKey: !hadKey && len(pre.Order) == 0}, nil
 }
 
 // migrate runs once per collection: profile servers identical to the host's are
