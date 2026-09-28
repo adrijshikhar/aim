@@ -33,13 +33,30 @@ type adapterTestCase struct {
 	// that starts a background session (merge, run, no exit step).
 	hasMCP bool
 	bgArgs []string
+	// hasPlugins: the adapter also declares a "plugins" group collection named
+	// pluginsCol, whose entries are enablement flags (Spec B).
+	hasPlugins bool
+	pluginsCol string
 }
 
 var allAdapters = []adapterTestCase{
 	{agent: "agy", hasSessions: true, supportsFork: false, hasMCP: true, bgArgs: []string{"remote-control"}},
-	{agent: "codex", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"app-server"}},
-	{agent: "claude", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"--bg"}},
+	{agent: "codex", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"app-server"}, hasPlugins: true, pluginsCol: "plugins"},
+	{agent: "claude", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"--bg"}, hasPlugins: true, pluginsCol: "enabledPlugins"},
 	{agent: "gemini", hasSessions: false, supportsFork: false, hasMCP: false},
+}
+
+// collectionNamed returns the collection in group with the given name, or
+// fails the test.
+func collectionNamed(t *testing.T, cols []merge.Collection, group, name string) merge.Collection {
+	t.Helper()
+	for _, c := range cols {
+		if c.Group == group && c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("no %s collection %q in %+v", group, name, cols)
+	return merge.Collection{}
 }
 
 func setupParameterizedRegistry() *agents.Registry {
@@ -233,7 +250,6 @@ func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 	defer func() { stdinIsTerminal = oldTTY }()
 
 	reg := setupParameterizedRegistry()
-	server := map[string]any{"command": "true"}
 
 	for _, tc := range allAdapters {
 		t.Run(tc.agent, func(t *testing.T) {
@@ -265,88 +281,134 @@ func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 
 			// agy's host layer is the real ~/.gemini/config when it exists
 			_ = os.MkdirAll(filepath.Join(realHome, ".gemini", "config"), 0o700)
-			c := mp.MCPCollections(profDir, realHome)[0]
-			write := func(path string, names ...string) {
-				e := merge.NewEntries()
-				for _, n := range names {
-					e.Set(n, server, nil)
-				}
-				_ = os.MkdirAll(filepath.Dir(path), 0o700)
-				if _, err := os.Stat(path); err != nil {
-					skeleton := []byte("{}\n")
-					if c.Format == merge.TOML {
-						skeleton = []byte("")
-					}
-					_ = os.WriteFile(path, skeleton, 0o600)
-				}
-				if _, err := c.Write(path, e); err != nil {
-					t.Fatalf("write %s: %v", path, err)
-				}
+			cols := mp.MCPCollections(profDir, realHome)
+			hasPlugins := false
+			for _, c := range cols {
+				hasPlugins = hasPlugins || c.Group == "plugins"
 			}
-			names := func(path string) string {
-				e, _, err := c.Read(path)
-				if err != nil {
-					t.Fatalf("read %s: %v", path, err)
-				}
-				order := append([]string(nil), e.Order...)
-				sort.Strings(order)
-				return strings.Join(order, ",")
+			if hasPlugins != tc.hasPlugins {
+				t.Fatalf("adapter %q declares a plugins collection=%v, table says %v", tc.agent, hasPlugins, tc.hasPlugins)
 			}
-			expect := func(what, path, want string) {
-				t.Helper()
-				if got := names(path); got != want {
-					t.Errorf("%s: servers = %q, want %q", what, got, want)
-				}
+			mcpName := "mcpServers"
+			if tc.agent == "codex" {
+				mcpName = "mcp_servers"
 			}
-			write(c.HostPath, "hostsrv")
-			write(c.ProfilePath, "own")
-
-			// 1. foreground: host merged for the session; a native add is kept at rest
-			var during string
-			launch(nil, func() int {
-				during = names(c.ProfilePath)
-				e, _, _ := c.Read(c.ProfilePath)
-				e.Set("newsrv", server, nil)
-				if _, err := c.Write(c.ProfilePath, e); err != nil {
-					t.Errorf("native add during session: %v", err)
-				}
-				return 0
+			t.Run("mcp", func(t *testing.T) {
+				runCollectionMerge(t, launch, cfg, tc.bgArgs, collectionNamed(t, cols, "mcp", mcpName),
+					map[string]any{"command": "true"}, func(p *config.ProfileConfig, v *bool) { p.MCPGlobal = v })
 			})
-			if during != "hostsrv,own" {
-				t.Errorf("during session: servers = %q, want %q", during, "hostsrv,own")
+			if tc.hasPlugins {
+				value := map[string]any{"value": true} // a JSON bool, as the codec wraps it
+				if tc.agent == "codex" {
+					value = map[string]any{"enabled": true}
+				}
+				t.Run("plugins", func(t *testing.T) {
+					runCollectionMerge(t, launch, cfg, tc.bgArgs, collectionNamed(t, cols, "plugins", tc.pluginsCol),
+						value, func(p *config.ProfileConfig, v *bool) { p.PluginsGlobal = v })
+				})
 			}
-			expect("at rest after keep", c.ProfilePath, "newsrv,own")
-			expect("host after keep", c.HostPath, "hostsrv")
-
-			// 2. mcp_global: false — the profile runs on its own servers only
-			off := false
-			cfg.Profiles["work"] = config.ProfileConfig{MCPGlobal: &off}
-			launch(nil, func() int { during = names(c.ProfilePath); return 0 })
-			if during != "newsrv,own" {
-				t.Errorf("mcp_global=false: servers = %q, want %q", during, "newsrv,own")
-			}
-			delete(cfg.Profiles, "work")
-
-			// 3. background: merged with no exit step; the next launch recovers and strips
-			launch(tc.bgArgs, func() int { return 0 })
-			expect("after background launch", c.ProfilePath, "hostsrv,newsrv,own")
-			launch(nil, func() int { during = names(c.ProfilePath); return 0 })
-			if during != "hostsrv,newsrv,own" {
-				t.Errorf("recovered session: servers = %q, want %q", during, "hostsrv,newsrv,own")
-			}
-			expect("at rest after recovery", c.ProfilePath, "newsrv,own")
-			expect("host after recovery", c.HostPath, "hostsrv")
-
-			// 4. background via profiles.work.args, no CLI args: still no exit step
-			cfg.Profiles["work"] = config.ProfileConfig{Args: tc.bgArgs}
-			launch(nil, func() int { return 0 })
-			expect("after background launch from profile args", c.ProfilePath, "hostsrv,newsrv,own")
-			delete(cfg.Profiles, "work")
-			launch(nil, func() int { during = names(c.ProfilePath); return 0 })
-			if during != "hostsrv,newsrv,own" {
-				t.Errorf("recovered session (profile args): servers = %q, want %q", during, "hostsrv,newsrv,own")
-			}
-			expect("at rest after profile-args recovery", c.ProfilePath, "newsrv,own")
 		})
 	}
+}
+
+// runCollectionMerge drives one collection through foreground keep, its
+// *_global switch, background launches and recovery; setFlag sets the switch
+// for the collection's group.
+func runCollectionMerge(t *testing.T, launch func([]string, func() int) int, cfg *config.Config, bgArgs []string,
+	c merge.Collection, value map[string]any, setFlag func(*config.ProfileConfig, *bool)) {
+	write := func(path string, names ...string) {
+		e, _, _ := c.Read(path)
+		for _, n := range names {
+			e.Set(n, value, nil)
+		}
+		_ = os.MkdirAll(filepath.Dir(path), 0o700)
+		if _, err := os.Stat(path); err != nil {
+			skeleton := []byte("{}\n")
+			if c.Format == merge.TOML {
+				skeleton = []byte("")
+			}
+			_ = os.WriteFile(path, skeleton, 0o600)
+		}
+		if _, err := c.Write(path, e); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	names := func(path string) string {
+		e, _, err := c.Read(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		order := append([]string(nil), e.Order...)
+		sort.Strings(order)
+		return strings.Join(order, ",")
+	}
+	expect := func(what, path, want string) {
+		t.Helper()
+		if got := names(path); got != want {
+			t.Errorf("%s: %s = %q, want %q", what, c.Name, got, want)
+		}
+	}
+	switchOff := func() {
+		off := false
+		p := config.ProfileConfig{}
+		setFlag(&p, &off)
+		cfg.Profiles["work"] = p
+	}
+	// ids carry "@" like plugin ids, so a TOML collection needs quoted headers
+	write(c.HostPath, "host@m")
+	write(c.ProfilePath, "own@m")
+
+	// 1. foreground: host merged for the session; a native add is kept at rest
+	var during string
+	launch(nil, func() int {
+		during = names(c.ProfilePath)
+		write(c.ProfilePath, "new@m")
+		return 0
+	})
+	if during != "host@m,own@m" {
+		t.Errorf("during session: %s = %q, want %q", c.Name, during, "host@m,own@m")
+	}
+	expect("at rest after keep", c.ProfilePath, "new@m,own@m")
+	expect("host after keep", c.HostPath, "host@m")
+
+	// 2. the group's *_global: false — the profile runs on its own entries only
+	switchOff()
+	launch(nil, func() int { during = names(c.ProfilePath); return 0 })
+	if during != "new@m,own@m" {
+		t.Errorf("switched off: %s = %q, want %q", c.Name, during, "new@m,own@m")
+	}
+	delete(cfg.Profiles, "work")
+
+	// 3. background: merged with no exit step; the next launch recovers and strips
+	launch(bgArgs, func() int { return 0 })
+	expect("after background launch", c.ProfilePath, "host@m,new@m,own@m")
+	launch(nil, func() int { during = names(c.ProfilePath); return 0 })
+	if during != "host@m,new@m,own@m" {
+		t.Errorf("recovered session: %s = %q, want %q", c.Name, during, "host@m,new@m,own@m")
+	}
+	expect("at rest after recovery", c.ProfilePath, "new@m,own@m")
+	expect("host after recovery", c.HostPath, "host@m")
+
+	// 4. background via profiles.work.args, no CLI args: still no exit step
+	cfg.Profiles["work"] = config.ProfileConfig{Args: bgArgs}
+	launch(nil, func() int { return 0 })
+	expect("after background launch from profile args", c.ProfilePath, "host@m,new@m,own@m")
+	delete(cfg.Profiles, "work")
+	launch(nil, func() int { during = names(c.ProfilePath); return 0 })
+	if during != "host@m,new@m,own@m" {
+		t.Errorf("recovered session (profile args): %s = %q, want %q", c.Name, during, "host@m,new@m,own@m")
+	}
+	expect("at rest after profile-args recovery", c.ProfilePath, "new@m,own@m")
+
+	// 5. background, then the group switched off: the next launch still
+	// recovers, so nothing merged is left behind (G6)
+	launch(bgArgs, func() int { return 0 })
+	expect("after background launch", c.ProfilePath, "host@m,new@m,own@m")
+	switchOff()
+	launch(nil, func() int { during = names(c.ProfilePath); return 0 })
+	if during != "new@m,own@m" {
+		t.Errorf("switched off after background: %s = %q, want %q", c.Name, during, "new@m,own@m")
+	}
+	expect("at rest after switched-off recovery", c.ProfilePath, "new@m,own@m")
+	delete(cfg.Profiles, "work")
 }

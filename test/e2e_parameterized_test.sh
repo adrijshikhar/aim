@@ -18,6 +18,9 @@ set -euo pipefail
 # 10. Session-Scoped MCP Server Merge (host servers merged per session, keep / promote,
 #     mcp_global:false, background launch (CLI or profile args) + recovery; adapters
 #     without MCP untouched)
+# 11. Session-Scoped Plugin Merge (a new profile seeded without host plugins, keep /
+#     promote, disable inside a profile shadows the host, plugins_global:false after a
+#     background launch still recovers, --version untouched; agy/gemini have none)
 # ==============================================================================
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -559,27 +562,40 @@ adapter_has_mcp() {
   esac
 }
 
-# Helper: Host-side MCP config file for adapter (under AIM_REAL_HOME)
-mcp_host_file() {
+# Helper: Check if adapter also merges host plugin enablement per session
+adapter_has_plugins() {
   case "$1" in
-    claude) echo "$AIM_REAL_HOME/.claude.json" ;;
-    codex)  echo "$AIM_REAL_HOME/.codex/config.toml" ;;
-    agy)    echo "$AIM_REAL_HOME/.gemini/config/mcp_config.json" ;;
+    claude|codex) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
-# Helper: Profile-side MCP config file, relative to the profile dir ($HOME inside the agent)
-mcp_profile_rel() {
-  case "$1" in
-    claude) echo ".claude/.claude.json" ;;
-    codex)  echo ".codex/config.toml" ;;
-    agy)    echo ".gemini/config/mcp_config.json" ;;
+# Helper: The adapter's MCP server and plugin collections (each named after its top-level key)
+mcp_coll()     { case "$1" in codex) echo mcp_servers ;; *) echo mcpServers ;; esac; }
+plugins_coll() { case "$1" in codex) echo plugins ;; claude) echo enabledPlugins ;; esac; }
+
+# Helper: Host-side config file of a collection (under AIM_REAL_HOME)
+coll_host_file() {
+  case "$1/$2" in
+    claude/mcpServers) echo "$AIM_REAL_HOME/.claude.json" ;;
+    claude/*)          echo "$AIM_REAL_HOME/.claude/settings.json" ;;
+    codex/*)           echo "$AIM_REAL_HOME/.codex/config.toml" ;;
+    agy/*)             echo "$AIM_REAL_HOME/.gemini/config/mcp_config.json" ;;
   esac
 }
 
-# Helper: File format and top-level key of the MCP server map
-mcp_format() { case "$1" in codex) echo toml ;; *) echo json ;; esac; }
-mcp_key()    { case "$1" in codex) echo mcp_servers ;; *) echo mcpServers ;; esac; }
+# Helper: Profile-side config file of a collection, relative to the profile dir ($HOME inside the agent)
+coll_profile_rel() {
+  case "$1/$2" in
+    claude/mcpServers) echo ".claude/.claude.json" ;;
+    claude/*)          echo ".claude/settings.json" ;;
+    codex/*)           echo ".codex/config.toml" ;;
+    agy/*)             echo ".gemini/config/mcp_config.json" ;;
+  esac
+}
+
+# Helper: File format of a collection
+coll_format() { case "$1" in codex) echo toml ;; *) echo json ;; esac; }
 
 # Helper: Native args that start a background session (merge, run, no exit step)
 mcp_bg_args() {
@@ -590,31 +606,44 @@ mcp_bg_args() {
   esac
 }
 
-# Helper: Write an MCP config holding the named servers (server -> command "true", plus args for 'shared')
-mcp_write() {
-  local agent="$1" file="$2"; shift 2
+# Helper: Write a config holding the named entries of one collection. Values per collection:
+# servers -> command "true" (plus args for 'shared'), enabledPlugins -> true,
+# extraKnownMarketplaces -> a directory source, TOML plugins -> [plugins."<id>"] enabled = true
+coll_write() {
+  local agent="$1" coll="$2" file="$3"; shift 3
   mkdir -p "$(dirname "$file")"
-  python3 - "$(mcp_format "$agent")" "$(mcp_key "$agent")" "$file" "$@" << 'PYEOF'
+  python3 - "$(coll_format "$agent")" "$coll" "$file" "$@" << 'PYEOF'
 import json, sys
 fmt, key, path, names = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
-servers = {n: ({"command": "true", "args": ["x"]} if n == "shared" else {"command": "true"}) for n in names}
+def value(n):
+    if key == "enabledPlugins":
+        return True
+    if key == "extraKnownMarketplaces":
+        return {"source": {"source": "directory", "path": "/x/" + n}}
+    if key == "plugins":
+        return {"enabled": True}
+    return {"command": "true", "args": ["x"]} if n == "shared" else {"command": "true"}
+entries = {n: value(n) for n in names}
 if fmt == "json":
-    json.dump({"other": 1, key: servers}, open(path, "w"), indent=2)
+    json.dump({"other": 1, key: entries}, open(path, "w"), indent=2)
 else:
     with open(path, "w") as f:
         f.write('model = "e2e"\n')
-        for n, v in servers.items():
+        for n, v in entries.items():
+            if key == "plugins":
+                f.write(f'\n[{key}."{n}"]\nenabled = true\n')
+                continue
             f.write(f'\n[{key}.{n}]\ncommand = "{v["command"]}"\n')
             if "args" in v:
                 f.write('args = ["x"]\n')
 PYEOF
 }
 
-# Helper: Print the server names in an MCP config, space-separated and sorted
-mcp_names() {
-  local agent="$1" file="$2"
+# Helper: Print the entry names of a collection, space-separated and sorted
+coll_names() {
+  local agent="$1" coll="$2" file="$3"
   [ -f "$file" ] || { echo ""; return; }
-  python3 - "$(mcp_format "$agent")" "$(mcp_key "$agent")" "$file" << 'PYEOF'
+  python3 - "$(coll_format "$agent")" "$coll" "$file" << 'PYEOF'
 import json, sys, tomllib
 fmt, key, path = sys.argv[1], sys.argv[2], sys.argv[3]
 data = json.load(open(path)) if fmt == "json" else tomllib.load(open(path, "rb"))
@@ -622,33 +651,50 @@ print(" ".join(sorted((data.get(key) or {}).keys())))
 PYEOF
 }
 
-# Helper: Assert an MCP config holds exactly the given servers
-assert_mcp_names() {
-  local agent="$1" file="$2" what="$3"; shift 3
+# Helper: Print whether a plugin entry is on: "true", "false" or "missing" (the bool of
+# enabledPlugins, the enabled key of a TOML plugin table)
+coll_enabled() {
+  local agent="$1" coll="$2" file="$3" name="$4"
+  python3 - "$(coll_format "$agent")" "$coll" "$file" "$name" << 'PYEOF'
+import json, sys, tomllib
+fmt, key, path, name = sys.argv[1:5]
+data = json.load(open(path)) if fmt == "json" else tomllib.load(open(path, "rb"))
+v = (data.get(key) or {}).get(name)
+if isinstance(v, dict):
+    v = v.get("enabled")
+print("missing" if v is None else str(v).lower())
+PYEOF
+}
+
+# Helper: Assert a collection holds exactly the given entries
+assert_coll_names() {
+  local agent="$1" coll="$2" file="$3" what="$4"; shift 4
   local want got
   want=$(printf '%s\n' "$@" | sort | tr '\n' ' ' | sed 's/ $//')
-  got=$(mcp_names "$agent" "$file")
+  got=$(coll_names "$agent" "$coll" "$file")
   if [ "$got" != "$want" ]; then
-    echo "FAIL [$agent]: $what has servers [$got], expected [$want]"
+    echo "FAIL [$agent/$coll]: $what has entries [$got], expected [$want]"
     [ -f "$file" ] && cat "$file"
     exit 1
   fi
 }
 
-# Helper: Set or clear profiles.<p>.mcp_global in aim's config.json
-set_mcp_global() {
-  python3 - "$AIM_HOME/config.json" "$1" "$2" << 'PYEOF'
+# Helper: Set or clear profiles.<p>.<flag> (mcp_global, plugins_global) in aim's config.json
+set_profile_flag() {
+  python3 - "$AIM_HOME/config.json" "$1" "$2" "$3" << 'PYEOF'
 import json, sys
-path, prof, val = sys.argv[1], sys.argv[2], sys.argv[3]
+path, prof, flag, val = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 cfg = json.load(open(path))
 p = cfg.setdefault("profiles", {}).setdefault(prof, {})
 if val == "unset":
-    p.pop("mcp_global", None)
+    p.pop(flag, None)
 else:
-    p["mcp_global"] = (val == "true")
+    p[flag] = (val == "true")
 json.dump(cfg, open(path, "w"), indent=2)
 PYEOF
 }
+set_mcp_global()     { set_profile_flag "$1" mcp_global "$2"; }
+set_plugins_global() { set_profile_flag "$1" plugins_global "$2"; }
 
 # Helper: Set profiles.<p>.args in aim's config.json to the remaining arguments, or clear it with "unset"
 set_profile_args() {
@@ -693,21 +739,44 @@ sys.exit(proc.returncode)
 PYEOF
 }
 
-# Hook the mock agent runs mid-session (E2E_HOOK): snapshot the profile's MCP
-# config, then add a server natively the way `<agent> mcp add` would.
+# Hook the mock agent runs mid-session (E2E_HOOK): snapshot the profile's config, then act
+# natively on entry E2E_MCP_ADD of collection E2E_MCP_KEY. E2E_MCP_MODE=add (the default)
+# adds it the way `<agent> mcp add` / `plugin install` would; E2E_MCP_MODE=disable switches
+# it off the way `claude plugin disable` does (false / enabled = false).
 cat << 'HOOK' > "$TEST_DIR/mcp_hook.sh"
 #!/bin/sh
 file="$HOME/$E2E_MCP_REL"
 cp "$file" "$E2E_SNAP" 2>/dev/null || : > "$E2E_SNAP"
 [ -n "${E2E_MCP_ADD:-}" ] || exit 0
-if [ "$E2E_MCP_FORMAT" = "toml" ]; then
+mode="${E2E_MCP_MODE:-add}"
+if [ "$E2E_MCP_FORMAT" = "toml" ] && [ "$mode" = "disable" ]; then
+  # a text edit, as by hand: the first enabled = true after the entry's header
+  python3 - "$file" "$E2E_MCP_KEY" "$E2E_MCP_ADD" << 'PYEOF'
+import sys
+path, key, name = sys.argv[1], sys.argv[2], sys.argv[3]
+s = open(path).read()
+i = s.index('[%s."%s"]' % (key, name))
+j = s.index("enabled = true", i)
+open(path, "w").write(s[:j] + "enabled = false" + s[j + len("enabled = true"):])
+PYEOF
+elif [ "$E2E_MCP_FORMAT" = "toml" ] && [ "$E2E_MCP_KEY" = "plugins" ]; then
+  printf '\n[%s."%s"]\nenabled = true\n' "$E2E_MCP_KEY" "$E2E_MCP_ADD" >> "$file"
+elif [ "$E2E_MCP_FORMAT" = "toml" ]; then
   printf '\n[%s.%s]\ncommand = "true"\n' "$E2E_MCP_KEY" "$E2E_MCP_ADD" >> "$file"
 else
-  python3 - "$file" "$E2E_MCP_KEY" "$E2E_MCP_ADD" << 'PYEOF'
+  python3 - "$file" "$E2E_MCP_KEY" "$E2E_MCP_ADD" "$mode" << 'PYEOF'
 import json, sys
-path, key, name = sys.argv[1], sys.argv[2], sys.argv[3]
+path, key, name, mode = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 data = json.load(open(path))
-data.setdefault(key, {})[name] = {"command": "true"}
+if mode == "disable":
+    value = False
+elif key == "enabledPlugins":
+    value = True
+elif key == "extraKnownMarketplaces":
+    value = {"source": {"source": "directory", "path": "/x/" + name}}
+else:
+    value = {"command": "true"}
+data.setdefault(key, {})[name] = value
 json.dump(data, open(path, "w"), indent=2)
 PYEOF
 fi
@@ -732,15 +801,16 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
     continue
   fi
 
-  HOST_FILE=$(mcp_host_file "$AGENT")
-  PROF_REL=$(mcp_profile_rel "$AGENT")
+  COLL=$(mcp_coll "$AGENT")
+  HOST_FILE=$(coll_host_file "$AGENT" "$COLL")
+  PROF_REL=$(coll_profile_rel "$AGENT" "$COLL")
   PROF_FILE="$PROF_DIR/$PROF_REL"
   SNAP="$TEST_DIR/${AGENT}_mcp_during"
-  export E2E_MCP_REL="$PROF_REL" E2E_MCP_KEY="$(mcp_key "$AGENT")" E2E_MCP_FORMAT="$(mcp_format "$AGENT")" E2E_SNAP="$SNAP"
+  export E2E_MCP_REL="$PROF_REL" E2E_MCP_KEY="$COLL" E2E_MCP_FORMAT="$(coll_format "$AGENT")" E2E_SNAP="$SNAP"
 
   # Host: hostsrv + shared. Profile: own + an identical copy-once leftover of shared.
-  mcp_write "$AGENT" "$HOST_FILE" hostsrv shared
-  mcp_write "$AGENT" "$PROF_FILE" own shared
+  coll_write "$AGENT" "$COLL" "$HOST_FILE" hostsrv shared
+  coll_write "$AGENT" "$COLL" "$PROF_FILE" own shared
   cp "$HOST_FILE" "$TEST_DIR/${AGENT}_host_before"
 
   # 1. Global merge visible during the session; a native add is kept in the profile on exit
@@ -748,8 +818,8 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   export AIM_AUTO_CREATE=1
   export E2E_MCP_ADD=newsrv
   RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
-  assert_mcp_names "$AGENT" "$SNAP" "profile config during session" own hostsrv shared
-  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config at rest" own newsrv
+  assert_coll_names "$AGENT" "$COLL" "$SNAP" "profile config during session" own hostsrv shared
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config at rest" own newsrv
   if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT)"; then
     echo "FAIL [$AGENT]: exit did not report the kept change"
     echo "$RUN_OUT"
@@ -775,8 +845,8 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
     echo "$PTY_OUT"
     exit 1
   fi
-  assert_mcp_names "$AGENT" "$HOST_FILE" "host config after promote" hostsrv shared promoted
-  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config after promote" own newsrv
+  assert_coll_names "$AGENT" "$COLL" "$HOST_FILE" "host config after promote" hostsrv shared promoted
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config after promote" own newsrv
   echo "  ✔ 'promoted' written to the host and stripped from the profile"
 
   # 3. mcp_global: false — the profile runs on its own servers only
@@ -784,7 +854,7 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   set_mcp_global "$PROF" false
   unset E2E_MCP_ADD
   "$AIM_BIN" run "$AGENT" "$PROF" < /dev/null
-  assert_mcp_names "$AGENT" "$SNAP" "profile config during session (mcp_global=false)" own newsrv
+  assert_coll_names "$AGENT" "$COLL" "$SNAP" "profile config during session (mcp_global=false)" own newsrv
   set_mcp_global "$PROF" unset
   echo "  ✔ Host servers not merged when mcp_global is false"
 
@@ -793,7 +863,7 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   export E2E_MCP_ADD=bgsrv
   "$AIM_BIN" run "$AGENT" "$PROF" $(mcp_bg_args "$AGENT") < /dev/null
   unset E2E_MCP_ADD
-  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config after background launch" own newsrv bgsrv hostsrv shared promoted
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config after background launch" own newsrv bgsrv hostsrv shared promoted
   echo "  ✔ Background launch left the merged config in place"
 
   # 5. Background via profiles.<p>.args with no CLI args: recovers step 4, merges, no exit step
@@ -808,7 +878,7 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
     echo "$RUN_OUT"
     exit 1
   fi
-  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config after background launch from profile args" own newsrv bgsrv profbgsrv hostsrv shared promoted
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config after background launch from profile args" own newsrv bgsrv profbgsrv hostsrv shared promoted
   echo "  ✔ Profile args made the launch a background one: host items left in place"
 
   # 6. The next foreground launch recovers: keeps the background session's change, strips host items
@@ -819,13 +889,166 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
     echo "$RUN_OUT"
     exit 1
   fi
-  assert_mcp_names "$AGENT" "$SNAP" "profile config during recovered session" own newsrv bgsrv profbgsrv hostsrv shared promoted
-  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config at rest after recovery" own newsrv bgsrv profbgsrv
-  assert_mcp_names "$AGENT" "$HOST_FILE" "host config after recovery" hostsrv shared promoted
+  assert_coll_names "$AGENT" "$COLL" "$SNAP" "profile config during recovered session" own newsrv bgsrv profbgsrv hostsrv shared promoted
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config at rest after recovery" own newsrv bgsrv profbgsrv
+  assert_coll_names "$AGENT" "$COLL" "$HOST_FILE" "host config after recovery" hostsrv shared promoted
   echo "  ✔ Recovered: 'bgsrv' and 'profbgsrv' kept, host items stripped, host untouched"
 done
 
-unset E2E_HOOK E2E_MCP_ADD E2E_MCP_REL E2E_MCP_KEY E2E_MCP_FORMAT E2E_SNAP
+unset E2E_MCP_ADD E2E_MCP_REL E2E_MCP_KEY E2E_MCP_FORMAT E2E_SNAP
+
+echo ""
+echo "========================================================================"
+echo "  PHASE 5: Session-Scoped Plugin Merge                                   "
+echo "  (first copy, keep, promote, disable in profile, plugins_global:false   "
+echo "   after a background launch, --version); plugins: claude, codex         "
+echo "========================================================================"
+
+for AGENT in "${ALL_ADAPTERS[@]}"; do
+  echo ""
+  echo "--- Testing Plugin Merge: [$AGENT] ---"
+  PROF="plug-$AGENT"
+  PROF_DIR="$AIM_HOME/profiles/$PROF"
+  export AIM_AUTO_CREATE=1
+
+  if ! adapter_has_plugins "$AGENT"; then
+    # no hook: it snapshots into E2E_SNAP, which is unset here
+    env -u E2E_HOOK "$AIM_BIN" run "$AGENT" "$PROF" < /dev/null
+    STATE="$AIM_HOME/profile-merge/$PROF.json"
+    if [ -f "$STATE" ] && grep -qE '"[a-z]+/(plugins|enabledPlugins|extraKnownMarketplaces)"' "$STATE"; then
+      echo "FAIL [$AGENT]: adapter without plugins recorded plugin merge state:"
+      cat "$STATE"
+      exit 1
+    fi
+    echo "  ✔ No plugin merge for $AGENT, launch unaffected"
+    continue
+  fi
+
+  COLL=$(plugins_coll "$AGENT")
+  HOST_FILE=$(coll_host_file "$AGENT" "$COLL")
+  PROF_REL=$(coll_profile_rel "$AGENT" "$COLL")
+  PROF_FILE="$PROF_DIR/$PROF_REL"
+  SNAP="$TEST_DIR/${AGENT}_plugins_during"
+  export E2E_MCP_REL="$PROF_REL" E2E_MCP_KEY="$COLL" E2E_MCP_FORMAT="$(coll_format "$AGENT")" E2E_SNAP="$SNAP" E2E_MCP_MODE=add
+
+  # The host file is written before either profile's first launch, so the first copy of
+  # it (Claude's settings.json, Codex's seeded config.toml) sees the host's plugins.
+  coll_write "$AGENT" "$COLL" "$HOST_FILE" hostplug@m shared@m
+  cp "$HOST_FILE" "$TEST_DIR/${AGENT}_plugins_host_before"
+
+  # 1. A new profile starts with none of the host's plugins (G5). A profile of its own:
+  #    this first launch uses up the collection's one-time migration.
+  echo "  [1/7] Testing the first copy of the host config carries no plugins..."
+  SEED_FILE="$AIM_HOME/profiles/seed-$AGENT/$PROF_REL"
+  "$AIM_BIN" run "$AGENT" "seed-$AGENT" < /dev/null
+  assert_coll_names "$AGENT" "$COLL" "$SNAP" "new profile during its first session" hostplug@m shared@m
+  assert_coll_names "$AGENT" "$COLL" "$SEED_FILE" "new profile at rest"
+  if [ "$AGENT" = "claude" ] && [ "$(stat -f '%Lp' "$SEED_FILE" 2>/dev/null || stat -c '%a' "$SEED_FILE")" != "600" ]; then
+    echo "FAIL [$AGENT]: the first settings.json copy must be 0600"
+    exit 1
+  fi
+  echo "  ✔ First copy has no host plugins; they are merged for the session only"
+
+  # Profile: own@m + an identical copy-once leftover of shared@m
+  coll_write "$AGENT" "$COLL" "$PROF_FILE" own@m shared@m
+
+  # 2. Merge during the session; a native install is kept in the profile on exit
+  echo "  [2/7] Testing merge, one-time migration and keep-on-exit (non-interactive)..."
+  export E2E_MCP_ADD=newplug@m
+  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+  assert_coll_names "$AGENT" "$COLL" "$SNAP" "profile plugins during session" own@m hostplug@m shared@m
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile plugins at rest" own@m newplug@m
+  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT)"; then
+    echo "FAIL [$AGENT]: exit did not report the kept change"
+    echo "$RUN_OUT"
+    exit 1
+  fi
+  if ! echo "$RUN_OUT" | grep -q "1 plugin(s) in $PROF matched the host's (shared@m) and were removed; backup: "; then
+    echo "FAIL [$AGENT]: migration did not name the removed plugin and its backup"
+    echo "$RUN_OUT"
+    exit 1
+  fi
+  if ! cmp -s "$HOST_FILE" "$TEST_DIR/${AGENT}_plugins_host_before"; then
+    echo "FAIL [$AGENT]: host config changed by a keep-only session"
+    exit 1
+  fi
+  echo "  ✔ Host plugins merged for the session only; 'newplug@m' kept, 'shared@m' leftover migrated"
+
+  # 3. Promote: answer [p] at the exit prompt on a PTY; the prompt names the collection
+  echo "  [3/7] Testing promote to host via exit prompt (PTY)..."
+  export E2E_MCP_ADD=promoted@m
+  PTY_OUT=$(pty_run "(default: k)" "p" "$AIM_BIN" run "$AGENT" "$PROF")
+  CLEAN_PTY=$(echo "$PTY_OUT" | sed -E $'s/\x1b\\[[0-9;]*m//g')
+  if ! echo "$CLEAN_PTY" | grep -q "+ $COLL/promoted@m"; then
+    echo "FAIL [$AGENT]: exit prompt must list '$COLL/promoted@m'"
+    echo "$PTY_OUT"
+    exit 1
+  fi
+  assert_coll_names "$AGENT" "$COLL" "$HOST_FILE" "host plugins after promote" hostplug@m shared@m promoted@m
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile plugins after promote" own@m newplug@m
+  echo "  ✔ 'promoted@m' written to the host and stripped from the profile"
+
+  # 4. Switch a host plugin off inside the profile: an edit of a host item, kept. On the
+  #    next launch the profile's own false shadows the host's true.
+  echo "  [4/7] Testing disable inside the profile, then the next launch..."
+  export E2E_MCP_MODE=disable E2E_MCP_ADD=hostplug@m
+  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+  export E2E_MCP_MODE=add
+  unset E2E_MCP_ADD
+  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT)"; then
+    echo "FAIL [$AGENT]: the disable was not kept"
+    echo "$RUN_OUT"
+    exit 1
+  fi
+  "$AIM_BIN" run "$AGENT" "$PROF" < /dev/null
+  assert_coll_names "$AGENT" "$COLL" "$SNAP" "profile plugins during the next session" own@m newplug@m hostplug@m shared@m promoted@m
+  if [ "$(coll_enabled "$AGENT" "$COLL" "$SNAP" hostplug@m)" != "false" ]; then
+    echo "FAIL [$AGENT]: the profile's false must shadow the host's true"
+    cat "$SNAP"
+    exit 1
+  fi
+  if [ "$(coll_enabled "$AGENT" "$COLL" "$PROF_FILE" hostplug@m)" != "false" ] || [ "$(coll_enabled "$AGENT" "$COLL" "$HOST_FILE" hostplug@m)" != "true" ]; then
+    echo "FAIL [$AGENT]: the disable must stay in the profile and leave the host on"
+    exit 1
+  fi
+  echo "  ✔ 'hostplug@m' off in this profile only; the host keeps it on"
+
+  # 5. Background launch: merge, run, no exit step — host plugins stay until the next launch
+  echo "  [5/7] Testing background launch ('aim run $AGENT $PROF $(mcp_bg_args "$AGENT")')..."
+  export E2E_MCP_ADD=bgplug@m
+  "$AIM_BIN" run "$AGENT" "$PROF" $(mcp_bg_args "$AGENT") < /dev/null
+  unset E2E_MCP_ADD
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile plugins after background launch" own@m newplug@m hostplug@m bgplug@m shared@m promoted@m
+  echo "  ✔ Background launch left the merged plugins in place"
+
+  # 6. plugins_global: false on the next launch still recovers the background session (G6)
+  echo "  [6/7] Testing profiles.$PROF.plugins_global = false after the background launch..."
+  set_plugins_global "$PROF" false
+  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+  set_plugins_global "$PROF" unset
+  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
+    echo "FAIL [$AGENT]: plugins_global=false must still recover the background session"
+    echo "$RUN_OUT"
+    exit 1
+  fi
+  assert_coll_names "$AGENT" "$COLL" "$SNAP" "profile plugins during session (plugins_global=false)" own@m newplug@m hostplug@m bgplug@m
+  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile plugins at rest (plugins_global=false)" own@m newplug@m hostplug@m bgplug@m
+  assert_coll_names "$AGENT" "$COLL" "$HOST_FILE" "host plugins after recovery" hostplug@m shared@m promoted@m
+  echo "  ✔ Recovered with plugins_global=false: 'bgplug@m' kept, no host plugins left behind"
+
+  # 7. A non-session invocation leaves both files as they were at rest
+  echo "  [7/7] Testing 'aim run $AGENT $PROF --version' leaves the configs untouched..."
+  cp "$PROF_FILE" "$TEST_DIR/${AGENT}_plugins_prof_rest"
+  cp "$HOST_FILE" "$TEST_DIR/${AGENT}_plugins_host_rest"
+  "$AIM_BIN" run "$AGENT" "$PROF" --version > /dev/null
+  if ! cmp -s "$PROF_FILE" "$TEST_DIR/${AGENT}_plugins_prof_rest" || ! cmp -s "$HOST_FILE" "$TEST_DIR/${AGENT}_plugins_host_rest"; then
+    echo "FAIL [$AGENT]: --version changed a config file"
+    exit 1
+  fi
+  echo "  ✔ --version left profile and host byte-identical"
+done
+
+unset E2E_HOOK E2E_MCP_ADD E2E_MCP_REL E2E_MCP_KEY E2E_MCP_FORMAT E2E_SNAP E2E_MCP_MODE
 
 echo ""
 echo "========================================================================"
