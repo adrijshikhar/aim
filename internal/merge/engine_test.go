@@ -622,3 +622,25 @@ func TestEngine_HostMissingIsSilentSkip(t *testing.T) {
 	}
 	_ = s.Finish(ch, keepAll)
 }
+
+func TestEngine_JoinerSkipsCollectionTheFirstSessionSkipped(t *testing.T) {
+	f := newFixture(t)
+	_ = os.WriteFile(f.pf, []byte(`{"mcpServers":{"own":{"command":"o"}}}`), 0o600)
+	a := f.start() // no host file: nothing merged, no session state
+	b := f.start() // joins a
+	chb, _ := b.Diff()
+	if len(chb) != 0 {
+		t.Fatalf("a joiner must not report the profile's own servers: %+v", chb)
+	}
+	if err := b.Finish(chb, decideBy(map[string]Decision{"own": Promote})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.host); !os.IsNotExist(err) {
+		t.Fatal("promote must not create a host file for a collection no session merged")
+	}
+	cha, _ := a.Diff()
+	_ = a.Finish(cha, keepAll)
+	if got := f.profileNames(); strings.Join(got, ",") != "own" {
+		t.Fatalf("at rest = %v", got)
+	}
+}

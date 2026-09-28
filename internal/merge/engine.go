@@ -62,6 +62,10 @@ const lockTimeout = 10 * time.Second
 // errNoHost skips a collection silently: with no host file there is nothing to merge.
 var errNoHost = errors.New("host file missing")
 
+// errNotMerged skips a collection silently for a joining session: the first
+// session did not merge it, so there is no session state to diff against.
+var errNotMerged = errors.New("not merged by the running session")
+
 func (e *Engine) warnf(format string, a ...any) {
 	if e.Out != nil {
 		fmt.Fprintf(e.Out, format+"\n", a...)
@@ -138,7 +142,7 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 	backedUp := map[string]bool{} // one migration backup per profile file per Start
 	for _, c := range cols {
 		if err := e.startCollection(profile, c, st, alone, backedUp); err != nil {
-			if !errors.Is(err, errNoHost) {
+			if !errors.Is(err, errNoHost) && !errors.Is(err, errNotMerged) {
 				e.warnf("aim: %s: %v — skipped", c.ID(), err)
 			}
 			continue
@@ -164,6 +168,9 @@ func (e *Engine) startCollection(profile string, c Collection, st *State, alone 
 		return errors.New(c.ProfilePath + " is a symlink; not merging into a shared file")
 	}
 	if !alone {
+		if _, ok := st.Active[c.ID()]; !ok {
+			return errNotMerged
+		}
 		return nil // another running session of this agent already merged; join it
 	}
 	host, hostOK, err := readRetry(c, c.HostPath)
