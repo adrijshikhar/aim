@@ -6,7 +6,7 @@ ZSH_COMPLETION_DIR   ?= $(HOME)/.zsh/completions
 BASH_COMPLETION_DIR  ?= $(HOME)/.local/share/bash-completion/completions
 FISH_COMPLETION_DIR  ?= $(HOME)/.config/fish/completions
 
-.PHONY: all build test smoke live-test install install-completions uninstall uninstall-completions clean release release-snapshot
+.PHONY: all build test conformance smoke live-test install install-completions uninstall uninstall-completions clean release release-snapshot
 
 all: build
 
@@ -17,6 +17,9 @@ build:
 test:
 	@echo "Running tests..."
 	go test -v -race ./...
+
+conformance:
+	go test -tags conformance -v ./test/conformance/
 
 smoke: build
 	@echo "Running smoke tests..."

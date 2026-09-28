@@ -116,6 +116,21 @@ Inspect quota limits, live capacity gauges, reset countdowns, and status warning
 
 ---
 
+## Global MCP servers
+
+MCP servers in your normal agent config (the host) are available in every aim session.
+When a session adds, edits or removes one, aim asks at exit whether to promote the change
+to the host or keep it in that profile; without a terminal the change is kept. A removed
+host server comes back next session. Background launches (`claude --bg`, `codex app-server`,
+`agy remote-control`) get the host servers too; the next launch of that profile cleans up.
+
+To add a server to one profile only, run the agent's own command inside the profile:
+`aim shell claude work` then `claude mcp add -s user foo -- npx foo`.
+
+Turn the merge off for a profile with `"mcp_global": false` in `~/.aim/config.json`.
+
+---
+
 ## TUI Keybindings
 
 When running `aim`, navigate using the following shortcuts:
