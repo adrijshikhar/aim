@@ -76,6 +76,10 @@ func stripComment(s string) string {
 func scanDepth(line string, depth int, inML string) (int, string) {
 	for i := 0; i < len(line); i++ {
 		if inML != "" {
+			if inML == `"""` && line[i] == '\\' {
+				i++ // an escape: \""" does not close a basic string
+				continue
+			}
 			if strings.HasPrefix(line[i:], inML) {
 				i += len(inML) - 1
 				inML = ""

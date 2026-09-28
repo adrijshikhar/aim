@@ -108,3 +108,36 @@ func TestJSON_AppendThenDeleteKeyRestoresBytes(t *testing.T) {
 		}
 	}
 }
+
+// Escapes, braces and the key's own name inside strings must not confuse the
+// member scan: only the key's value is rewritten.
+func TestJSON_StringsThatLookLikeStructurePreserveBytes(t *testing.T) {
+	head := "{\n  \"note\": \"a \\\"q\\\" \\\\ {x} \\\"mcpServers\\\": {\\\"y\\\": 1} \\\\\",\n  \"mcpServers\": "
+	mine := `{"command": "a", "args": ["\"mcpServers\": {", "\\", "{", "}", "\\\""]}`
+	tail := ",\n  \"tail\": \"}{\\\\\\\"mcpServers\\\"\"\n}\n"
+	p := filepath.Join(t.TempDir(), ".claude.json")
+	_ = os.WriteFile(p, []byte(head+"{\n    \"mine\": "+mine+"\n  }"+tail), 0o600)
+	e, _, err := ReadJSONKey(p, "mcpServers")
+	if err != nil || strings.Join(e.Order, ",") != "mine" {
+		t.Fatalf("read: order=%v err=%v", e.Order, err)
+	}
+	if args, _ := e.Values["mine"]["args"].([]any); len(args) != 5 || args[0] != `"mcpServers": {` || args[4] != `\"` {
+		t.Fatalf("args = %#v", e.Values["mine"]["args"])
+	}
+	e.Set("jev", map[string]any{"command": "npx"}, nil)
+	if err := WriteJSONKey(p, "mcpServers", e, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(p)
+	s := string(out)
+	if !strings.HasPrefix(s, head) || !strings.HasSuffix(s, tail) {
+		t.Fatalf("bytes outside the key changed:\n%s", s)
+	}
+	if !strings.Contains(s[len(head):len(s)-len(tail)], `"mine": `+mine) {
+		t.Fatalf("untouched entry rewritten:\n%s", s)
+	}
+	got, _, err := ReadJSONKey(p, "mcpServers")
+	if err != nil || strings.Join(got.Order, ",") != "mine,jev" {
+		t.Fatalf("after write: order=%v err=%v", got.Order, err)
+	}
+}
