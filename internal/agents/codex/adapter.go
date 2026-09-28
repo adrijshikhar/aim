@@ -246,9 +246,9 @@ func copyHostConfig(realHome, profileCodexDir string) {
 			// Rewrite hook trust hashes keyed by host hooks.json path to the profile's hooks.json path
 			rewritten := strings.ReplaceAll(string(data), hostHooksJSON, destHooksJSON)
 			cleaned, _ := deduplicateTomlTables(rewritten)
-			// Host servers reach sessions through the session merge (T4): a new
-			// profile starts with none of its own. Plugin tables are kept.
-			cleaned = string(stripTables(profileCodexDir, []byte(cleaned), "mcp_servers"))
+			// Host servers and plugin enablement reach sessions through the
+			// session merge (T4, G5): a new profile starts with none of its own.
+			cleaned = string(stripTables(profileCodexDir, []byte(cleaned), "mcp_servers", "plugins"))
 			_ = os.WriteFile(destConfig, []byte(cleaned), 0644)
 		}
 	} else {
