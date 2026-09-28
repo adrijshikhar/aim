@@ -158,3 +158,52 @@ func TestExecuteRun_WrapsSessionWithMerge(t *testing.T) {
 		t.Fatal("state must live under AIM_HOME/profile-merge")
 	}
 }
+
+// groupMock declares an MCP and a plugins collection in one settings file.
+func groupMock(t *testing.T, d string) (*collectionMock, string) {
+	t.Helper()
+	host := filepath.Join(d, "host.json")
+	prof := filepath.Join(d, "prof.json")
+	_ = os.WriteFile(host, []byte(`{"mcpServers":{"jev":{"command":"npx"}},"enabledPlugins":{"x@m":true}}`), 0o600)
+	_ = os.WriteFile(prof, []byte(`{"mcpServers":{}}`), 0o600)
+	col := func(name, group string) merge.Collection {
+		return merge.Collection{Agent: "mock", Name: name, Format: merge.JSON, Key: name, HostPath: host, ProfilePath: prof, Group: group}
+	}
+	return &collectionMock{mockAdapter: mockAdapter{name: "mock"},
+		cols: []merge.Collection{col("mcpServers", "mcp"), col("enabledPlugins", "plugins")}}, prof
+}
+
+func TestWithSessionMerge_PluginsGlobalOffRecoversAfterBackground(t *testing.T) {
+	d := isolate(t)
+	ad, prof := groupMock(t, d)
+	store := merge.Store{Dir: filepath.Join(d, "state")}
+	ad.bg = true
+	withSessionMerge(ad, store, "work", d, nil, []string{"--bg"}, func() int { return 0 })
+	if b, _ := os.ReadFile(prof); !strings.Contains(string(b), `"x@m"`) {
+		t.Fatalf("the background launch merges plugins: %s", b)
+	}
+	ad.bg = false
+	off := false
+	cfg := &config.Config{Profiles: map[string]config.ProfileConfig{"work": {PluginsGlobal: &off}}}
+	var during []byte
+	withSessionMerge(ad, store, "work", d, cfg, nil, func() int { during, _ = os.ReadFile(prof); return 0 })
+	if strings.Contains(string(during), "enabledPlugins") || !strings.Contains(string(during), `"jev"`) {
+		t.Fatalf("plugins_global=false must recover the plugins and merge only servers: %s", during)
+	}
+	if after, _ := os.ReadFile(prof); strings.Contains(string(after), "jev") || strings.Contains(string(after), "enabledPlugins") {
+		t.Fatalf("at rest = %s", after)
+	}
+}
+
+func TestWithSessionMerge_MCPGlobalOffStillMergesPlugins(t *testing.T) {
+	d := isolate(t)
+	ad, prof := groupMock(t, d)
+	off := false
+	cfg := &config.Config{Profiles: map[string]config.ProfileConfig{"work": {MCPGlobal: &off}}}
+	store := merge.Store{Dir: filepath.Join(d, "state")}
+	var during []byte
+	withSessionMerge(ad, store, "work", d, cfg, nil, func() int { during, _ = os.ReadFile(prof); return 0 })
+	if strings.Contains(string(during), "jev") || !strings.Contains(string(during), `"x@m"`) {
+		t.Fatalf("mcp_global=false switches off servers only: %s", during)
+	}
+}
