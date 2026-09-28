@@ -2,8 +2,8 @@ name: Upstream Canary Watcher
 
 on:
   schedule:
-    # Run canary checks daily at 03:00 UTC
-    - cron: "0 3 * * *"
+    # Run canary checks every 8 hours (00:00, 08:00, 16:00 UTC)
+    - cron: "0 */8 * * *"
   workflow_dispatch:
     inputs:
       agent:
