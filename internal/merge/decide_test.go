@@ -53,8 +53,12 @@ func TestPrompter_ReviewEach(t *testing.T) {
 
 func TestPrompter_RemovedPromoteNeedsSecondConfirm(t *testing.T) {
 	c := []Change{{Collection: Collection{Agent: "claude", Name: "mcpServers"}, Name: "ctx", Kind: Removed}}
-	if d := Prompter(strings.NewReader("p\nn\n"), &bytes.Buffer{}, true, "work", "claude")(c); d[0] != Keep {
+	var out bytes.Buffer
+	if d := Prompter(strings.NewReader("p\nn\n"), &out, true, "work", "claude")(c); d[0] != Keep {
 		t.Fatal("removing from the host needs its own confirmation")
+	}
+	if !strings.Contains(out.String(), "Remove mcpServers/ctx from the host (every profile)? [y/N] ") {
+		t.Fatalf("the removal question must name the collection: %q", out.String())
 	}
 	if d := Prompter(strings.NewReader("p\ny\n"), &bytes.Buffer{}, true, "work", "claude")(c); d[0] != Promote {
 		t.Fatal("y confirms the removal")

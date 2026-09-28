@@ -66,7 +66,7 @@ func Prompter(in io.Reader, out io.Writer, interactive bool, profile, agent stri
 				d[i] = Promote
 				return true
 			}
-			a, ok := ask(fmt.Sprintf("Remove %s from the host (every profile)? [y/N] ", cs[i].Name))
+			a, ok := ask(fmt.Sprintf("Remove %s from the host (every profile)? [y/N] ", cs[i].Collection.Name+"/"+cs[i].Name))
 			if a == "y" || a == "yes" {
 				d[i] = Promote
 			}
