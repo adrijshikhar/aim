@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -73,16 +74,21 @@ func (m Model) openMoveModal() (Model, tea.Cmd) {
 }
 
 func (m Model) updateMoveModal(msg tea.Msg) (Model, tea.Cmd) {
+	km := m.keys.MoveModal
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultMoveModalKeyMap()
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
+		switch {
+		case key.Matches(msg, km.Quit):
 			m.cancelStream()
 			return m, tea.Quit
-		case "esc":
+		case key.Matches(msg, km.Cancel):
 			m.moveModal = moveModalState{}
 			return m, nil
-		case "enter":
+		case key.Matches(msg, km.Submit):
 			return m.executeMove()
 		default:
 			// If typing after collision warning, reset forceRequired
@@ -183,9 +189,11 @@ func (m Model) renderMoveModal() string {
 		) + "\n\n")
 	}
 
-	b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [Enter] Confirm  •  [Esc] Cancel",
-	))
+	km := m.keys.MoveModal
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultMoveModalKeyMap()
+	}
+	b.WriteString("  " + m.help.ShortHelpView(km.ShortHelp()))
 
 	box := MoveModalBoxStyle.Render(b.String())
 	return "\n" + box + "\n"

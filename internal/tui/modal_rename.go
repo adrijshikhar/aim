@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -51,16 +52,21 @@ func (m Model) openRenameModal() (Model, tea.Cmd) {
 }
 
 func (m Model) updateRenameModal(msg tea.Msg) (Model, tea.Cmd) {
+	km := m.keys.RenameModal
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultRenameModalKeyMap()
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
+		switch {
+		case key.Matches(msg, km.Quit):
 			m.cancelStream()
 			return m, tea.Quit
-		case "esc":
+		case key.Matches(msg, km.Cancel):
 			m.renameModal = renameModalState{}
 			return m, nil
-		case "enter":
+		case key.Matches(msg, km.Submit):
 			return m.executeRename()
 		default:
 			var cmd tea.Cmd
@@ -144,9 +150,11 @@ func (m Model) renderRenameModal() string {
 		) + "\n\n")
 	}
 
-	b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [Enter] Confirm  •  [Esc] Cancel",
-	))
+	km := m.keys.RenameModal
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultRenameModalKeyMap()
+	}
+	b.WriteString("  " + m.help.ShortHelpView(km.ShortHelp()))
 
 	box := RenameModalBoxStyle.Render(b.String())
 	return "\n" + box + "\n"

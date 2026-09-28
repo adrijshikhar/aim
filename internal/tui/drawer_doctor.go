@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -99,34 +100,39 @@ func (m Model) fetchDoctorDiagnostics() Model {
 }
 
 func (m Model) updateDoctorDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	km := m.keys.DoctorDrawer
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultDoctorDrawerKeyMap()
+	}
+
+	switch {
+	case key.Matches(msg, km.Quit):
 		m.cancelStream()
 		return m, tea.Quit
-	case "d", "esc", "q":
+	case key.Matches(msg, km.Close):
 		m.doctorDrawer = doctorDrawerState{}
 		return m, nil
-	case "up", "k":
+	case key.Matches(msg, km.Up):
 		if m.cursor > 0 {
 			m.cursor--
 			m = m.fetchDoctorDiagnostics()
 		}
 		return m, nil
-	case "down", "j":
+	case key.Matches(msg, km.Down):
 		if m.cursor < len(m.profiles)-1 {
 			m.cursor++
 			m = m.fetchDoctorDiagnostics()
 		}
 		return m, nil
-	case "1":
+	case key.Matches(msg, km.Agent1):
 		return m.selectAgentByIndex(0)
-	case "2":
+	case key.Matches(msg, km.Agent2):
 		return m.selectAgentByIndex(1)
-	case "3":
+	case key.Matches(msg, km.Agent3):
 		return m.selectAgentByIndex(2)
-	case "tab":
+	case key.Matches(msg, km.NextAgent):
 		return m.cycleAgent(true)
-	case "shift+tab":
+	case key.Matches(msg, km.PrevAgent):
 		return m.cycleAgent(false)
 	}
 	return m, nil
@@ -163,9 +169,11 @@ func (m Model) renderDoctorDrawer() string {
 		b.WriteString(fmt.Sprintf("  %s %s %s\n", badge, cat, msg))
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [↑/↓] Inspect Profile  •  [Tab] Switch Agent  •  [d/Esc/q] Close Drawer",
-	))
+	km := m.keys.DoctorDrawer
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultDoctorDrawerKeyMap()
+	}
+	b.WriteString("\n  " + m.help.ShortHelpView(km.ShortHelp()))
 
 	box := DoctorDrawerStyle.Render(b.String())
 	return "\n" + box + "\n"

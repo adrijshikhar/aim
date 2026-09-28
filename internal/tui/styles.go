@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -151,4 +152,18 @@ func GaugeStyleForStatus(st usage.Status) lipgloss.Style {
 	default:
 		return GaugeDimStyle
 	}
+}
+
+// NewThemedHelp initializes a bubbles help.Model styled with Atom One Dark colors and a clamped 100-column max width.
+func NewThemedHelp() help.Model {
+	h := help.New()
+	h.ShortSeparator = " • "
+	h.Styles.ShortKey = lipgloss.NewStyle().Bold(true).Foreground(TextBright)
+	h.Styles.ShortDesc = lipgloss.NewStyle().Foreground(TextMuted)
+	h.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(TextDim)
+	h.Styles.FullKey = lipgloss.NewStyle().Bold(true).Foreground(AccentCyan)
+	h.Styles.FullDesc = lipgloss.NewStyle().Foreground(TextPrimary)
+	h.Styles.FullSeparator = lipgloss.NewStyle().Foreground(TextDim)
+	h.Width = 100
+	return h
 }

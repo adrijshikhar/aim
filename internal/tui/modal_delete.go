@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -53,47 +54,45 @@ func (m Model) openDeleteModal() (Model, tea.Cmd) {
 }
 
 func (m Model) updateDeleteModal(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	km := m.keys.DeleteModal
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultDeleteModalKeyMap()
+	}
+
+	switch {
+	case key.Matches(msg, km.Quit):
 		m.cancelStream()
 		return m, tea.Quit
-	case "esc", "q", "n":
+	case key.Matches(msg, km.Cancel):
 		m.deleteModal = deleteModalState{}
 		return m, nil
-	case "left", "h":
+	case key.Matches(msg, km.Left):
 		numOpts := 2
 		if m.deleteModal.isShared {
 			numOpts = 3
 		}
 		m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex - 1 + numOpts) % numOpts
 		return m, nil
-	case "right", "l", "tab":
+	case key.Matches(msg, km.Right):
 		numOpts := 2
 		if m.deleteModal.isShared {
 			numOpts = 3
 		}
 		m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex + 1) % numOpts
 		return m, nil
-	case "shift+tab":
-		numOpts := 2
-		if m.deleteModal.isShared {
-			numOpts = 3
-		}
-		m.deleteModal.focusedIndex = (m.deleteModal.focusedIndex - 1 + numOpts) % numOpts
-		return m, nil
-	case "1":
+	case key.Matches(msg, km.Select1):
 		if m.deleteModal.isShared {
 			return m.executeDeleteChoice(0)
 		}
-	case "2":
+	case key.Matches(msg, km.Select2):
 		if m.deleteModal.isShared {
 			return m.executeDeleteChoice(1)
 		}
-	case "y":
+	case key.Matches(msg, km.QuickY):
 		if !m.deleteModal.isShared {
 			return m.executeDeleteChoice(0)
 		}
-	case "enter":
+	case key.Matches(msg, km.Confirm):
 		return m.executeDeleteChoice(m.deleteModal.focusedIndex)
 	}
 	return m, nil
@@ -181,9 +180,11 @@ func (m Model) renderDeleteModal() string {
 		btn2 := btn2Style.Render("[Cancel]")
 
 		b.WriteString(fmt.Sprintf("  %s    %s    %s\n\n", btn0, btn1, btn2))
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"  [←/→/Tab] Select  •  [Enter] Confirm  •  [Esc] Cancel",
-		))
+		km := m.keys.DeleteModal
+		if len(km.Quit.Keys()) == 0 {
+			km = DefaultDeleteModalKeyMap()
+		}
+		b.WriteString("  " + m.help.ShortHelpView(km.ShortHelpShared()))
 	} else {
 		b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(
 			fmt.Sprintf("Are you sure you want to permanently delete profile %q?", pName),
@@ -205,9 +206,11 @@ func (m Model) renderDeleteModal() string {
 		btn1 := btn1Style.Render("[ Cancel ]")
 
 		b.WriteString(fmt.Sprintf("      %s      %s\n\n", btn0, btn1))
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"  [←/→/Tab] Select  •  [Enter/y] Confirm  •  [Esc] Cancel",
-		))
+		km := m.keys.DeleteModal
+		if len(km.Quit.Keys()) == 0 {
+			km = DefaultDeleteModalKeyMap()
+		}
+		b.WriteString("  " + m.help.ShortHelpView(km.ShortHelpSingle()))
 	}
 
 	box := ModalBoxStyle.Render(b.String())
