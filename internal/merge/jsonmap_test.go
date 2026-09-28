@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,5 +140,49 @@ func TestJSON_StringsThatLookLikeStructurePreserveBytes(t *testing.T) {
 	got, _, err := ReadJSONKey(p, "mcpServers")
 	if err != nil || strings.Join(got.Order, ",") != "mine,jev" {
 		t.Fatalf("after write: order=%v err=%v", got.Order, err)
+	}
+}
+
+func TestReplaceInJSONMember_OnlyInsideTheMember(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	src := `{
+  "hooks": {"Stop": [{"command": "/h/.claude/hooks/stop.sh"}]},
+  "extraKnownMarketplaces": {"m": {"source": {"source": "directory", "path": "/h/.claude/mkt"}}},
+  "statusLine": {"command": "/h/.claude/status.sh"}
+}`
+	_ = os.WriteFile(p, []byte(src), 0o644)
+	changed, err := ReplaceInJSONMember(p, "hooks", "/h/.claude", "/p/.claude", 0o600)
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	out, _ := os.ReadFile(p)
+	want := strings.Replace(src, "/h/.claude/hooks", "/p/.claude/hooks", 1)
+	if string(out) != want {
+		t.Fatalf("only the hooks value may change:\n%s", out)
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v, want the 0600 floor", fi.Mode().Perm())
+	}
+}
+
+func TestReplaceInJSONMember_NoOp(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	src := `{"hooks": {"Stop": []}, "statusLine": {"command": "/h/.claude/s.sh"}}`
+	_ = os.WriteFile(p, []byte(src), 0o644)
+	for _, tc := range []struct{ key, old string }{{"hooks", "/h/.claude"}, {"missing", "/h/.claude"}, {"statusLine", ""}} {
+		changed, err := ReplaceInJSONMember(p, tc.key, tc.old, "/p/.claude", 0o600)
+		if err != nil || changed {
+			t.Fatalf("%s/%q: changed=%v err=%v", tc.key, tc.old, changed, err)
+		}
+	}
+	out, _ := os.ReadFile(p)
+	if string(out) != src {
+		t.Fatalf("a no-op must leave the file byte-identical:\n%s", out)
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("a no-op must not rewrite the file: mode %v", fi.Mode().Perm())
+	}
+	if _, err := ReplaceInJSONMember(filepath.Join(t.TempDir(), "none.json"), "hooks", "a", "b", 0o600); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing file: err = %v", err)
 	}
 }

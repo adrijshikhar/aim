@@ -114,6 +114,9 @@ func decodeObjectEntries(obj []byte) (Entries, error) {
 	return e, nil
 }
 
+// encodeValue unwraps a {"value": v} scalar. An object that is exactly
+// {"value": X} with no raw bytes is written back as X; none of the merged
+// collections can hold one (spec R4).
 func encodeValue(name string, e Entries) []byte {
 	if raw, ok := e.Raw[name]; ok {
 		return raw
@@ -245,4 +248,34 @@ func DeleteJSONKey(path, key string, minMode os.FileMode) error {
 		return AtomicWrite(path, out, minMode)
 	}
 	return nil
+}
+
+// ReplaceInJSONMember replaces old with new inside the value of one top-level
+// member only, keeping every other byte. It reports whether the file changed;
+// an absent key, an empty old or no match is (false, nil).
+func ReplaceInJSONMember(path, key, old, new string, minMode os.FileMode) (bool, error) {
+	if old == "" {
+		return false, nil // bytes.ReplaceAll would insert new between every byte
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	members, err := scanTop(data)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range members {
+		if m.key != key {
+			continue
+		}
+		val := data[m.valStart:m.end]
+		if !bytes.Contains(val, []byte(old)) {
+			return false, nil
+		}
+		repl := bytes.ReplaceAll(val, []byte(old), []byte(new))
+		out := append(append(append([]byte(nil), data[:m.valStart]...), repl...), data[m.end:]...)
+		return true, AtomicWrite(path, out, minMode)
+	}
+	return false, nil
 }
