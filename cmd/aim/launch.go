@@ -53,7 +53,7 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 	eng := &merge.Engine{Store: store, Out: os.Stderr, Now: nowFunc}
 	cols := mp.MCPCollections(pDir, config.RealHomeDir())
 	native := append(cfg.GetProfileArgs(profileName), extraArgs...) // a copy: extraArgs is not aliased
-	opt := merge.StartOptions{Enabled: cfg.MCPGlobalEnabled(profileName), Background: mp.IsBackground(native)}
+	opt := merge.StartOptions{Enabled: func(merge.Collection) bool { return cfg.MCPGlobalEnabled(profileName) }, Background: mp.IsBackground(native)}
 	sess, err := eng.Start(profileName, adapter.Name(), cols, opt)
 	if err != nil {
 		fmtWarn("aim: MCP merge: %v", err)

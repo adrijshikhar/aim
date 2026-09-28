@@ -33,7 +33,7 @@ func (f *fixture) files(host, profile string) {
 
 func (f *fixture) start() *Session {
 	f.t.Helper()
-	s, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: true})
+	s, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: allOn})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -59,6 +59,23 @@ func (f *fixture) hostValue(name string) string {
 }
 
 func keepAll(c []Change) []Decision { return make([]Decision, len(c)) }
+
+func allOn(Collection) bool  { return true }
+func allOff(Collection) bool { return false }
+
+// sessionsLockFree fails the test when a session still holds the shared
+// sessions lock for (profile, agent).
+func sessionsLockFree(t *testing.T, eng *Engine, profile, agent string) {
+	t.Helper()
+	probe, ok, err := TryUpgrade(eng.Store.SessionsLockPath(profile, agent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("the sessions lock for %s/%s is still held", profile, agent)
+	}
+	_ = probe.Unlock()
+}
 
 func decideBy(m map[string]Decision) func([]Change) []Decision {
 	return func(c []Change) []Decision {
@@ -399,7 +416,7 @@ func TestEngine_SessionsArePerAgent(t *testing.T) {
 	other := filepath.Join(t.TempDir(), "codex.json")
 	_ = os.WriteFile(other, []byte(`{"mcpServers":{}}`), 0o600)
 	codexCol := Collection{Agent: "codex", Name: "mcpServers", Format: JSON, Key: "mcpServers", HostPath: f.host, ProfilePath: other}
-	c, err := f.eng.Start("work", "codex", []Collection{codexCol}, StartOptions{Enabled: true})
+	c, err := f.eng.Start("work", "codex", []Collection{codexCol}, StartOptions{Enabled: allOn})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +459,7 @@ func TestEngine_RecoverAfterCrash(t *testing.T) {
 func TestEngine_BackgroundThenRecover(t *testing.T) {
 	f := newFixture(t)
 	f.files(`{"mcpServers":{"jev":{"command":"npx"}}}`, `{"mcpServers":{"mine":{"command":"m"}}}`)
-	bg, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: true, Background: true})
+	bg, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: allOn, Background: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +572,7 @@ func TestEngine_TOMLNoOpSessionsDoNotGrowFile(t *testing.T) {
 	col := Collection{Agent: "codex", Name: "mcp_servers", Format: TOML, Key: "mcp_servers", HostPath: host, ProfilePath: prof}
 	eng := &Engine{Store: Store{Dir: filepath.Join(d, "state")}, Out: &bytes.Buffer{}, Now: time.Now}
 	for i := 0; i < 4; i++ {
-		s, err := eng.Start("work", "codex", []Collection{col}, StartOptions{Enabled: true})
+		s, err := eng.Start("work", "codex", []Collection{col}, StartOptions{Enabled: allOn})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -577,13 +594,14 @@ func TestEngine_DisabledStillRecovers(t *testing.T) {
 	f.files(`{"mcpServers":{"jev":{"command":"npx"}}}`, `{"mcpServers":{"mine":{"command":"m"}}}`)
 	s := f.start()
 	s.abandon() // crash with jev merged
-	off, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: false})
+	off, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: allOff})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := f.profileNames(); strings.Join(got, ",") != "mine" {
 		t.Fatalf("mcp_global=false must still strip a crashed merge, and merge nothing: %v", got)
 	}
+	sessionsLockFree(t, f.eng, "work", "claude")
 	ch, _ := off.Diff()
 	if len(ch) != 0 {
 		t.Fatalf("disabled Diff = %+v", ch)
@@ -695,7 +713,7 @@ func TestEngine_SaveFailureRollsBackMerge(t *testing.T) {
 	}
 	before, _ := os.ReadFile(f.pf)
 	sabotage = true
-	if _, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: true}); err == nil {
+	if _, err := f.eng.Start("work", "claude", []Collection{f.col}, StartOptions{Enabled: allOn}); err == nil {
 		t.Fatal("Start must report the failed Save")
 	}
 	if after, _ := os.ReadFile(f.pf); string(after) != string(before) {
@@ -713,7 +731,7 @@ func TestEngine_FailedProfileWriteRecordsNoState(t *testing.T) {
 	col := Collection{Agent: "codex", Name: "mcp_servers", Format: TOML, Key: "mcp_servers", HostPath: host, ProfilePath: prof}
 	out := &bytes.Buffer{}
 	eng := &Engine{Store: Store{Dir: filepath.Join(d, "state")}, Out: out, Now: time.Now}
-	s, err := eng.Start("work", "codex", []Collection{col}, StartOptions{Enabled: true})
+	s, err := eng.Start("work", "codex", []Collection{col}, StartOptions{Enabled: allOn})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,7 +745,7 @@ func TestEngine_FailedProfileWriteRecordsNoState(t *testing.T) {
 	ch, _ := s.Diff()
 	_ = s.Finish(ch, keepAll)
 	out.Reset()
-	s2, err := eng.Start("work", "codex", []Collection{col}, StartOptions{Enabled: true})
+	s2, err := eng.Start("work", "codex", []Collection{col}, StartOptions{Enabled: allOn})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -757,7 +775,7 @@ func TestEngine_PartialFailureMergesTheOtherCollection(t *testing.T) {
 			if badFirst {
 				cols = []Collection{bad, f.col}
 			}
-			s, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: true})
+			s, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: allOn})
 			if err != nil {
 				t.Fatalf("a failing collection must not fail Start: %v", err)
 			}
@@ -789,4 +807,122 @@ func TestEngine_PartialFailureMergesTheOtherCollection(t *testing.T) {
 			}
 		})
 	}
+}
+
+// pluginsCol is a second collection in the fixture's files, the shape Claude's
+// enabledPlugins has: bool values in the same settings file as mcpServers.
+func (f *fixture) pluginsCol() Collection {
+	return Collection{Agent: "claude", Name: "enabledPlugins", Format: JSON, Key: "enabledPlugins",
+		HostPath: f.host, ProfilePath: f.pf, Group: "plugins", Noun: "plugin"}
+}
+
+func TestEngine_DisabledGroupIsRecoveredNotMerged(t *testing.T) {
+	f := newFixture(t)
+	f.col.Group = "mcp"
+	plug := f.pluginsCol()
+	f.files(`{"mcpServers":{"jev":{"command":"npx"}},"enabledPlugins":{"x@m":true}}`, `{"mcpServers":{}}`)
+	cols := []Collection{f.col, plug}
+	if _, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: allOn, Background: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.names(f.pf); strings.Join(got, ",") != "jev" {
+		t.Fatalf("background mcp merge = %v", got)
+	}
+	if e, _, _ := plug.Read(f.pf); strings.Join(e.Order, ",") != "x@m" {
+		t.Fatalf("background plugin merge = %v", e.Order)
+	}
+	mcpOnly := func(c Collection) bool { return c.Group != "plugins" }
+	s, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: mcpOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.profileNames(); strings.Join(got, ",") != "jev" {
+		t.Fatalf("the enabled group must be merged again: %v", got)
+	}
+	if has, _ := JSONHasKey(f.pf, "enabledPlugins"); has {
+		b, _ := os.ReadFile(f.pf)
+		t.Fatalf("the disabled group must be recovered, key and all:\n%s", b)
+	}
+	st, _ := f.eng.Store.Load("work")
+	if _, ok := st.Active[plug.ID()]; ok || st.Active[f.col.ID()]["jev"] == "" {
+		t.Fatalf("Active = %+v", st.Active)
+	}
+	if len(s.cols) != 1 || s.cols[0].ID() != f.col.ID() {
+		t.Fatalf("session collections = %+v", s.cols)
+	}
+	ch, _ := s.Diff()
+	if err := s.Finish(ch, keepAll); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(f.pf); string(b) != `{"mcpServers":{}}` {
+		t.Fatalf("at rest = %s", b)
+	}
+}
+
+func TestEngine_AllDisabledAfterBackgroundRecoversWithoutLock(t *testing.T) {
+	f := newFixture(t)
+	plug := f.pluginsCol()
+	f.files(`{"mcpServers":{"jev":{"command":"npx"}},"enabledPlugins":{"x@m":true}}`, `{"mcpServers":{"mine":{"command":"m"}}}`)
+	cols := []Collection{f.col, plug}
+	if _, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: allOn, Background: true}); err != nil {
+		t.Fatal(err)
+	}
+	off, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: allOff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has, _ := JSONHasKey(f.pf, "enabledPlugins"); has || strings.Join(f.profileNames(), ",") != "mine" {
+		b, _ := os.ReadFile(f.pf)
+		t.Fatalf("every group must be recovered:\n%s", b)
+	}
+	sessionsLockFree(t, f.eng, "work", "claude")
+	if len(off.cols) != 0 {
+		t.Fatalf("nothing merged, got %+v", off.cols)
+	}
+	st, _ := f.eng.Store.Load("work")
+	if len(st.Active) != 0 {
+		t.Fatalf("Active = %+v", st.Active)
+	}
+	// switched back on, the next launch is alone and merges again
+	on := f.start()
+	if got := f.profileNames(); strings.Join(got, ",") != "mine,jev" {
+		t.Fatalf("re-enabled launch = %v", got)
+	}
+	ch, _ := on.Diff()
+	_ = on.Finish(ch, keepAll)
+}
+
+func TestEngine_NilEnabledMergesEveryCollection(t *testing.T) {
+	f := newFixture(t)
+	plug := f.pluginsCol()
+	f.files(`{"mcpServers":{"jev":{"command":"npx"}},"enabledPlugins":{"x@m":true}}`, `{}`)
+	s, err := f.eng.Start("work", "claude", []Collection{f.col, plug}, StartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.cols) != 2 {
+		t.Fatalf("a nil predicate means every collection: %+v", s.cols)
+	}
+	ch, _ := s.Diff()
+	_ = s.Finish(ch, keepAll)
+	if b, _ := os.ReadFile(f.pf); string(b) != `{}` {
+		t.Fatalf("at rest = %s", b)
+	}
+}
+
+func TestEngine_MigrationMessageUsesNoun(t *testing.T) {
+	f := newFixture(t)
+	plug := f.pluginsCol()
+	f.files(`{"enabledPlugins":{"shared@m":true,"diff@m":true}}`, `{"enabledPlugins":{"shared@m":true,"diff@m":false}}`)
+	s, err := f.eng.Start("work", "claude", []Collection{plug}, StartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := f.out.String()
+	if !strings.Contains(out, "claude: 1 plugin(s) in work matched the host's (shared@m) and were removed; backup: ") ||
+		!strings.Contains(out, "claude: 1 plugin(s) in work differ from the host's (diff@m) and stay the profile's own") {
+		t.Fatalf("migration message = %q", out)
+	}
+	ch, _ := s.Diff()
+	_ = s.Finish(ch, keepAll)
 }

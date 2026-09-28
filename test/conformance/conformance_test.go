@@ -97,7 +97,7 @@ func TestConformance(t *testing.T) {
 			keep := func(x []merge.Change) []merge.Decision { return make([]merge.Decision, len(x)) }
 
 			// 1. a session sees the host item; a no-change session restores the same items
-			s, err := eng.Start("p", c.name, cols, merge.StartOptions{Enabled: true})
+			s, err := eng.Start("p", c.name, cols, merge.StartOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,7 +118,7 @@ func TestConformance(t *testing.T) {
 			}
 
 			// 2. a native add during a session is reported as added and kept at rest
-			s, _ = eng.Start("p", c.name, cols, merge.StartOptions{Enabled: true})
+			s, _ = eng.Start("p", c.name, cols, merge.StartOptions{})
 			run(t, c, c.envFor(home, prof), c.add("newsrv")...)
 			ch, _ = s.Diff()
 			if len(ch) != 1 || ch[0].Name != "newsrv" || ch[0].Kind != merge.Added {

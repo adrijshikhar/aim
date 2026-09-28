@@ -35,10 +35,11 @@ const (
 	Promote
 )
 
-// StartOptions: Enabled is profiles.<p>.mcp_global; Background means merge,
-// run, no exit step (spec R2).
+// StartOptions: Enabled picks the collections to merge (profiles.<p>.mcp_global,
+// plugins_global; nil means every one) — recovery covers all of them either
+// way. Background means merge, run, no exit step (spec R2).
 type StartOptions struct {
-	Enabled    bool
+	Enabled    func(Collection) bool
 	Background bool
 }
 
@@ -113,7 +114,7 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 	s := &Session{eng: e, profile: profile, agent: agent}
 	ml, err := LockExclusive(e.Store.MergeLockPath(profile), lockTimeout)
 	if err != nil {
-		e.warnf("aim: MCP merge skipped for %s (%v)", profile, err)
+		e.warnf("aim: host merge skipped for %s (%v)", profile, err)
 		return s, nil
 	}
 	defer ml.Unlock()
@@ -136,12 +137,18 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 			}
 		}
 	}
-	if !opt.Enabled {
-		return s, e.Store.Save(profile, st)
+	var allowed []Collection
+	for _, c := range cols {
+		if opt.Enabled == nil || opt.Enabled(c) {
+			allowed = append(allowed, c)
+		}
+	}
+	if len(allowed) == 0 {
+		return s, e.Store.Save(profile, st) // no sessions lock: Diff and Finish do nothing
 	}
 	backedUp := map[string]string{} // profile file → its one migration backup per Start
 	var undo []stripWrite
-	for _, c := range cols {
+	for _, c := range allowed {
 		w, err := e.startCollection(profile, c, st, alone, backedUp)
 		if err != nil {
 			if !errors.Is(err, errNoHost) && !errors.Is(err, errNotMerged) {
@@ -272,13 +279,13 @@ func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entri
 			return err
 		}
 		if name != "" {
-			e.warnf("%s: %d server(s) in %s matched the host's (%s) and were removed; backup: %s",
-				c.Agent, len(removed), profile, strings.Join(removed, ", "), name)
+			e.warnf("%s: %d %s(s) in %s matched the host's (%s) and were removed; backup: %s",
+				c.Agent, len(removed), c.noun(), profile, strings.Join(removed, ", "), name)
 		}
 	}
 	if len(differing) > 0 {
-		e.warnf("%s: %d server(s) in %s differ from the host's (%s) and stay the profile's own",
-			c.Agent, len(differing), profile, strings.Join(differing, ", "))
+		e.warnf("%s: %d %s(s) in %s differ from the host's (%s) and stay the profile's own",
+			c.Agent, len(differing), c.noun(), profile, strings.Join(differing, ", "))
 	}
 	st.Migrated[id] = e.now()
 	return nil
@@ -425,7 +432,7 @@ func (s *Session) Finish(changes []Change, decide func([]Change) []Decision) err
 	}
 	now, err := e.diff(s.cols, st)
 	if err != nil {
-		e.warnf("aim: MCP diff: %v", err)
+		e.warnf("aim: host diff: %v", err)
 	}
 	for _, ch := range now {
 		d := Keep
