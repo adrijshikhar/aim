@@ -292,7 +292,9 @@ func WriteTOMLKey(path, key string, desired Entries, minMode os.FileMode) ([]str
 			if err != nil {
 				return nil, err
 			}
-			text = string(b)
+			// go-toml leads with the bare super-table header; keep only the
+			// entry's own tables, or a second synthesised add defines [key] twice.
+			text = strings.TrimPrefix(string(b), "["+key+"]\n")
 		}
 		if !strings.HasSuffix(text, "\n") {
 			text += "\n"

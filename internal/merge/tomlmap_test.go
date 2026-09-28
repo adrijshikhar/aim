@@ -171,3 +171,27 @@ func TestTOML_RepeatedAddRemoveDoesNotGrow(t *testing.T) {
 		}
 	}
 }
+
+// An entry with no raw bytes is synthesised by the marshaller; two of them in a
+// row must not define the bare [mcp_servers] super-table twice.
+func TestTOML_SynthesisedAddsDoNotRepeatSuperTable(t *testing.T) {
+	p := write(t, "model = \"x\"\n")
+	e := NewEntries()
+	for _, n := range []string{"first", "second"} {
+		e.Set(n, map[string]any{"command": "true"}, nil)
+		if skipped, err := WriteTOMLKey(p, "mcp_servers", e, 0o600); err != nil || len(skipped) != 0 {
+			t.Fatalf("add %s: skipped=%v err=%v", n, skipped, err)
+		}
+	}
+	got, _, err := ReadTOMLKey(p, "mcp_servers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.Order, ",") != "first,second" {
+		t.Fatalf("entries = %v, want [first second]", got.Order)
+	}
+	data, _ := os.ReadFile(p)
+	if strings.Contains(string(data), "[mcp_servers]\n") {
+		t.Fatalf("bare super-table header written:\n%s", data)
+	}
+}
