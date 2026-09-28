@@ -426,6 +426,16 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}, nil
 }
 
+// sharedConfigDir is the host layer for agy: the real ~/.gemini/config when it
+// exists, else aim's shared fallback.
+func sharedConfigDir(realHome string) string {
+	realConfigDir := filepath.Join(realHome, ".gemini", "config")
+	if _, err := os.Stat(realConfigDir); err == nil {
+		return realConfigDir
+	}
+	return filepath.Join(config.BaseDir(), "shared", "gemini-config")
+}
+
 func bridgeSharedState(realHome, profileDir string) error {
 	var sharedDir string
 	realAgyDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
@@ -470,37 +480,31 @@ func bridgeSharedState(realHome, profileDir string) error {
 	bridgeDir(pPluginData, sPluginData)
 
 	// 6. Gemini config directory (plugins, import_manifest.json, hooks, settings)
-	var sharedConfigDir string
-	realConfigDir := filepath.Join(realHome, ".gemini", "config")
-	if _, err := os.Stat(realConfigDir); err == nil {
-		sharedConfigDir = realConfigDir
-	} else {
-		sharedConfigDir = filepath.Join(config.BaseDir(), "shared", "gemini-config")
-	}
-	_ = os.MkdirAll(sharedConfigDir, 0755)
+	sharedDirCfg := sharedConfigDir(realHome)
+	_ = os.MkdirAll(sharedDirCfg, 0755)
 
 	profileConfigDir := filepath.Join(profileDir, ".gemini", "config")
 	_ = os.MkdirAll(profileConfigDir, 0755)
 
 	// 6a. plugins directory
-	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "plugins"), 0755)
-	bridgeDir(filepath.Join(profileConfigDir, "plugins"), filepath.Join(sharedConfigDir, "plugins"))
+	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "plugins"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "plugins"), filepath.Join(sharedDirCfg, "plugins"))
 
 	// 6b. import_manifest.json
-	bridgeFile(filepath.Join(profileConfigDir, "import_manifest.json"), filepath.Join(sharedConfigDir, "import_manifest.json"))
+	bridgeFile(filepath.Join(profileConfigDir, "import_manifest.json"), filepath.Join(sharedDirCfg, "import_manifest.json"))
 
 	// 6c. hooks.json & hooks directory
-	bridgeFile(filepath.Join(profileConfigDir, "hooks.json"), filepath.Join(sharedConfigDir, "hooks.json"))
-	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "hooks"), 0755)
-	bridgeDir(filepath.Join(profileConfigDir, "hooks"), filepath.Join(sharedConfigDir, "hooks"))
+	bridgeFile(filepath.Join(profileConfigDir, "hooks.json"), filepath.Join(sharedDirCfg, "hooks.json"))
+	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "hooks"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "hooks"), filepath.Join(sharedDirCfg, "hooks"))
 
 	// 6d. config.json & mcp_config.json
-	bridgeFile(filepath.Join(profileConfigDir, "config.json"), filepath.Join(sharedConfigDir, "config.json"))
-	bridgeFile(filepath.Join(profileConfigDir, "mcp_config.json"), filepath.Join(sharedConfigDir, "mcp_config.json"))
+	bridgeFile(filepath.Join(profileConfigDir, "config.json"), filepath.Join(sharedDirCfg, "config.json"))
+	bridgeFile(filepath.Join(profileConfigDir, "mcp_config.json"), filepath.Join(sharedDirCfg, "mcp_config.json"))
 
 	// 6e. projects
-	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "projects"), 0755)
-	bridgeDir(filepath.Join(profileConfigDir, "projects"), filepath.Join(sharedConfigDir, "projects"))
+	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "projects"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "projects"), filepath.Join(sharedDirCfg, "projects"))
 
 	// 6f. skills symlink in .gemini/config
 	sSkills := filepath.Join(realHome, ".agents", "skills")
