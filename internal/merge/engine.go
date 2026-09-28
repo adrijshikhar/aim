@@ -1,0 +1,546 @@
+package merge
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+)
+
+// Change is one difference between what a session started with and what it
+// left in the profile file.
+type Change struct {
+	Collection Collection
+	Name       string
+	Kind       ChangeKind
+	Value      map[string]any
+	Raw        []byte
+	// HostChanged: for edited/removed, the host's copy differs from the value
+	// merged at start; for added, the host now defines the name. Promote would
+	// overwrite the host, so it is refused (spec §5 End step 3).
+	HostChanged bool
+}
+
+type Decision int
+
+const (
+	// Keep leaves the change in the profile (added/edited: the profile's own;
+	// removed: the host item comes back next session).
+	Keep Decision = iota
+	// Promote writes the change to the host file.
+	Promote
+)
+
+// StartOptions: Enabled is profiles.<p>.mcp_global; Background means merge,
+// run, no exit step (spec R2).
+type StartOptions struct {
+	Enabled    bool
+	Background bool
+}
+
+type Engine struct {
+	Store Store
+	Out   io.Writer
+	Now   func() time.Time
+}
+
+type Session struct {
+	eng      *Engine
+	profile  string
+	agent    string
+	cols     []Collection // collections this session merged or joined
+	sessions *Lock
+	active   bool // a foreground session with an exit step
+}
+
+const lockTimeout = 10 * time.Second
+
+// errNoHost skips a collection silently: with no host file there is nothing to merge.
+var errNoHost = errors.New("host file missing")
+
+func (e *Engine) warnf(format string, a ...any) {
+	if e.Out != nil {
+		fmt.Fprintf(e.Out, format+"\n", a...)
+	}
+}
+
+func (e *Engine) now() time.Time {
+	if e.Now != nil {
+		return e.Now()
+	}
+	return time.Now()
+}
+
+func readRetry(c Collection, path string) (Entries, bool, error) {
+	ent, ok, err := c.Read(path)
+	if err != nil {
+		time.Sleep(100 * time.Millisecond)
+		ent, ok, err = c.Read(path)
+	}
+	return ent, ok, err
+}
+
+func setHash(m map[string]map[string]string, id, name, h string) {
+	if m[id] == nil {
+		m[id] = map[string]string{}
+	}
+	m[id][name] = h
+}
+
+// hasSessionState reports whether a session of these collections started and
+// has not finished (its Active entry is still present).
+func hasSessionState(st *State, cols []Collection) bool {
+	for _, c := range cols {
+		if _, ok := st.Active[c.ID()]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// Start runs spec §5 Start. A foreground session holds the shared sessions
+// lock for (profile, agent) when Start returns with active=true; a background
+// launch merges and returns a session whose Diff and Finish do nothing.
+func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOptions) (*Session, error) {
+	s := &Session{eng: e, profile: profile, agent: agent}
+	ml, err := LockExclusive(e.Store.MergeLockPath(profile), lockTimeout)
+	if err != nil {
+		e.warnf("aim: MCP merge skipped for %s (%v)", profile, err)
+		return s, nil
+	}
+	defer ml.Unlock()
+
+	st, err := e.Store.Load(profile)
+	if err != nil {
+		return s, err
+	}
+	probe, alone, err := TryUpgrade(e.Store.SessionsLockPath(profile, agent))
+	if err != nil {
+		return s, err
+	}
+	if alone {
+		_ = probe.Unlock()
+		if hasSessionState(st, cols) {
+			// The previous session ended without an exit step (crash, or a
+			// background launch): keep its changes, strip its host items.
+			if err := e.recover(profile, agent, cols, st); err != nil {
+				e.warnf("aim: recovery for %s: %v", profile, err)
+			}
+		}
+	}
+	if !opt.Enabled {
+		return s, e.Store.Save(profile, st)
+	}
+	backedUp := map[string]bool{} // one migration backup per profile file per Start
+	for _, c := range cols {
+		if err := e.startCollection(profile, c, st, alone, backedUp); err != nil {
+			if !errors.Is(err, errNoHost) {
+				e.warnf("aim: %s: %v — skipped", c.ID(), err)
+			}
+			continue
+		}
+		s.cols = append(s.cols, c)
+	}
+	if err := e.Store.Save(profile, st); err != nil {
+		return s, err
+	}
+	if opt.Background {
+		return s, nil // merged; the next launch of this agent recovers
+	}
+	s.sessions, err = LockShared(e.Store.SessionsLockPath(profile, agent))
+	if err != nil {
+		return s, err
+	}
+	s.active = true
+	return s, nil
+}
+
+func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, backedUp map[string]bool) error {
+	if fi, err := os.Lstat(c.ProfilePath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return errors.New(c.ProfilePath + " is a symlink; not merging into a shared file")
+	}
+	if !alone {
+		return nil // another running session of this agent already merged; join it
+	}
+	host, hostOK, err := readRetry(c, c.HostPath)
+	if err != nil {
+		return err
+	}
+	if !hostOK {
+		return errNoHost
+	}
+	prof, _, err := readRetry(c, c.ProfilePath)
+	if err != nil {
+		return err
+	}
+	id := c.ID()
+	norm := c.norm()
+	if _, done := st.Migrated[id]; !done {
+		if err := e.migrate(profile, c, host, &prof, st, backedUp); err != nil {
+			return err
+		}
+	}
+	// Every profile item is the profile's own; a name the profile defines wins
+	// over the host's (conflict rule) and is never merged over or stripped.
+	start, active := map[string]string{}, map[string]string{}
+	for _, n := range prof.Order {
+		start[n] = Hash(norm, prof.Values[n])
+	}
+	changed := false
+	for _, n := range host.Order {
+		if prof.Has(n) {
+			continue
+		}
+		prof.Set(n, host.Values[n], host.Raw[n])
+		active[n] = Hash(norm, host.Values[n])
+		changed = true
+	}
+	st.StartProfile[id] = start
+	st.Active[id] = active
+	if !changed {
+		return nil
+	}
+	hadKey, err := c.HasKey(c.ProfilePath)
+	if err != nil {
+		return err
+	}
+	skipped, err := c.Write(c.ProfilePath, prof)
+	for _, n := range skipped {
+		delete(active, n)
+		e.warnf("aim: %s: %s is defined inline and was not merged", id, n)
+	}
+	if err == nil && !hadKey {
+		st.AddedKey[id] = true
+	}
+	return err
+}
+
+// migrate runs once per collection: profile servers identical to the host's are
+// old copy-once leftovers (T4) and are removed after a backup; servers that
+// differ stay the profile's own (conflict rule) and are listed once.
+func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entries, st *State, backedUp map[string]bool) error {
+	id := c.ID()
+	norm := c.norm()
+	var differing []string
+	removed := false
+	for _, n := range slices.Clone(prof.Order) {
+		if !host.Has(n) {
+			continue
+		}
+		if Hash(norm, prof.Values[n]) == Hash(norm, host.Values[n]) {
+			prof.Delete(n)
+			removed = true
+		} else {
+			differing = append(differing, n)
+		}
+	}
+	if removed {
+		if err := e.backup(c.ProfilePath, backedUp); err != nil {
+			return err
+		}
+		if _, err := c.Write(c.ProfilePath, *prof); err != nil {
+			return err
+		}
+	}
+	if len(differing) > 0 {
+		e.warnf("%s: %d server(s) in %s differ from the host's (%s) and stay the profile's own",
+			c.Agent, len(differing), profile, strings.Join(differing, ", "))
+	}
+	st.Migrated[id] = e.now()
+	return nil
+}
+
+// backup copies path to <path>.aim-backup-<UTC>[-n] (0600) once per Start and
+// never overwrites an existing backup.
+func (e *Engine) backup(path string, done map[string]bool) error {
+	if done[path] {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	base := fmt.Sprintf("%s.aim-backup-%s", path, e.now().UTC().Format("20060102T150405Z"))
+	for i := 1; ; i++ {
+		name := base
+		if i > 1 {
+			name = fmt.Sprintf("%s-%d", base, i)
+		}
+		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		_, werr := f.Write(data)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return werr
+		}
+		done[path] = true
+		return nil
+	}
+}
+
+// Diff compares each collection with what the session started from (spec §5
+// End step 1). It takes the merge lock only while reading.
+func (s *Session) Diff() ([]Change, error) {
+	if !s.active {
+		return nil, nil
+	}
+	ml, err := LockExclusive(s.eng.Store.MergeLockPath(s.profile), lockTimeout)
+	if err != nil {
+		return nil, err
+	}
+	defer ml.Unlock()
+	st, err := s.eng.Store.Load(s.profile)
+	if err != nil {
+		return nil, err
+	}
+	return s.eng.diff(s.cols, st)
+}
+
+// diff returns the changes sorted by collection, then name.
+func (e *Engine) diff(cols []Collection, st *State) ([]Change, error) {
+	var out []Change
+	for _, c := range cols {
+		id := c.ID()
+		now, _, err := readRetry(c, c.ProfilePath)
+		if err != nil {
+			return out, err
+		}
+		host, _, _ := c.Read(c.HostPath) // best effort: an unreadable host counts as changed
+		norm := c.norm()
+		hostHash := func(n string) string {
+			if host.Has(n) {
+				return Hash(norm, host.Values[n])
+			}
+			return ""
+		}
+		active, start := st.Active[id], st.StartProfile[id]
+		for n, h := range active {
+			switch {
+			case !now.Has(n):
+				out = append(out, Change{Collection: c, Name: n, Kind: Removed, HostChanged: hostHash(n) != h})
+			case Hash(norm, now.Values[n]) != h:
+				out = append(out, Change{Collection: c, Name: n, Kind: Edited, Value: now.Values[n], Raw: now.Raw[n], HostChanged: hostHash(n) != h})
+			}
+		}
+		for _, n := range now.Order {
+			if _, isActive := active[n]; isActive {
+				continue
+			}
+			if _, wasProfile := start[n]; wasProfile {
+				continue // the profile's own change: kept, no question
+			}
+			out = append(out, Change{Collection: c, Name: n, Kind: Added, Value: now.Values[n], Raw: now.Raw[n], HostChanged: host.Has(n)})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if a, b := out[i].Collection.ID(), out[j].Collection.ID(); a != b {
+			return a < b
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func sameChange(a, b Change) bool {
+	return a.Collection.ID() == b.Collection.ID() && a.Name == b.Name && a.Kind == b.Kind
+}
+
+// sameValue reports whether two changes carry the same value (a removal has none).
+func sameValue(a, b Change) bool {
+	if a.Kind == Removed {
+		return true
+	}
+	n := a.Collection.norm()
+	return Hash(n, a.Value) == Hash(n, b.Value)
+}
+
+// Finish runs spec §5 End steps 2–5: decide WITHOUT the merge lock (the prompt
+// may wait on the user), then lock, re-diff, apply the decisions to the changes
+// still present (anything new is kept), strip if this is the agent's last
+// session, save, release.
+func (s *Session) Finish(changes []Change, decide func([]Change) []Decision) error {
+	if !s.active {
+		return nil
+	}
+	e := s.eng
+	var decisions []Decision
+	if len(changes) > 0 && decide != nil {
+		decisions = decide(changes)
+	}
+	ml, err := LockExclusive(e.Store.MergeLockPath(s.profile), lockTimeout)
+	if err != nil {
+		_ = s.sessions.Unlock()
+		return err
+	}
+	defer ml.Unlock()
+	st, err := e.Store.Load(s.profile)
+	if err != nil {
+		_ = s.sessions.Unlock()
+		return err
+	}
+	now, err := e.diff(s.cols, st)
+	if err != nil {
+		e.warnf("aim: MCP diff: %v", err)
+	}
+	for _, ch := range now {
+		d := Keep
+		for i, old := range changes {
+			if i >= len(decisions) || !sameChange(old, ch) {
+				continue
+			}
+			if decisions[i] == Promote && !sameValue(old, ch) {
+				e.warnf("aim: %s %s: changed since the prompt — kept in %s", ch.Collection.ID(), ch.Name, s.profile)
+				break
+			}
+			d = decisions[i]
+			break
+		}
+		e.apply(s.profile, ch, d, st)
+	}
+	_ = s.sessions.Unlock()
+	s.active = false
+	probe, last, err := TryUpgrade(e.Store.SessionsLockPath(s.profile, s.agent))
+	if err != nil || !last {
+		return e.Store.Save(s.profile, st)
+	}
+	_ = probe.Unlock()
+	// Last session: plan the strip, save state first, then write (spec §5 End 4).
+	var writes []stripWrite
+	for _, c := range s.cols {
+		writes = append(writes, e.planStrip(c, st))
+	}
+	if err := e.Store.Save(s.profile, st); err != nil {
+		return err
+	}
+	for _, w := range writes {
+		e.writeStrip(w)
+	}
+	return nil
+}
+
+// apply records one decision. A kept addition or edit becomes the profile's
+// own (StartProfile), so a session still running does not report it again; a
+// kept removal drops the name from Active (it comes back next session). A
+// promote that fails falls back to keep.
+func (e *Engine) apply(profile string, ch Change, d Decision, st *State) {
+	id := ch.Collection.ID()
+	if d == Promote {
+		err := e.promote(ch, st)
+		if err == nil {
+			return
+		}
+		e.warnf("aim: %s %s: %v — kept in %s", id, ch.Name, err, profile)
+	}
+	switch ch.Kind {
+	case Removed:
+		delete(st.Active[id], ch.Name)
+	case Edited:
+		delete(st.Active[id], ch.Name)
+		setHash(st.StartProfile, id, ch.Name, Hash(ch.Collection.norm(), ch.Value))
+	case Added:
+		setHash(st.StartProfile, id, ch.Name, Hash(ch.Collection.norm(), ch.Value))
+	}
+}
+
+// stripWrite is a strip that has been computed but not yet written.
+type stripWrite struct {
+	c         Collection
+	prof      Entries
+	removeKey bool
+	skip      bool
+}
+
+// planStrip computes the profile file without the host items merged by
+// sessions and clears the collection's session state. The file is written
+// after the state is saved (a crash in between leaves host copies the user can
+// remove; the reverse order would misreport them as kept removals).
+func (e *Engine) planStrip(c Collection, st *State) stripWrite {
+	id := c.ID()
+	w := stripWrite{c: c, skip: true}
+	active := st.Active[id]
+	if len(active) > 0 || st.AddedKey[id] {
+		prof, ok, err := readRetry(c, c.ProfilePath)
+		switch {
+		case err != nil:
+			e.warnf("aim: %s: strip: %v", id, err)
+		case !ok:
+			// the file vanished during the session: nothing to write
+		default:
+			for n, h := range active {
+				if prof.Has(n) && Hash(c.norm(), prof.Values[n]) == h {
+					prof.Delete(n)
+				}
+			}
+			w.prof, w.skip = prof, false
+			w.removeKey = st.AddedKey[id] && len(prof.Order) == 0
+		}
+	}
+	delete(st.Active, id)
+	delete(st.StartProfile, id)
+	delete(st.AddedKey, id)
+	return w
+}
+
+func (e *Engine) writeStrip(w stripWrite) {
+	if w.skip {
+		return
+	}
+	var err error
+	if w.removeKey {
+		err = w.c.RemoveKey(w.c.ProfilePath)
+	} else {
+		_, err = w.c.Write(w.c.ProfilePath, w.prof)
+	}
+	if err != nil {
+		e.warnf("aim: %s: strip failed: %v", w.c.ID(), err)
+	}
+}
+
+// recover finishes a session that ended without an exit step: every change is
+// kept, then its host items are stripped.
+func (e *Engine) recover(profile, agent string, cols []Collection, st *State) error {
+	var mine []Collection
+	for _, c := range cols {
+		if _, ok := st.Active[c.ID()]; ok {
+			mine = append(mine, c)
+		}
+	}
+	changes, err := e.diff(mine, st)
+	if err != nil {
+		return err
+	}
+	for _, ch := range changes {
+		e.apply(profile, ch, Keep, st)
+	}
+	if len(changes) > 0 {
+		e.warnf("%d change(s) kept in %s (%s) from a session that did not exit through aim", len(changes), profile, agent)
+	}
+	var writes []stripWrite
+	for _, c := range mine {
+		writes = append(writes, e.planStrip(c, st))
+	}
+	if err := e.Store.Save(profile, st); err != nil {
+		return err
+	}
+	for _, w := range writes {
+		e.writeStrip(w)
+	}
+	return nil
+}
+
+// abandon simulates a killed session in tests.
+func (s *Session) abandon() { _ = s.sessions.Unlock() }
