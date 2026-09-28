@@ -2510,4 +2510,3 @@ func TestResumeModal_FlagsInputAndSelectedArgs(t *testing.T) {
 		t.Fatalf("expected SelectedArgs to be [--yolo, -m, o3], got %v", m.SelectedArgs())
 	}
 }
-
