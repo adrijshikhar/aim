@@ -102,46 +102,53 @@ func (m Model) filteredSessions() []session.Session {
 
 func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.sessionsDrawer.filterActive {
-		switch msg.Type {
-		case tea.KeyCtrlC:
+		if msg.Type == tea.KeyCtrlC || msg.String() == "ctrl+c" {
 			m.cancelStream()
 			return m, tea.Quit
-		case tea.KeyEsc:
+		}
+
+		if msg.Type == tea.KeyTab || msg.String() == "tab" || msg.Type == tea.KeyEsc || msg.String() == "esc" {
 			m.sessionsDrawer.filterActive = false
+			m.sessionsDrawer.filterInput.Blur()
 			return m, nil
-		case tea.KeyUp:
+		}
+
+		if msg.Type == tea.KeyUp || msg.String() == "up" || msg.String() == "ctrl+p" || msg.String() == "ctrl+k" {
 			if m.sessionsDrawer.cursor > 0 {
 				m.sessionsDrawer.cursor--
 			}
 			return m, nil
-		case tea.KeyDown:
+		}
+
+		if msg.Type == tea.KeyDown || msg.String() == "down" || msg.String() == "ctrl+n" || msg.String() == "ctrl+j" {
 			filtered := m.filteredSessions()
 			if m.sessionsDrawer.cursor < len(filtered)-1 {
 				m.sessionsDrawer.cursor++
 			}
 			return m, nil
-		case tea.KeyEnter:
+		}
+
+		if msg.Type == tea.KeyCtrlF || msg.String() == "ctrl+f" {
 			filtered := m.filteredSessions()
 			if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 				m.sessionsDrawer.filterActive = false
+				m.sessionsDrawer.filterInput.Blur()
+				target := filtered[m.sessionsDrawer.cursor]
+				return m.openResumeModalWithFlags(&target, ActionResumeExact, false, true)
+			}
+			return m, nil
+		}
+
+		if msg.Type == tea.KeyEnter || msg.String() == "enter" {
+			filtered := m.filteredSessions()
+			if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
+				m.sessionsDrawer.filterActive = false
+				m.sessionsDrawer.filterInput.Blur()
 				target := filtered[m.sessionsDrawer.cursor]
 				return m.openResumeModal(&target, ActionResumeExact, false)
 			}
 			m.sessionsDrawer.filterActive = false
-			return m, nil
-		}
-
-		switch msg.String() {
-		case "ctrl+n", "ctrl+j":
-			filtered := m.filteredSessions()
-			if m.sessionsDrawer.cursor < len(filtered)-1 {
-				m.sessionsDrawer.cursor++
-			}
-			return m, nil
-		case "ctrl+p", "ctrl+k":
-			if m.sessionsDrawer.cursor > 0 {
-				m.sessionsDrawer.cursor--
-			}
+			m.sessionsDrawer.filterInput.Blur()
 			return m, nil
 		}
 
@@ -158,13 +165,37 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "ctrl+c":
 		m.cancelStream()
 		return m, tea.Quit
-	case "s", "esc", "q":
+	case "s", "q":
+		m.sessionsDrawer = sessionsDrawerState{}
+		return m, nil
+	case "esc":
+		if m.sessionsDrawer.filterInput.Value() != "" {
+			m.sessionsDrawer.filterInput.SetValue("")
+			m.sessionsDrawer.cursor = 0
+			return m, nil
+		}
 		m.sessionsDrawer = sessionsDrawerState{}
 		return m, nil
 	case "/":
 		m.sessionsDrawer.filterActive = true
-		m.sessionsDrawer.filterInput.Focus()
-		return m, textinput.Blink
+		cmd := m.sessionsDrawer.filterInput.Focus()
+		return m, cmd
+	case "tab":
+		if m.sessionsDrawer.filterInput.Value() != "" {
+			m.sessionsDrawer.filterActive = true
+			cmd := m.sessionsDrawer.filterInput.Focus()
+			return m, cmd
+		}
+		if m.sessionsDrawer.agentFilter == "agy" {
+			m.sessionsDrawer.agentFilter = "codex"
+		} else if m.sessionsDrawer.agentFilter == "codex" {
+			m.sessionsDrawer.agentFilter = ""
+		} else {
+			m.sessionsDrawer.agentFilter = "agy"
+		}
+		m.sessionsDrawer.cursor = 0
+		m = m.fetchSessions()
+		return m, nil
 	case "up", "k":
 		if m.sessionsDrawer.cursor > 0 {
 			m.sessionsDrawer.cursor--
@@ -182,7 +213,7 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			target := filtered[m.sessionsDrawer.cursor]
 			return m.openResumeModal(&target, ActionResumeExact, false)
 		}
-	case "f":
+	case "f", "ctrl+f":
 		filtered := m.filteredSessions()
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
@@ -200,17 +231,6 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			target := filtered[m.sessionsDrawer.cursor]
 			return m.openResumeModal(&target, ActionResumeExact, true)
 		}
-	case "tab":
-		if m.sessionsDrawer.agentFilter == "agy" {
-			m.sessionsDrawer.agentFilter = "codex"
-		} else if m.sessionsDrawer.agentFilter == "codex" {
-			m.sessionsDrawer.agentFilter = ""
-		} else {
-			m.sessionsDrawer.agentFilter = "agy"
-		}
-		m.sessionsDrawer.cursor = 0
-		m = m.fetchSessions()
-		return m, nil
 	case "1":
 		m.sessionsDrawer.agentFilter = "agy"
 		m.sessionsDrawer.cursor = 0
@@ -252,7 +272,7 @@ func (m Model) renderSessionsDrawer() string {
 		filterTabStyle(allActive).Render("[0] All"),
 		filterTabStyle(agyActive).Render("[1] Antigravity"),
 		filterTabStyle(codexActive).Render("[2] Codex"),
-		lipgloss.NewStyle().Foreground(TextMuted).Render("| [Tab] Cycle | [/] Filter | [Esc] Close"),
+		lipgloss.NewStyle().Foreground(TextMuted).Render("| [0-2] Tab | [/] Filter | [Esc] Close"),
 	)
 	b.WriteString(topBar + "\n\n")
 
@@ -385,9 +405,19 @@ func (m Model) renderSessionsDrawer() string {
 		}
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [↑/↓] Navigate  •  [Enter] Resume  •  [f] Flags  •  [c] Catalyst  •  [b] Fork  •  [Esc] Close",
-	))
+	if m.sessionsDrawer.filterActive {
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
+			"  [↑/↓] Navigate  •  [Enter] Resume  •  [Ctrl+F] Flags  •  [Tab/Esc] Exit Filter",
+		))
+	} else if m.sessionsDrawer.filterInput.Value() != "" {
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
+			"  [↑/↓] Navigate  •  [Enter] Resume  •  [f] Flags  •  [c] Catalyst  •  [b] Fork  •  [/ / Tab] Filter  •  [Esc] Clear",
+		))
+	} else {
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
+			"  [↑/↓] Navigate  •  [Enter] Resume  •  [f] Flags  •  [c] Catalyst  •  [b] Fork  •  [/] Filter  •  [Esc] Close",
+		))
+	}
 
 	box := SessionsDrawerStyle.Render(b.String())
 	return "\n" + box + "\n"

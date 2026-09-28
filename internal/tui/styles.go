@@ -129,7 +129,8 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(AccentBlue).
 				Padding(1, 2).
-				MarginLeft(2)
+				MarginLeft(2).
+				Width(104)
 
 	ResumeModalBoxStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
