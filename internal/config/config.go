@@ -45,9 +45,13 @@ func RealHomeDir() string {
 	if custom := os.Getenv("AIM_REAL_HOME"); custom != "" {
 		return custom
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "."
+	home := os.Getenv("HOME")
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return "."
+		}
 	}
 	marker := filepath.Join(".aim", "profiles")
 	if strings.Contains(home, marker) {

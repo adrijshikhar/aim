@@ -68,6 +68,7 @@ type Model struct {
 	keys           KeyMap
 
 	selectedSession *session.Session
+	selectedArgs    []string
 }
 
 func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config) Model {
@@ -145,6 +146,14 @@ func (m Model) SelectedProfile() string {
 
 func (m Model) SelectedSession() *session.Session {
 	return m.selectedSession
+}
+
+func (m Model) SelectedArgs() []string {
+	return m.selectedArgs
+}
+
+func (m *Model) SetSelectedArgsForTest(args []string) {
+	m.selectedArgs = args
 }
 
 func (m Model) SelectedAgent() string {

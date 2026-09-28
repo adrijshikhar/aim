@@ -318,6 +318,27 @@ func DeduplicateMatches(matches []Session) []Session {
 			idToSession[match.ID] = match
 			continue
 		}
+		// Check storage sizes to avoid picking a truncated session merely because it was touched recently
+		var matchSize, existSize int64
+		if match.StoragePath != "" {
+			if fi, err := os.Stat(match.StoragePath); err == nil {
+				matchSize = fi.Size()
+			}
+		}
+		if existing.StoragePath != "" {
+			if fi, err := os.Stat(existing.StoragePath); err == nil {
+				existSize = fi.Size()
+			}
+		}
+		if matchSize > 0 && existSize > 0 {
+			if matchSize > existSize+256 {
+				idToSession[match.ID] = match
+				continue
+			} else if existSize > matchSize+256 {
+				continue
+			}
+		}
+
 		// If match is more recently active, take it
 		if match.LastActiveAt.After(existing.LastActiveAt) {
 			idToSession[match.ID] = match

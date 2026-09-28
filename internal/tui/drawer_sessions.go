@@ -9,6 +9,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/session/providers/agy"
+	claudesess "github.com/aim-cli/aim/internal/session/providers/claude"
 	"github.com/aim-cli/aim/internal/session/providers/codex"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,6 +63,7 @@ func (m Model) fetchSessions() Model {
 	mgr := session.NewManager()
 	mgr.RegisterProvider(agy.NewProvider())
 	mgr.RegisterProvider(codex.NewProvider())
+	mgr.RegisterProvider(claudesess.NewProvider())
 
 	sessions, err := mgr.ListSessions(context.Background(), m.sessionsDrawer.agentFilter, "", false)
 	if err != nil {
@@ -88,6 +90,8 @@ func (m Model) filteredSessions() []session.Session {
 		if strings.Contains(strings.ToLower(s.ID), term) ||
 			strings.Contains(strings.ToLower(s.ShortID), term) ||
 			strings.Contains(strings.ToLower(s.Title), term) ||
+			strings.Contains(strings.ToLower(s.Summary), term) ||
+			strings.Contains(strings.ToLower(s.Cwd), term) ||
 			strings.Contains(strings.ToLower(s.Profile), term) ||
 			strings.Contains(strings.ToLower(s.Agent), term) {
 			res = append(res, s)
@@ -99,16 +103,54 @@ func (m Model) filteredSessions() []session.Session {
 func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.sessionsDrawer.filterActive {
 		switch msg.Type {
-		case tea.KeyEsc, tea.KeyEnter:
-			m.sessionsDrawer.filterActive = false
-			return m, nil
 		case tea.KeyCtrlC:
 			m.cancelStream()
 			return m, tea.Quit
+		case tea.KeyEsc:
+			m.sessionsDrawer.filterActive = false
+			return m, nil
+		case tea.KeyUp:
+			if m.sessionsDrawer.cursor > 0 {
+				m.sessionsDrawer.cursor--
+			}
+			return m, nil
+		case tea.KeyDown:
+			filtered := m.filteredSessions()
+			if m.sessionsDrawer.cursor < len(filtered)-1 {
+				m.sessionsDrawer.cursor++
+			}
+			return m, nil
+		case tea.KeyEnter:
+			filtered := m.filteredSessions()
+			if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
+				m.sessionsDrawer.filterActive = false
+				target := filtered[m.sessionsDrawer.cursor]
+				return m.openResumeModal(&target, ActionResumeExact, false)
+			}
+			m.sessionsDrawer.filterActive = false
+			return m, nil
 		}
+
+		switch msg.String() {
+		case "ctrl+n", "ctrl+j":
+			filtered := m.filteredSessions()
+			if m.sessionsDrawer.cursor < len(filtered)-1 {
+				m.sessionsDrawer.cursor++
+			}
+			return m, nil
+		case "ctrl+p", "ctrl+k":
+			if m.sessionsDrawer.cursor > 0 {
+				m.sessionsDrawer.cursor--
+			}
+			return m, nil
+		}
+
+		oldVal := m.sessionsDrawer.filterInput.Value()
 		var cmd tea.Cmd
 		m.sessionsDrawer.filterInput, cmd = m.sessionsDrawer.filterInput.Update(msg)
-		m.sessionsDrawer.cursor = 0
+		if m.sessionsDrawer.filterInput.Value() != oldVal {
+			m.sessionsDrawer.cursor = 0
+		}
 		return m, cmd
 	}
 
@@ -140,13 +182,19 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			target := filtered[m.sessionsDrawer.cursor]
 			return m.openResumeModal(&target, ActionResumeExact, false)
 		}
+	case "f":
+		filtered := m.filteredSessions()
+		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
+			target := filtered[m.sessionsDrawer.cursor]
+			return m.openResumeModalWithFlags(&target, ActionResumeExact, false, true)
+		}
 	case "c":
 		filtered := m.filteredSessions()
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
 			return m.openResumeModal(&target, ActionResumeCatalyst, false)
 		}
-	case "b", "f":
+	case "b":
 		filtered := m.filteredSessions()
 		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			target := filtered[m.sessionsDrawer.cursor]
@@ -286,7 +334,7 @@ func (m Model) renderSessionsDrawer() string {
 				previewText = "(no summary recorded for this session)"
 			}
 
-			displayLines := wrapText(previewText, 89, 3)
+			displayLines := wrapText(previewText, 89, 4)
 			if len(displayLines) == 0 {
 				displayLines = []string{"(no summary recorded for this session)"}
 			}
@@ -338,7 +386,7 @@ func (m Model) renderSessionsDrawer() string {
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(TextMuted).Render(
-		"  [↑/↓] Navigate  •  [Enter] Resume  •  [c] Catalyst Handoff  •  [b] Fork  •  [Esc] Close",
+		"  [↑/↓] Navigate  •  [Enter] Resume  •  [f] Flags  •  [c] Catalyst  •  [b] Fork  •  [Esc] Close",
 	))
 
 	box := SessionsDrawerStyle.Render(b.String())

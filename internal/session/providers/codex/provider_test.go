@@ -714,3 +714,109 @@ INSERT INTO thread_turns (thread_id, rollout_ordinal, turn_id) VALUES
 		t.Errorf("expected 2 valid items remaining, got %s", strings.TrimSpace(string(outValid)))
 	}
 }
+
+func TestProvider_Hydrate_SubagentsAndShellSnapshots(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	srcDir := t.TempDir()
+	targetDir := t.TempDir()
+
+	srcCodexDir := filepath.Join(srcDir, ".codex")
+	srcSessionsDir := filepath.Join(srcCodexDir, "sessions", "2026", "09", "22")
+	srcShellDir := filepath.Join(srcCodexDir, "shell_snapshots")
+	_ = os.MkdirAll(srcSessionsDir, 0755)
+	_ = os.MkdirAll(srcShellDir, 0755)
+
+	parentID := "01a0c7e1-e34c-7ca2-be3f-df5db5e94752"
+	childID := "01a0ce1e-af6b-76d1-a39c-84394870f6f3"
+
+	// Create rollouts
+	parentRollout := filepath.Join(srcSessionsDir, fmt.Sprintf("rollout-%s.jsonl", parentID))
+	_ = os.WriteFile(parentRollout, []byte(`{"event":"init"}`+"\n"), 0644)
+	childRollout := filepath.Join(srcSessionsDir, fmt.Sprintf("rollout-%s.jsonl", childID))
+	_ = os.WriteFile(childRollout, []byte(`{"event":"subagent_init"}`+"\n"), 0644)
+
+	// Create shell snapshot
+	shellSnapFile := filepath.Join(srcShellDir, "snapshot-test.json")
+	_ = os.WriteFile(shellSnapFile, []byte(`{"shell":"state"}`), 0644)
+
+	// Seed source state_5.sqlite
+	stateDB := filepath.Join(srcCodexDir, "state_5.sqlite")
+	stateSchema := fmt.Sprintf(`
+CREATE TABLE _sqlx_migrations (
+    version BIGINT PRIMARY KEY,
+    description TEXT NOT NULL,
+    installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    success BOOLEAN NOT NULL,
+    checksum BLOB NOT NULL,
+    execution_time BIGINT NOT NULL
+);
+INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (1, 'init', 1, X'00', 1);
+
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	rollout_path TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	source TEXT NOT NULL,
+	model_provider TEXT NOT NULL,
+	cwd TEXT NOT NULL,
+	title TEXT NOT NULL,
+	sandbox_policy TEXT NOT NULL,
+	approval_mode TEXT NOT NULL
+);
+INSERT INTO threads VALUES
+('%s', '%s', 1700000000, 1700000000, 'cli', 'openai', '/workspace', 'Parent Thread', 'danger', 'manual'),
+('%s', '%s', 1700000001, 1700000001, 'cli', 'openai', '/workspace', 'Child Subagent', 'danger', 'manual');
+
+CREATE TABLE thread_spawn_edges (
+	parent_thread_id TEXT NOT NULL,
+	child_thread_id TEXT NOT NULL PRIMARY KEY,
+	status TEXT NOT NULL
+);
+INSERT INTO thread_spawn_edges VALUES ('%s', '%s', 'open');
+`, parentID, parentRollout, childID, childRollout, parentID, childID)
+	if err := exec.Command(sqliteBin, stateDB, stateSchema).Run(); err != nil {
+		t.Fatalf("failed to seed state DB: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	srcSession := session.NewSession(parentID, "Parent Thread", "codex", "mockprofile", false, time.Now())
+	srcSession.StoragePath = parentRollout
+
+	_, err = p.Hydrate(ctx, &srcSession, targetDir, false)
+	if err != nil {
+		t.Fatalf("Hydrate failed: %v", err)
+	}
+
+	targetStateDB := filepath.Join(targetDir, ".codex", "state_5.sqlite")
+
+	// 1. Verify child thread exists in target state DB
+	out, err := exec.Command(sqliteBin, targetStateDB, fmt.Sprintf("SELECT title FROM threads WHERE id = '%s';", childID)).Output()
+	if err != nil || !strings.Contains(string(out), "Child Subagent") {
+		t.Errorf("expected Child Subagent in target state DB, got %q (err: %v)", string(out), err)
+	}
+
+	// 2. Verify thread_spawn_edges copied to target
+	outEdge, err := exec.Command(sqliteBin, targetStateDB, fmt.Sprintf("SELECT status FROM thread_spawn_edges WHERE parent_thread_id = '%s' AND child_thread_id = '%s';", parentID, childID)).Output()
+	if err != nil || strings.TrimSpace(string(outEdge)) != "open" {
+		t.Errorf("expected spawn edge status 'open', got %q (err: %v)", string(outEdge), err)
+	}
+
+	// 3. Verify child rollout copied
+	targetChildRollout := filepath.Join(targetDir, ".codex", "sessions", "2026", "09", "22", fmt.Sprintf("rollout-%s.jsonl", childID))
+	if _, err := os.Stat(targetChildRollout); err != nil {
+		t.Errorf("expected target child rollout to exist at %s: %v", targetChildRollout, err)
+	}
+
+	// 4. Verify shell snapshot copied
+	targetShellSnap := filepath.Join(targetDir, ".codex", "shell_snapshots", "snapshot-test.json")
+	if _, err := os.Stat(targetShellSnap); err != nil {
+		t.Errorf("expected shell snapshot to exist at %s: %v", targetShellSnap, err)
+	}
+}

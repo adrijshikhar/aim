@@ -126,6 +126,27 @@ func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName strin
 		whereClauses = append(whereClauses, "(archived IS NULL OR archived = 0)")
 	}
 
+	// Filter out empty zombie sessions (0 tokens, no title, no user message or preview)
+	var contentConditions []string
+	if colSet["tokens_used"] {
+		contentConditions = append(contentConditions, "(tokens_used IS NOT NULL AND tokens_used > 0)")
+	}
+	if colSet["name"] {
+		contentConditions = append(contentConditions, "(name IS NOT NULL AND name != '')")
+	}
+	if colSet["title"] {
+		contentConditions = append(contentConditions, "(title IS NOT NULL AND title != '')")
+	}
+	if colSet["first_user_message"] {
+		contentConditions = append(contentConditions, "(first_user_message IS NOT NULL AND first_user_message != '')")
+	}
+	if colSet["preview"] {
+		contentConditions = append(contentConditions, "(preview IS NOT NULL AND preview != '')")
+	}
+	if len(contentConditions) > 0 {
+		whereClauses = append(whereClauses, "("+strings.Join(contentConditions, " OR ")+")")
+	}
+
 	query := fmt.Sprintf("SELECT %s FROM threads", strings.Join(selectCols, ", "))
 	if len(whereClauses) > 0 {
 		query += " WHERE " + strings.Join(whereClauses, " AND ")
@@ -499,7 +520,17 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 		}
 	}
 
-	// 4. Update session_index.jsonl
+	// 4. Hydrate child subagents and shell snapshots
+	if srcCodexDir != "" {
+		if err := p.hydrateChildSubagentSessions(ctx, srcCodexDir, targetCodexDir, targetSessionsDir, srcSession.ID); err != nil {
+			logger.Debug("[session/codex] error copying child subagent sessions: %v", err)
+		}
+		if err := p.hydrateShellSnapshots(srcCodexDir, targetCodexDir); err != nil {
+			logger.Debug("[session/codex] error copying shell snapshots: %v", err)
+		}
+	}
+
+	// 5. Update session_index.jsonl
 	if err := p.appendSessionIndex(targetCodexDir, targetID, srcSession.Title, targetRolloutPath); err != nil {
 		return "", err
 	}
@@ -613,6 +644,106 @@ func (p *Provider) hydrateAncestorSessions(ctx context.Context, srcCodexDir, tar
 		}
 
 		currentRollout = parentRollout
+	}
+	return nil
+}
+
+func (p *Provider) hydrateChildSubagentSessions(ctx context.Context, srcCodexDir, targetCodexDir, targetSessionsDir, parentID string) error {
+	if p.sqliteBin == "" {
+		return nil
+	}
+	srcDB := filepath.Join(srcCodexDir, "state_5.sqlite")
+	targetDB := filepath.Join(targetCodexDir, "state_5.sqlite")
+	if _, err := os.Stat(srcDB); err != nil {
+		return nil
+	}
+
+	query := fmt.Sprintf("SELECT child_thread_id, COALESCE(status, '') FROM thread_spawn_edges WHERE parent_thread_id = '%s';\n", escapeSQL(parentID))
+	cmd := exec.CommandContext(ctx, p.sqliteBin, "-list", "-separator", "|", srcDB)
+	cmd.Stdin = strings.NewReader(query)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	srcSessionsDir := filepath.Join(srcCodexDir, "sessions")
+	srcHistoryDB := filepath.Join(srcCodexDir, "thread_history_1.sqlite")
+	targetHistoryDB := filepath.Join(targetCodexDir, "thread_history_1.sqlite")
+
+	createEdgeTable := "CREATE TABLE IF NOT EXISTS thread_spawn_edges (parent_thread_id TEXT NOT NULL, child_thread_id TEXT NOT NULL PRIMARY KEY, status TEXT NOT NULL);\n"
+	createCmd := exec.CommandContext(ctx, p.sqliteBin, targetDB)
+	createCmd.Stdin = strings.NewReader(createEdgeTable)
+	_ = createCmd.Run()
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) == 0 {
+			continue
+		}
+		childID := strings.TrimSpace(parts[0])
+		if childID == "" {
+			continue
+		}
+		childStatus := ""
+		if len(parts) > 1 {
+			childStatus = strings.TrimSpace(parts[1])
+		}
+
+		childRollout := p.findRolloutPath(ctx, srcCodexDir, childID)
+		var destChildRollout string
+		if childRollout != "" {
+			var destChildRel string
+			if rel, err := filepath.Rel(srcSessionsDir, childRollout); err == nil && !strings.HasPrefix(rel, "..") {
+				destChildRel = rel
+			}
+			if destChildRel == "" {
+				destChildRel = filepath.Base(childRollout)
+			}
+			destChildRollout = filepath.Join(targetSessionsDir, destChildRel)
+			_ = os.MkdirAll(filepath.Dir(destChildRollout), 0755)
+			_ = copyFile(childRollout, destChildRollout)
+		}
+
+		_ = p.copyThreadInStateDB(ctx, srcDB, targetDB, childID, childID, destChildRollout)
+		if _, err := os.Stat(srcHistoryDB); err == nil {
+			_ = p.copyThreadHistoryDB(ctx, srcHistoryDB, targetHistoryDB, childID, childID, destChildRollout)
+		}
+
+		// Insert edge into target thread_spawn_edges
+		insertEdge := fmt.Sprintf("INSERT OR REPLACE INTO thread_spawn_edges (parent_thread_id, child_thread_id, status) VALUES ('%s', '%s', '%s');\n",
+			escapeSQL(parentID), escapeSQL(childID), escapeSQL(childStatus))
+		edgeCmd := exec.CommandContext(ctx, p.sqliteBin, targetDB)
+		edgeCmd.Stdin = strings.NewReader(insertEdge)
+		_ = edgeCmd.Run()
+	}
+	return nil
+}
+
+func (p *Provider) hydrateShellSnapshots(srcCodexDir, targetCodexDir string) error {
+	srcShellDir := filepath.Join(srcCodexDir, "shell_snapshots")
+	if _, err := os.Stat(srcShellDir); err != nil {
+		return nil
+	}
+	targetShellDir := filepath.Join(targetCodexDir, "shell_snapshots")
+	if err := os.MkdirAll(targetShellDir, 0755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(srcShellDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		srcFile := filepath.Join(srcShellDir, entry.Name())
+		destFile := filepath.Join(targetShellDir, entry.Name())
+		_ = copyFile(srcFile, destFile)
 	}
 	return nil
 }
