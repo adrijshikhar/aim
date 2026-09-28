@@ -734,3 +734,56 @@ func TestEngine_FailedProfileWriteRecordsNoState(t *testing.T) {
 	ch2, _ := s2.Diff()
 	_ = s2.Finish(ch2, keepAll)
 }
+
+// One collection failing must not undo or block another, in either order:
+// collection 1 is merged, recorded and stripped back to its pre-Start bytes;
+// collection 2 is skipped with a warning.
+func TestEngine_PartialFailureMergesTheOtherCollection(t *testing.T) {
+	for _, badFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("badFirst=%v", badFirst), func(t *testing.T) {
+			f := newFixture(t)
+			d := t.TempDir()
+			// in renderObject's layout, so the strip reproduces the file byte for byte
+			src := "{\"x\": 1, \"mcpServers\": {\n    \"own\": {\"command\": \"o\"}\n  }}\n"
+			f.files(`{"mcpServers":{"jev":{"command":"npx"}}}`, src)
+			bad := Collection{Agent: "claude", Name: "servers", Format: JSON, Key: "servers",
+				HostPath: filepath.Join(d, "host2.json"), ProfilePath: filepath.Join(d, "profile2.json")}
+			_ = os.WriteFile(bad.HostPath, []byte(`{not json`), 0o600)
+			_ = os.WriteFile(bad.ProfilePath, []byte(`{"servers":{}}`), 0o600)
+			cols := []Collection{f.col, bad}
+			if badFirst {
+				cols = []Collection{bad, f.col}
+			}
+			s, err := f.eng.Start("work", "claude", cols, StartOptions{Enabled: true})
+			if err != nil {
+				t.Fatalf("a failing collection must not fail Start: %v", err)
+			}
+			if out := f.out.String(); !strings.Contains(out, bad.ID()) || !strings.Contains(out, "skipped") || strings.Contains(out, f.col.ID()) {
+				t.Fatalf("want a warning for %s only, got %q", bad.ID(), out)
+			}
+			if got := f.profileNames(); strings.Join(got, ",") != "own,jev" {
+				t.Fatalf("collection 1 during session = %v", got)
+			}
+			st, _ := f.eng.Store.Load("work")
+			if st.Active[f.col.ID()]["jev"] == "" {
+				t.Fatalf("collection 1's merge must be recorded: %+v", st.Active)
+			}
+			if _, ok := st.Active[bad.ID()]; ok {
+				t.Fatalf("the skipped collection must record nothing: %+v", st.Active)
+			}
+			ch, err := s.Diff()
+			if err != nil || len(ch) != 0 {
+				t.Fatalf("changes = %+v, err = %v", ch, err)
+			}
+			if err := s.Finish(ch, keepAll); err != nil {
+				t.Fatal(err)
+			}
+			if b, _ := os.ReadFile(f.pf); string(b) != src {
+				t.Fatalf("collection 1 at rest:\n%s\nwant:\n%s", b, src)
+			}
+			if b, _ := os.ReadFile(bad.ProfilePath); string(b) != `{"servers":{}}` {
+				t.Fatalf("the skipped collection's profile changed: %s", b)
+			}
+		})
+	}
+}
