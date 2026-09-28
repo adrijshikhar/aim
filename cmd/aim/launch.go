@@ -46,9 +46,10 @@ func splitRunFlags(args []string) (bool, []string) {
 // (IsBackground) merges and skips the exit step. profiles.<p>.args precede
 // extraArgs in the launched command, so both checks see them separately: a
 // background arg there counts too, and profile flags such as `--model o3` do
-// not hide a first word like `app-server` in extraArgs. A non-session invocation (the adapter's version or help spelling) runs without
-// Start at all, so a crashed or background session is recovered by the next
-// real session.
+// not hide a first word like `app-server` in extraArgs. A non-session
+// invocation (the adapter's version or help spelling) runs without Start at
+// all, so a crashed or background session is recovered by the next real
+// session.
 func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileName, pDir string, cfg *config.Config, extraArgs []string, run func() int) int {
 	mp, ok := adapter.(agents.MCPProvider)
 	if !ok {
