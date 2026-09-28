@@ -20,6 +20,8 @@ type resumeModalState struct {
 	cursor     int
 	customMode bool
 	input      textinput.Model
+	flagsMode  bool
+	flagsInput textinput.Model
 }
 
 func (m Model) IsResumeModalActive() bool {
@@ -42,7 +44,19 @@ func (m Model) ResumeModalIsCustomMode() bool {
 	return m.resumeModal.customMode
 }
 
+func (m Model) ResumeModalIsFlagsMode() bool {
+	return m.resumeModal.flagsMode
+}
+
+func (m Model) ResumeModalFlagsInput() string {
+	return m.resumeModal.flagsInput.Value()
+}
+
 func (m Model) openResumeModal(target *session.Session, outcome ActionOutcome, fork bool) (Model, tea.Cmd) {
+	return m.openResumeModalWithFlags(target, outcome, fork, false)
+}
+
+func (m Model) openResumeModalWithFlags(target *session.Session, outcome ActionOutcome, fork bool, initialFlagsMode bool) (Model, tea.Cmd) {
 	if target == nil {
 		return m, nil
 	}
@@ -77,6 +91,18 @@ func (m Model) openResumeModal(target *session.Session, outcome ActionOutcome, f
 	ti.CharLimit = 64
 	ti.Width = 32
 
+	fi := textinput.New()
+	fi.Placeholder = "e.g. --yolo -m o3 --search"
+	fi.CharLimit = 128
+	fi.Width = 45
+	fi.Prompt = "Flags: "
+	fi.PromptStyle = lipgloss.NewStyle().Bold(true).Foreground(AccentCyan)
+
+	var cmd tea.Cmd
+	if initialFlagsMode {
+		cmd = fi.Focus()
+	}
+
 	m.resumeModal = resumeModalState{
 		active:     true,
 		session:    target,
@@ -86,9 +112,11 @@ func (m Model) openResumeModal(target *session.Session, outcome ActionOutcome, f
 		cursor:     0,
 		customMode: false,
 		input:      ti,
+		flagsMode:  initialFlagsMode,
+		flagsInput: fi,
 	}
 
-	return m, nil
+	return m, cmd
 }
 
 func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
@@ -119,6 +147,26 @@ func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 
+		if m.resumeModal.flagsMode {
+			switch msg.String() {
+			case "ctrl+c":
+				m.cancelStream()
+				return m, tea.Quit
+			case "esc", "tab":
+				m.resumeModal.flagsMode = false
+				m.resumeModal.flagsInput.Blur()
+				return m, nil
+			case "enter":
+				// Confirm with current selected profile and flags
+				profile := m.resumeModal.profiles[m.resumeModal.cursor]
+				return m.finishResumeSelection(profile)
+			default:
+				var cmd tea.Cmd
+				m.resumeModal.flagsInput, cmd = m.resumeModal.flagsInput.Update(msg)
+				return m, cmd
+			}
+		}
+
 		totalOptions := len(m.resumeModal.profiles) + 1 // +1 for "Enter custom profile name..."
 		switch msg.String() {
 		case "ctrl+c":
@@ -137,6 +185,10 @@ func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
 				m.resumeModal.cursor++
 			}
 			return m, nil
+		case "tab", "f", "e":
+			m.resumeModal.flagsMode = true
+			cmd := m.resumeModal.flagsInput.Focus()
+			return m, cmd
 		case "enter":
 			if m.resumeModal.cursor == len(m.resumeModal.profiles) {
 				// User selected "Enter custom profile name..."
@@ -158,6 +210,12 @@ func (m Model) finishResumeSelection(profile string) (Model, tea.Cmd) {
 	m.selectedSession = m.resumeModal.session
 	m.outcome = m.resumeModal.outcome
 	m.sessionsDrawer.fork = m.resumeModal.fork
+	rawFlags := strings.TrimSpace(m.resumeModal.flagsInput.Value())
+	if rawFlags != "" {
+		m.selectedArgs = splitArgs(rawFlags)
+	} else {
+		m.selectedArgs = nil
+	}
 	m.resumeModal.active = false
 	m.cancelStream()
 	return m, tea.Quit
@@ -277,11 +335,68 @@ func (m Model) renderResumeModal() string {
 		}
 		b.WriteString(fmt.Sprintf("  %s+ %s\n\n", cursor, itemStyle.Render("Enter custom profile name...")))
 
-		b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-			"  [↑/↓] Select Profile  •  [Enter] Confirm & Resume  •  [Esc] Back",
-		))
+		flagsHeader := lipgloss.NewStyle().Foreground(TextSecondary).Render("Extra CLI Flags (optional):")
+		b.WriteString("  " + flagsHeader + "\n")
+		if m.resumeModal.flagsMode {
+			b.WriteString("  " + m.resumeModal.flagsInput.View() + "\n\n")
+			b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
+				"  [Enter] Confirm & Resume  •  [Tab/Esc] Done Editing Flags",
+			))
+		} else {
+			val := m.resumeModal.flagsInput.Value()
+			valDisplay := val
+			flagsBoxStyle := lipgloss.NewStyle().Bold(true).Foreground(AccentCyan)
+			if valDisplay == "" {
+				valDisplay = "(none — press [f] or [Tab] to add e.g. --yolo)"
+				flagsBoxStyle = lipgloss.NewStyle().Foreground(TextMuted)
+			}
+			b.WriteString(fmt.Sprintf("  Flags: %s\n\n", flagsBoxStyle.Render(valDisplay)))
+			b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
+				"  [↑/↓] Select Profile  •  [f/Tab] Flags  •  [Enter] Confirm & Resume  •  [Esc] Back",
+			))
+		}
 	}
 
 	box := ResumeModalBoxStyle.Render(b.String())
 	return "\n" + box + "\n"
+}
+
+func splitArgs(s string) []string {
+	var args []string
+	var current strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	for _, r := range s {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if (r == ' ' || r == '\t') && !inSingle && !inDouble {
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+			continue
+		}
+		current.WriteRune(r)
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
 }

@@ -24,6 +24,7 @@ func setupMockSessionEnv(t *testing.T) (string, *agents.Registry, *profile.Profi
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -57,6 +58,7 @@ func TestSessionsCmd_Empty(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)

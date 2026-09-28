@@ -2410,3 +2410,104 @@ func TestSessionsDrawer_WrapText(t *testing.T) {
 		t.Errorf("expected line 3 to end with '...', got: %s", linesLong[2])
 	}
 }
+
+func TestSessionsDrawer_FilterNavigationWithArrowKeys(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	// Open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+
+	// Inject mock sessions matching "dsl"
+	s1 := session.NewSession("11111111-0000-0000-0000-000000000001", "dsl-delete", "codex", "alpha", false, time.Now())
+	s2 := session.NewSession("22222222-0000-0000-0000-000000000002", "dsl-test-connection", "codex", "beta", false, time.Now())
+	s3 := session.NewSession("33333333-0000-0000-0000-000000000003", "dsl-other", "codex", "alpha", false, time.Now())
+	m.SetSessionsForTest([]session.Session{s1, s2, s3})
+
+	// Enter filter mode
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+
+	// Type "dsl"
+	for _, r := range "dsl" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+
+	// In filter mode, pressing Down arrow moves highlight down
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.sessionsDrawer.cursor != 1 {
+		t.Fatalf("expected cursor to be 1 after Down arrow in filter, got %d", m.sessionsDrawer.cursor)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.sessionsDrawer.cursor != 2 {
+		t.Fatalf("expected cursor to be 2 after Down arrow in filter, got %d", m.sessionsDrawer.cursor)
+	}
+
+	// Press Up arrow moves highlight up
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	if m.sessionsDrawer.cursor != 1 {
+		t.Fatalf("expected cursor to be 1 after Up arrow in filter, got %d", m.sessionsDrawer.cursor)
+	}
+
+	// Press Enter while filtering immediately opens resume modal on highlighted session (s2)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal to be active after Enter in filter")
+	}
+	if m.ResumeModalSession() == nil || m.ResumeModalSession().ID != s2.ID {
+		t.Fatalf("expected resume modal on session s2 (%s), got %v", s2.ID, m.ResumeModalSession())
+	}
+}
+
+func TestResumeModal_FlagsInputAndSelectedArgs(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	s1 := session.NewSession("11111111-2222-3333-4444-555566667777", "Session One", "codex", "alpha", false, time.Now())
+	m.SetSessionsForTest([]session.Session{s1})
+
+	// Open resume modal on s1
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+	m.SetSessionsForTest([]session.Session{s1})
+
+	// Press 'f' on the session to open resume modal directly in flags mode
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m = updated.(Model)
+
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal to be active")
+	}
+	if !m.ResumeModalIsFlagsMode() {
+		t.Fatalf("expected flagsMode to be active when opening with 'f'")
+	}
+
+	// Type flags: "--yolo -m o3"
+	flagsStr := "--yolo -m o3"
+	for _, r := range flagsStr {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+
+	if m.ResumeModalFlagsInput() != flagsStr {
+		t.Fatalf("expected flags input %q, got %q", flagsStr, m.ResumeModalFlagsInput())
+	}
+
+	// Press Enter to confirm resume with flags
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if cmd == nil {
+		t.Errorf("expected tea.Quit command on resume")
+	}
+	if len(m.SelectedArgs()) != 3 || m.SelectedArgs()[0] != "--yolo" || m.SelectedArgs()[1] != "-m" || m.SelectedArgs()[2] != "o3" {
+		t.Fatalf("expected SelectedArgs to be [--yolo, -m, o3], got %v", m.SelectedArgs())
+	}
+}
+

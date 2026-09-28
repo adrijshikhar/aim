@@ -28,8 +28,9 @@ func newResumeCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 	)
 
 	cmd := &cobra.Command{
-		Use:   "resume <agent> <profile> [session-id] [flags] [-- args...]",
-		Short: "Resume an existing session under a specified profile",
+		Use:                "resume <agent> <profile> [session-id] [flags] [-- args...]",
+		Short:              "Resume an existing session under a specified profile",
+		DisableFlagParsing: true,
 		Long: `Resume an existing session under a specified profile.
 
 Arguments:
@@ -44,11 +45,29 @@ Flags:
   -b, --fork      Fork session into a new conversation ID
   -f, --force     Force resume even if session is currently active in another process`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 2 {
+			var cleanArgs []string
+			for _, a := range args {
+				switch a {
+				case "--exact":
+					exactFlag = true
+				case "--catalyst", "-c", "--summary", "-s":
+					catalystFlag = true
+				case "--fork", "-b":
+					forkFlag = true
+				case "--force", "-f":
+					forceFlag = true
+				case "-h", "--help":
+					return cmd.Help()
+				default:
+					cleanArgs = append(cleanArgs, a)
+				}
+			}
+
+			if len(cleanArgs) < 2 {
 				return fmt.Errorf("resume requires <agent> and <profile>")
 			}
-			agentName := args[0]
-			profileName := args[1]
+			agentName := cleanArgs[0]
+			profileName := cleanArgs[1]
 
 			if reg != nil {
 				if ad, err := reg.Get(agentName); err == nil {
@@ -67,7 +86,7 @@ Flags:
 			var sessionID string
 			var extraArgs []string
 
-			// If args[1] is not an existing profile, check if it's a session ID or title
+			// If cleanArgs[1] is not an existing profile, check if it's a session ID or title
 			if pm != nil && !pm.ProfileExists(profileName) {
 				if matches, err := mgr.FindAllSessionsByID(ctx, agentName, profileName); err == nil && len(matches) > 0 {
 					sessionID = profileName
@@ -78,28 +97,30 @@ Flags:
 					if profileName == "" || profileName == "<host>" {
 						profileName = "default"
 					}
-					if len(args) > 2 {
-						if args[2] == "--" {
-							extraArgs = args[3:]
+					if len(cleanArgs) > 2 {
+						if cleanArgs[2] == "--" {
+							extraArgs = cleanArgs[3:]
 						} else {
-							extraArgs = args[2:]
+							extraArgs = cleanArgs[2:]
 						}
 					}
 				}
 			}
 
 			if sessionID == "" {
-				// Parse sessionID and extraArgs normally (args[1] is profile, args[2] is session ID)
-				if len(args) > 2 {
-					if args[2] == "--" {
-						extraArgs = args[3:]
+				// Parse sessionID and extraArgs normally (cleanArgs[1] is profile, cleanArgs[2] is session ID or flags)
+				if len(cleanArgs) > 2 {
+					if cleanArgs[2] == "--" {
+						extraArgs = cleanArgs[3:]
+					} else if strings.HasPrefix(cleanArgs[2], "-") {
+						extraArgs = cleanArgs[2:]
 					} else {
-						sessionID = args[2]
-						if len(args) > 3 {
-							if args[3] == "--" {
-								extraArgs = args[4:]
+						sessionID = cleanArgs[2]
+						if len(cleanArgs) > 3 {
+							if cleanArgs[3] == "--" {
+								extraArgs = cleanArgs[4:]
 							} else {
-								extraArgs = args[3:]
+								extraArgs = cleanArgs[3:]
 							}
 						}
 					}
@@ -229,10 +250,19 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		ctx = context.Background()
 	}
 
-	// Check if another profile has a newer version of this session
+	// Check if another profile has a newer or more complete version of this session
 	if latest, err := findLatestSessionAcrossProfiles(ctx, mgr, agent, sess.ID); err == nil && latest != nil {
-		if latest.LastActiveAt.After(sess.LastActiveAt) {
-			if !latest.IsHost && latest.Profile != profile {
+		isNewer := latest.LastActiveAt.After(sess.LastActiveAt)
+		isLarger := false
+		if latest.StoragePath != "" && sess.StoragePath != "" {
+			if fiL, err1 := os.Stat(latest.StoragePath); err1 == nil {
+				if fiS, err2 := os.Stat(sess.StoragePath); err2 == nil && fiL.Size() > fiS.Size()+1024 {
+					isLarger = true
+				}
+			}
+		}
+		if (isNewer || isLarger || latest.Profile != profile) && latest.Profile != profile {
+			if !latest.IsHost {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s Syncing newer session updates from profile %q into %q...\n",
 					lipgloss.NewStyle().Foreground(tui.AccentCyan).Render("⚡"),
 					latest.Profile,

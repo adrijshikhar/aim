@@ -369,6 +369,10 @@ func TestConfig_DefaultXDG_WithCustomEnv(t *testing.T) {
 	cleanHome := t.TempDir()
 	t.Setenv("AIM_HOME", "")
 	t.Setenv("AIM_REAL_HOME", cleanHome)
+	t.Setenv("AIM_CONFIG_DIR", "")
+	t.Setenv("AIM_DATA_DIR", "")
+	t.Setenv("AIM_CACHE_DIR", "")
+	t.Setenv("AIM_STATE_DIR", "")
 
 	cfgDir := filepath.Join(cleanHome, "custom-config")
 	dataDir := filepath.Join(cleanHome, "custom-data")

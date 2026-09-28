@@ -141,7 +141,8 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 				return 1
 			}
 			resumeCmd := newResumeCmd(reg, pm)
-			if err := executeExactResume(resumeCmd, reg, pm, mgr, sess.Agent, targetProfile, pDir, sess, res.IsForkResume(), nil); err != nil {
+			extraArgs := res.SelectedArgs()
+			if err := executeExactResume(resumeCmd, reg, pm, mgr, sess.Agent, targetProfile, pDir, sess, res.IsForkResume(), extraArgs); err != nil {
 				fmt.Fprintf(os.Stderr, "Resume error: %v\n", err)
 				return 1
 			}
@@ -158,7 +159,8 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 				targetProfile = "default"
 			}
 			resumeCmd := newResumeCmd(reg, pm)
-			if err := executeCatalystResume(resumeCmd, reg, pm, sess.Agent, targetProfile, sess, nil); err != nil {
+			extraArgs := res.SelectedArgs()
+			if err := executeCatalystResume(resumeCmd, reg, pm, sess.Agent, targetProfile, sess, extraArgs); err != nil {
 				fmt.Fprintf(os.Stderr, "Catalyst resume error: %v\n", err)
 				return 1
 			}

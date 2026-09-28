@@ -54,6 +54,7 @@ func TestImportCmd_HydrateSession(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 
 	reg := agents.NewRegistry()
 	reg.Register(codex.NewAdapter())

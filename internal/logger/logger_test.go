@@ -149,6 +149,7 @@ func TestInit_XDGStateDir(t *testing.T) {
 	cleanHome := t.TempDir()
 	t.Setenv("AIM_HOME", "")
 	t.Setenv("AIM_REAL_HOME", cleanHome)
+	t.Setenv("AIM_STATE_DIR", "")
 
 	stateDir := filepath.Join(cleanHome, "xdg-state")
 	t.Setenv("XDG_STATE_HOME", stateDir)
