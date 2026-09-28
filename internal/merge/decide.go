@@ -10,15 +10,20 @@ import (
 var kindMark = map[ChangeKind]string{Added: "+", Edited: "~", Removed: "−"}
 
 // label names the change with its collection (Claude and Codex merge more
-// than one) and, for a scalar entry such as a plugin's enabled flag, the new
-// value, so a host-wide disable is never promoted blind.
+// than one) and the new enablement of a plugin, so a host-wide disable is
+// never promoted blind: the value of a scalar entry (Claude's enabledPlugins)
+// or the enabled flag of a table (Codex's [plugins."x"]).
 func label(c Change) string {
 	what := string(c.Kind)
 	if c.Kind != Added {
 		what += " (host item)"
 	}
-	if v, ok := c.Value["value"]; ok && len(c.Value) == 1 && c.Kind != Removed {
-		what += fmt.Sprintf(" → %v", v)
+	if c.Kind != Removed {
+		if v, ok := c.Value["value"]; ok && len(c.Value) == 1 {
+			what += fmt.Sprintf(" → %v", v)
+		} else if on, ok := c.Value["enabled"].(bool); ok {
+			what += fmt.Sprintf(" → enabled=%v", on)
+		}
 	}
 	if c.HostChanged {
 		what += "   host changed since start — promote is refused"

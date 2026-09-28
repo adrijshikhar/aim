@@ -102,3 +102,28 @@ func TestLabel_PrefixesCollectionAndShowsScalarValue(t *testing.T) {
 		t.Fatalf("the value goes before the host-changed note: %q", hc)
 	}
 }
+
+// A Codex plugin is a table ([plugins."x"] enabled = false), not a scalar: its
+// enabled flag is shown too, so a host-wide disable is never promoted blind.
+func TestLabel_ShowsEnabledFlagOfPluginTable(t *testing.T) {
+	plug := Collection{Agent: "codex", Name: "plugins"}
+	pad := func(n string) string { return strings.Repeat(" ", 34-len(n)) }
+	cases := []struct {
+		c    Change
+		want string
+	}{
+		{Change{Collection: plug, Name: "x@m", Kind: Edited, Value: map[string]any{"enabled": false}},
+			"  ~ plugins/x@m" + pad("plugins/x@m") + " edited (host item) → enabled=false"},
+		{Change{Collection: plug, Name: "y@m", Kind: Added, Value: map[string]any{"enabled": true, "source": "s"}},
+			"  + plugins/y@m" + pad("plugins/y@m") + " added → enabled=true"},
+		{Change{Collection: plug, Name: "z@m", Kind: Removed, Value: map[string]any{"enabled": true}},
+			"  − plugins/z@m" + pad("plugins/z@m") + " removed (host item)"},
+		{Change{Collection: plug, Name: "w@m", Kind: Edited, Value: map[string]any{"enabled": "yes"}},
+			"  ~ plugins/w@m" + pad("plugins/w@m") + " edited (host item)"},
+	}
+	for _, tc := range cases {
+		if got := label(tc.c); got != tc.want {
+			t.Errorf("label =\n%q\nwant\n%q", got, tc.want)
+		}
+	}
+}
