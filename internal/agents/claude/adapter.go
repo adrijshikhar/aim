@@ -1,7 +1,9 @@
 package claude
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -152,6 +154,9 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}, nil
 }
 
+// writeSettings writes the profile's first settings.json (tests count calls).
+var writeSettings = merge.AtomicWrite
+
 // rewriteSettingsHooks points host hook paths in the profile's settings.json at
 // the profile. The first copy from the host carries no plugin enablement: that
 // is merged per session (G5). Only the hooks member is rewritten, so a
@@ -163,23 +168,46 @@ func rewriteSettingsHooks(hostHome, profileDir string) {
 	hostClaude := filepath.Join(hostHome, ".claude")
 	destClaude := filepath.Join(profileDir, ".claude")
 
-	if _, err := os.Stat(destSettings); err != nil {
-		data, err := os.ReadFile(filepath.Join(hostClaude, "settings.json"))
-		if err != nil {
-			return
-		}
-		if err := merge.AtomicWrite(destSettings, data, 0o600); err != nil {
-			logger.Debug("[claude] Failed to write settings.json to %s: %v", destSettings, err)
-			return
-		}
-		for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
-			if err := merge.DeleteJSONKey(destSettings, key, 0o600); err != nil {
-				logger.Debug("[claude] Failed to drop %s from %s: %v", key, destSettings, err)
-			}
-		}
+	_, err := os.Stat(destSettings)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		seedSettings(filepath.Join(hostClaude, "settings.json"), destSettings, hostClaude, destClaude)
+		return
+	case err != nil:
+		logger.Warn("[claude] %s: %v; its hook paths are not rewritten", destSettings, err)
+		return
 	}
 	if _, err := merge.ReplaceInJSONMember(destSettings, "hooks", hostClaude, destClaude, 0o600); err != nil {
 		logger.Debug("[claude] Failed to update rewritten settings.json at %s: %v", destSettings, err)
+	}
+}
+
+// seedSettings makes the profile's first settings.json from the host's, in
+// memory and written once (0600): plugin enablement and marketplaces dropped,
+// hook paths pointed at the profile. A host file that cannot be stripped
+// safely is not copied at all; Claude then starts with its defaults rather
+// than with the host's enablement.
+func seedSettings(hostSettings, dest, hostClaude, destClaude string) {
+	data, err := os.ReadFile(hostSettings)
+	if err != nil {
+		return
+	}
+	if len(bytes.TrimSpace(data)) > 0 {
+		for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
+			if data, err = merge.DeleteJSONKeyBytes(data, key); err != nil {
+				break
+			}
+		}
+		if err == nil {
+			data, _, err = merge.ReplaceInJSONMemberBytes(data, "hooks", hostClaude, destClaude)
+		}
+		if err != nil {
+			logger.Warn("[claude] %s not copied to the profile (%v); Claude starts with its default settings", hostSettings, err)
+			return
+		}
+	}
+	if err := writeSettings(dest, data, 0o600); err != nil {
+		logger.Warn("[claude] Failed to write settings.json to %s: %v", dest, err)
 	}
 }
 

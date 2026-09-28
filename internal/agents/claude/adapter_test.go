@@ -2,11 +2,13 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -397,5 +399,90 @@ func TestAdapter_DoctorHooksCheckIgnoresOtherMembers(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(dest); strings.Contains(string(data), h) {
 		t.Fatalf("hooks not rewritten:\n%s", data)
+	}
+}
+
+func TestRewriteSettingsHooks_FirstCopyIsOneWrite(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+	_ = os.MkdirAll(filepath.Join(hostHome, ".claude"), 0o755)
+	_ = os.WriteFile(filepath.Join(hostHome, ".claude", "settings.json"), []byte(settingsFixture(hostHome)), 0o644)
+	var writes int
+	orig := writeSettings
+	writeSettings = func(path string, data []byte, mode os.FileMode) error {
+		writes++
+		return orig(path, data, mode)
+	}
+	defer func() { writeSettings = orig }()
+
+	rewriteSettingsHooks(hostHome, profileDir)
+
+	if writes != 1 {
+		t.Fatalf("first copy took %d writes, want 1", writes)
+	}
+	dest := filepath.Join(profileDir, ".claude", "settings.json")
+	data, _ := os.ReadFile(dest)
+	h, p := filepath.Join(hostHome, ".claude"), filepath.Join(profileDir, ".claude")
+	want := `{
+  "permissions": {"allow": ["Bash"]},
+  "hooks": {"Stop": [{"command": "` + p + `/hooks/stop.sh"}]},
+  "statusLine": {"command": "` + h + `/status.sh"}
+}`
+	if string(data) != want {
+		t.Fatalf("first copy =\n%s\nwant\n%s", data, want)
+	}
+	if fi, _ := os.Stat(dest); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("first copy mode = %v, want 0600", fi.Mode().Perm())
+	}
+}
+
+// A host settings.json the splicer cannot strip safely (a duplicate top-level
+// key) is not copied at all: seeding it would carry the host's enablement.
+func TestRewriteSettingsHooks_UnstrippableHostIsNotCopied(t *testing.T) {
+	var warned strings.Builder
+	logger.SetWarnOutput(&warned)
+	defer logger.Reset()
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+	_ = os.MkdirAll(filepath.Join(hostHome, ".claude"), 0o755)
+	_ = os.WriteFile(filepath.Join(hostHome, ".claude", "settings.json"),
+		[]byte(`{"enabledPlugins": {"x@m": true}, "hooks": {}, "enabledPlugins": {"y@m": true}}`), 0o644)
+
+	rewriteSettingsHooks(hostHome, profileDir)
+
+	if _, err := os.Stat(filepath.Join(profileDir, ".claude", "settings.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an unstrippable host copy must not be written (stat err = %v)", err)
+	}
+	if !strings.Contains(warned.String(), "settings.json") {
+		t.Fatalf("want a visible warning, got %q", warned.String())
+	}
+}
+
+// Only a missing settings.json is a first copy; any other stat error (here a
+// symlink loop) must not be treated as absent and overwritten.
+func TestRewriteSettingsHooks_StatErrorIsNotAbsent(t *testing.T) {
+	var warned strings.Builder
+	logger.SetWarnOutput(&warned)
+	defer logger.Reset()
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+	_ = os.MkdirAll(filepath.Join(hostHome, ".claude"), 0o755)
+	_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0o700)
+	_ = os.WriteFile(filepath.Join(hostHome, ".claude", "settings.json"), []byte(settingsFixture(hostHome)), 0o644)
+	dest := filepath.Join(profileDir, ".claude", "settings.json")
+	if err := os.Symlink(dest, dest); err != nil {
+		t.Fatal(err)
+	}
+
+	rewriteSettingsHooks(hostHome, profileDir)
+
+	if fi, err := os.Lstat(dest); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("settings.json was overwritten (lstat = %v, %v)", fi, err)
+	}
+	if !strings.Contains(warned.String(), dest) {
+		t.Fatalf("want a visible warning naming %s, got %q", dest, warned.String())
 	}
 }

@@ -227,9 +227,19 @@ func DeleteJSONKey(path, key string, minMode os.FileMode) error {
 	if err != nil {
 		return err
 	}
+	out, err := DeleteJSONKeyBytes(data, key)
+	if err != nil || bytes.Equal(out, data) {
+		return err
+	}
+	return AtomicWrite(path, out, minMode)
+}
+
+// DeleteJSONKeyBytes is DeleteJSONKey in memory: it returns data without the
+// top-level member key (data itself when there is none). data is not modified.
+func DeleteJSONKeyBytes(data []byte, key string) ([]byte, error) {
 	members, err := scanTop(data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for k, m := range members {
 		if m.key != key {
@@ -244,10 +254,9 @@ func DeleteJSONKey(path, key string, minMode os.FileMode) error {
 		default:
 			from, to = int(m.start), int(members[1].start)
 		}
-		out := append(append([]byte(nil), data[:from]...), data[to:]...)
-		return AtomicWrite(path, out, minMode)
+		return append(append([]byte(nil), data[:from]...), data[to:]...), nil
 	}
-	return nil
+	return data, nil
 }
 
 // ReplaceInJSONMember replaces old with new inside the value of one top-level
@@ -255,15 +264,28 @@ func DeleteJSONKey(path, key string, minMode os.FileMode) error {
 // an absent key, an empty old or no match is (false, nil).
 func ReplaceInJSONMember(path, key, old, new string, minMode os.FileMode) (bool, error) {
 	if old == "" {
-		return false, nil // bytes.ReplaceAll would insert new between every byte
+		return false, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
+	out, changed, err := ReplaceInJSONMemberBytes(data, key, old, new)
+	if err != nil || !changed {
+		return false, err
+	}
+	return true, AtomicWrite(path, out, minMode)
+}
+
+// ReplaceInJSONMemberBytes is ReplaceInJSONMember in memory. When nothing
+// changes it returns data itself; data is not modified.
+func ReplaceInJSONMemberBytes(data []byte, key, old, new string) ([]byte, bool, error) {
+	if old == "" {
+		return data, false, nil // bytes.ReplaceAll would insert new between every byte
+	}
 	members, err := scanTop(data)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	for _, m := range members {
 		if m.key != key {
@@ -271,11 +293,10 @@ func ReplaceInJSONMember(path, key, old, new string, minMode os.FileMode) (bool,
 		}
 		val := data[m.valStart:m.end]
 		if !bytes.Contains(val, []byte(old)) {
-			return false, nil
+			return data, false, nil
 		}
 		repl := bytes.ReplaceAll(val, []byte(old), []byte(new))
-		out := append(append(append([]byte(nil), data[:m.valStart]...), repl...), data[m.end:]...)
-		return true, AtomicWrite(path, out, minMode)
+		return append(append(append([]byte(nil), data[:m.valStart]...), repl...), data[m.end:]...), true, nil
 	}
-	return false, nil
+	return data, false, nil
 }

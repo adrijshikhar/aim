@@ -186,3 +186,24 @@ func TestReplaceInJSONMember_NoOp(t *testing.T) {
 		t.Fatalf("missing file: err = %v", err)
 	}
 }
+
+func TestJSONBytes_DeleteAndReplaceInMemory(t *testing.T) {
+	src := []byte(`{"a": 1, "hooks": {"x": "/h/.claude/s"}, "enabledPlugins": {"p@m": true}}`)
+	out, err := DeleteJSONKeyBytes(src, "enabledPlugins")
+	if err != nil || string(out) != `{"a": 1, "hooks": {"x": "/h/.claude/s"}}` {
+		t.Fatalf("delete = %s, %v", out, err)
+	}
+	if same, err := DeleteJSONKeyBytes(out, "absent"); err != nil || string(same) != string(out) {
+		t.Fatalf("an absent key is a no-op: %s, %v", same, err)
+	}
+	repl, changed, err := ReplaceInJSONMemberBytes(out, "hooks", "/h/.claude", "/p/.claude")
+	if err != nil || !changed || string(repl) != `{"a": 1, "hooks": {"x": "/p/.claude/s"}}` {
+		t.Fatalf("replace = %s, %v, %v", repl, changed, err)
+	}
+	if _, err := DeleteJSONKeyBytes([]byte(`{"a":1,"a":2}`), "a"); !errors.Is(err, ErrUnsafeJSON) {
+		t.Fatalf("duplicate keys must be refused, got %v", err)
+	}
+	if string(src) != `{"a": 1, "hooks": {"x": "/h/.claude/s"}, "enabledPlugins": {"p@m": true}}` {
+		t.Fatal("the input must not be modified")
+	}
+}
