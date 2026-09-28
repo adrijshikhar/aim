@@ -12,9 +12,10 @@ import (
 )
 
 type ProfileConfig struct {
-	Agents []string          `json:"agents,omitempty"`
-	Env    map[string]string `json:"env,omitempty"`
-	Args   []string          `json:"args,omitempty"`
+	Agents    []string          `json:"agents,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	MCPGlobal *bool             `json:"mcp_global,omitempty"`
 }
 
 func (p *ProfileConfig) UnmarshalJSON(data []byte) error {
@@ -206,6 +207,19 @@ func NewDefaultConfig() *Config {
 		DefaultProfile: "",
 		Profiles:       make(map[string]ProfileConfig),
 	}
+}
+
+// MCPGlobalEnabled reports whether host MCP servers are merged into the
+// profile's sessions. Absent means true.
+func (c *Config) MCPGlobalEnabled(profile string) bool {
+	if c == nil {
+		return true
+	}
+	p, ok := c.Profiles[profile]
+	if !ok || p.MCPGlobal == nil {
+		return true
+	}
+	return *p.MCPGlobal
 }
 
 func (c *Config) GetProfileAgents(profile string) []string {
