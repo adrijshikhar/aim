@@ -16,12 +16,26 @@ func claudeNormalise(v map[string]any) map[string]any {
 	return v
 }
 
+// MCPCollections: MCP servers live in .claude.json; which plugins are on, and
+// the marketplaces they come from, in settings.json. Plugin content is shared.
 func (a *Adapter) MCPCollections(profileDir, realHome string) []merge.Collection {
+	hostSettings := filepath.Join(realHome, ".claude", "settings.json")
+	profSettings := filepath.Join(profileDir, ".claude", "settings.json")
 	return []merge.Collection{{
 		Agent: "claude", Name: "mcpServers", Format: merge.JSON, Key: "mcpServers",
 		HostPath:    filepath.Join(realHome, ".claude.json"),
 		ProfilePath: filepath.Join(profileDir, ".claude", ".claude.json"),
 		Normalise:   claudeNormalise,
+		Group:       "mcp",
+		Noun:        "server",
+	}, {
+		Agent: "claude", Name: "enabledPlugins", Format: merge.JSON, Key: "enabledPlugins",
+		HostPath: hostSettings, ProfilePath: profSettings,
+		Group: "plugins", Noun: "plugin",
+	}, {
+		Agent: "claude", Name: "extraKnownMarketplaces", Format: merge.JSON, Key: "extraKnownMarketplaces",
+		HostPath: hostSettings, ProfilePath: profSettings,
+		Group: "plugins", Noun: "marketplace",
 	}}
 }
 

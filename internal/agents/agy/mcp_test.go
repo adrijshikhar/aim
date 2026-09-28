@@ -13,7 +13,7 @@ func TestMCPCollections_Agy(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(home, ".gemini", "config"), 0o755)
 	a := &Adapter{}
 	cols := a.MCPCollections("/p", home)
-	if len(cols) != 1 || cols[0].ID() != "agy/mcpServers" {
+	if len(cols) != 1 || cols[0].ID() != "agy/mcpServers" || cols[0].Group != "mcp" || cols[0].Noun != "server" {
 		t.Fatalf("collections = %+v", cols)
 	}
 	c := cols[0]

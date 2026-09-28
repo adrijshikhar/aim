@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/usage"
@@ -302,5 +303,99 @@ func TestAdapter_PrepareEnv_StripsHostTokens(t *testing.T) {
 		if val, exists := launch.Env[k]; exists && val != "" {
 			t.Errorf("expected %s to be stripped from LaunchEnv, got %q", k, val)
 		}
+	}
+}
+
+// settingsFixture is a host settings.json with the host .claude path in hooks,
+// a marketplace source and statusLine.
+func settingsFixture(hostHome string) string {
+	h := filepath.Join(hostHome, ".claude")
+	return `{
+  "permissions": {"allow": ["Bash"]},
+  "hooks": {"Stop": [{"command": "` + h + `/hooks/stop.sh"}]},
+  "enabledPlugins": {"x@m": true, "y@m": false},
+  "extraKnownMarketplaces": {"m": {"source": {"source": "directory", "path": "` + h + `/mkt"}}},
+  "statusLine": {"command": "` + h + `/status.sh"}
+}`
+}
+
+func TestRewriteSettingsHooks_FirstCopyHasNoPluginEnablement(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+	_ = os.MkdirAll(filepath.Join(hostHome, ".claude"), 0o755)
+	_ = os.WriteFile(filepath.Join(hostHome, ".claude", "settings.json"), []byte(settingsFixture(hostHome)), 0o644)
+
+	rewriteSettingsHooks(hostHome, profileDir)
+
+	dest := filepath.Join(profileDir, ".claude", "settings.json")
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, p := filepath.Join(hostHome, ".claude"), filepath.Join(profileDir, ".claude")
+	want := `{
+  "permissions": {"allow": ["Bash"]},
+  "hooks": {"Stop": [{"command": "` + p + `/hooks/stop.sh"}]},
+  "statusLine": {"command": "` + h + `/status.sh"}
+}`
+	if string(data) != want {
+		t.Fatalf("first copy =\n%s\nwant\n%s", data, want)
+	}
+	if fi, _ := os.Stat(dest); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("first copy mode = %v, want 0600", fi.Mode().Perm())
+	}
+}
+
+func TestRewriteSettingsHooks_OnlyHooksAreRewritten(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+	_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0o700)
+	dest := filepath.Join(profileDir, ".claude", "settings.json")
+	src := settingsFixture(hostHome)
+	_ = os.WriteFile(dest, []byte(src), 0o644)
+
+	rewriteSettingsHooks(hostHome, profileDir)
+
+	data, _ := os.ReadFile(dest)
+	h, p := filepath.Join(hostHome, ".claude"), filepath.Join(profileDir, ".claude")
+	want := strings.Replace(src, h+"/hooks", p+"/hooks", 1)
+	if string(data) != want {
+		t.Fatalf("a marketplace path must not be rewritten:\n%s", data)
+	}
+}
+
+func TestAdapter_DoctorHooksCheckIgnoresOtherMembers(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profiles", "work")
+	t.Setenv("AIM_REAL_HOME", hostHome)
+	_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0o700)
+	dest := filepath.Join(profileDir, ".claude", "settings.json")
+	h := filepath.Join(hostHome, ".claude")
+	src := `{"hooks": {}, "extraKnownMarketplaces": {"m": {"source": {"source": "directory", "path": "` + h + `/mkt"}}}}`
+	_ = os.WriteFile(dest, []byte(src), 0o644)
+
+	hooksReported := func() bool {
+		for _, r := range NewAdapter().Doctor(context.Background(), "work", profileDir) {
+			if r.Category == "Hooks" {
+				return true
+			}
+		}
+		return false
+	}
+	if hooksReported() {
+		t.Fatal("a host path outside hooks is not a hook to migrate")
+	}
+	if data, _ := os.ReadFile(dest); string(data) != src {
+		t.Fatalf("Doctor must leave the file alone:\n%s", data)
+	}
+	_ = os.WriteFile(dest, []byte(`{"hooks": {"Stop": "`+h+`/hooks/stop.sh"}}`), 0o644)
+	if !hooksReported() {
+		t.Fatal("a host path in hooks must be migrated and reported")
+	}
+	if data, _ := os.ReadFile(dest); strings.Contains(string(data), h) {
+		t.Fatalf("hooks not rewritten:\n%s", data)
 	}
 }

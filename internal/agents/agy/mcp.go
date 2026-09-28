@@ -22,6 +22,8 @@ func (a *Adapter) MCPCollections(profileDir, realHome string) []merge.Collection
 		HostPath:    filepath.Join(sharedConfigDir(realHome), "mcp_config.json"),
 		ProfilePath: filepath.Join(profileDir, ".gemini", "config", "mcp_config.json"),
 		Normalise:   agyNormalise,
+		Group:       "mcp",
+		Noun:        "server",
 	}}
 }
 
