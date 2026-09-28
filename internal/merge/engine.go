@@ -156,7 +156,7 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 		// Nothing records the merge: take the host items out again, or they
 		// become the profile's own for good.
 		for _, w := range undo {
-			e.writeStrip(w)
+			e.writeStrip(w, "rollback")
 		}
 		return s, err
 	}
@@ -458,7 +458,7 @@ func (s *Session) Finish(changes []Change, decide func([]Change) []Decision) err
 		return err
 	}
 	for _, w := range writes {
-		e.writeStrip(w)
+		e.writeStrip(w, "strip")
 	}
 	return nil
 }
@@ -526,7 +526,9 @@ func (e *Engine) planStrip(c Collection, st *State) stripWrite {
 	return w
 }
 
-func (e *Engine) writeStrip(w stripWrite) {
+// writeStrip writes w; verb names the operation in the failure warning ("strip",
+// or "rollback" when Start undoes a merge no saved state records).
+func (e *Engine) writeStrip(w stripWrite, verb string) {
 	if w.skip {
 		return
 	}
@@ -537,7 +539,7 @@ func (e *Engine) writeStrip(w stripWrite) {
 		_, err = w.c.Write(w.c.ProfilePath, w.prof)
 	}
 	if err != nil {
-		e.warnf("aim: %s: strip failed: %v", w.c.ID(), err)
+		e.warnf("aim: %s: %s failed: %v", w.c.ID(), verb, err)
 	}
 }
 
@@ -568,7 +570,7 @@ func (e *Engine) recover(profile, agent string, cols []Collection, st *State) er
 		return err
 	}
 	for _, w := range writes {
-		e.writeStrip(w)
+		e.writeStrip(w, "strip")
 	}
 	return nil
 }
