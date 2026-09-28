@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -269,26 +270,37 @@ func copyHostConfig(realHome, profileCodexDir string) {
 }
 
 // stripTables removes whole top-level tables from TOML text with the merge
-// package's splicing helper (via a 0600 temp file in dir). On any error the
-// text is returned unchanged.
+// package's splicing helper (via a 0600 temp file in dir). Each key is
+// stripped on its own: one the splicer refuses stays in the text with a
+// warning, and the keys stripped before it stay stripped. If the temp file
+// cannot be used at all the text is returned unchanged, with a warning.
 func stripTables(dir string, data []byte, keys ...string) []byte {
 	tmp, err := os.CreateTemp(dir, ".aim-seed-*.toml")
 	if err != nil {
+		logger.Warn("[codex] seeding %s without %s failed: %v", dir, strings.Join(keys, ", "), err)
 		return data
 	}
 	defer os.Remove(tmp.Name())
 	_, werr := tmp.Write(data)
 	if cerr := tmp.Close(); werr != nil || cerr != nil {
+		logger.Warn("[codex] seeding %s without %s failed: %v", dir, strings.Join(keys, ", "), errors.Join(werr, cerr))
 		return data
 	}
 	for _, k := range keys {
-		if _, err := merge.WriteTOMLKey(tmp.Name(), k, merge.NewEntries(), 0o600); err != nil {
-			logger.Debug("[codex] seeding without %s failed: %v", k, err)
-			return data
+		// A failed splice writes nothing, so the temp file keeps the last
+		// successful strip.
+		skipped, err := merge.WriteTOMLKey(tmp.Name(), k, merge.NewEntries(), 0o600)
+		if err != nil {
+			logger.Warn("[codex] seeding %s without %s failed, it is copied from the host: %v", dir, k, err)
+			continue
+		}
+		if len(skipped) > 0 {
+			logger.Warn("[codex] %s entries defined inline are copied from the host: %s", k, strings.Join(skipped, ", "))
 		}
 	}
 	out, err := os.ReadFile(tmp.Name())
 	if err != nil {
+		logger.Warn("[codex] seeding %s without %s failed: %v", dir, strings.Join(keys, ", "), err)
 		return data
 	}
 	return out
