@@ -657,3 +657,27 @@ func (m *mockAgentAdapter) Doctor(ctx context.Context, profileName, profileDir s
 func (m *mockAgentAdapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
 	return nil, nil
 }
+
+func TestCloneProfile_CopiesMCPGlobal(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("AIM_HOME", base)
+	pm := NewProfileManager(base)
+	_, _ = pm.EnsureProfile("src")
+	off := false
+	cfg := &config.Config{Profiles: map[string]config.ProfileConfig{"src": {MCPGlobal: &off}}}
+	if err := pm.CloneProfile("src", "dst", "", cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Profiles["dst"].MCPGlobal
+	if got == nil || *got || got == cfg.Profiles["src"].MCPGlobal {
+		t.Fatalf("clone must copy mcp_global by value, got %v", got)
+	}
+}
+
+func TestMergeStateStore_DefaultsUnderStateDir(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("AIM_HOME", base)
+	if got := NewProfileManager(base).MergeStateStore().Dir; got != filepath.Join(base, "profile-merge") {
+		t.Fatalf("default store = %s", got)
+	}
+}

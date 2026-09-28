@@ -44,11 +44,8 @@ func (m Model) fetchDoctorDiagnostics() Model {
 			Status:   "WARN",
 			Message:  fmt.Sprintf("No profiles configured for %s", m.agent),
 		})
-		if reg != nil {
-			if ad, err := reg.Get(m.agent); err == nil && ad != nil {
-				results = append(results, ad.Doctor(context.Background(), "", "")...)
-			}
-		}
+		// No profile: do not run Doctor with an empty profile dir — adapters
+		// resolve files relative to it and would write into the working dir.
 		m.doctorDrawer = doctorDrawerState{
 			active:        true,
 			targetAgent:   m.agent,

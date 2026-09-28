@@ -2,8 +2,10 @@ package agy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +17,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
@@ -426,6 +429,16 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}, nil
 }
 
+// sharedConfigDir is the host layer for agy: the real ~/.gemini/config when it
+// exists, else aim's shared fallback.
+func sharedConfigDir(realHome string) string {
+	realConfigDir := filepath.Join(realHome, ".gemini", "config")
+	if _, err := os.Stat(realConfigDir); err == nil {
+		return realConfigDir
+	}
+	return filepath.Join(config.BaseDir(), "shared", "gemini-config")
+}
+
 func bridgeSharedState(realHome, profileDir string) error {
 	var sharedDir string
 	realAgyDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
@@ -470,37 +483,33 @@ func bridgeSharedState(realHome, profileDir string) error {
 	bridgeDir(pPluginData, sPluginData)
 
 	// 6. Gemini config directory (plugins, import_manifest.json, hooks, settings)
-	var sharedConfigDir string
-	realConfigDir := filepath.Join(realHome, ".gemini", "config")
-	if _, err := os.Stat(realConfigDir); err == nil {
-		sharedConfigDir = realConfigDir
-	} else {
-		sharedConfigDir = filepath.Join(config.BaseDir(), "shared", "gemini-config")
-	}
-	_ = os.MkdirAll(sharedConfigDir, 0755)
+	sharedDirCfg := sharedConfigDir(realHome)
+	_ = os.MkdirAll(sharedDirCfg, 0755)
 
 	profileConfigDir := filepath.Join(profileDir, ".gemini", "config")
 	_ = os.MkdirAll(profileConfigDir, 0755)
 
 	// 6a. plugins directory
-	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "plugins"), 0755)
-	bridgeDir(filepath.Join(profileConfigDir, "plugins"), filepath.Join(sharedConfigDir, "plugins"))
+	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "plugins"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "plugins"), filepath.Join(sharedDirCfg, "plugins"))
 
 	// 6b. import_manifest.json
-	bridgeFile(filepath.Join(profileConfigDir, "import_manifest.json"), filepath.Join(sharedConfigDir, "import_manifest.json"))
+	bridgeFile(filepath.Join(profileConfigDir, "import_manifest.json"), filepath.Join(sharedDirCfg, "import_manifest.json"))
 
 	// 6c. hooks.json & hooks directory
-	bridgeFile(filepath.Join(profileConfigDir, "hooks.json"), filepath.Join(sharedConfigDir, "hooks.json"))
-	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "hooks"), 0755)
-	bridgeDir(filepath.Join(profileConfigDir, "hooks"), filepath.Join(sharedConfigDir, "hooks"))
+	bridgeFile(filepath.Join(profileConfigDir, "hooks.json"), filepath.Join(sharedDirCfg, "hooks.json"))
+	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "hooks"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "hooks"), filepath.Join(sharedDirCfg, "hooks"))
 
 	// 6d. config.json & mcp_config.json
-	bridgeFile(filepath.Join(profileConfigDir, "config.json"), filepath.Join(sharedConfigDir, "config.json"))
-	bridgeFile(filepath.Join(profileConfigDir, "mcp_config.json"), filepath.Join(sharedConfigDir, "mcp_config.json"))
+	bridgeFile(filepath.Join(profileConfigDir, "config.json"), filepath.Join(sharedDirCfg, "config.json"))
+	if err := regularizeMCPConfig(profileConfigDir); err != nil {
+		logger.Debug("[agy] mcp_config.json: %v", err)
+	}
 
 	// 6e. projects
-	_ = os.MkdirAll(filepath.Join(sharedConfigDir, "projects"), 0755)
-	bridgeDir(filepath.Join(profileConfigDir, "projects"), filepath.Join(sharedConfigDir, "projects"))
+	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "projects"), 0755)
+	bridgeDir(filepath.Join(profileConfigDir, "projects"), filepath.Join(sharedDirCfg, "projects"))
 
 	// 6f. skills symlink in .gemini/config
 	sSkills := filepath.Join(realHome, ".agents", "skills")
@@ -510,6 +519,44 @@ func bridgeSharedState(realHome, profileDir string) error {
 	}
 
 	return nil
+}
+
+// emptyMCPConfig is what an absent, dangling or empty mcp_config.json becomes.
+const emptyMCPConfig = `{"mcpServers":{}}`
+
+// regularizeMCPConfig makes the profile's mcp_config.json a regular 0600 file,
+// so agy's own writes are never replaced by a re-link (T6). A symlink becomes a
+// copy of its target; the session merge (package merge) supplies host servers.
+func regularizeMCPConfig(profileConfigDir string) error {
+	p := filepath.Join(profileConfigDir, "mcp_config.json")
+	fi, err := os.Lstat(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return merge.AtomicWrite(p, []byte(emptyMCPConfig), 0o600)
+	}
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if len(bytes.TrimSpace(data)) == 0 {
+			return merge.AtomicWrite(p, []byte(emptyMCPConfig), 0o600)
+		}
+		if fi.Mode().Perm()&0o077 != 0 {
+			return os.Chmod(p, 0o600)
+		}
+		return nil
+	}
+	data, rerr := os.ReadFile(p) // follows the link
+	if rerr != nil || len(bytes.TrimSpace(data)) == 0 {
+		data = []byte(emptyMCPConfig)
+	}
+	if err := os.Remove(p); err != nil {
+		return err
+	}
+	return merge.AtomicWrite(p, data, 0o600)
 }
 
 func bridgeDir(profilePath, sharedPath string) {

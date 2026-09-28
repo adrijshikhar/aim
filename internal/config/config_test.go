@@ -454,3 +454,15 @@ func TestConfig_DefaultXDG_WithoutEnv(t *testing.T) {
 		t.Errorf("expected XDG resolution to not resolve to non-existent ~/.aim (%q)", legacyAimDir)
 	}
 }
+
+func TestMCPGlobalEnabled_DefaultTrue(t *testing.T) {
+	f := false
+	c := &Config{Profiles: map[string]ProfileConfig{"a": {}, "b": {MCPGlobal: &f}}}
+	if !c.MCPGlobalEnabled("a") || c.MCPGlobalEnabled("b") || !c.MCPGlobalEnabled("missing") {
+		t.Fatal("mcp_global default must be true")
+	}
+	var nilCfg *Config
+	if !nilCfg.MCPGlobalEnabled("a") {
+		t.Fatal("a missing config means merge on")
+	}
+}

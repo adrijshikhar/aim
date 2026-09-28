@@ -15,6 +15,9 @@ set -euo pipefail
 # 7. Cross-Profile Session Hydration & Flag Forwarding (aim resume)
 # 8. Size-Aware Deduplication & Sync (larger source rollout overwrites stale/truncated touch)
 # 9. Session Forking (--fork with UUID regeneration and ref replacement)
+# 10. Session-Scoped MCP Server Merge (host servers merged per session, keep / promote,
+#     mcp_global:false, background launch (CLI or profile args) + recovery; adapters
+#     without MCP untouched)
 # ==============================================================================
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -65,6 +68,8 @@ echo "ARGS: \$*" >> "$TEST_DIR/${AGENT}_invoked.log"
 echo "HOME: \$HOME" >> "$TEST_DIR/${AGENT}_invoked.log"
 echo "AIM_AGENT: \${AIM_AGENT:-}" >> "$TEST_DIR/${AGENT}_invoked.log"
 echo "AIM_PROFILE: \${AIM_PROFILE:-}" >> "$TEST_DIR/${AGENT}_invoked.log"
+# E2E_HOOK simulates work the agent does mid-session (e.g. a native `mcp add`)
+if [ -n "\${E2E_HOOK:-}" ]; then sh "\$E2E_HOOK"; fi
 MOCK
   chmod +x "$MOCK_BIN/$AGENT"
 done
@@ -538,6 +543,289 @@ for AGENT in "${NON_SESSION_ADAPTERS[@]}"; do
   fi
   echo "✔ Correctly rejected resumption for non-session adapter '$AGENT'"
 done
+
+echo ""
+echo "========================================================================"
+echo "  PHASE 4: Session-Scoped MCP Server Merge                               "
+echo "  (global merge, keep, promote, mcp_global:false, background recovery)   "
+echo "  Parameterizing across ALL adapters; MCP: claude, codex, agy            "
+echo "========================================================================"
+
+# Helper: Check if adapter merges host MCP servers per session (agents.MCPProvider)
+adapter_has_mcp() {
+  case "$1" in
+    claude|codex|agy) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Helper: Host-side MCP config file for adapter (under AIM_REAL_HOME)
+mcp_host_file() {
+  case "$1" in
+    claude) echo "$AIM_REAL_HOME/.claude.json" ;;
+    codex)  echo "$AIM_REAL_HOME/.codex/config.toml" ;;
+    agy)    echo "$AIM_REAL_HOME/.gemini/config/mcp_config.json" ;;
+  esac
+}
+
+# Helper: Profile-side MCP config file, relative to the profile dir ($HOME inside the agent)
+mcp_profile_rel() {
+  case "$1" in
+    claude) echo ".claude/.claude.json" ;;
+    codex)  echo ".codex/config.toml" ;;
+    agy)    echo ".gemini/config/mcp_config.json" ;;
+  esac
+}
+
+# Helper: File format and top-level key of the MCP server map
+mcp_format() { case "$1" in codex) echo toml ;; *) echo json ;; esac; }
+mcp_key()    { case "$1" in codex) echo mcp_servers ;; *) echo mcpServers ;; esac; }
+
+# Helper: Native args that start a background session (merge, run, no exit step)
+mcp_bg_args() {
+  case "$1" in
+    claude) echo "--bg" ;;
+    codex)  echo "app-server" ;;
+    agy)    echo "remote-control" ;;
+  esac
+}
+
+# Helper: Write an MCP config holding the named servers (server -> command "true", plus args for 'shared')
+mcp_write() {
+  local agent="$1" file="$2"; shift 2
+  mkdir -p "$(dirname "$file")"
+  python3 - "$(mcp_format "$agent")" "$(mcp_key "$agent")" "$file" "$@" << 'PYEOF'
+import json, sys
+fmt, key, path, names = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+servers = {n: ({"command": "true", "args": ["x"]} if n == "shared" else {"command": "true"}) for n in names}
+if fmt == "json":
+    json.dump({"other": 1, key: servers}, open(path, "w"), indent=2)
+else:
+    with open(path, "w") as f:
+        f.write('model = "e2e"\n')
+        for n, v in servers.items():
+            f.write(f'\n[{key}.{n}]\ncommand = "{v["command"]}"\n')
+            if "args" in v:
+                f.write('args = ["x"]\n')
+PYEOF
+}
+
+# Helper: Print the server names in an MCP config, space-separated and sorted
+mcp_names() {
+  local agent="$1" file="$2"
+  [ -f "$file" ] || { echo ""; return; }
+  python3 - "$(mcp_format "$agent")" "$(mcp_key "$agent")" "$file" << 'PYEOF'
+import json, sys, tomllib
+fmt, key, path = sys.argv[1], sys.argv[2], sys.argv[3]
+data = json.load(open(path)) if fmt == "json" else tomllib.load(open(path, "rb"))
+print(" ".join(sorted((data.get(key) or {}).keys())))
+PYEOF
+}
+
+# Helper: Assert an MCP config holds exactly the given servers
+assert_mcp_names() {
+  local agent="$1" file="$2" what="$3"; shift 3
+  local want got
+  want=$(printf '%s\n' "$@" | sort | tr '\n' ' ' | sed 's/ $//')
+  got=$(mcp_names "$agent" "$file")
+  if [ "$got" != "$want" ]; then
+    echo "FAIL [$agent]: $what has servers [$got], expected [$want]"
+    [ -f "$file" ] && cat "$file"
+    exit 1
+  fi
+}
+
+# Helper: Set or clear profiles.<p>.mcp_global in aim's config.json
+set_mcp_global() {
+  python3 - "$AIM_HOME/config.json" "$1" "$2" << 'PYEOF'
+import json, sys
+path, prof, val = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg = json.load(open(path))
+p = cfg.setdefault("profiles", {}).setdefault(prof, {})
+if val == "unset":
+    p.pop("mcp_global", None)
+else:
+    p["mcp_global"] = (val == "true")
+json.dump(cfg, open(path, "w"), indent=2)
+PYEOF
+}
+
+# Helper: Set profiles.<p>.args in aim's config.json to the remaining arguments, or clear it with "unset"
+set_profile_args() {
+  python3 - "$AIM_HOME/config.json" "$@" << 'PYEOF'
+import json, sys
+path, prof, args = sys.argv[1], sys.argv[2], sys.argv[3:]
+cfg = json.load(open(path))
+p = cfg.setdefault("profiles", {}).setdefault(prof, {})
+if args == ["unset"]:
+    p.pop("args", None)
+else:
+    p["args"] = args
+json.dump(cfg, open(path, "w"), indent=2)
+PYEOF
+}
+
+# Helper: Run a command on a PTY, answer once when EXPECT appears, print output
+pty_run() {
+  local expect="$1" answer="$2"; shift 2
+  python3 - "$expect" "$answer" "$@" << 'PYEOF'
+import os, pty, subprocess, sys
+expect, answer, cmd = sys.argv[1].encode(), sys.argv[2].encode(), sys.argv[3:]
+master, slave = pty.openpty()
+proc = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+os.close(slave)
+sent, out = False, b""
+while True:
+    try:
+        data = os.read(master, 1024)
+    except OSError:
+        break
+    if not data:
+        break
+    out += data
+    if not sent and expect in out:
+        os.write(master, answer + b"\n")
+        sent = True
+os.close(master)
+proc.wait()
+sys.stdout.write(out.decode("utf-8", errors="replace"))
+sys.exit(proc.returncode)
+PYEOF
+}
+
+# Hook the mock agent runs mid-session (E2E_HOOK): snapshot the profile's MCP
+# config, then add a server natively the way `<agent> mcp add` would.
+cat << 'HOOK' > "$TEST_DIR/mcp_hook.sh"
+#!/bin/sh
+file="$HOME/$E2E_MCP_REL"
+cp "$file" "$E2E_SNAP" 2>/dev/null || : > "$E2E_SNAP"
+[ -n "${E2E_MCP_ADD:-}" ] || exit 0
+if [ "$E2E_MCP_FORMAT" = "toml" ]; then
+  printf '\n[%s.%s]\ncommand = "true"\n' "$E2E_MCP_KEY" "$E2E_MCP_ADD" >> "$file"
+else
+  python3 - "$file" "$E2E_MCP_KEY" "$E2E_MCP_ADD" << 'PYEOF'
+import json, sys
+path, key, name = sys.argv[1], sys.argv[2], sys.argv[3]
+data = json.load(open(path))
+data.setdefault(key, {})[name] = {"command": "true"}
+json.dump(data, open(path, "w"), indent=2)
+PYEOF
+fi
+HOOK
+
+export E2E_HOOK="$TEST_DIR/mcp_hook.sh"
+
+for AGENT in "${ALL_ADAPTERS[@]}"; do
+  echo ""
+  echo "--- Testing MCP Merge: [$AGENT] ---"
+  PROF="mcp-$AGENT"
+  PROF_DIR="$AIM_HOME/profiles/$PROF"
+
+  if ! adapter_has_mcp "$AGENT"; then
+    export AIM_AUTO_CREATE=1
+    "$AIM_BIN" run "$AGENT" "$PROF" < /dev/null
+    if [ -f "$AIM_HOME/profile-merge/$PROF.json" ]; then
+      echo "FAIL [$AGENT]: adapter without MCP servers left merge state at profile-merge/$PROF.json"
+      exit 1
+    fi
+    echo "  ✔ No MCP merge for $AGENT (no MCPProvider), launch unaffected"
+    continue
+  fi
+
+  HOST_FILE=$(mcp_host_file "$AGENT")
+  PROF_REL=$(mcp_profile_rel "$AGENT")
+  PROF_FILE="$PROF_DIR/$PROF_REL"
+  SNAP="$TEST_DIR/${AGENT}_mcp_during"
+  export E2E_MCP_REL="$PROF_REL" E2E_MCP_KEY="$(mcp_key "$AGENT")" E2E_MCP_FORMAT="$(mcp_format "$AGENT")" E2E_SNAP="$SNAP"
+
+  # Host: hostsrv + shared. Profile: own + an identical copy-once leftover of shared.
+  mcp_write "$AGENT" "$HOST_FILE" hostsrv shared
+  mcp_write "$AGENT" "$PROF_FILE" own shared
+  cp "$HOST_FILE" "$TEST_DIR/${AGENT}_host_before"
+
+  # 1. Global merge visible during the session; a native add is kept in the profile on exit
+  echo "  [1/6] Testing global merge, one-time migration and keep-on-exit (non-interactive)..."
+  export AIM_AUTO_CREATE=1
+  export E2E_MCP_ADD=newsrv
+  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+  assert_mcp_names "$AGENT" "$SNAP" "profile config during session" own hostsrv shared
+  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config at rest" own newsrv
+  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT)"; then
+    echo "FAIL [$AGENT]: exit did not report the kept change"
+    echo "$RUN_OUT"
+    exit 1
+  fi
+  if ! ls "$PROF_FILE".aim-backup-* > /dev/null 2>&1; then
+    echo "FAIL [$AGENT]: migration removed the identical 'shared' copy without a backup"
+    exit 1
+  fi
+  if ! cmp -s "$HOST_FILE" "$TEST_DIR/${AGENT}_host_before"; then
+    echo "FAIL [$AGENT]: host config changed by a keep-only session"
+    exit 1
+  fi
+  echo "  ✔ Host servers merged for the session only; 'newsrv' kept, 'shared' leftover migrated with backup"
+
+  # 2. Promote: answer [p] at the exit prompt on a PTY; the host gains the server
+  echo "  [2/6] Testing promote to host via exit prompt (PTY)..."
+  export E2E_MCP_ADD=promoted
+  PTY_OUT=$(pty_run "(default: k)" "p" "$AIM_BIN" run "$AGENT" "$PROF")
+  CLEAN_PTY=$(echo "$PTY_OUT" | sed -E $'s/\x1b\\[[0-9;]*m//g')
+  if ! echo "$CLEAN_PTY" | grep -q "Session in $PROF ($AGENT) changed:"; then
+    echo "FAIL [$AGENT]: exit prompt not shown on a TTY"
+    echo "$PTY_OUT"
+    exit 1
+  fi
+  assert_mcp_names "$AGENT" "$HOST_FILE" "host config after promote" hostsrv shared promoted
+  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config after promote" own newsrv
+  echo "  ✔ 'promoted' written to the host and stripped from the profile"
+
+  # 3. mcp_global: false — the profile runs on its own servers only
+  echo "  [3/6] Testing profiles.$PROF.mcp_global = false..."
+  set_mcp_global "$PROF" false
+  unset E2E_MCP_ADD
+  "$AIM_BIN" run "$AGENT" "$PROF" < /dev/null
+  assert_mcp_names "$AGENT" "$SNAP" "profile config during session (mcp_global=false)" own newsrv
+  set_mcp_global "$PROF" unset
+  echo "  ✔ Host servers not merged when mcp_global is false"
+
+  # 4. Background launch: merge, run, no exit step — host items stay until the next launch
+  echo "  [4/6] Testing background launch ('aim run $AGENT $PROF $(mcp_bg_args "$AGENT")')..."
+  export E2E_MCP_ADD=bgsrv
+  "$AIM_BIN" run "$AGENT" "$PROF" $(mcp_bg_args "$AGENT") < /dev/null
+  unset E2E_MCP_ADD
+  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config after background launch" own newsrv bgsrv hostsrv shared promoted
+  echo "  ✔ Background launch left the merged config in place"
+
+  # 5. Background via profiles.<p>.args with no CLI args: recovers step 4, merges, no exit step
+  echo "  [5/6] Testing background launch from profiles.$PROF.args = [$(mcp_bg_args "$AGENT")]..."
+  set_profile_args "$PROF" $(mcp_bg_args "$AGENT")
+  export E2E_MCP_ADD=profbgsrv
+  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+  unset E2E_MCP_ADD
+  set_profile_args "$PROF" unset
+  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
+    echo "FAIL [$AGENT]: launch from profile args did not recover the previous background session"
+    echo "$RUN_OUT"
+    exit 1
+  fi
+  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config after background launch from profile args" own newsrv bgsrv profbgsrv hostsrv shared promoted
+  echo "  ✔ Profile args made the launch a background one: host items left in place"
+
+  # 6. The next foreground launch recovers: keeps the background session's change, strips host items
+  echo "  [6/6] Testing recovery on the next launch..."
+  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
+    echo "FAIL [$AGENT]: recovery did not report the background session's change"
+    echo "$RUN_OUT"
+    exit 1
+  fi
+  assert_mcp_names "$AGENT" "$SNAP" "profile config during recovered session" own newsrv bgsrv profbgsrv hostsrv shared promoted
+  assert_mcp_names "$AGENT" "$PROF_FILE" "profile config at rest after recovery" own newsrv bgsrv profbgsrv
+  assert_mcp_names "$AGENT" "$HOST_FILE" "host config after recovery" hostsrv shared promoted
+  echo "  ✔ Recovered: 'bgsrv' and 'profbgsrv' kept, host items stripped, host untouched"
+done
+
+unset E2E_HOOK E2E_MCP_ADD E2E_MCP_REL E2E_MCP_KEY E2E_MCP_FORMAT E2E_SNAP
 
 echo ""
 echo "========================================================================"

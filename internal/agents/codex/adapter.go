@@ -18,6 +18,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 )
@@ -245,6 +246,9 @@ func copyHostConfig(realHome, profileCodexDir string) {
 			// Rewrite hook trust hashes keyed by host hooks.json path to the profile's hooks.json path
 			rewritten := strings.ReplaceAll(string(data), hostHooksJSON, destHooksJSON)
 			cleaned, _ := deduplicateTomlTables(rewritten)
+			// Host servers reach sessions through the session merge (T4): a new
+			// profile starts with none of its own. Plugin tables are kept.
+			cleaned = string(stripTables(profileCodexDir, []byte(cleaned), "mcp_servers"))
 			_ = os.WriteFile(destConfig, []byte(cleaned), 0644)
 		}
 	} else {
@@ -262,6 +266,32 @@ func copyHostConfig(realHome, profileCodexDir string) {
 			}
 		}
 	}
+}
+
+// stripTables removes whole top-level tables from TOML text with the merge
+// package's splicing helper (via a 0600 temp file in dir). On any error the
+// text is returned unchanged.
+func stripTables(dir string, data []byte, keys ...string) []byte {
+	tmp, err := os.CreateTemp(dir, ".aim-seed-*.toml")
+	if err != nil {
+		return data
+	}
+	defer os.Remove(tmp.Name())
+	_, werr := tmp.Write(data)
+	if cerr := tmp.Close(); werr != nil || cerr != nil {
+		return data
+	}
+	for _, k := range keys {
+		if _, err := merge.WriteTOMLKey(tmp.Name(), k, merge.NewEntries(), 0o600); err != nil {
+			logger.Debug("[codex] seeding without %s failed: %v", k, err)
+			return data
+		}
+	}
+	out, err := os.ReadFile(tmp.Name())
+	if err != nil {
+		return data
+	}
+	return out
 }
 
 func ensureSidecarDaemons(realHome, profileCodexDir string) {

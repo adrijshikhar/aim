@@ -22,15 +22,7 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 		Short:              "Execute agent under isolated profile",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var autoCreate bool
-			var cleanArgs []string
-			for _, a := range args {
-				if a == "-y" || a == "--yes" || a == "--create" {
-					autoCreate = true
-				} else {
-					cleanArgs = append(cleanArgs, a)
-				}
-			}
+			autoCreate, cleanArgs := splitRunFlags(args)
 			if len(cleanArgs) > 0 && (cleanArgs[0] == "-h" || cleanArgs[0] == "--help") {
 				return cmd.Help()
 			}
@@ -143,7 +135,11 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 
 	r := runner.NewRunner()
 	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", extraArgs)
-	code, err := r.Run(context.Background(), launchEnv, extraArgs)
+	code := withSessionMerge(adapter, pm.MergeStateStore(), profileName, pDir, cfg, extraArgs, func() int {
+		c, runErr := r.Run(context.Background(), launchEnv, extraArgs)
+		err = runErr
+		return c
+	})
 	if err != nil {
 		logger.Debug("[run] Runner.Run returned error: %v", err)
 		fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)

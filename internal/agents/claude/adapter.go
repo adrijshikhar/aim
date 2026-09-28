@@ -131,7 +131,6 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}
 
 	rewriteSettingsHooks(config.RealHomeDir(), profileDir)
-	copyClaudeJSON(config.RealHomeDir(), profileDir)
 	_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
 
 	bin := a.ResolveBinary()
@@ -187,23 +186,6 @@ func rewriteSettingsHooks(hostHome, profileDir string) {
 	}
 }
 
-// copyClaudeJSON copies .claude.json from host to the profile directory if it does not
-// already exist or if the destination file lacks oauthAccount.
-func copyClaudeJSON(hostHome, profileDir string) {
-	dest := filepath.Join(profileDir, ".claude.json")
-	if data, err := os.ReadFile(dest); err == nil && len(data) > 0 {
-		if strings.Contains(string(data), "oauthAccount") {
-			return
-		}
-	}
-	src := filepath.Join(hostHome, ".claude.json")
-	if data, err := os.ReadFile(src); err == nil && len(data) > 0 {
-		if err := os.WriteFile(dest, data, 0600); err != nil {
-			logger.Debug("[claude] Failed to copy .claude.json to %s: %v", dest, err)
-		}
-	}
-}
-
 // Doctor performs diagnostics on the Claude Code installation and profile state.
 func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {
 	var results []agents.DiagnosticResult
@@ -223,7 +205,10 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 		})
 	}
 
-	copyClaudeJSON(config.RealHomeDir(), profileDir)
+	if _, err := os.Stat(filepath.Join(profileDir, ".claude.json")); err == nil {
+		results = append(results, agents.DiagnosticResult{Category: "Config", Status: "OK",
+			Message: "~/.claude.json in this profile is used only when Claude runs without CLAUDE_CONFIG_DIR"})
+	}
 	if a.HasCredentials(profileDir) {
 		results = append(results, agents.DiagnosticResult{
 			Category: "Auth",

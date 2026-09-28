@@ -11,11 +11,23 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
 )
 
 type ProfileManager struct {
 	BaseDir      string
 	profilesRoot string
+	// MergeStore overrides where session-merge state lives (tests); the zero
+	// value means StateDir()/profile-merge, resolved at use time.
+	MergeStore merge.Store
+}
+
+// MergeStateStore returns the session-merge state store for this manager.
+func (m *ProfileManager) MergeStateStore() merge.Store {
+	if m != nil && m.MergeStore.Dir != "" {
+		return m.MergeStore
+	}
+	return merge.Store{Dir: filepath.Join(config.StateDir(), "profile-merge")}
 }
 
 func NewProfileManager(baseDir string) *ProfileManager {
@@ -366,6 +378,10 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 	}
 	if len(srcProf.Args) > 0 {
 		dstProf.Args = append([]string(nil), srcProf.Args...)
+	}
+	if srcProf.MCPGlobal != nil {
+		v := *srcProf.MCPGlobal
+		dstProf.MCPGlobal = &v
 	}
 	cfg.Profiles[newProfile] = dstProf
 
