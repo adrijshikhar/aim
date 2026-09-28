@@ -926,3 +926,32 @@ func TestEngine_MigrationMessageUsesNoun(t *testing.T) {
 	ch, _ := s.Diff()
 	_ = s.Finish(ch, keepAll)
 }
+
+// Two collections share one profile file and only the second migrates this
+// Start: the first one's merge must not reach the backup, or restoring it makes
+// the host's servers (and their secrets) the profile's own.
+func TestEngine_MigrationBackupIsThePreStartFile(t *testing.T) {
+	f := newFixture(t)
+	f.col.Group = "mcp"
+	plug := f.pluginsCol()
+	src := `{"enabledPlugins":{"x@m":true}}`
+	f.files(`{"mcpServers":{"jev":{"command":"npx","env":{"TOKEN":"secret"}}},"enabledPlugins":{"x@m":true}}`, src)
+	st, _ := f.eng.Store.Load("work")
+	st.Migrated[f.col.ID()] = time.Unix(0, 0)
+	if err := f.eng.Store.Save("work", st); err != nil {
+		t.Fatal(err)
+	}
+	s, err := f.eng.Start("work", "claude", []Collection{f.col, plug}, StartOptions{Enabled: allOn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, _ := filepath.Glob(f.pf + ".aim-backup-*")
+	if len(matches) != 1 {
+		t.Fatalf("want one backup, got %v", matches)
+	}
+	if b, _ := os.ReadFile(matches[0]); string(b) != src {
+		t.Fatalf("backup =\n%s\nwant the pre-Start file\n%s", b, src)
+	}
+	ch, _ := s.Diff()
+	_ = s.Finish(ch, keepAll)
+}

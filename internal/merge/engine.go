@@ -146,10 +146,16 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 	if len(allowed) == 0 {
 		return s, e.Store.Save(profile, st) // no sessions lock: Diff and Finish do nothing
 	}
-	backedUp := map[string]string{} // profile file → its one migration backup per Start
+	bk := newBackups()
+	if alone {
+		// Before anything is merged: a collection that migrates later in this
+		// loop must back up its file as Start found it, not with an earlier
+		// collection's host items already in it.
+		bk.snapshot(allowed, st)
+	}
 	var undo []stripWrite
 	for _, c := range allowed {
-		w, err := e.startCollection(profile, c, st, alone, backedUp)
+		w, err := e.startCollection(profile, c, st, alone, bk)
 		if err != nil {
 			if !errors.Is(err, errNoHost) && !errors.Is(err, errNotMerged) {
 				e.warnf("aim: %s: %v — skipped", c.ID(), err)
@@ -181,7 +187,7 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 // startCollection merges one collection and returns the write that undoes it
 // (skip when nothing was written). State is recorded only once the file holds
 // the merge.
-func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, backedUp map[string]string) (stripWrite, error) {
+func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, bk *backups) (stripWrite, error) {
 	none := stripWrite{c: c, skip: true}
 	if fi, err := os.Lstat(c.ProfilePath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return none, errors.New(c.ProfilePath + " is a symlink; not merging into a shared file")
@@ -206,7 +212,7 @@ func (e *Engine) startCollection(profile string, c Collection, st *State, alone 
 	id := c.ID()
 	norm := c.norm()
 	if _, done := st.Migrated[id]; !done {
-		if err := e.migrate(profile, c, host, &prof, st, backedUp); err != nil {
+		if err := e.migrate(profile, c, host, &prof, st, bk); err != nil {
 			return none, err
 		}
 	}
@@ -255,7 +261,7 @@ func (e *Engine) startCollection(profile string, c Collection, st *State, alone 
 // migrate runs once per collection: profile servers identical to the host's are
 // old copy-once leftovers (T4) and are removed after a backup; servers that
 // differ stay the profile's own (conflict rule). Both are listed once.
-func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entries, st *State, backedUp map[string]string) error {
+func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entries, st *State, bk *backups) error {
 	id := c.ID()
 	norm := c.norm()
 	var removed, differing []string
@@ -271,7 +277,7 @@ func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entri
 		}
 	}
 	if len(removed) > 0 {
-		name, err := e.backup(c.ProfilePath, backedUp)
+		name, err := e.backup(c.ProfilePath, bk)
 		if err != nil {
 			return err
 		}
@@ -291,19 +297,63 @@ func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entri
 	return nil
 }
 
-// backup copies path to <path>.aim-backup-<UTC>[-n] (0600) once per Start and
-// never overwrites an existing backup. It returns the backup's name ("" when
-// path does not exist).
-func (e *Engine) backup(path string, done map[string]string) (string, error) {
-	if name, ok := done[path]; ok {
+// backups is one Start's migration backups: each profile file a collection
+// may migrate, as Start found it, and the one backup taken from it.
+type backups struct {
+	before map[string]snapshot
+	names  map[string]string
+}
+
+// snapshot is a file's bytes before the merge loop (exists=false: no file).
+type snapshot struct {
+	data   []byte
+	exists bool
+	err    error
+}
+
+func newBackups() *backups {
+	return &backups{before: map[string]snapshot{}, names: map[string]string{}}
+}
+
+// snapshot reads every profile file a collection that has not migrated yet
+// lives in. Two collections can share one file (Claude's settings.json, Codex's
+// config.toml), so the file is read once, before either merges into it.
+func (b *backups) snapshot(cols []Collection, st *State) {
+	for _, c := range cols {
+		if _, done := st.Migrated[c.ID()]; done {
+			continue
+		}
+		if _, ok := b.before[c.ProfilePath]; ok {
+			continue
+		}
+		data, err := os.ReadFile(c.ProfilePath)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			b.before[c.ProfilePath] = snapshot{}
+		case err != nil:
+			b.before[c.ProfilePath] = snapshot{err: err}
+		default:
+			b.before[c.ProfilePath] = snapshot{data: data, exists: true}
+		}
+	}
+}
+
+// backup writes path's pre-Start bytes to <path>.aim-backup-<UTC>[-n] (0600)
+// once per Start and never overwrites an existing backup. It returns the
+// backup's name ("" when path did not exist).
+func (e *Engine) backup(path string, b *backups) (string, error) {
+	if name, ok := b.names[path]; ok {
 		return name, nil
 	}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
+	snap, ok := b.before[path]
+	if !ok {
+		return "", errors.New(path + ": no pre-Start snapshot to back up")
 	}
-	if err != nil {
-		return "", err
+	if snap.err != nil {
+		return "", snap.err
+	}
+	if !snap.exists {
+		return "", nil
 	}
 	base := fmt.Sprintf("%s.aim-backup-%s", path, e.now().UTC().Format("20060102T150405Z"))
 	for i := 1; ; i++ {
@@ -318,14 +368,14 @@ func (e *Engine) backup(path string, done map[string]string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		_, werr := f.Write(data)
+		_, werr := f.Write(snap.data)
 		if cerr := f.Close(); werr == nil {
 			werr = cerr
 		}
 		if werr != nil {
 			return "", werr
 		}
-		done[path] = name
+		b.names[path] = name
 		return name, nil
 	}
 }
