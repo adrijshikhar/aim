@@ -24,6 +24,7 @@ func (m *collectionMock) MCPCollections(profileDir, realHome string) []merge.Col
 	return m.cols
 }
 func (m *collectionMock) IsBackground(args []string) bool { return m.bg }
+func (m *collectionMock) IsSession(args []string) bool    { return true }
 
 // isolate points every aim and agent path at temp dirs (this machine has a
 // legacy ~/.aim that config.StateDir() would otherwise resolve to).

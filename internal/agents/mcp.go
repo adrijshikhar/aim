@@ -14,11 +14,14 @@ type MCPProvider interface {
 	// IsBackground reports whether the native args start a session that
 	// outlives the child aim waits on (spec R2): merge, run, no exit step.
 	IsBackground(args []string) bool
+	// IsSession is false for an invocation that prints version or help and
+	// exits: there is nothing to merge. Each CLI spells these differently.
+	IsSession(args []string) bool
 }
 
-// BackgroundMatch is true when a token before the first "--" is one of flags,
+// ArgsMatch is true when a token before the first "--" is one of flags,
 // or the very first token is one of firstWords.
-func BackgroundMatch(args, flags, firstWords []string) bool {
+func ArgsMatch(args, flags, firstWords []string) bool {
 	for _, a := range args {
 		if a == "--" {
 			break
@@ -28,11 +31,4 @@ func BackgroundMatch(args, flags, firstWords []string) bool {
 		}
 	}
 	return len(args) > 0 && !strings.HasPrefix(args[0], "-") && slices.Contains(firstWords, args[0])
-}
-
-// IsSession is false for an invocation that prints version or help and exits
-// (every MCP adapter's CLI spells it the same way): there is nothing to merge.
-// A native `mcp …` subcommand is a session, so `mcp list` shows the merged set.
-func IsSession(args []string) bool {
-	return !BackgroundMatch(args, []string{"--version", "-v", "--help", "-h"}, []string{"help", "version"})
 }

@@ -28,5 +28,13 @@ func (a *Adapter) MCPCollections(profileDir, realHome string) []merge.Collection
 // IsBackground: `--bg`/`--background` anywhere before "--", or the background
 // session subcommands.
 func (a *Adapter) IsBackground(args []string) bool {
-	return agents.BackgroundMatch(args, []string{"--bg", "--background"}, []string{"agents", "attach", "respawn"})
+	return agents.ArgsMatch(args, []string{"--bg", "--background"}, []string{"agents", "attach", "respawn"})
+}
+
+// IsSession: -v/--version and -h/--help as `claude --help` lists them, plus
+// -V, which prints the version too. There is no help or version subcommand:
+// `claude version` is a prompt. A native `mcp …` subcommand is a session, so
+// `mcp list` shows the merged set.
+func (a *Adapter) IsSession(args []string) bool {
+	return !agents.ArgsMatch(args, []string{"-v", "-V", "--version", "-h", "--help"}, nil)
 }

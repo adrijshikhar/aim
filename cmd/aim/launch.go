@@ -45,15 +45,16 @@ func splitRunFlags(args []string) (bool, []string) {
 // (spec §5): Start before, Diff + decide + Finish after. A background launch
 // (IsBackground) merges and skips the exit step. profiles.<p>.args precede
 // extraArgs in the launched command, so a background arg there counts too. A
-// non-session invocation (--version, --help) runs without Start at all, so a
-// crashed or background session is recovered by the next real session.
+// non-session invocation (the adapter's version or help spelling) runs without
+// Start at all, so a crashed or background session is recovered by the next
+// real session.
 func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileName, pDir string, cfg *config.Config, extraArgs []string, run func() int) int {
 	mp, ok := adapter.(agents.MCPProvider)
 	if !ok {
 		return run()
 	}
 	native := append(cfg.GetProfileArgs(profileName), extraArgs...) // a copy: extraArgs is not aliased
-	if !agents.IsSession(native) {
+	if !mp.IsSession(native) {
 		return run()
 	}
 	eng := &merge.Engine{Store: store, Out: os.Stderr, Now: nowFunc}

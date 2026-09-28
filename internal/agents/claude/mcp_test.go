@@ -28,3 +28,32 @@ func TestMCPCollections_Claude(t *testing.T) {
 		t.Fatal("background forms")
 	}
 }
+
+// TestIsSession_Claude: the spellings `claude --help` lists (-v, --version,
+// -h, --help) plus -V, which 2.1.283 also accepts. Claude has no help or
+// version subcommand, so those words are a prompt and start a session.
+func TestIsSession_Claude(t *testing.T) {
+	a := &Adapter{}
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{"--resume", "x"}, true},
+		{[]string{"mcp", "list"}, true}, // shows the merged set, so it merges
+		{[]string{"-v"}, false},
+		{[]string{"-V"}, false},
+		{[]string{"--version"}, false},
+		{[]string{"-h"}, false},
+		{[]string{"--help"}, false},
+		{[]string{"--model", "opus", "--version"}, false},
+		{[]string{"version"}, true},
+		{[]string{"help"}, true},
+		{[]string{"fix", "--", "--help"}, true}, // after "--" belongs to the agent
+	}
+	for _, c := range cases {
+		if got := a.IsSession(c.args); got != c.want {
+			t.Errorf("%v: got %v want %v", c.args, got, c.want)
+		}
+	}
+}

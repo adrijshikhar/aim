@@ -36,3 +36,33 @@ func TestSharedConfigDir_FallsBackUnderAimHome(t *testing.T) {
 		t.Fatalf("fallback = %s", got)
 	}
 }
+
+// TestIsSession_Agy: agy (1.2.12) parses Go-style flags, so -version and
+// -help work beside the double-dash forms; -v is its log-verbosity flag and
+// -V is undefined. `help` is a subcommand, `version` is not.
+func TestIsSession_Agy(t *testing.T) {
+	a := &Adapter{}
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{"-c"}, true},
+		{[]string{"mcp", "list"}, true},
+		{[]string{"--version"}, false},
+		{[]string{"-version"}, false},
+		{[]string{"-h"}, false},
+		{[]string{"--help"}, false},
+		{[]string{"-help"}, false},
+		{[]string{"help"}, false},
+		{[]string{"-v", "2"}, true},
+		{[]string{"-V"}, true},
+		{[]string{"version"}, true},
+		{[]string{"-p", "x", "--", "--help"}, true},
+	}
+	for _, c := range cases {
+		if got := a.IsSession(c.args); got != c.want {
+			t.Errorf("%v: got %v want %v", c.args, got, c.want)
+		}
+	}
+}

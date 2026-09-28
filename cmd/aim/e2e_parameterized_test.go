@@ -30,15 +30,17 @@ type adapterTestCase struct {
 	supportsFork bool
 	// hasMCP: the adapter implements agents.MCPProvider, so host MCP servers
 	// are merged into the profile per session; bgArgs is a native invocation
-	// that starts a background session (merge, run, no exit step).
-	hasMCP bool
-	bgArgs []string
+	// that starts a background session (merge, run, no exit step), and
+	// versionArgs the CLI's own version flag (no session, no merge).
+	hasMCP      bool
+	bgArgs      []string
+	versionArgs []string
 }
 
 var allAdapters = []adapterTestCase{
-	{agent: "agy", hasSessions: true, supportsFork: false, hasMCP: true, bgArgs: []string{"remote-control"}},
-	{agent: "codex", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"app-server"}},
-	{agent: "claude", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"--bg"}},
+	{agent: "agy", hasSessions: true, supportsFork: false, hasMCP: true, bgArgs: []string{"remote-control"}, versionArgs: []string{"--version"}},
+	{agent: "codex", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"app-server"}, versionArgs: []string{"-V"}},
+	{agent: "claude", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"--bg"}, versionArgs: []string{"-v"}},
 	{agent: "gemini", hasSessions: false, supportsFork: false, hasMCP: false},
 }
 
@@ -301,17 +303,18 @@ func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 			write(c.HostPath, "hostsrv")
 			write(c.ProfilePath, "own")
 
-			// 0. non-session (--version): runs with no merge, no strip, no merge state
+			// 0. non-session (the CLI's own version flag): runs with no merge, no
+			// strip, no merge state
 			before, _ := os.ReadFile(c.ProfilePath)
 			ran := false
-			if code := launch([]string{"--version"}, func() int { ran = true; return 0 }); code != 0 || !ran {
-				t.Fatalf("--version launch: ran=%v code=%d, want ran=true code=0", ran, code)
+			if code := launch(tc.versionArgs, func() int { ran = true; return 0 }); code != 0 || !ran {
+				t.Fatalf("%v launch: ran=%v code=%d, want ran=true code=0", tc.versionArgs, ran, code)
 			}
 			if after, _ := os.ReadFile(c.ProfilePath); string(after) != string(before) {
-				t.Errorf("--version launch rewrote the profile file:\n%s\n%s", before, after)
+				t.Errorf("%v launch rewrote the profile file:\n%s\n%s", tc.versionArgs, before, after)
 			}
 			if _, err := os.Stat(filepath.Join(store.Dir, "work.json")); !os.IsNotExist(err) {
-				t.Errorf("--version launch created merge state (stat err = %v)", err)
+				t.Errorf("%v launch created merge state (stat err = %v)", tc.versionArgs, err)
 			}
 
 			// 1. foreground: host merged for the session; a native add is kept at rest
