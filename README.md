@@ -92,7 +92,7 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim login <agent> <profile>` | Authenticate a new account via OAuth PKCE |
 | `aim whoami` | Show active profile, agent, session ID, and quota info |
 | `aim doctor [agent]` | Check environment, binary paths, tokens, ADC status, and keychain isolation |
-| `aim shell <agent> <profile>` | Launch an isolated subshell with profile environment |
+| `aim shell <agent> <profile>` | Subshell with the profile environment (deprecated with the front door) |
 | `aim clone <agent> <src> <dst>` | Duplicate profile settings without copying tokens |
 | `aim remove [agent] <profile>` | Unlink agent from profile (deletes dir if empty) |
 | `aim completion <shell>` | Generate shell completions (`zsh`, `bash`, `fish`) |
@@ -116,22 +116,52 @@ Inspect quota limits, live capacity gauges, reset countdowns, and status warning
 
 ---
 
-## Global MCP servers
+## Host servers and plugins
 
-MCP servers in your normal agent config (the host) are available in every aim session.
-When a session adds, edits or removes one, aim asks at exit whether to promote the change
-to the host or keep it in that profile; without a terminal the change is kept. A removed
-host server comes back next session. Background launches (`claude --bg`, `codex app-server`,
-`agy remote-control`) get the host servers too; the next launch of that profile cleans up.
+MCP servers and enabled plugins in your normal agent config (the host) are available in
+every aim session. aim merges them into the profile when a session starts and takes them
+out again when the last session of that profile exits, so at rest a profile holds only
+its own. What is merged:
 
-The first launch of an existing profile removes servers that are identical copies of the
-host's. Before it does, aim writes a backup next to the profile file, named
-`<file>.aim-backup-<UTC timestamp>`; delete those backups once the profile looks right.
+| Agent | MCP servers | Plugins |
+|---|---|---|
+| Claude | `mcpServers` in `~/.claude.json` | `enabledPlugins` and `extraKnownMarketplaces` in `~/.claude/settings.json` |
+| Codex | `[mcp_servers.*]` in `~/.codex/config.toml` | `[plugins."<id>"]` in the same file, with the plugin's own sub-tables |
+| agy | `mcpServers` in the shared `mcp_config.json` | — (agy's plugins are fully shared already) |
 
-To add a server to one profile only, run the agent's own command inside the profile:
-`aim shell claude work` then `claude mcp add -s user foo -- npx foo`.
+Only which plugins are on is scoped per profile; the installed plugin files and
+marketplaces stay shared with the host.
 
-Turn the merge off for a profile with `"mcp_global": false` in `~/.aim/config.json`.
+When a session adds, edits or removes a server or plugin, aim asks at exit whether to
+promote the change to the host or keep it in that profile; without a terminal the change
+is kept. Each change is listed with its collection, and a plugin switched on or off shows
+its new value (`~ enabledPlugins/x@m   edited (host item) → false`). A removed host item
+comes back next session. Background launches (`claude --bg`, `codex app-server`,
+`agy remote-control`) get the host items too; the next launch of that profile cleans up.
+
+To switch a host plugin off in one profile only, disable it inside a session and keep the
+change: `aim run claude work plugin disable x@m` (for Codex, set `enabled = false` in the
+profile's `config.toml`). The profile's `false` is its own from then on and wins over the
+host's `true` in every later session. An item the profile defines always wins over the
+host's.
+
+To add a server or plugin to one profile only, run the agent's own command through aim and
+keep the change at exit: `aim run claude work mcp add -s user foo -- npx foo`.
+
+The first launch of an existing profile removes servers and plugins that are identical
+copies of the host's. Before it does, aim writes a backup next to the profile file, named
+`<file>.aim-backup-<UTC timestamp>`; delete those backups once the profile looks right. A
+profile entry that differs from the host's stays the profile's own. For example, a Codex
+profile holding 17 plugin tables identical to the host's and one the host no longer has
+loses the 17 (backed up), keeps the other as its own, and sees the host's plugins in its
+sessions. A new profile starts with none of the host's servers or plugins in its config.
+
+Agents started by hand in a profile, outside `aim run` (`aim shell`, an IDE pointed at
+the profile's `CLAUDE_CONFIG_DIR` or `CODEX_HOME`), see only the profile's own servers
+and plugins.
+
+Turn the merge off per profile in `~/.aim/config.json`: `"mcp_global": false` for servers,
+`"plugins_global": false` for plugins.
 
 ---
 
