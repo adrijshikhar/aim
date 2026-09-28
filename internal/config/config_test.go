@@ -501,3 +501,24 @@ func TestPluginsGlobal_RoundTrip(t *testing.T) {
 		t.Fatalf("absent plugins_global must be omitted: %s", out)
 	}
 }
+
+func TestGroupEnabled(t *testing.T) {
+	f := false
+	c := &Config{Profiles: map[string]ProfileConfig{"a": {MCPGlobal: &f}, "b": {PluginsGlobal: &f}}}
+	if c.GroupEnabled("a", "mcp") || !c.GroupEnabled("a", "plugins") {
+		t.Fatal("mcp follows mcp_global only")
+	}
+	if !c.GroupEnabled("b", "mcp") || c.GroupEnabled("b", "plugins") {
+		t.Fatal("plugins follows plugins_global only")
+	}
+	// An unknown or empty group is switched by neither setting.
+	for _, g := range []string{"", "skills"} {
+		if !c.GroupEnabled("a", g) || !c.GroupEnabled("b", g) {
+			t.Fatalf("group %q must not follow mcp_global or plugins_global", g)
+		}
+	}
+	var nilCfg *Config
+	if !nilCfg.GroupEnabled("a", "mcp") || !nilCfg.GroupEnabled("a", "plugins") {
+		t.Fatal("a nil config enables every group")
+	}
+}

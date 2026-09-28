@@ -43,7 +43,7 @@ func mockWithFiles(t *testing.T, d string) (*collectionMock, string, string) {
 	_ = os.WriteFile(host, []byte(`{"mcpServers":{"jev":{"command":"npx"}}}`), 0o600)
 	_ = os.WriteFile(prof, []byte(`{"mcpServers":{}}`), 0o600)
 	return &collectionMock{mockAdapter: mockAdapter{name: "mock"}, cols: []merge.Collection{{Agent: "mock", Name: "mcpServers",
-		Format: merge.JSON, Key: "mcpServers", HostPath: host, ProfilePath: prof}}}, host, prof
+		Format: merge.JSON, Key: "mcpServers", HostPath: host, ProfilePath: prof, Group: "mcp"}}}, host, prof
 }
 
 func TestSplitRunFlags_OnlyBeforeDoubleDash(t *testing.T) {
@@ -144,7 +144,7 @@ func TestExecuteRun_WrapsSessionWithMerge(t *testing.T) {
 	_ = os.WriteFile(bin, []byte("#!/bin/sh\ncat \""+prof+"\" > \""+seen+"\"\n"), 0o755)
 	reg := agents.NewRegistry()
 	reg.Register(&collectionMock{mockAdapter: mockAdapter{name: "mock", binaryPath: bin}, cols: []merge.Collection{{Agent: "mock",
-		Name: "mcpServers", Format: merge.JSON, Key: "mcpServers", HostPath: host, ProfilePath: prof}}})
+		Name: "mcpServers", Format: merge.JSON, Key: "mcpServers", HostPath: host, ProfilePath: prof, Group: "mcp"}}})
 	if code := executeRun(reg, pm, "mock", "work", nil); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
@@ -205,5 +205,27 @@ func TestWithSessionMerge_MCPGlobalOffStillMergesPlugins(t *testing.T) {
 	withSessionMerge(ad, store, "work", d, cfg, nil, func() int { during, _ = os.ReadFile(prof); return 0 })
 	if strings.Contains(string(during), "jev") || !strings.Contains(string(during), `"x@m"`) {
 		t.Fatalf("mcp_global=false switches off servers only: %s", during)
+	}
+}
+
+// GroupEnabled treats an unknown group as always on, so every collection an
+// adapter merges must name a group a profile setting switches.
+func TestAdapters_CollectionsDeclareKnownGroup(t *testing.T) {
+	d := t.TempDir()
+	n := 0
+	for _, a := range defaultRegistry().All() {
+		mp, ok := a.(agents.MCPProvider)
+		if !ok {
+			continue
+		}
+		for _, c := range mp.MCPCollections(filepath.Join(d, "profile"), filepath.Join(d, "home")) {
+			n++
+			if c.Group != "mcp" && c.Group != "plugins" {
+				t.Errorf("%s: %s declares group %q, want mcp or plugins", a.Name(), c.ID(), c.Group)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no adapter declared a collection")
 	}
 }

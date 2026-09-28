@@ -56,13 +56,7 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 	native := append(cfg.GetProfileArgs(profileName), extraArgs...) // a copy: extraArgs is not aliased
 	// Every collection goes to Start, switched-off groups included: recovery
 	// must still strip what an earlier background launch merged (spec §4).
-	enabled := func(c merge.Collection) bool {
-		switch c.Group {
-		case "plugins":
-			return cfg.PluginsGlobalEnabled(profileName)
-		}
-		return cfg.MCPGlobalEnabled(profileName)
-	}
+	enabled := func(c merge.Collection) bool { return cfg.GroupEnabled(profileName, c.Group) }
 	opt := merge.StartOptions{Enabled: enabled, Background: mp.IsBackground(native)}
 	sess, err := eng.Start(profileName, adapter.Name(), cols, opt)
 	if err != nil {

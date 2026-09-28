@@ -236,6 +236,19 @@ func (c *Config) PluginsGlobalEnabled(profile string) bool {
 	return *p.PluginsGlobal
 }
 
+// GroupEnabled reports whether the host merge of a collection group is on for
+// the profile: "mcp" follows mcp_global, "plugins" plugins_global. Any other
+// group has no setting and is always merged.
+func (c *Config) GroupEnabled(profile, group string) bool {
+	switch group {
+	case "mcp":
+		return c.MCPGlobalEnabled(profile)
+	case "plugins":
+		return c.PluginsGlobalEnabled(profile)
+	}
+	return true
+}
+
 func (c *Config) GetProfileAgents(profile string) []string {
 	if c == nil || c.Profiles == nil {
 		return nil
