@@ -138,6 +138,11 @@ is kept. Each change is listed with its collection, and a plugin switched on or 
 its new value (`~ enabledPlugins/x@m   edited (host item) → false`). A removed host item
 comes back next session. Background launches (`claude --bg`, `codex app-server`,
 `agy remote-control`) get the host items too; the next launch of that profile cleans up.
+Version and help invocations skip the merge entirely, as each CLI spells them: for
+`claude`, `-v`, `-V`, `--version`, `-h` and `--help`; for `codex`, `-V`, `--version`, `-h`,
+`--help` and `codex help`; for `agy`, `--version`, `-version`, `-h`, `--help`, `-help` and
+`agy help`. Anything else, such as `claude version` (a prompt), starts a session. Skipping
+the merge also leaves cleanup of a crashed or background session to the next real session.
 
 To switch a host plugin off in one profile only, disable it inside a session and keep the
 change: `aim run claude work plugin disable x@m` (for Codex, set `enabled = false` in the

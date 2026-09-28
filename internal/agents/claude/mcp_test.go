@@ -24,7 +24,7 @@ func TestMCPCollections_Claude(t *testing.T) {
 	if merge.Hash(c.Normalise, written) != merge.Hash(c.Normalise, rewritten) {
 		t.Fatal("Claude's normalisation noise must not change the hash")
 	}
-	if !a.IsBackground([]string{"--bg"}) || !a.IsBackground([]string{"agents"}) || a.IsBackground([]string{"--resume", "x"}) {
+	if !a.IsBackground(nil, []string{"--bg"}) || !a.IsBackground(nil, []string{"agents"}) || a.IsBackground(nil, []string{"--resume", "x"}) {
 		t.Fatal("background forms")
 	}
 }
@@ -43,5 +43,34 @@ func TestMCPCollections_ClaudePlugins(t *testing.T) {
 	// the JSON codec wraps a bool as {"value": b}; the default normaliser keeps false
 	if merge.Hash(nil, map[string]any{"value": true}) == merge.Hash(nil, map[string]any{"value": false}) {
 		t.Fatal("enabled and disabled must hash differently")
+	}
+}
+
+// TestIsSession_Claude: the spellings `claude --help` lists (-v, --version,
+// -h, --help) plus -V, which 2.1.283 also accepts. Claude has no help or
+// version subcommand, so those words are a prompt and start a session.
+func TestIsSession_Claude(t *testing.T) {
+	a := &Adapter{}
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{"--resume", "x"}, true},
+		{[]string{"mcp", "list"}, true}, // shows the merged set, so it merges
+		{[]string{"-v"}, false},
+		{[]string{"-V"}, false},
+		{[]string{"--version"}, false},
+		{[]string{"-h"}, false},
+		{[]string{"--help"}, false},
+		{[]string{"--model", "opus", "--version"}, false},
+		{[]string{"version"}, true},
+		{[]string{"help"}, true},
+		{[]string{"fix", "--", "--help"}, true}, // after "--" belongs to the agent
+	}
+	for _, c := range cases {
+		if got := a.IsSession(nil, c.args); got != c.want {
+			t.Errorf("%v: got %v want %v", c.args, got, c.want)
+		}
 	}
 }

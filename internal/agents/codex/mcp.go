@@ -24,6 +24,12 @@ func (a *Adapter) MCPCollections(profileDir, realHome string) []merge.Collection
 	}}
 }
 
-func (a *Adapter) IsBackground(args []string) bool {
-	return agents.BackgroundMatch(args, nil, []string{"app-server", "remote-control"})
+func (a *Adapter) IsBackground(profileArgs, args []string) bool {
+	return agents.ArgsMatch(profileArgs, args, nil, []string{"app-server", "remote-control"})
+}
+
+// IsSession: -V/--version, -h/--help and the help subcommand. codex rejects
+// -v and has no version subcommand, so both reach codex as a session attempt.
+func (a *Adapter) IsSession(profileArgs, args []string) bool {
+	return !agents.ArgsMatch(profileArgs, args, []string{"-V", "--version", "-h", "--help"}, []string{"help"})
 }

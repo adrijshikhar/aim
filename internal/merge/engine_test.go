@@ -721,6 +721,48 @@ func TestEngine_SaveFailureRollsBackMerge(t *testing.T) {
 	}
 }
 
+func TestEngine_FailedRollbackSaysRollback(t *testing.T) {
+	d := t.TempDir()
+	write := func(path, body string) {
+		_ = os.MkdirAll(filepath.Dir(path), 0o700)
+		_ = os.WriteFile(path, []byte(body), 0o600)
+	}
+	first := Collection{Agent: "claude", Name: "mcpServers", Format: JSON, Key: "mcpServers",
+		HostPath: filepath.Join(d, "h1.json"), ProfilePath: filepath.Join(d, "p1", "profile.json")}
+	second := Collection{Agent: "claude", Name: "second", Format: JSON, Key: "mcpServers",
+		HostPath: filepath.Join(d, "h2.json"), ProfilePath: filepath.Join(d, "p2", "profile.json")}
+	for _, c := range []Collection{first, second} {
+		write(c.HostPath, `{"mcpServers":{"jev":{"command":"npx"}}}`)
+		write(c.ProfilePath, `{"mcpServers":{"own":{"command":"o"}}}`)
+	}
+	out := &bytes.Buffer{}
+	eng := &Engine{Store: Store{Dir: filepath.Join(d, "state")}, Out: out, Now: time.Now}
+	sabotage := true
+	second.Normalise = func(v map[string]any) map[string]any {
+		if sabotage {
+			// first is merged by now: Save cannot rename over a directory, and
+			// first's rollback cannot write under a parent that is a regular file.
+			sabotage = false
+			_ = os.MkdirAll(filepath.Join(eng.Store.path("work"), "x"), 0o700)
+			_ = os.RemoveAll(filepath.Dir(first.ProfilePath))
+			_ = os.WriteFile(filepath.Dir(first.ProfilePath), nil, 0o600)
+		}
+		return DropEmpty(v)
+	}
+	if _, err := eng.Start("work", "claude", []Collection{first, second}, StartOptions{Enabled: allOn}); err == nil {
+		t.Fatal("Start must report the failed Save")
+	}
+	if !strings.Contains(out.String(), "aim: claude/mcpServers: rollback failed: ") {
+		t.Fatalf("want a rollback failure for the first collection, got %q", out.String())
+	}
+	if strings.Contains(out.String(), "strip failed") {
+		t.Fatalf("a rollback is not a strip: %q", out.String())
+	}
+	if got := strings.Count(out.String(), "rollback failed"); got != 1 {
+		t.Fatalf("only the first collection's rollback fails, got %d in %q", got, out.String())
+	}
+}
+
 func TestEngine_FailedProfileWriteRecordsNoState(t *testing.T) {
 	d := t.TempDir()
 	host := filepath.Join(d, "host.toml")

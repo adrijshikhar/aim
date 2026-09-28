@@ -30,9 +30,11 @@ type adapterTestCase struct {
 	supportsFork bool
 	// hasMCP: the adapter implements agents.MCPProvider, so host MCP servers
 	// are merged into the profile per session; bgArgs is a native invocation
-	// that starts a background session (merge, run, no exit step).
-	hasMCP bool
-	bgArgs []string
+	// that starts a background session (merge, run, no exit step), and
+	// versionArgs the CLI's own version flag (no session, no merge).
+	hasMCP      bool
+	bgArgs      []string
+	versionArgs []string
 	// hasPlugins: the adapter also declares a "plugins" group collection named
 	// pluginsCol, whose entries are enablement flags (Spec B).
 	hasPlugins bool
@@ -40,9 +42,9 @@ type adapterTestCase struct {
 }
 
 var allAdapters = []adapterTestCase{
-	{agent: "agy", hasSessions: true, supportsFork: false, hasMCP: true, bgArgs: []string{"remote-control"}},
-	{agent: "codex", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"app-server"}, hasPlugins: true, pluginsCol: "plugins"},
-	{agent: "claude", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"--bg"}, hasPlugins: true, pluginsCol: "enabledPlugins"},
+	{agent: "agy", hasSessions: true, supportsFork: false, hasMCP: true, bgArgs: []string{"remote-control"}, versionArgs: []string{"--version"}},
+	{agent: "codex", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"app-server"}, versionArgs: []string{"-V"}, hasPlugins: true, pluginsCol: "plugins"},
+	{agent: "claude", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"--bg"}, versionArgs: []string{"-v"}, hasPlugins: true, pluginsCol: "enabledPlugins"},
 	{agent: "gemini", hasSessions: false, supportsFork: false, hasMCP: false},
 }
 
@@ -294,7 +296,7 @@ func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 				mcpName = "mcp_servers"
 			}
 			t.Run("mcp", func(t *testing.T) {
-				runCollectionMerge(t, launch, cfg, tc.bgArgs, collectionNamed(t, cols, "mcp", mcpName),
+				runCollectionMerge(t, launch, cfg, store, tc.bgArgs, tc.versionArgs, collectionNamed(t, cols, "mcp", mcpName),
 					map[string]any{"command": "true"}, func(p *config.ProfileConfig, v *bool) { p.MCPGlobal = v })
 			})
 			if tc.hasPlugins {
@@ -303,7 +305,7 @@ func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 					value = map[string]any{"enabled": true}
 				}
 				t.Run("plugins", func(t *testing.T) {
-					runCollectionMerge(t, launch, cfg, tc.bgArgs, collectionNamed(t, cols, "plugins", tc.pluginsCol),
+					runCollectionMerge(t, launch, cfg, store, tc.bgArgs, tc.versionArgs, collectionNamed(t, cols, "plugins", tc.pluginsCol),
 						value, func(p *config.ProfileConfig, v *bool) { p.PluginsGlobal = v })
 				})
 			}
@@ -314,7 +316,7 @@ func TestParameterized_AllAdapters_MCPSessionMerge(t *testing.T) {
 // runCollectionMerge drives one collection through foreground keep, its
 // *_global switch, background launches and recovery; setFlag sets the switch
 // for the collection's group.
-func runCollectionMerge(t *testing.T, launch func([]string, func() int) int, cfg *config.Config, bgArgs []string,
+func runCollectionMerge(t *testing.T, launch func([]string, func() int) int, cfg *config.Config, store merge.Store, bgArgs, versionArgs []string,
 	c merge.Collection, value map[string]any, setFlag func(*config.ProfileConfig, *bool)) {
 	write := func(path string, names ...string) {
 		e, _, _ := c.Read(path)
@@ -357,6 +359,22 @@ func runCollectionMerge(t *testing.T, launch func([]string, func() int) int, cfg
 	// ids carry "@" like plugin ids, so a TOML collection needs quoted headers
 	write(c.HostPath, "host@m")
 	write(c.ProfilePath, "own@m")
+
+	// 0. non-session (the CLI's own version flag): runs with no merge, no strip
+	// and no merge state for this collection
+	before, _ := os.ReadFile(c.ProfilePath)
+	ran := false
+	if code := launch(versionArgs, func() int { ran = true; return 0 }); code != 0 || !ran {
+		t.Fatalf("%v launch: ran=%v code=%d, want ran=true code=0", versionArgs, ran, code)
+	}
+	if after, _ := os.ReadFile(c.ProfilePath); string(after) != string(before) {
+		t.Errorf("%v launch rewrote the profile file:\n%s\n%s", versionArgs, before, after)
+	}
+	if st, err := store.Load("work"); err != nil {
+		t.Fatal(err)
+	} else if _, ok := st.Active[c.ID()]; ok {
+		t.Errorf("%v launch merged %s", versionArgs, c.ID())
+	}
 
 	// 1. foreground: host merged for the session; a native add is kept at rest
 	var during string
