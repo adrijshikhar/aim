@@ -17,6 +17,7 @@ import (
 // No test may reach the real controlling terminal.
 func init() {
 	openTTY = func() (io.ReadWriteCloser, error) { return nil, errors.New("no tty in tests") }
+	ttyIsForeground = func(io.ReadWriteCloser) bool { return true }
 }
 
 type fakeTTY struct {
@@ -64,6 +65,29 @@ func TestWithSessionMerge_PipedStdinPromptsOnTTY(t *testing.T) {
 	}
 	if !strings.Contains(tty.out.String(), "Session in work (mock) changed:") || !tty.closed {
 		t.Fatalf("prompt must be written to the tty and the tty closed: %q closed=%v", tty.out.String(), tty.closed)
+	}
+}
+
+// A backgrounded run must not read the terminal (SIGTTIN would stop it with
+// the profile still merged): it keeps every change without prompting.
+func TestWithSessionMerge_BackgroundJobKeepsWithoutPrompt(t *testing.T) {
+	tty := &fakeTTY{Reader: strings.NewReader("p\n")}
+	ad, store, host, prof, run := promptSetup(t, false, strings.NewReader("p\n"), func() (io.ReadWriteCloser, error) { return tty, nil })
+	orig := ttyIsForeground
+	ttyIsForeground = func(io.ReadWriteCloser) bool { return false }
+	t.Cleanup(func() { ttyIsForeground = orig })
+	_, out := captureOutput(t, func() { withSessionMerge(ad, store, "work", "", nil, nil, run) })
+	if tty.out.Len() != 0 || !tty.closed {
+		t.Fatalf("background: nothing may be written to the tty and it must be closed: %q closed=%v", tty.out.String(), tty.closed)
+	}
+	if !strings.Contains(out, "1 change(s) kept in work (mock)") {
+		t.Fatalf("output = %q", out)
+	}
+	if b, _ := os.ReadFile(host); strings.Contains(string(b), `"foo"`) {
+		t.Fatalf("nothing may reach the host: %s", b)
+	}
+	if b, _ := os.ReadFile(prof); !strings.Contains(string(b), `"foo"`) || strings.Contains(string(b), `"jev"`) {
+		t.Fatalf("at rest = %s", b)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/merge"
 	"github.com/mattn/go-isatty"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -23,6 +24,22 @@ var (
 	// openTTY opens the controlling terminal for the prompt when stdin is
 	// piped. Replaced in tests.
 	openTTY = func() (io.ReadWriteCloser, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
+	// ttyIsForeground reports whether aim is in the terminal's foreground
+	// process group: a background job reading it would be stopped (SIGTTIN).
+	// Replaced in tests.
+	ttyIsForeground = func(tty io.ReadWriteCloser) bool {
+		f, ok := tty.(*os.File)
+		if !ok {
+			return false
+		}
+		rc, err := f.SyscallConn() // not Fd(): that would make the tty blocking
+		if err != nil {
+			return false
+		}
+		pg := -1
+		_ = rc.Control(func(fd uintptr) { pg, err = unix.IoctlGetInt(int(fd), unix.TIOCGPGRP) })
+		return err == nil && pg == unix.Getpgrp()
+	}
 )
 
 func fmtWarn(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) }
@@ -97,15 +114,19 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 }
 
 // exitDecider prompts on stdin when it is a terminal, else on the controlling
-// terminal; without either every change is kept. SIGINT, SIGTERM or SIGHUP
+// terminal when aim is in its foreground process group; otherwise every change
+// is kept. SIGINT, SIGTERM or SIGHUP
 // at the prompt keeps every change.
 func exitDecider(sigs chan os.Signal, profile, agent string) func([]merge.Change) []merge.Decision {
 	return func(cs []merge.Change) []merge.Decision {
 		in, out, interactive := sessionPromptIn, io.Writer(os.Stderr), stdinIsTerminal()
 		if !interactive {
+			// A background job keeps every change: reading the tty would stop it.
 			if tty, err := openTTY(); err == nil {
 				defer tty.Close()
-				in, out, interactive = tty, tty, true
+				if ttyIsForeground(tty) {
+					in, out, interactive = tty, tty, true
+				}
 			}
 		}
 		decide := merge.Prompter(in, out, interactive, profile, agent)
