@@ -30,6 +30,20 @@ func (m *ProfileManager) MergeStateStore() merge.Store {
 	return merge.Store{Dir: filepath.Join(config.StateDir(), "profile-merge")}
 }
 
+// refuseIfRunning fails while any agent has a running aim session in the
+// profile: its exit step would write into a moved or deleted directory, or
+// into merge state keyed by the old name.
+func (m *ProfileManager) refuseIfRunning(profile string) error {
+	running, err := m.MergeStateStore().ActiveSessions(profile)
+	if err != nil {
+		return fmt.Errorf("checking running sessions of %s: %w", profile, err)
+	}
+	if len(running) > 0 {
+		return fmt.Errorf("profile %s has a running %s session; exit it first", profile, running[0])
+	}
+	return nil
+}
+
 func NewProfileManager(baseDir string) *ProfileManager {
 	return &ProfileManager{
 		BaseDir:      baseDir,
@@ -174,6 +188,9 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 	if err := validateProfileName(profileName); err != nil {
 		return err
 	}
+	if err := m.refuseIfRunning(profileName); err != nil {
+		return err
+	}
 	if cfg == nil {
 		var err error
 		cfg, err = config.LoadConfig()
@@ -200,6 +217,9 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 		}
 	}
 	cfg.DeleteProfile(profileName)
+	if err := m.MergeStateStore().Remove(profileName); err != nil {
+		return err
+	}
 	return config.SaveConfig(cfg)
 }
 
@@ -208,6 +228,9 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 // If no agents remain, the entire profile directory is deleted and cleanedUp is true.
 func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.Config) (bool, error) {
 	if err := validateProfileName(profileName); err != nil {
+		return false, err
+	}
+	if err := m.refuseIfRunning(profileName); err != nil {
 		return false, err
 	}
 	if cfg == nil {
@@ -246,6 +269,9 @@ func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.
 		}
 	}
 	cfg.DeleteProfile(profileName)
+	if err := m.MergeStateStore().Remove(profileName); err != nil {
+		return false, err
+	}
 	return true, config.SaveConfig(cfg)
 }
 
@@ -405,6 +431,9 @@ func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Conf
 	if oldName == newName {
 		return fmt.Errorf("source and destination profile names cannot be the same")
 	}
+	if err := m.refuseIfRunning(oldName); err != nil {
+		return err
+	}
 
 	if cfg == nil {
 		var err error
@@ -446,6 +475,9 @@ func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Conf
 		}
 		cfg.RenameProfile(newName, oldName)
 		return fmt.Errorf("failed to update config for renamed profile: %w", err)
+	}
+	if err := m.MergeStateStore().Rename(oldName, newName); err != nil {
+		return fmt.Errorf("failed to rename merge state: %w", err)
 	}
 
 	// Ensure dotfile symlinks in new location are intact

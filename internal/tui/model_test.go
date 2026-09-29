@@ -11,6 +11,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/usage"
@@ -936,6 +937,24 @@ func TestTUI_DeleteModal_SingleAgent_Confirm(t *testing.T) {
 	}
 	if len(mDel.Profiles()) != 0 {
 		t.Errorf("expected 0 profiles after deletion, got %v", mDel.Profiles())
+	}
+}
+
+func TestTUI_DeleteModal_RefusedWhileSessionRuns(t *testing.T) {
+	m := newTestModel(t, "work")
+	l, err := merge.LockShared(m.pm.MergeStateStore().SessionsLockPath("work", "agy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unlock()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	mY := updated.(Model)
+	if !mY.IsDeleteModalActive() || len(mY.Profiles()) != 1 {
+		t.Fatalf("refused delete must keep the modal and the profile: active=%v profiles=%v", mY.IsDeleteModalActive(), mY.Profiles())
+	}
+	if !strings.Contains(mY.View(), "running agy session") {
+		t.Errorf("modal must say why the delete was refused")
 	}
 }
 

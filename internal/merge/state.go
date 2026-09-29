@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -92,4 +93,36 @@ func (s Store) Rename(from, to string) error {
 		return nil
 	}
 	return err
+}
+
+// ActiveSessions returns the agents with a running foreground session in the
+// profile: those whose sessions lock cannot be taken exclusively. The probe
+// lock is released at once.
+func (s Store) ActiveSessions(profile string) ([]string, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var running []string
+	for _, e := range entries {
+		agent, ok := strings.CutPrefix(e.Name(), profile+".")
+		agent, ok2 := strings.CutSuffix(agent, ".sessions")
+		// Agent names hold no dot, so "work.x.claude.sessions" is profile work.x.
+		if !ok || !ok2 || agent == "" || strings.Contains(agent, ".") {
+			continue
+		}
+		l, free, err := TryUpgrade(filepath.Join(s.Dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if !free {
+			running = append(running, agent)
+			continue
+		}
+		_ = l.Unlock()
+	}
+	return running, nil
 }
