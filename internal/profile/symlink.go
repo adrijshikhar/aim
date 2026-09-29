@@ -159,7 +159,11 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 				continue
 			}
 			if fi.IsDir() && isStubOrEmptyDir(dest, cleanName) {
-				_ = os.RemoveAll(dest)
+				if err := os.RemoveAll(dest); err != nil {
+					logger.Debug("[symlink] Failed to remove stub dir %s: %v", dest, err)
+					errs = append(errs, err)
+					continue
+				}
 			} else {
 				continue
 			}

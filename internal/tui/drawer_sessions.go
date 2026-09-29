@@ -103,9 +103,6 @@ func (m Model) filteredSessions() []session.Session {
 
 func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 	km := m.keys.SessionsDrawer
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultSessionsDrawerKeyMap()
-	}
 
 	if m.sessionsDrawer.filterActive {
 		filterKm := km.ForFilterMode()
@@ -163,11 +160,8 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, km.Quit):
 		m.cancelStream()
 		return m, tea.Quit
-	case msg.String() == "s" || msg.String() == "q":
-		m.sessionsDrawer = sessionsDrawerState{}
-		return m, nil
-	case msg.String() == "esc":
-		if m.sessionsDrawer.filterInput.Value() != "" {
+	case key.Matches(msg, km.Close):
+		if key.Matches(msg, km.ClearFilter) && m.sessionsDrawer.filterInput.Value() != "" {
 			m.sessionsDrawer.filterInput.SetValue("")
 			m.sessionsDrawer.cursor = 0
 			return m, nil
@@ -184,11 +178,12 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			cmd := m.sessionsDrawer.filterInput.Focus()
 			return m, cmd
 		}
-		if m.sessionsDrawer.agentFilter == "agy" {
+		switch m.sessionsDrawer.agentFilter {
+		case "agy":
 			m.sessionsDrawer.agentFilter = "codex"
-		} else if m.sessionsDrawer.agentFilter == "codex" {
+		case "codex":
 			m.sessionsDrawer.agentFilter = ""
-		} else {
+		default:
 			m.sessionsDrawer.agentFilter = "agy"
 		}
 		m.sessionsDrawer.cursor = 0
@@ -404,9 +399,6 @@ func (m Model) renderSessionsDrawer() string {
 	}
 
 	km := m.keys.SessionsDrawer
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultSessionsDrawerKeyMap()
-	}
 	var footerHelp string
 	if m.sessionsDrawer.filterActive {
 		footerHelp = m.help.ShortHelpView(km.ShortHelpFilter())

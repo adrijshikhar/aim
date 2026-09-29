@@ -75,9 +75,6 @@ func (m Model) openMoveModal() (Model, tea.Cmd) {
 
 func (m Model) updateMoveModal(msg tea.Msg) (Model, tea.Cmd) {
 	km := m.keys.MoveModal
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultMoveModalKeyMap()
-	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -190,9 +187,6 @@ func (m Model) renderMoveModal() string {
 	}
 
 	km := m.keys.MoveModal
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultMoveModalKeyMap()
-	}
 	b.WriteString("  " + m.help.ShortHelpView(km.ShortHelp()))
 
 	box := MoveModalBoxStyle.Render(b.String())

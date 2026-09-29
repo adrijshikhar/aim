@@ -53,9 +53,6 @@ func (m Model) openRenameModal() (Model, tea.Cmd) {
 
 func (m Model) updateRenameModal(msg tea.Msg) (Model, tea.Cmd) {
 	km := m.keys.RenameModal
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultRenameModalKeyMap()
-	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -151,9 +148,6 @@ func (m Model) renderRenameModal() string {
 	}
 
 	km := m.keys.RenameModal
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultRenameModalKeyMap()
-	}
 	b.WriteString("  " + m.help.ShortHelpView(km.ShortHelp()))
 
 	box := RenameModalBoxStyle.Render(b.String())

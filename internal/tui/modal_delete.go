@@ -55,9 +55,6 @@ func (m Model) openDeleteModal() (Model, tea.Cmd) {
 
 func (m Model) updateDeleteModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	km := m.keys.DeleteModal
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultDeleteModalKeyMap()
-	}
 
 	switch {
 	case key.Matches(msg, km.Quit):
@@ -181,9 +178,6 @@ func (m Model) renderDeleteModal() string {
 
 		b.WriteString(fmt.Sprintf("  %s    %s    %s\n\n", btn0, btn1, btn2))
 		km := m.keys.DeleteModal
-		if len(km.Quit.Keys()) == 0 {
-			km = DefaultDeleteModalKeyMap()
-		}
 		b.WriteString("  " + m.help.ShortHelpView(km.ShortHelpShared()))
 	} else {
 		b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(
@@ -207,9 +201,6 @@ func (m Model) renderDeleteModal() string {
 
 		b.WriteString(fmt.Sprintf("      %s      %s\n\n", btn0, btn1))
 		km := m.keys.DeleteModal
-		if len(km.Quit.Keys()) == 0 {
-			km = DefaultDeleteModalKeyMap()
-		}
 		b.WriteString("  " + m.help.ShortHelpView(km.ShortHelpSingle()))
 	}
 

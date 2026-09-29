@@ -49,7 +49,9 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 		return true
 	}
 	if pm != nil {
-		_ = pm.EnsureAllProfilesDotfiles()
+		if err := pm.EnsureAllProfilesDotfiles(); err != nil {
+			logger.Debug("[doctor] Failed to ensure dotfiles across profiles: %v", err)
+		}
 	}
 	cfg, _ := config.LoadConfig()
 

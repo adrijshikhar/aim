@@ -122,9 +122,6 @@ func (m Model) openResumeModalWithFlags(target *session.Session, outcome ActionO
 
 func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
 	km := m.keys.ResumeModal
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultResumeModalKeyMap()
-	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -344,9 +341,6 @@ func (m Model) renderResumeModal() string {
 		flagsHeader := lipgloss.NewStyle().Foreground(TextSecondary).Render("Extra CLI Flags (optional):")
 		b.WriteString("  " + flagsHeader + "\n")
 		km := m.keys.ResumeModal
-		if len(km.Quit.Keys()) == 0 {
-			km = DefaultResumeModalKeyMap()
-		}
 		if m.resumeModal.flagsMode {
 			b.WriteString("  " + m.resumeModal.flagsInput.View() + "\n\n")
 			b.WriteString("  " + m.help.ShortHelpView(km.ShortHelpFlags()))

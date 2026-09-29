@@ -101,9 +101,6 @@ func (m Model) fetchDoctorDiagnostics() Model {
 
 func (m Model) updateDoctorDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 	km := m.keys.DoctorDrawer
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultDoctorDrawerKeyMap()
-	}
 
 	switch {
 	case key.Matches(msg, km.Quit):
@@ -170,9 +167,6 @@ func (m Model) renderDoctorDrawer() string {
 	}
 
 	km := m.keys.DoctorDrawer
-	if len(km.Quit.Keys()) == 0 {
-		km = DefaultDoctorDrawerKeyMap()
-	}
 	b.WriteString("\n  " + m.help.ShortHelpView(km.ShortHelp()))
 
 	box := DoctorDrawerStyle.Render(b.String())
