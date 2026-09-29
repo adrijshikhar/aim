@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -18,6 +20,9 @@ var (
 	// whether it may be shown. Both are replaced in tests.
 	sessionPromptIn io.Reader = os.Stdin
 	stdinIsTerminal           = func() bool { return isatty.IsTerminal(os.Stdin.Fd()) }
+	// openTTY opens the controlling terminal for the prompt when stdin is
+	// piped. Replaced in tests.
+	openTTY = func() (io.ReadWriteCloser, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
 )
 
 func fmtWarn(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) }
@@ -69,16 +74,55 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 	if err != nil {
 		fmtWarn("aim: host merge: %v", err)
 	}
+	var sigs chan os.Signal
+	if sess != nil {
+		// The runner forwards SIGINT/SIGTERM to the agent; until Finish they
+		// must not kill aim, or the host's items stay in the profile until the
+		// next launch recovers them.
+		sigs = make(chan os.Signal, 1)
+		signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigs)
+	}
 	code := run()
 	if sess != nil {
 		changes, err := sess.Diff()
 		if err != nil {
 			fmtWarn("aim: host diff: %v", err)
 		}
-		decide := merge.Prompter(sessionPromptIn, os.Stderr, stdinIsTerminal(), profileName, adapter.Name())
-		if err := sess.Finish(changes, decide); err != nil {
+		if err := sess.Finish(changes, exitDecider(sigs, profileName, adapter.Name())); err != nil {
 			fmtWarn("aim: host finish: %v", err)
 		}
 	}
 	return code
+}
+
+// exitDecider prompts on stdin when it is a terminal, else on the controlling
+// terminal; without either every change is kept. SIGINT or SIGTERM at the
+// prompt keeps every change.
+func exitDecider(sigs chan os.Signal, profile, agent string) func([]merge.Change) []merge.Decision {
+	return func(cs []merge.Change) []merge.Decision {
+		in, out, interactive := sessionPromptIn, io.Writer(os.Stderr), stdinIsTerminal()
+		if !interactive {
+			if tty, err := openTTY(); err == nil {
+				defer tty.Close()
+				in, out, interactive = tty, tty, true
+			}
+		}
+		decide := merge.Prompter(in, out, interactive, profile, agent)
+		if !interactive {
+			return decide(cs)
+		}
+		for len(sigs) > 0 { // the Ctrl+C that ended the agent is not an answer
+			<-sigs
+		}
+		res := make(chan []merge.Decision, 1)
+		go func() { res <- decide(cs) }()
+		select {
+		case d := <-res:
+			return d
+		case <-sigs:
+			fmt.Fprintf(out, "\n%d change(s) kept in %s (%s)\n", len(cs), profile, agent)
+			return make([]merge.Decision, len(cs)) // Keep is the zero Decision
+		}
+	}
 }

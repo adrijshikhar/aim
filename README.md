@@ -132,8 +132,9 @@ Only which plugins are on is scoped per profile; the installed plugin files and
 marketplaces stay shared with the host.
 
 When a session adds, edits or removes a server or plugin, aim asks at exit whether to
-promote the change to the host or keep it in that profile; without a terminal the change
-is kept. Each change is listed with its collection, and a plugin switched on or off shows
+promote the change to the host or keep it in that profile. When stdin is piped
+(`aim run claude work < file`) the prompt uses the controlling terminal (`/dev/tty`);
+without a terminal at all, or on Ctrl+C at the prompt, the change is kept. Each change is listed with its collection, and a plugin switched on or off shows
 its new value (`~ enabledPlugins/x@m   edited (host item) → false`). A removed host item
 comes back next session. Background launches (`claude --bg`, `codex app-server`,
 `agy remote-control`) get the host items too; the next launch of that profile cleans up.

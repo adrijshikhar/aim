@@ -23,6 +23,18 @@ set -euo pipefail
 #     background launch still recovers, --version untouched; agy/gemini have none)
 # ==============================================================================
 
+# aim prompts on /dev/tty when stdin is piped, so the `< /dev/null` checks below
+# must run without a controlling terminal (pty_run gives aim its own).
+if [ -z "${AIM_E2E_DETACHED:-}" ] && (: <>/dev/tty) 2>/dev/null; then
+  export AIM_E2E_DETACHED=1
+  exec python3 -c 'import os, sys
+pid = os.fork()
+if pid == 0:
+    os.setsid()
+    os.execvp(sys.argv[1], sys.argv[1:])
+sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))' bash "$0" "$@"
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AIM_BIN="$REPO_ROOT/aim"
 echo "==> Building fresh AIM binary from $REPO_ROOT..."
