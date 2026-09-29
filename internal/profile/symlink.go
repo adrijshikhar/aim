@@ -155,25 +155,52 @@ func isAllowedBridgedPath(clean string) bool {
 	return true
 }
 
-// bridgeCandidate resolves one bridged path for profileDir and reports whether
+// bridgeRoots holds the real home and the profile dir as given, plus their
+// symlink-resolved forms. Containment and the deny-list are checked on the
+// resolved forms, so a host link cannot route around them.
+type bridgeRoots struct {
+	realHome, profileDir         string
+	realHomeReal, profileDirReal string
+}
+
+func newBridgeRoots(realHome, profileDir string) bridgeRoots {
+	return bridgeRoots{
+		realHome:       realHome,
+		profileDir:     profileDir,
+		realHomeReal:   resolvePath(realHome),
+		profileDirReal: resolvePath(profileDir),
+	}
+}
+
+// resolvePath returns p with symlinks resolved, or p cleaned when it cannot be
+// resolved (a dangling link, say).
+func resolvePath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
+// bridgeCandidate resolves one bridged path for the profile and reports whether
 // it may be acted on: it must be allowed, exist on the host as a regular file,
-// dir or symlink (not a socket, fifo or device), not contain the profile, and
-// not sit under a profile parent that is a link or a file. That last rule keeps
-// EnsureDotfiles from creating, replacing or removing anything inside a dir
-// that is itself a link to the host, which would rewrite the real home.
+// dir or symlink (not a socket, fifo or device), not resolve into aim or agent
+// state, not contain the profile, and not sit under a profile parent that is a
+// link or a file. That last rule keeps EnsureDotfiles from creating, replacing
+// or removing anything inside a dir that is itself a link to the host, which
+// would rewrite the real home.
 //
 // A host dir that contains the profile is never acted on, but descend reports
 // whether its children should be tried instead: true while it strictly
 // contains the aim data dir (the parent of the profiles root), so .local and
 // .local/share are descended on the XDG layout and the data dir itself, with
 // its config and the other profiles, is not.
-func bridgeCandidate(realHome, profileDir, name string) (cleanName, src, dest string, ok, descend bool) {
+func bridgeCandidate(r bridgeRoots, name string) (cleanName, src, dest string, ok, descend bool) {
 	cleanName = filepath.Clean(filepath.FromSlash(name))
 	if !isAllowedBridgedPath(cleanName) {
 		logger.Debug("[symlink] Skipping disallowed path: %s", name)
 		return "", "", "", false, false
 	}
-	src = filepath.Join(realHome, cleanName)
+	src = filepath.Join(r.realHome, cleanName)
 	fi, err := os.Lstat(src)
 	if err != nil {
 		return "", "", "", false, false
@@ -182,16 +209,36 @@ func bridgeCandidate(realHome, profileDir, name string) (cleanName, src, dest st
 		logger.Debug("[symlink] Skipping special host file: %s", src)
 		return "", "", "", false, false
 	}
-	if isWithin(profileDir, src) {
-		logger.Debug("[symlink] Skipping %s: it contains the profile", src)
-		dataDir := filepath.Dir(filepath.Dir(profileDir))
-		descend = fi.IsDir() && isWithin(dataDir, src) && filepath.Clean(dataDir) != filepath.Clean(src)
-		return cleanName, src, "", false, descend
-	}
-	if underLinkOrFile(profileDir, cleanName) {
+	srcReal := resolvePath(src)
+	if resolvesIntoIsolatedState(r.realHomeReal, srcReal, cleanName) {
+		logger.Debug("[symlink] Skipping %s: it resolves to %s", src, srcReal)
 		return "", "", "", false, false
 	}
-	return cleanName, src, filepath.Join(profileDir, cleanName), true, false
+	if isWithin(r.profileDirReal, srcReal) {
+		logger.Debug("[symlink] Skipping %s: it contains the profile", src)
+		dataDir := filepath.Dir(filepath.Dir(r.profileDirReal))
+		descend = fi.IsDir() && isWithin(dataDir, srcReal) && dataDir != srcReal
+		return cleanName, src, "", false, descend
+	}
+	if underLinkOrFile(r.profileDir, cleanName) {
+		return "", "", "", false, false
+	}
+	return cleanName, src, filepath.Join(r.profileDir, cleanName), true, false
+}
+
+// resolvesIntoIsolatedState reports whether a host entry whose symlinks
+// resolve somewhere other than its own name lands on a path the deny-list
+// keeps out: the resolved home-relative path is checked with
+// isAllowedBridgedPath, and a top-level one with isDeniedHostDotfile too.
+func resolvesIntoIsolatedState(homeReal, srcReal, cleanName string) bool {
+	rel, err := filepath.Rel(homeReal, srcReal)
+	if err != nil || !filepath.IsLocal(rel) || rel == cleanName {
+		return false
+	}
+	if !isAllowedBridgedPath(rel) {
+		return true
+	}
+	return !strings.ContainsRune(rel, filepath.Separator) && isDeniedHostDotfile(rel)
 }
 
 // isWithin reports whether path is dir or lies under it.
@@ -203,12 +250,18 @@ func isWithin(path, dir string) bool {
 // forEachBridgeCandidate calls fn for every path in paths that bridgeCandidate
 // accepts, descending into host dirs that contain the profile, once per path.
 // Each candidate is evaluated just before fn runs, so a parent that fn has
-// linked already rules out the paths below it.
+// linked already rules out the paths below it. A profile that resolves to the
+// real home or an ancestor of it gets nothing: every link would be a self-link.
 func forEachBridgeCandidate(realHome, profileDir string, paths []string, fn func(cleanName, src, dest string)) {
+	r := newBridgeRoots(realHome, profileDir)
+	if isWithin(r.realHomeReal, r.profileDirReal) {
+		logger.Debug("[symlink] Skipping bridging: profile %s resolves onto the real home %s", profileDir, realHome)
+		return
+	}
 	seen := make(map[string]bool)
 	var visit func(name string)
 	visit = func(name string) {
-		cleanName, src, dest, ok, descend := bridgeCandidate(realHome, profileDir, name)
+		cleanName, src, dest, ok, descend := bridgeCandidate(r, name)
 		switch {
 		case ok && !seen[cleanName]:
 			seen[cleanName] = true

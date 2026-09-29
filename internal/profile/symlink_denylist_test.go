@@ -521,3 +521,81 @@ func TestEnsureDotfiles_KeepsDirWithEmptySubdirTheHostLacks(t *testing.T) {
 		}
 	}
 }
+
+// The deny-list is checked against where a host entry resolves, not only its
+// name: a host link into aim or agent state is never bridged.
+func TestEnsureDotfiles_HostLinkIntoIsolatedStateNotLinked(t *testing.T) {
+	host := t.TempDir()
+	prof := filepath.Join(host, ".aim", "profiles", "office")
+	mustMkdirAll(t, prof)
+	mustWriteFile(t, filepath.Join(host, ".aim", "config.json"), "{}")
+	mustWriteFile(t, filepath.Join(host, ".aim", "profiles", "work", ".claude", ".credentials.json"), "secret")
+	mustWriteFile(t, filepath.Join(host, "dotfiles", "tool", "cfg"), "x")
+	for link, target := range map[string]string{
+		".claude-work": filepath.Join(host, ".aim", "profiles", "work", ".claude"),
+		".aimlink":     filepath.Join(host, ".aim"),
+		".toollink":    filepath.Join(host, "dotfiles", "tool"),
+	} {
+		if err := os.Symlink(target, filepath.Join(host, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := t.TempDir()
+
+	for _, p := range []string{prof, other} {
+		if err := EnsureDotfiles(host, p); err != nil {
+			t.Fatalf("EnsureDotfiles(%s): %v", p, err)
+		}
+		for _, rel := range []string{".claude-work", ".aimlink"} {
+			if _, err := os.Lstat(filepath.Join(p, rel)); err == nil {
+				t.Errorf("%s: %s resolves into aim/agent state and must not be linked", p, rel)
+			}
+		}
+		if !isSymlink(filepath.Join(p, ".toollink")) {
+			t.Errorf("%s: a host link to ordinary config must still be linked", p)
+		}
+		for _, s := range BridgeStatus(host, p, GetBridgedPaths(host)) {
+			if s.Path == ".claude-work" || s.Path == ".aimlink" {
+				t.Errorf("%s: BridgeStatus must not report %s", p, s.Path)
+			}
+		}
+	}
+}
+
+// A profiles root reached through a symlink into a host dotdir is still inside
+// that dotdir: containment compares resolved paths, so no cycle is created.
+func TestEnsureDotfiles_SymlinkedProfilesRootNoCycle(t *testing.T) {
+	host := t.TempDir()
+	mustMkdirAll(t, filepath.Join(host, ".local", "share", "aim", "profiles", "p"))
+	mustWriteFile(t, filepath.Join(host, ".local", "bin", "tool"), "#!/bin/sh")
+	if err := os.Symlink(filepath.Join(host, ".local", "share", "aim"), filepath.Join(host, "aimhome")); err != nil {
+		t.Fatal(err)
+	}
+	prof := filepath.Join(host, "aimhome", "profiles", "p")
+
+	if err := EnsureDotfiles(host, prof); err != nil {
+		t.Fatalf("EnsureDotfiles: %v", err)
+	}
+	if isSymlink(filepath.Join(prof, ".local")) {
+		t.Fatalf(".local contains the profile through aimhome and must not be linked")
+	}
+	if !isSymlink(filepath.Join(prof, ".local", "bin")) {
+		t.Errorf("expected .local/bin to be linked")
+	}
+	if _, err := os.Lstat(filepath.Join(prof, ".local", "share", "aim")); err == nil {
+		t.Errorf("the aim data dir must not be bridged into the profile")
+	}
+
+	// A profile dir that is the real home itself (via a link) is left alone.
+	mustMkdirAll(t, filepath.Join(host, ".emptydir"))
+	selfLink := filepath.Join(t.TempDir(), "self")
+	if err := os.Symlink(host, selfLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDotfiles(host, selfLink); err != nil {
+		t.Fatalf("EnsureDotfiles(self): %v", err)
+	}
+	if fi, err := os.Lstat(filepath.Join(host, ".emptydir")); err != nil || !fi.IsDir() {
+		t.Errorf("a profile that is the real home must not have its dirs replaced (err %v)", err)
+	}
+}
