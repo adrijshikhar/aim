@@ -6,6 +6,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -120,17 +121,19 @@ func (m Model) openResumeModalWithFlags(target *session.Session, outcome ActionO
 }
 
 func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
+	km := m.keys.ResumeModal
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.resumeModal.customMode {
-			switch msg.String() {
-			case "ctrl+c":
+			switch {
+			case key.Matches(msg, km.Quit):
 				m.cancelStream()
 				return m, tea.Quit
-			case "esc":
+			case msg.String() == "esc":
 				m.resumeModal.customMode = false
 				return m, nil
-			case "enter":
+			case key.Matches(msg, km.Enter):
 				val := strings.TrimSpace(m.resumeModal.input.Value())
 				if val == "" {
 					if m.resumeModal.session.Profile != "" && m.resumeModal.session.Profile != "<host>" {
@@ -148,15 +151,15 @@ func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 		if m.resumeModal.flagsMode {
-			switch msg.String() {
-			case "ctrl+c":
+			switch {
+			case key.Matches(msg, km.Quit):
 				m.cancelStream()
 				return m, tea.Quit
-			case "esc", "tab":
+			case key.Matches(msg, km.DoneFlags):
 				m.resumeModal.flagsMode = false
 				m.resumeModal.flagsInput.Blur()
 				return m, nil
-			case "enter":
+			case key.Matches(msg, km.Enter):
 				// Confirm with current selected profile and flags
 				profile := m.resumeModal.profiles[m.resumeModal.cursor]
 				return m.finishResumeSelection(profile)
@@ -168,28 +171,28 @@ func (m Model) updateResumeModal(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 		totalOptions := len(m.resumeModal.profiles) + 1 // +1 for "Enter custom profile name..."
-		switch msg.String() {
-		case "ctrl+c":
+		switch {
+		case key.Matches(msg, km.Quit):
 			m.cancelStream()
 			return m, tea.Quit
-		case "esc", "q":
+		case key.Matches(msg, km.Cancel):
 			m.resumeModal.active = false
 			return m, nil
-		case "up", "k":
+		case key.Matches(msg, km.Up):
 			if m.resumeModal.cursor > 0 {
 				m.resumeModal.cursor--
 			}
 			return m, nil
-		case "down", "j":
+		case key.Matches(msg, km.Down):
 			if m.resumeModal.cursor < totalOptions-1 {
 				m.resumeModal.cursor++
 			}
 			return m, nil
-		case "tab", "f", "e":
+		case key.Matches(msg, km.ToggleFlags):
 			m.resumeModal.flagsMode = true
 			cmd := m.resumeModal.flagsInput.Focus()
 			return m, cmd
-		case "enter":
+		case key.Matches(msg, km.Enter):
 			if m.resumeModal.cursor == len(m.resumeModal.profiles) {
 				// User selected "Enter custom profile name..."
 				m.resumeModal.customMode = true
@@ -337,11 +340,10 @@ func (m Model) renderResumeModal() string {
 
 		flagsHeader := lipgloss.NewStyle().Foreground(TextSecondary).Render("Extra CLI Flags (optional):")
 		b.WriteString("  " + flagsHeader + "\n")
+		km := m.keys.ResumeModal
 		if m.resumeModal.flagsMode {
 			b.WriteString("  " + m.resumeModal.flagsInput.View() + "\n\n")
-			b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-				"  [Enter] Confirm & Resume  •  [Tab/Esc] Done Editing Flags",
-			))
+			b.WriteString("  " + m.help.ShortHelpView(km.ShortHelpFlags()))
 		} else {
 			val := m.resumeModal.flagsInput.Value()
 			valDisplay := val
@@ -351,9 +353,7 @@ func (m Model) renderResumeModal() string {
 				flagsBoxStyle = lipgloss.NewStyle().Foreground(TextMuted)
 			}
 			b.WriteString(fmt.Sprintf("  Flags: %s\n\n", flagsBoxStyle.Render(valDisplay)))
-			b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(
-				"  [↑/↓] Select Profile  •  [f/Tab] Flags  •  [Enter] Confirm & Resume  •  [Esc] Back",
-			))
+			b.WriteString("  " + m.help.ShortHelpView(km.ShortHelpProfile()))
 		}
 	}
 

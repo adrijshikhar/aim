@@ -488,3 +488,39 @@ func TestEnsureDotfiles_ReplacesStubStatuslineDirectory(t *testing.T) {
 		t.Errorf("expected stub statusline directory to be replaced with symlink")
 	}
 }
+
+func TestEnsureDotfiles_FishAndCargoSupport(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+	_ = os.MkdirAll(profileDir, 0755)
+
+	// Create fish and cargo files on host
+	_ = os.MkdirAll(filepath.Join(hostHome, ".local", "share", "omf"), 0755)
+	_ = os.WriteFile(filepath.Join(hostHome, ".local", "share", "omf", "init.fish"), []byte("# omf"), 0644)
+	_ = os.MkdirAll(filepath.Join(hostHome, ".cargo"), 0755)
+	_ = os.WriteFile(filepath.Join(hostHome, ".cargo", "env.fish"), []byte("# cargo env"), 0644)
+	_ = os.WriteFile(filepath.Join(hostHome, ".fish-personal"), []byte("# personal"), 0644)
+	_ = os.WriteFile(filepath.Join(hostHome, ".fish_custom"), []byte("# custom"), 0644)
+
+	if err := EnsureDotfiles(hostHome, profileDir); err != nil {
+		t.Fatalf("EnsureDotfiles failed: %v", err)
+	}
+
+	for _, check := range []string{
+		filepath.Join(".local", "share", "omf"),
+		filepath.Join(".cargo", "env.fish"),
+		".fish-personal",
+		".fish_custom",
+	} {
+		p := filepath.Join(profileDir, check)
+		fi, err := os.Lstat(p)
+		if err != nil {
+			t.Errorf("expected bridged path %s to exist: %v", check, err)
+			continue
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("expected %s to be a symlink", check)
+		}
+	}
+}

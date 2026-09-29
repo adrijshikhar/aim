@@ -15,16 +15,21 @@ import (
 )
 
 func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
-	return &cobra.Command{
+	var check bool
+	cmd := &cobra.Command{
 		Use:   "doctor [agent]",
 		Short: "Diagnose environment, tokens, and binaries",
 		Args:  cobra.MaximumNArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			agent := ""
 			if len(args) > 0 {
 				agent = args[0]
 			}
-			runDoctor(reg, pm, agent)
+			ok := runDoctor(reg, pm, agent)
+			if check && !ok {
+				return fmt.Errorf("doctor diagnostics reported failures")
+			}
+			return nil
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) == 0 {
@@ -33,16 +38,20 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		},
 	}
+	cmd.Flags().BoolVar(&check, "check", false, "Exit with non-zero status if any diagnostic check fails")
+	return cmd
 }
 
-func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName string) {
+func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName string) bool {
 	logger.Debug("[doctor] Running diagnostics (agent=%q)", agentName)
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Doctor Diagnostics ==="))
 	if reg == nil {
-		return
+		return true
 	}
 	if pm != nil {
-		_ = pm.EnsureAllProfilesDotfiles()
+		if err := pm.EnsureAllProfilesDotfiles(); err != nil {
+			logger.Debug("[doctor] Failed to ensure dotfiles across profiles: %v", err)
+		}
 	}
 	cfg, _ := config.LoadConfig()
 
@@ -51,17 +60,21 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 		if err != nil {
 			failBadge := tui.GaugeRedStyle.Width(8).Render("[FAIL]")
 			fmt.Printf("%s Unknown agent: %s\n", failBadge, agentName)
-			return
+			return false
 		}
-		diagnoseAdapter(adapter, pm, cfg, reg)
+		ok := diagnoseAdapter(adapter, pm, cfg, reg)
 		diagnosePlatform(agentName, cfg)
-		return
+		return ok
 	}
 
+	allOK := true
 	for _, adapter := range reg.All() {
-		diagnoseAdapter(adapter, pm, cfg, reg)
+		if !diagnoseAdapter(adapter, pm, cfg, reg) {
+			allOK = false
+		}
 	}
 	diagnosePlatform("", cfg)
+	return allOK
 }
 
 func diagnosePlatform(agentName string, cfg *config.Config) {
@@ -101,13 +114,14 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 	}
 }
 
-func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry) {
+func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry) bool {
+	allOK := true
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render(fmt.Sprintf("[%s (%s)]", adapter.DisplayName(), adapter.Name())))
 	profiles, _ := pm.ListProfilesForAgent(adapter.Name(), cfg, reg)
 	if len(profiles) == 0 {
 		fmt.Println(lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("  No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
-		return
+		return true
 	}
 	for _, p := range profiles {
 		fmt.Println()
@@ -130,6 +144,9 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 			}
 		}
 		for _, r := range results {
+			if r.Status == "FAIL" {
+				allOK = false
+			}
 			var badgeStyle lipgloss.Style
 			switch r.Status {
 			case "OK":
@@ -147,4 +164,5 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 			fmt.Printf("  %s %s %s\n", badge, cat, msg)
 		}
 	}
+	return allOK
 }

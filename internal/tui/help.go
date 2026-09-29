@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -28,11 +29,11 @@ func (m Model) closeHelpOverlay() (Model, tea.Cmd) {
 }
 
 func (m Model) updateHelpOverlay(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	if msg.Type == tea.KeyCtrlC || msg.String() == "ctrl+c" {
 		m.cancelStream()
 		return m, tea.Quit
-	case "?", "esc", "q":
+	}
+	if key.Matches(msg, m.keys.Help) || msg.Type == tea.KeyEsc || msg.String() == "esc" || msg.String() == "q" {
 		m.helpModal = helpModalState{active: false}
 		return m, nil
 	}
