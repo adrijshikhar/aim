@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/merge"
+	"github.com/aim-cli/aim/internal/profile"
 )
 
 // No test may reach the real controlling terminal.
@@ -198,5 +201,23 @@ func TestWithSessionMerge_SIGINTDuringStartIsHeld(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(prof); !strings.Contains(string(b), `"foo"`) || strings.Contains(string(b), `"jev"`) {
 		t.Fatalf("at rest = %s", b)
+	}
+}
+
+// A session launched from the TUI runs after the TUI has closed, so its
+// warnings (logger.Warn) must reach the console.
+func TestRunTUI_LaunchedSessionShowsWarnings(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetWarnOutput(&buf)
+	t.Cleanup(func() { logger.SetWarnOutput(nil) })
+	orig := tuiRunner
+	tuiRunner = func(*agents.Registry, *profile.ProfileManager) int {
+		logger.Warn("seeding refused")
+		return 0
+	}
+	t.Cleanup(func() { tuiRunner = orig })
+	runTUI(nil, nil)
+	if !strings.Contains(buf.String(), "aim: seeding refused") {
+		t.Fatalf("warning from the launched session was hidden: %q", buf.String())
 	}
 }
