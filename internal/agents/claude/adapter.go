@@ -154,7 +154,8 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}, nil
 }
 
-// writeSettings writes the profile's first settings.json (tests count calls).
+// writeSettings writes the profile's first settings.json. Replaced in tests
+// (they count calls), so those tests must not use t.Parallel.
 var writeSettings = merge.AtomicWrite
 
 // rewriteSettingsHooks points host hook paths in the profile's settings.json at
