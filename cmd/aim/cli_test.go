@@ -1770,3 +1770,45 @@ func TestCLI_CodexIntegration(t *testing.T) {
 		t.Errorf("expected cloned profile to have codex agent")
 	}
 }
+
+func TestCLI_Doctor_WarnsOnProfileOnlyBridgedCopy(t *testing.T) {
+	tmpDir := t.TempDir()
+	realHome := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+	t.Setenv("AIM_REAL_HOME", realHome)
+	pm := profile.NewProfileManager(tmpDir)
+	profDir, _ := pm.EnsureProfile("stale")
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{name: "mock", binaryPath: "/bin/sh"})
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("stale", "mock")
+	cfg.CustomBridgedPaths = []string{".hevo", ".claude-mem"}
+	_ = config.SaveConfig(cfg)
+
+	// Host has both; the profile holds its own non-empty .hevo (the field
+	// failure) and nothing for .claude-mem (linked by doctor's own EnsureDotfiles).
+	for _, p := range []string{filepath.Join(realHome, ".hevo"), filepath.Join(realHome, ".claude-mem"), filepath.Join(profDir, ".hevo")} {
+		if err := os.MkdirAll(p, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p, "data"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		runDoctor(reg, pm, "mock")
+	})
+
+	copyPath := filepath.Join(profDir, ".hevo")
+	if !strings.Contains(stdout, "stale: .hevo is a profile-only copy; the host's is not used. Remove it to share the host's: rm -rf "+copyPath) {
+		t.Errorf("expected profile-only copy warning for .hevo, got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, ".claude-mem is a profile-only copy") {
+		t.Errorf("did not expect .claude-mem to be flagged, got:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(copyPath, "data")); err != nil {
+		t.Errorf("doctor must not delete the profile copy: %v", err)
+	}
+}

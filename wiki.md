@@ -116,6 +116,7 @@ Everything managed by AIM resides in `~/.aim/` (configurable via the `AIM_HOME` 
 
 - **`debug`**: Enable verbose debug logging to stderr and `~/.aim/aim-debug.log` (`true` / `false`, default: `false`). Can also be toggled via `AIM_DEBUG=1` or `--debug`.
 - **`custom_bridged_paths`**: Additional dotfile or config paths to bridge from the host home into every profile sandbox.
+  A non-empty profile copy of a bridged path is kept as an override, so the host's is silently not used; `aim doctor` flags each such copy (and any link pointing elsewhere) with the `rm -rf` that restores sharing — it never deletes anything itself.
 - **`custom_ignored_keychains`**: List of additional macOS Keychain service names to scrub before and after agent execution to maintain strict profile isolation.
 - **`env`**: Profile-specific environment variables injected on launch.
 - **`args`**: Extra CLI arguments automatically passed to the agent binary when launched under this profile.
