@@ -1,8 +1,11 @@
 package profile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/aim-cli/aim/internal/agents"
 )
 
 // BridgeKind classifies how a profile's copy of a bridged path relates to the host's.
@@ -67,4 +70,43 @@ func sameFile(a, b string) bool {
 	}
 	rb, err := filepath.EvalSymlinks(b)
 	return err == nil && ra == rb
+}
+
+// BridgeDiagnostics summarises BridgeStatus for aim doctor and the TUI doctor
+// drawer: one OK line counting the shared paths, and a WARN for each bridged
+// host path the profile does not actually share (a symlink elsewhere, or a
+// preserved profile-only copy that shadows the host's). It only warns;
+// removing a copy is left to the user.
+func BridgeDiagnostics(profileName, realHome, profileDir string, extraPaths ...string) []agents.DiagnosticResult {
+	var results []agents.DiagnosticResult
+	shared, pending := 0, 0
+	for _, s := range BridgeStatus(realHome, profileDir, GetBridgedPaths(realHome, extraPaths...)) {
+		switch s.Kind {
+		case BridgeLinked:
+			shared++
+		case BridgePending:
+			pending++
+		case BridgeForeignLink:
+			results = append(results, agents.DiagnosticResult{
+				Category: "Bridge",
+				Status:   "WARN",
+				Message:  fmt.Sprintf("%s: %s links to %s, not the host's", profileName, s.Path, s.Target),
+			})
+		case BridgeCopy:
+			results = append(results, agents.DiagnosticResult{
+				Category: "Bridge",
+				Status:   "WARN",
+				Message: fmt.Sprintf("%s: %s is a profile-only copy; the host's is not used. Remove it to share the host's: rm -rf %s",
+					profileName, s.Path, s.ProfilePath),
+			})
+		}
+	}
+	if shared+pending > 0 {
+		msg := fmt.Sprintf("%d host path(s) shared", shared)
+		if pending > 0 {
+			msg += fmt.Sprintf(", %d linked on next launch", pending)
+		}
+		results = append([]agents.DiagnosticResult{{Category: "Bridge", Status: "OK", Message: msg}}, results...)
+	}
+	return results
 }
