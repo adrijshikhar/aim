@@ -27,6 +27,7 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 | **Multi-agent support** | Antigravity CLI (`agy`), Gemini CLI (`gemini`), and OpenAI Codex (`codex`) out of the box; easily extensible |
 | **Interactive TUI** | Bubble Tea dashboard with real-time capacity gauges, multi-agent tabs (`1`–`4`, `Tab`), live fuzzy filter (`/`), help overlay (`?`), and one-key launch |
 | **XDG Base Directory** | Follows XDG standards (`~/.config/aim`, `~/.local/state/aim`, etc.) with seamless legacy `~/.aim` fallback |
+| **Dotfile bridging** | Every host `~/.*` (`.gitconfig`, `.ssh`, `.config`, `.mcp-auth`, …) plus `~/go` and macOS `Library/Caches` is linked into each profile; agent state (`.claude`, `.claude.json`, `.codex`, `.gemini`, `.aim`) stays per profile. See the [wiki](wiki.md#what-is-isolated-vs-bridged) |
 | **Keychain isolation** | System keychains mounted for developer tools (`gh`, `git`); agent tokens explicitly purged |
 | **Debug logging** | Opt-in tracing via `--debug`, `AIM_DEBUG=1`, or config file with dual console/file logs |
 | **Usage & quota tracking** | Live capacity gauges, 5h & weekly limits, reset countdowns, and instant caching |

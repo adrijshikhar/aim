@@ -550,8 +550,8 @@ fatal: could not read Username for 'https://github.com': terminal prompts disabl
 ```
 
 #### Root Cause
-AIM redirects `$HOME` to `~/.aim/profiles/<profile>`. By default, AIM bridges `~/.gitconfig`, `~/.ssh/`, and the macOS `Library/Keychains` so developer credentials pass through seamlessly.
-However, if Git is configured to store credentials in a file inside `$HOME` (e.g. `~/.git-credentials`) rather than the macOS keychain or SSH agent, the profile sandbox will not see it.
+AIM redirects `$HOME` to `~/.aim/profiles/<profile>`. It links every top-level host dotfile (`~/.gitconfig`, `~/.git-credentials`, `~/.ssh/`, `~/.config/`, …) and the macOS `Library/Keychains` into the profile, so developer credentials normally pass through.
+However, a profile that holds its own copy of one of those paths (for example a real `~/.config` created inside the profile) keeps it as an override, and the host's is not used. `aim doctor` lists each such copy.
 
 #### Resolution
 1. Verify `git` is configured to use the macOS keychain:
@@ -564,7 +564,8 @@ However, if Git is configured to store credentials in a file inside `$HOME` (e.g
    # If empty, add your key:
    ssh-add ~/.ssh/id_ed25519
    ```
-3. If using `gh`, run `gh auth status` on the host. `gh` keeps its token in the macOS keychain, which profiles reach through the bridged `Library/Keychains`, so if it is missing run `gh auth login` on the host rather than inside a profile.
+3. Run `aim doctor` and remove any profile-only copy it flags for `.gitconfig`, `.git-credentials`, `.ssh` or `.config` with the `rm -rf` it prints; the host's is linked on the next launch.
+4. If using `gh`, run `gh auth status` on the host. `gh` keeps its token in the macOS keychain, which profiles reach through the bridged `Library/Keychains`, so if it is missing run `gh auth login` on the host rather than inside a profile.
 
 ---
 

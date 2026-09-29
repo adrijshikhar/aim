@@ -89,7 +89,7 @@ Agents often separate their state into:
 
 **Rules:**
 1. **Isolate Agent State**: Redirect `HOME` and any agent-specific home variable (`CODEX_HOME`, `CLAUDE_HOME`) to `profileDir`.
-2. **Bridge Companion Configs**: If the agent relies on an external tool configured under XDG directories (`~/.config/<tool>`), add that tool's path to `defaultBridgedPaths` in `internal/profile/symlink.go`.
+2. **Bridge Companion Configs**: Every top-level host dotfile (including `~/.config`) is already linked into profiles by `GetBridgedPaths` in `internal/profile/symlink.go`. If the agent keeps per-account state in a new top-level dot entry, add it to `isolatedDotfiles` there (and to `isAllowedBridgedPath`) so it stays per profile; if a companion tool lives outside the dot scan, add it to `defaultNonDotPaths`.
 3. **Non-Destructive Symlinking**: Never clobber existing profile files. If an external tool previously auto-generated a default directory (like fallback `settings.json`), detect and migrate it cleanly.
 
 ---
