@@ -31,6 +31,9 @@ var defaultBridgedPaths = []string{
 	".bash_profile",
 	".profile",
 	".config/fish",
+	".fish-personal",
+	filepath.Join(".local", "share", "omf"),
+	filepath.Join(".local", "share", "fish"),
 
 	// Package Managers & Runtimes
 	".npmrc",
@@ -39,6 +42,8 @@ var defaultBridgedPaths = []string{
 	".pip/pip.conf",
 	".cargo/config.toml",
 	".cargo/credentials.toml",
+	".cargo/env.fish",
+	".cargo/env",
 
 	// Containers & Cloud Tooling
 	".docker",
@@ -127,6 +132,15 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 
 	logger.Debug("[symlink] Ensuring dotfiles for profile at %s (host: %s)", profileDir, realHome)
 	paths := GetBridgedPaths(extraPaths...)
+	// Dynamically discover user shell configs like .fish* in realHome
+	if entries, err := os.ReadDir(realHome); err == nil {
+		for _, e := range entries {
+			name := e.Name()
+			if strings.HasPrefix(name, ".fish") {
+				paths = append(paths, name)
+			}
+		}
+	}
 	var errs []error
 
 	for _, name := range paths {
@@ -145,7 +159,11 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 				continue
 			}
 			if fi.IsDir() && isStubOrEmptyDir(dest, cleanName) {
-				_ = os.RemoveAll(dest)
+				if err := os.RemoveAll(dest); err != nil {
+					logger.Debug("[symlink] Failed to remove stub dir %s: %v", dest, err)
+					errs = append(errs, err)
+					continue
+				}
 			} else {
 				continue
 			}

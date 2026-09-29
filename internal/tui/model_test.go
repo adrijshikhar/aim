@@ -2535,3 +2535,113 @@ func TestKeyMapHasNoShellBinding(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionsDrawer_FilterTabToggleAndCtrlF(t *testing.T) {
+	m := newTestModel(t, "alpha", "beta")
+
+	s1 := session.NewSession("11111111-0000-0000-0000-000000000001", "dsl-first", "codex", "alpha", false, time.Now())
+	s2 := session.NewSession("22222222-0000-0000-0000-000000000002", "dsl-second", "codex", "beta", false, time.Now())
+	s3 := session.NewSession("33333333-0000-0000-0000-000000000003", "other-third", "codex", "alpha", false, time.Now())
+
+	// Open sessions drawer
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(Model)
+	m.SetSessionsForTest([]session.Session{s1, s2, s3})
+
+	// Enter filter mode
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	if !m.sessionsDrawer.filterActive {
+		t.Fatalf("expected filter to be active")
+	}
+
+	// Type "dsl"
+	for _, r := range "dsl" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+
+	filtered := m.filteredSessions()
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 filtered sessions matching 'dsl', got %d", len(filtered))
+	}
+
+	// Navigate down using msg.Type == tea.KeyDown
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.sessionsDrawer.cursor != 1 {
+		t.Fatalf("expected cursor to be 1, got %d", m.sessionsDrawer.cursor)
+	}
+
+	// Test Ctrl+F directly while filter is active
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	m = updated.(Model)
+	if !m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal to be active after Ctrl+F in filter mode")
+	}
+	if !m.ResumeModalIsFlagsMode() {
+		t.Fatalf("expected flagsMode to be active after Ctrl+F")
+	}
+	if m.ResumeModalSession() == nil || m.ResumeModalSession().ID != s2.ID {
+		t.Fatalf("expected resume modal for s2, got %v", m.ResumeModalSession())
+	}
+
+	// Dismiss flags mode, then dismiss resume modal back to drawer
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.ResumeModalIsFlagsMode() {
+		t.Fatalf("expected flagsMode to be false after first Esc")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.IsResumeModalActive() {
+		t.Fatalf("expected resume modal dismissed")
+	}
+
+	// Re-enter filter mode
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	if !m.sessionsDrawer.filterActive {
+		t.Fatalf("expected filterActive true")
+	}
+
+	// Press Tab to blur filter input but keep filter value
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if m.sessionsDrawer.filterActive {
+		t.Fatalf("expected filterActive to be false after Tab")
+	}
+	if m.sessionsDrawer.filterInput.Value() != "dsl" {
+		t.Fatalf("expected filter value 'dsl' to be preserved, got %q", m.sessionsDrawer.filterInput.Value())
+	}
+
+	// In list mode with active filter, pressing 'f' opens resume modal with flags
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m = updated.(Model)
+	if !m.IsResumeModalActive() || !m.ResumeModalIsFlagsMode() {
+		t.Fatalf("expected resume modal with flags mode active via 'f' key")
+	}
+
+	// Dismiss flags mode, then dismiss modal again
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+
+	// Press Esc while drawer is in list mode with filter -> clears filter query
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.sessionsDrawer.filterInput.Value() != "" {
+		t.Fatalf("expected filter input to be cleared after Esc, got %q", m.sessionsDrawer.filterInput.Value())
+	}
+	if !m.sessionsDrawer.active {
+		t.Fatalf("expected sessions drawer to still be open after first Esc")
+	}
+
+	// Second Esc closes the sessions drawer
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.sessionsDrawer.active {
+		t.Fatalf("expected sessions drawer to be closed after second Esc")
+	}
+}

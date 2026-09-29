@@ -22,6 +22,7 @@ import (
 func TestResumeCmd_ArgValidation(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	reg := agents.NewRegistry()
@@ -53,6 +54,7 @@ func TestResumeCmd_ArgValidation(t *testing.T) {
 func TestResumeCmd_NotFound(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	reg := agents.NewRegistry()
@@ -85,6 +87,7 @@ func TestResumeCmd_CatalystBriefCreation(t *testing.T) {
 
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	// Initialize git repo in tempDir
@@ -150,6 +153,7 @@ func TestResume_SyncsLatestSession(t *testing.T) {
 
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	reg := agents.NewRegistry()
@@ -269,6 +273,7 @@ func (m *testSessionProvider) Hydrate(ctx context.Context, srcSession *session.S
 func TestResume_AmbiguousPrefixAcrossProfiles(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	pm := profile.NewProfileManager(tempDir)
@@ -298,6 +303,7 @@ func TestResume_AmbiguousPrefixAcrossProfiles(t *testing.T) {
 func TestResume_NilManager(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	fakeBinDir := filepath.Join(tempDir, "bin")
@@ -337,6 +343,7 @@ func TestResume_NilManager(t *testing.T) {
 func TestResume_AIMSessionIDPropagation(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	dumpFile := filepath.Join(tempDir, "env_dump.txt")
@@ -430,6 +437,7 @@ func (m *mockForkProvider) Hydrate(ctx context.Context, srcSession *session.Sess
 func TestResumeCmd_ClaudeResumeArgs(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	dumpFile := filepath.Join(tempDir, "args_dump.txt")
@@ -483,6 +491,7 @@ func TestResumeCmd_ClaudeResumeArgs(t *testing.T) {
 func TestResumeCmd_DirectSessionIDWithoutProfile(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
 	fakeBinDir := filepath.Join(tempDir, "bin")

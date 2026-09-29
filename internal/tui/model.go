@@ -11,6 +11,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -65,6 +66,7 @@ type Model struct {
 	helpModal      helpModalState
 	filter         filterState
 	keys           KeyMap
+	help           help.Model
 
 	selectedSession *session.Session
 	selectedArgs    []string
@@ -97,6 +99,7 @@ func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Conf
 		loading:     false,
 		spinner:     s,
 		keys:        DefaultKeyMap(),
+		help:        NewThemedHelp(),
 		filter:      newFilterState(),
 	}
 	m = m.refreshProfiles()
@@ -412,6 +415,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		if msg.Width > 8 {
+			m.help.Width = msg.Width - 8
+		} else {
+			m.help.Width = 100
+		}
 		return m, nil
 
 	case usageReportMsg:

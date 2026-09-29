@@ -1,0 +1,88 @@
+name: Upstream Canary Watcher
+
+on:
+  schedule:
+    # Run canary checks every 8 hours (00:00, 08:00, 16:00 UTC)
+    - cron: "0 */8 * * *"
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: "Target agent to check ('all', 'codex', 'claude', 'agy', 'opencode')"
+        type: string
+        required: false
+        default: "all"
+      version:
+        description: "Target version to test, or 'latest'"
+        type: string
+        required: false
+        default: "latest"
+      dry_run:
+        description: "Dry run (test diagnostics without filing GitHub issues)"
+        type: boolean
+        required: false
+        default: false
+      force:
+        description: "Force canary tests even if local version matches"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Upstream Agent Canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Run Upstream Canary Watcher
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_AGENT: ${{ inputs.agent }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_FORCE: ${{ inputs.force }}
+        run: |
+          ARGS=()
+          if [ -n "$INPUT_AGENT" ]; then
+            ARGS+=(--agent "$INPUT_AGENT")
+          fi
+          if [ -n "$INPUT_VERSION" ]; then
+            ARGS+=(--version "$INPUT_VERSION")
+          fi
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          if [ "$INPUT_FORCE" = "true" ]; then
+            ARGS+=(--force)
+          fi
+          ARGS+=(--json "canary-report.json")
+
+          ./scripts/upstream_canary.sh "${ARGS[@]}"
+
+      - name: Upload Canary Report
+        if: always() && hashFiles('canary-report.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-report
+          path: canary-report.json
+          retention-days: 14
