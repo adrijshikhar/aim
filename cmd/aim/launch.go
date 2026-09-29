@@ -87,18 +87,15 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 	// must still strip what an earlier background launch merged (spec §4).
 	enabled := func(c merge.Collection) bool { return cfg.GroupEnabled(profileName, c.Group) }
 	opt := merge.StartOptions{Enabled: enabled, Background: mp.IsBackground(profileArgs, extraArgs)}
+	// The runner forwards SIGINT/SIGTERM/SIGHUP to the agent; from Start to
+	// Finish they must not kill aim, or the host's items stay in the profile
+	// until the next launch recovers them.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigs)
 	sess, err := eng.Start(profileName, adapter.Name(), cols, opt)
 	if err != nil {
 		fmtWarn("aim: host merge: %v", err)
-	}
-	var sigs chan os.Signal
-	if sess != nil {
-		// The runner forwards SIGINT/SIGTERM/SIGHUP to the agent; until Finish
-		// they must not kill aim, or the host's items stay in the profile until
-		// the next launch recovers them.
-		sigs = make(chan os.Signal, 1)
-		signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-		defer signal.Stop(sigs)
 	}
 	code := run()
 	if sess != nil {

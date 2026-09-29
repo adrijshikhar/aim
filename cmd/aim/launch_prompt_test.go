@@ -151,3 +151,31 @@ func testSignalDuringRunAndPromptKeeps(t *testing.T, sig syscall.Signal) {
 		t.Fatalf("at rest = %s", b)
 	}
 }
+
+// A SIGINT while Start merges (here: waiting on the merge lock) must not
+// kill aim between a profile write and the state that records it.
+func TestWithSessionMerge_SIGINTDuringStartIsHeld(t *testing.T) {
+	ad, store, _, prof, run := promptSetup(t, false, strings.NewReader(""), func() (io.ReadWriteCloser, error) {
+		return nil, errors.New("ENXIO")
+	})
+	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ml, err := merge.LockExclusive(store.MergeLockPath("work"), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+		time.Sleep(50 * time.Millisecond)
+		_ = ml.Unlock()
+	}()
+	_, out := captureOutput(t, func() { withSessionMerge(ad, store, "work", "", nil, nil, run) })
+	if !strings.Contains(out, "1 change(s) kept in work (mock)") {
+		t.Fatalf("output = %q", out)
+	}
+	if b, _ := os.ReadFile(prof); !strings.Contains(string(b), `"foo"`) || strings.Contains(string(b), `"jev"`) {
+		t.Fatalf("at rest = %s", b)
+	}
+}
