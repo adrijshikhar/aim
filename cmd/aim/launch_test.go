@@ -228,7 +228,8 @@ func TestWithSessionMerge_MCPGlobalOffStillMergesPlugins(t *testing.T) {
 }
 
 // GroupEnabled treats an unknown group as always on, so every collection an
-// adapter merges must name a group a profile setting switches.
+// adapter merges must name a group a profile setting switches, and a non-MCP
+// one its own Noun.
 func TestAdapters_CollectionsDeclareKnownGroup(t *testing.T) {
 	d := t.TempDir()
 	n := 0
@@ -241,6 +242,10 @@ func TestAdapters_CollectionsDeclareKnownGroup(t *testing.T) {
 			n++
 			if c.Group != "mcp" && c.Group != "plugins" {
 				t.Errorf("%s: %s declares group %q, want mcp or plugins", a.Name(), c.ID(), c.Group)
+			}
+			// An empty Noun reads "server" in messages, right only for MCP.
+			if c.Group != "mcp" && c.Noun == "" {
+				t.Errorf("%s: %s must declare a Noun", a.Name(), c.ID())
 			}
 		}
 	}
