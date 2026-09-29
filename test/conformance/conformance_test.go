@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/agents/claude"
 	"github.com/aim-cli/aim/internal/agents/codex"
 	"github.com/aim-cli/aim/internal/merge"
@@ -62,6 +63,22 @@ func cases() []agentCase {
 			seedProf: func(t *testing.T, p string) {
 				_ = os.MkdirAll(filepath.Join(p, ".codex"), 0o700)
 				_ = os.WriteFile(filepath.Join(p, ".codex", "config.toml"), []byte("model = \"x\"\n\n[mcp_servers.own]\ncommand = \"true\"\n"), 0o600)
+			},
+		},
+		{
+			// agy reads $HOME/.gemini/config/mcp_config.json; the host copy is the
+			// real home's, which sharedConfigDir picks when it exists.
+			name: "agy", provider: &agy.Adapter{}, bin: "agy", mcp: "mcpServers",
+			envFor: func(home, p string) []string { return append(os.Environ(), "HOME="+p) },
+			list:   []string{"mcp", "list"},
+			add:    func(n string) []string { return []string{"mcp", "add", n, "true"} },
+			seedHost: func(t *testing.T, h string) {
+				_ = os.MkdirAll(filepath.Join(h, ".gemini", "config"), 0o700)
+				_ = os.WriteFile(filepath.Join(h, ".gemini", "config", "mcp_config.json"), []byte(`{"mcpServers":{"hostsrv":{"command":"true"}}}`), 0o600)
+			},
+			seedProf: func(t *testing.T, p string) {
+				_ = os.MkdirAll(filepath.Join(p, ".gemini", "config"), 0o700)
+				_ = os.WriteFile(filepath.Join(p, ".gemini", "config", "mcp_config.json"), []byte(`{"mcpServers":{"own":{"command":"true"}}}`), 0o600)
 			},
 		},
 	}
