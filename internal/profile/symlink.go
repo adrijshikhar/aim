@@ -28,9 +28,9 @@ var isolatedDotfiles = map[string]bool{
 }
 
 var hostOnlyDotfiles = map[string]bool{
-	".Trash":              true,
-	".DS_Store":           true,
-	".CFUserTextEncoding": true,
+	".trash":              true,
+	".ds_store":           true,
+	".cfusertextencoding": true,
 	".localized":          true,
 	".zsh_sessions":       true,
 	".bash_sessions":      true,
@@ -38,7 +38,10 @@ var hostOnlyDotfiles = map[string]bool{
 
 // isDeniedHostDotfile reports whether a top-level host dot entry stays out of
 // profiles. .claude.json.* covers Claude's backup and atomic-write temp files.
+// Names compare case-insensitively: on a case-insensitive filesystem ~/.Codex
+// is ~/.codex, and no real dotdir differs from another only by case.
 func isDeniedHostDotfile(name string) bool {
+	name = strings.ToLower(name)
 	return isolatedDotfiles[name] ||
 		strings.HasPrefix(name, ".claude.json.") ||
 		hostOnlyDotfiles[name] ||
@@ -127,6 +130,8 @@ func isAllowedBridgedPath(clean string) bool {
 	if !filepath.IsLocal(clean) {
 		return false
 	}
+	// Case-insensitive, like isDeniedHostDotfile.
+	clean = strings.ToLower(clean)
 	// Deny AIM internal management state
 	if clean == ".aim" || strings.HasPrefix(clean, ".aim"+string(filepath.Separator)) {
 		return false

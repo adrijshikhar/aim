@@ -599,3 +599,23 @@ func TestEnsureDotfiles_SymlinkedProfilesRootNoCycle(t *testing.T) {
 		t.Errorf("a profile that is the real home must not have its dirs replaced (err %v)", err)
 	}
 }
+
+// On a case-insensitive filesystem ~/.Codex is ~/.codex, so the deny-list
+// compares names case-insensitively.
+func TestEnsureDotfiles_DenyListIgnoresCase(t *testing.T) {
+	host := t.TempDir()
+	prof := t.TempDir()
+	mustWriteFile(t, filepath.Join(host, ".Codex", "auth.json"), "secret")
+	mustWriteFile(t, filepath.Join(host, ".CLAUDE.json"), "{}")
+	mustWriteFile(t, filepath.Join(host, ".Gemini", "oauth_creds.json"), "secret")
+	mustWriteFile(t, filepath.Join(host, ".AIM", "config.json"), "{}")
+
+	if err := EnsureDotfiles(host, prof, filepath.Join(".AIM", "config.json")); err != nil {
+		t.Fatalf("EnsureDotfiles: %v", err)
+	}
+	for _, rel := range []string{".Codex", ".CLAUDE.json", ".Gemini", ".AIM"} {
+		if _, err := os.Lstat(filepath.Join(prof, rel)); err == nil {
+			t.Errorf("%s is agent state in another case and must not be linked", rel)
+		}
+	}
+}
