@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.0](https://github.com/adrijshikhar/aim/compare/v0.9.1...v0.10.0) (2026-09-29)
+
+
+### Features
+
+* session-scoped merge of global MCP servers (Spec A v1) ([#58](https://github.com/adrijshikhar/aim/issues/58)) ([a6c7f93](https://github.com/adrijshikhar/aim/commit/a6c7f93776c9e856c5bb257951b8a89190b54ca3))
+* session-scoped merge of plugin enablement (Spec B) + non-session skip ([#60](https://github.com/adrijshikhar/aim/issues/60)) ([1dd68af](https://github.com/adrijshikhar/aim/commit/1dd68af5c6a9ba3cccbd65a3cead35400747abc7))
+* **tui:** declarative keymaps, dynamic help rendering, fish bridging & upstream canary watcher ([#61](https://github.com/adrijshikhar/aim/issues/61)) ([6189fa7](https://github.com/adrijshikhar/aim/commit/6189fa7cacfc41d0ae7acd6e767315147130398b))
+
+
+### Bug Fixes
+
+* **session:** size-aware cross-profile hydration, flag forwarding, and parameterized e2e suite ([#56](https://github.com/adrijshikhar/aim/issues/56)) ([22de12e](https://github.com/adrijshikhar/aim/commit/22de12e2c280ba09efade3eb227d4ffd0a21d3d5))
+
 ## [0.9.1](https://github.com/adrijshikhar/aim/compare/v0.9.0...v0.9.1) (2026-09-25)
 
 
