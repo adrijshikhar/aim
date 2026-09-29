@@ -492,3 +492,32 @@ func TestEnsureDotfiles_DescendsIntoHostDirContainingTheProfile(t *testing.T) {
 		return nil
 	})
 }
+
+// An empty subdir is part of a scaffold only where the host has that dir too;
+// otherwise it is profile structure of its own and the dir is kept.
+func TestEnsureDotfiles_KeepsDirWithEmptySubdirTheHostLacks(t *testing.T) {
+	host := t.TempDir()
+	prof := t.TempDir()
+	mustWriteFile(t, filepath.Join(host, ".config", "gh", "hosts.yml"), "x")
+	mustMkdirAll(t, filepath.Join(prof, ".config", "mine"))
+	if err := os.Symlink(filepath.Join(host, ".config", "gh"), filepath.Join(prof, ".config", "gh")); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(host, ".config2", "cfg"), "x")
+	mustMkdirAll(t, filepath.Join(prof, ".config2", "a", "b"))
+
+	if err := EnsureDotfiles(host, prof); err != nil {
+		t.Fatalf("EnsureDotfiles: %v", err)
+	}
+	for _, rel := range []string{filepath.Join(".config", "mine"), filepath.Join(".config2", "a", "b")} {
+		fi, err := os.Lstat(filepath.Join(prof, rel))
+		if err != nil || !fi.IsDir() {
+			t.Errorf("%s must be kept as the profile's own dir (err %v)", rel, err)
+		}
+	}
+	for _, rel := range []string{".config", ".config2"} {
+		if isSymlink(filepath.Join(prof, rel)) {
+			t.Errorf("%s holds a dir the host lacks and must not be replaced", rel)
+		}
+	}
+}

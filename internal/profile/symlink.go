@@ -326,9 +326,10 @@ func isStubOrEmptyDir(path, src, cleanName string) bool {
 }
 
 // isHostScaffold reports whether dir holds nothing but links to the matching
-// entries of hostDir, and dirs of such links. That is what the old nested
-// allow-list left in a profile's .config, .cargo or .local; it has no content
-// of its own. RemoveAll on it removes only the links, never their targets.
+// entries of hostDir, and dirs of such links that the host has too. That is
+// what the old nested allow-list left in a profile's .config, .cargo or .local;
+// it has no content of its own. RemoveAll on it removes only the links, never
+// their targets. An empty dir is a scaffold, as isStubOrEmptyDir treats it.
 func isHostScaffold(dir, hostDir string) bool {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -344,7 +345,8 @@ func isHostScaffold(dir, hostDir string) bool {
 				return false
 			}
 		case e.IsDir():
-			if !isHostScaffold(p, h) {
+			// A subdir the host lacks is the profile's own structure, even empty.
+			if fi, err := os.Stat(h); err != nil || !fi.IsDir() || !isHostScaffold(p, h) {
 				return false
 			}
 		default:
