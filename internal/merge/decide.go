@@ -21,7 +21,7 @@ func label(c Change) string {
 	if c.Kind != Removed {
 		if v, ok := c.Value["value"]; ok && len(c.Value) == 1 {
 			what += fmt.Sprintf(" → %v", v)
-		} else if on, ok := c.Value["enabled"].(bool); ok {
+		} else if on, ok := c.Value["enabled"].(bool); ok && c.Collection.Group == "plugins" {
 			what += fmt.Sprintf(" → enabled=%v", on)
 		}
 	}

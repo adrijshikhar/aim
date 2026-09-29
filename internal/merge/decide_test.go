@@ -110,7 +110,8 @@ func TestLabel_PrefixesCollectionAndShowsScalarValue(t *testing.T) {
 // A Codex plugin is a table ([plugins."x"] enabled = false), not a scalar: its
 // enabled flag is shown too, so a host-wide disable is never promoted blind.
 func TestLabel_ShowsEnabledFlagOfPluginTable(t *testing.T) {
-	plug := Collection{Agent: "codex", Name: "plugins"}
+	plug := Collection{Agent: "codex", Name: "plugins", Group: "plugins"}
+	mcp := Collection{Agent: "codex", Name: "mcp_servers", Group: "mcp"}
 	pad := func(n string) string { return strings.Repeat(" ", 34-len(n)) }
 	cases := []struct {
 		c    Change
@@ -124,6 +125,9 @@ func TestLabel_ShowsEnabledFlagOfPluginTable(t *testing.T) {
 			"  − plugins/z@m" + pad("plugins/z@m") + " removed (host item)"},
 		{Change{Collection: plug, Name: "w@m", Kind: Edited, Value: map[string]any{"enabled": "yes"}},
 			"  ~ plugins/w@m" + pad("plugins/w@m") + " edited (host item)"},
+		// an MCP table may carry enabled too; its change is not the flag
+		{Change{Collection: mcp, Name: "srv", Kind: Edited, Value: map[string]any{"enabled": true, "command": "x"}},
+			"  ~ mcp_servers/srv" + pad("mcp_servers/srv") + " edited (host item)"},
 	}
 	for _, tc := range cases {
 		if got := label(tc.c); got != tc.want {
