@@ -9,7 +9,7 @@ set -euo pipefail
 # 1. Environment Isolation (HOME, AIM_AGENT, AIM_PROFILE, storage dirs)
 # 2. Arbitrary Flag Forwarding (no Cobra swallowing of --dangerously-skip-permissions, etc.)
 # 3. Typo Safety Guards (refusal to silently create profiles containing '--', interactive suggestions)
-# 4. Profile Dotfiles Bridging (.gitconfig, .ssh)
+# 4. Profile Dotfiles Bridging (every host dotfile but the per-profile agent state)
 # 5. Diagnostic Reporting (aim doctor)
 # 6. Session Listing across profiles (aim sessions)
 # 7. Cross-Profile Session Hydration & Flag Forwarding (aim resume)
@@ -310,6 +310,14 @@ echo "  PHASE 1: Core Launch, Environment Isolation, Flags & Typo Safety      "
 echo "  Parameterizing across ALL 4 adapters: agy, codex, claude, gemini       "
 echo "========================================================================"
 
+# Host state for the bridging checks: an arbitrary dotdir aim has never heard
+# of must be shared, and per-profile agent state must never be. The agent state
+# is removed after this phase so later phases see the host they expect.
+mkdir -p "$AIM_REAL_HOME/.newtool" "$AIM_REAL_HOME/.codex"
+echo "cfg" > "$AIM_REAL_HOME/.newtool/cfg"
+echo "host" > "$AIM_REAL_HOME/.codex/aim-e2e-host-marker"
+echo "{}" > "$AIM_REAL_HOME/.claude.json"
+
 for AGENT in "${ALL_ADAPTERS[@]}"; do
   echo ""
   echo "--- Testing Adapter: [$AGENT] ---"
@@ -366,6 +374,16 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
     echo "FAIL [$AGENT]: .gitconfig was not provisioned in profile directory"
     exit 1
   fi
+  if [ ! -L "$EXPECTED_HOME/.newtool" ] || [ "$(cat "$EXPECTED_HOME/.newtool/cfg")" != "cfg" ]; then
+    echo "FAIL [$AGENT]: arbitrary host dotdir .newtool was not bridged into the profile"
+    exit 1
+  fi
+  for isolated in .codex .claude.json; do
+    if [ -L "$EXPECTED_HOME/$isolated" ]; then
+      echo "FAIL [$AGENT]: per-profile $isolated was linked to the host"
+      exit 1
+    fi
+  done
   echo "  ✔ Flag forwarding, environment isolation, and dotfile bridging verified for $AGENT"
 
   # 2. Test typo guard in non-interactive / automated script mode
@@ -434,6 +452,7 @@ print(out.decode("utf-8", errors="replace"))
   fi
   echo "  ✔ Doctor diagnostics passed for $AGENT"
 done
+rm -rf "$AIM_REAL_HOME/.codex" "$AIM_REAL_HOME/.claude.json"
 
 echo ""
 echo "========================================================================"

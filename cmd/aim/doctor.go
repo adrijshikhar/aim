@@ -178,7 +178,8 @@ func bridgeResults(profileName, profileDir string, cfg *config.Config) []agents.
 	}
 	var results []agents.DiagnosticResult
 	shared, pending := 0, 0
-	for _, s := range profile.BridgeStatus(config.RealHomeDir(), profileDir, profile.GetBridgedPaths(extraPaths...)) {
+	realHome := config.RealHomeDir()
+	for _, s := range profile.BridgeStatus(realHome, profileDir, profile.GetBridgedPaths(realHome, extraPaths...)) {
 		switch s.Kind {
 		case profile.BridgeLinked:
 			shared++

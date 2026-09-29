@@ -30,20 +30,17 @@ type BridgeState struct {
 }
 
 // BridgeStatus reports, for each bridged path that exists on the host, whether
-// profileDir shares it. It applies the same allow-list and stub rules as
-// EnsureDotfiles and never modifies anything.
+// profileDir shares it. Pass GetBridgedPaths(realHome, ...) to check the same
+// set EnsureDotfiles links. It applies the same deny, stub and linked-parent
+// rules as EnsureDotfiles, so a path under a parent that already links to the
+// host is covered by that parent's state, and it never modifies anything.
 func BridgeStatus(realHome, profileDir string, paths []string) []BridgeState {
 	var states []BridgeState
 	for _, name := range paths {
-		cleanName := filepath.Clean(filepath.FromSlash(name))
-		if !isAllowedBridgedPath(cleanName) {
+		cleanName, src, dest, ok := bridgeCandidate(realHome, profileDir, name)
+		if !ok {
 			continue
 		}
-		src := filepath.Join(realHome, cleanName)
-		if _, err := os.Lstat(src); err != nil {
-			continue
-		}
-		dest := filepath.Join(profileDir, cleanName)
 		st := BridgeState{Path: cleanName, ProfilePath: dest}
 		fi, err := os.Lstat(dest)
 		switch {
@@ -55,7 +52,7 @@ func BridgeStatus(realHome, profileDir string, paths []string) []BridgeState {
 			if sameFile(dest, src) {
 				st.Kind = BridgeLinked
 			}
-		case fi.IsDir() && isStubOrEmptyDir(dest, cleanName):
+		case fi.IsDir() && isStubOrEmptyDir(dest, src, cleanName):
 			st.Kind = BridgePending
 		default:
 			st.Kind = BridgeCopy
