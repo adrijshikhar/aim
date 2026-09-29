@@ -134,6 +134,8 @@ func exitDecider(sigs chan os.Signal, profile, agent string) func([]merge.Change
 			<-sigs
 		}
 		res := make(chan []merge.Decision, 1)
+		// After a signal this goroutine may stay blocked reading and dies with
+		// the process; on /dev/tty the deferred Close unblocks it.
 		go func() { res <- decide(cs) }()
 		select {
 		case d := <-res:
