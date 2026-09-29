@@ -91,6 +91,27 @@ func TestWithSessionMerge_BackgroundJobKeepsWithoutPrompt(t *testing.T) {
 	}
 }
 
+// A background job whose stdin is still the terminal (`aim run … &` with job
+// control on) keeps every change: reading stdin would stop it with SIGTTIN.
+func TestWithSessionMerge_BackgroundJobOnTerminalStdinKeeps(t *testing.T) {
+	ad, store, host, prof, run := promptSetup(t, true, strings.NewReader("p\n"), func() (io.ReadWriteCloser, error) {
+		return nil, errors.New("ENXIO")
+	})
+	orig := ttyIsForeground
+	ttyIsForeground = func(io.ReadWriteCloser) bool { return false }
+	t.Cleanup(func() { ttyIsForeground = orig })
+	_, out := captureOutput(t, func() { withSessionMerge(ad, store, "work", "", nil, nil, run) })
+	if strings.Contains(out, "[p] promote") || !strings.Contains(out, "1 change(s) kept in work (mock)") {
+		t.Fatalf("output = %q", out)
+	}
+	if b, _ := os.ReadFile(host); strings.Contains(string(b), `"foo"`) {
+		t.Fatalf("nothing may reach the host: %s", b)
+	}
+	if b, _ := os.ReadFile(prof); !strings.Contains(string(b), `"foo"`) || strings.Contains(string(b), `"jev"`) {
+		t.Fatalf("at rest = %s", b)
+	}
+}
+
 func TestWithSessionMerge_NoTerminalKeepsWithoutPrompt(t *testing.T) {
 	ad, store, host, prof, run := promptSetup(t, false, strings.NewReader("p\n"), func() (io.ReadWriteCloser, error) {
 		return nil, errors.New("ENXIO")

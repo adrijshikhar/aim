@@ -111,14 +111,15 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 }
 
 // exitDecider prompts on stdin when it is a terminal, else on the controlling
-// terminal when aim is in its foreground process group; otherwise every change
-// is kept. SIGINT, SIGTERM or SIGHUP
-// at the prompt keeps every change.
+// terminal, in both cases only when aim is in the terminal's foreground process
+// group; otherwise every change is kept. SIGINT, SIGTERM or SIGHUP at the
+// prompt keeps every change.
 func exitDecider(sigs chan os.Signal, profile, agent string) func([]merge.Change) []merge.Decision {
 	return func(cs []merge.Change) []merge.Decision {
-		in, out, interactive := sessionPromptIn, io.Writer(os.Stderr), stdinIsTerminal()
+		// A background job (`aim run … &`) keeps every change: reading the
+		// terminal, as stdin or as /dev/tty, would stop it with SIGTTIN.
+		in, out, interactive := sessionPromptIn, io.Writer(os.Stderr), stdinIsTerminal() && ttyIsForeground(os.Stdin)
 		if !interactive {
-			// A background job keeps every change: reading the tty would stop it.
 			if tty, err := openTTY(); err == nil {
 				defer tty.Close()
 				if ttyIsForeground(tty) {
