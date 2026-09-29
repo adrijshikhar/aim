@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,9 +25,11 @@ var (
 	// openTTY opens the controlling terminal for the prompt when stdin is
 	// piped. Replaced in tests.
 	openTTY = func() (io.ReadWriteCloser, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
-	// ttyIsForeground reports whether aim is in the terminal's foreground
-	// process group: a background job reading it would be stopped (SIGTTIN).
-	// Replaced in tests.
+	// ttyIsForeground reports whether aim may read the terminal without being
+	// stopped: it is in the terminal's foreground process group, or the
+	// terminal is not its controlling one (ENOTTY), where SIGTTIN never
+	// applies. A background job reading its controlling terminal would be
+	// stopped. Replaced in tests.
 	ttyIsForeground = func(tty io.ReadWriteCloser) bool {
 		f, ok := tty.(*os.File)
 		if !ok {
@@ -38,6 +41,9 @@ var (
 		}
 		pg := -1
 		_ = rc.Control(func(fd uintptr) { pg, err = unix.IoctlGetInt(int(fd), unix.TIOCGPGRP) })
+		if errors.Is(err, unix.ENOTTY) {
+			return true
+		}
 		return err == nil && pg == unix.Getpgrp()
 	}
 )
