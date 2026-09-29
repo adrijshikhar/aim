@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -189,6 +190,11 @@ func TestWithSessionMerge_SIGINTDuringStartIsHeld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Under load the SIGINT below can land before withSessionMerge installs
+	// its handler; catch it here so it cannot kill the test binary.
+	guard := make(chan os.Signal, 1)
+	signal.Notify(guard, syscall.SIGINT)
+	defer signal.Stop(guard)
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
