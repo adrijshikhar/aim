@@ -161,9 +161,10 @@ profile holding 17 plugin tables identical to the host's and one the host no lon
 loses the 17 (backed up), keeps the other as its own, and sees the host's plugins in its
 sessions. A new profile starts with none of the host's servers or plugins in its config.
 
-While an `aim run` session of a profile is live, `aim remove`, `aim mv` and the TUI's
+While a foreground `aim run` session of a profile is live, `aim remove`, `aim mv` and the TUI's
 rename, move and delete refuse with "profile <p> has a running <agent> session; exit it
-first"; `aim clone` still works.
+first"; `aim clone` still works. Background launches (`claude --bg`, `codex app-server`,
+`agy remote-control`) are not detected.
 
 Agents started by hand in a profile, outside `aim run` (an IDE pointed at the profile's
 `CLAUDE_CONFIG_DIR` or `CODEX_HOME`), see only the profile's own servers and plugins.
