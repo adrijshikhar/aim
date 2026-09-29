@@ -229,11 +229,14 @@ func TestWithSessionMerge_MCPGlobalOffStillMergesPlugins(t *testing.T) {
 
 // GroupEnabled treats an unknown group as always on, so every collection an
 // adapter merges must name a group a profile setting switches, and a non-MCP
-// one its own Noun.
+// one its own Noun. No adapter name may hold a dot (Store.ActiveSessions).
 func TestAdapters_CollectionsDeclareKnownGroup(t *testing.T) {
 	d := t.TempDir()
 	n := 0
 	for _, a := range defaultRegistry().All() {
+		if strings.Contains(a.Name(), ".") {
+			t.Errorf("adapter name %q holds a dot: Store.ActiveSessions skips a dotted agent in <profile>.<agent>.sessions, so the running-session refusal would miss it", a.Name())
+		}
 		mp, ok := a.(agents.MCPProvider)
 		if !ok {
 			continue
