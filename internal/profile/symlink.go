@@ -64,7 +64,9 @@ var defaultNonDotPaths = func() []string {
 // dirs live under the per-profile .claude. The rest are fallbacks for a profile
 // that overrides the parent (.config, .cargo, .local, .pip) with a real dir of
 // its own; whenever that parent links to the host they are skipped, since they
-// already resolve into it.
+// already resolve into it. A parent that contains the profile (.local on the
+// XDG layout) is not an override: its children are bridged one by one instead
+// (see forEachBridgeCandidate).
 var nestedBridgedPaths = []string{
 	filepath.Join(".claude", "plugins"),
 	filepath.Join(".claude", "skills"),
@@ -159,29 +161,72 @@ func isAllowedBridgedPath(clean string) bool {
 // not sit under a profile parent that is a link or a file. That last rule keeps
 // EnsureDotfiles from creating, replacing or removing anything inside a dir
 // that is itself a link to the host, which would rewrite the real home.
-func bridgeCandidate(realHome, profileDir, name string) (cleanName, src, dest string, ok bool) {
+//
+// A host dir that contains the profile is never acted on, but descend reports
+// whether its children should be tried instead: true while it strictly
+// contains the aim data dir (the parent of the profiles root), so .local and
+// .local/share are descended on the XDG layout and the data dir itself, with
+// its config and the other profiles, is not.
+func bridgeCandidate(realHome, profileDir, name string) (cleanName, src, dest string, ok, descend bool) {
 	cleanName = filepath.Clean(filepath.FromSlash(name))
 	if !isAllowedBridgedPath(cleanName) {
 		logger.Debug("[symlink] Skipping disallowed path: %s", name)
-		return "", "", "", false
+		return "", "", "", false, false
 	}
 	src = filepath.Join(realHome, cleanName)
 	fi, err := os.Lstat(src)
 	if err != nil {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
 	if fi.Mode()&(os.ModeSocket|os.ModeNamedPipe|os.ModeDevice|os.ModeCharDevice|os.ModeIrregular) != 0 {
 		logger.Debug("[symlink] Skipping special host file: %s", src)
-		return "", "", "", false
+		return "", "", "", false, false
 	}
-	if rel, err := filepath.Rel(src, profileDir); err == nil && filepath.IsLocal(rel) {
+	if isWithin(profileDir, src) {
 		logger.Debug("[symlink] Skipping %s: it contains the profile", src)
-		return "", "", "", false
+		dataDir := filepath.Dir(filepath.Dir(profileDir))
+		descend = fi.IsDir() && isWithin(dataDir, src) && filepath.Clean(dataDir) != filepath.Clean(src)
+		return cleanName, src, "", false, descend
 	}
 	if underLinkOrFile(profileDir, cleanName) {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
-	return cleanName, src, filepath.Join(profileDir, cleanName), true
+	return cleanName, src, filepath.Join(profileDir, cleanName), true, false
+}
+
+// isWithin reports whether path is dir or lies under it.
+func isWithin(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && filepath.IsLocal(rel)
+}
+
+// forEachBridgeCandidate calls fn for every path in paths that bridgeCandidate
+// accepts, descending into host dirs that contain the profile, once per path.
+// Each candidate is evaluated just before fn runs, so a parent that fn has
+// linked already rules out the paths below it.
+func forEachBridgeCandidate(realHome, profileDir string, paths []string, fn func(cleanName, src, dest string)) {
+	seen := make(map[string]bool)
+	var visit func(name string)
+	visit = func(name string) {
+		cleanName, src, dest, ok, descend := bridgeCandidate(realHome, profileDir, name)
+		switch {
+		case ok && !seen[cleanName]:
+			seen[cleanName] = true
+			fn(cleanName, src, dest)
+		case descend:
+			entries, err := os.ReadDir(src)
+			if err != nil {
+				logger.Debug("[symlink] Failed to read %s: %v", src, err)
+				return
+			}
+			for _, e := range entries {
+				visit(filepath.Join(cleanName, e.Name()))
+			}
+		}
+	}
+	for _, name := range paths {
+		visit(name)
+	}
 }
 
 // underLinkOrFile reports whether any parent of cleanName inside profileDir is
@@ -219,28 +264,23 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 	logger.Debug("[symlink] Ensuring dotfiles for profile at %s (host: %s)", profileDir, realHome)
 	var errs []error
 
-	for _, name := range GetBridgedPaths(realHome, extraPaths...) {
-		cleanName, src, dest, ok := bridgeCandidate(realHome, profileDir, name)
-		if !ok {
-			continue
-		}
+	forEachBridgeCandidate(realHome, profileDir, GetBridgedPaths(realHome, extraPaths...), func(cleanName, src, dest string) {
 		if fi, err := os.Lstat(dest); err == nil {
 			if fi.Mode()&os.ModeSymlink != 0 {
-				continue
+				return
 			}
-			if fi.IsDir() && isStubOrEmptyDir(dest, src, cleanName) {
-				if err := os.RemoveAll(dest); err != nil {
-					logger.Debug("[symlink] Failed to remove stub dir %s: %v", dest, err)
-					errs = append(errs, err)
-					continue
-				}
-			} else {
-				continue
+			if !fi.IsDir() || !isStubOrEmptyDir(dest, src, cleanName) {
+				return
+			}
+			if err := os.RemoveAll(dest); err != nil {
+				logger.Debug("[symlink] Failed to remove stub dir %s: %v", dest, err)
+				errs = append(errs, err)
+				return
 			}
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 			errs = append(errs, err)
-			continue
+			return
 		}
 		if err := os.Symlink(src, dest); err != nil {
 			logger.Debug("[symlink] Failed to bridge %s -> %s: %v", src, dest, err)
@@ -248,7 +288,7 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 		} else {
 			logger.Debug("[symlink] Bridged: %s -> %s", cleanName, src)
 		}
-	}
+	})
 
 	return errors.Join(errs...)
 }

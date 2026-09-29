@@ -33,14 +33,11 @@ type BridgeState struct {
 // profileDir shares it. Pass GetBridgedPaths(realHome, ...) to check the same
 // set EnsureDotfiles links. It applies the same deny, stub and linked-parent
 // rules as EnsureDotfiles, so a path under a parent that already links to the
-// host is covered by that parent's state, and it never modifies anything.
+// host is covered by that parent's state, the children of a host dir that
+// contains the profile are reported one by one, and it never modifies anything.
 func BridgeStatus(realHome, profileDir string, paths []string) []BridgeState {
 	var states []BridgeState
-	for _, name := range paths {
-		cleanName, src, dest, ok := bridgeCandidate(realHome, profileDir, name)
-		if !ok {
-			continue
-		}
+	forEachBridgeCandidate(realHome, profileDir, paths, func(cleanName, src, dest string) {
 		st := BridgeState{Path: cleanName, ProfilePath: dest}
 		fi, err := os.Lstat(dest)
 		switch {
@@ -58,7 +55,7 @@ func BridgeStatus(realHome, profileDir string, paths []string) []BridgeState {
 			st.Kind = BridgeCopy
 		}
 		states = append(states, st)
-	}
+	})
 	return states
 }
 

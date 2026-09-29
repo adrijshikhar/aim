@@ -18,7 +18,7 @@ To balance complete agent isolation with seamless developer workflow, AIM shares
 
 | Category | Path | Isolation Behavior |
 |---|---|---|
-| **Host dotfiles** | every `~/.*` not denied below: `.gitconfig`, `.ssh`, `.gnupg`, `.config`, `.local`, `.cargo`, `.npmrc`, `.docker`, `.aws`, `.kube`, `.agents`, `.mcp-auth`, … | **Bridged** (one link per top-level entry) |
+| **Host dotfiles** | every `~/.*` not denied below: `.gitconfig`, `.ssh`, `.gnupg`, `.config`, `.local`, `.cargo`, `.npmrc`, `.docker`, `.aws`, `.kube`, `.agents`, `.mcp-auth`, … | **Bridged** (one link per top-level entry; a dir that contains the profiles, such as `.local` on the default XDG layout where profiles live in `~/.local/share/aim/profiles`, is not linked itself: its children are, e.g. `.local/bin`, `.local/state`, `.local/share/claude`, down to but excluding the aim data dir) |
 | **Go path** | `go` (only if `~/go` exists) | **Bridged** (module and build cache shared, not duplicated per profile) |
 | **System Keychains** | `Library/Keychains` (macOS) | **Bridged with Agent Ignore List** (mounted for `gh`, `git`, certs; agent services purged) |
 | **User caches** | `Library/Caches` (macOS) | **Bridged** (go-build, pip, Homebrew, Playwright, bun, … shared) |

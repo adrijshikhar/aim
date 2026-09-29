@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -416,4 +417,78 @@ func TestEnsureDotfiles_LibraryCachesOverrideKeptEmptyReplaced(t *testing.T) {
 	if !isSymlink(filepath.Join(empty, "Library", "Caches")) {
 		t.Errorf("an empty profile Library/Caches must be replaced with a link")
 	}
+}
+
+// On the XDG layout profiles live at ~/.local/share/aim/profiles/<p>, so .local
+// contains the profile and cannot be linked. Its children are bridged instead,
+// descending only through the entries that still contain the profile, and the
+// aim data dir itself (config, other profiles) is never linked.
+func TestEnsureDotfiles_DescendsIntoHostDirContainingTheProfile(t *testing.T) {
+	host := t.TempDir()
+	prof := filepath.Join(host, ".local", "share", "aim", "profiles", "p")
+	mustMkdirAll(t, prof)
+	mustWriteFile(t, filepath.Join(host, ".local", "bin", "tool"), "#!/bin/sh")
+	mustWriteFile(t, filepath.Join(host, ".local", "share", "omf", "init.fish"), "x")
+	mustWriteFile(t, filepath.Join(host, ".local", "share", "claude", "versions", "1"), "x")
+	mustWriteFile(t, filepath.Join(host, ".local", "state", "gh", "state.yml"), "x")
+	mustWriteFile(t, filepath.Join(host, ".local", "share", "aim", "config.json"), "{}")
+	mustMkdirAll(t, filepath.Join(host, ".local", "share", "aim", "profiles", "q", ".claude"))
+
+	if err := EnsureDotfiles(host, prof); err != nil {
+		t.Fatalf("EnsureDotfiles: %v", err)
+	}
+
+	for _, rel := range []string{
+		filepath.Join(".local", "bin"),
+		filepath.Join(".local", "state"),
+		filepath.Join(".local", "share", "omf"),
+		filepath.Join(".local", "share", "claude"),
+	} {
+		if !isSymlink(filepath.Join(prof, rel)) {
+			t.Errorf("expected %s to be linked to the host", rel)
+		}
+		assertSharedWithHost(t, prof, host, rel)
+	}
+	for _, rel := range []string{".local", filepath.Join(".local", "share")} {
+		if isSymlink(filepath.Join(prof, rel)) {
+			t.Errorf("%s contains the profile and must not be linked", rel)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(prof, ".local", "share", "aim")); err == nil {
+		t.Errorf("the aim data dir must not be bridged into the profile")
+	}
+
+	got := map[string]BridgeKind{}
+	for _, s := range BridgeStatus(host, prof, GetBridgedPaths(host)) {
+		if _, dup := got[s.Path]; dup {
+			t.Errorf("BridgeStatus reported %s twice", s.Path)
+		}
+		got[s.Path] = s.Kind
+	}
+	for _, rel := range []string{
+		filepath.Join(".local", "bin"),
+		filepath.Join(".local", "share", "omf"),
+		filepath.Join(".local", "share", "claude"),
+	} {
+		if k, ok := got[rel]; !ok || k != BridgeLinked {
+			t.Errorf("BridgeStatus %s: got %v (present %v), want BridgeLinked", rel, k, ok)
+		}
+	}
+	for p := range got {
+		if p == ".local" || strings.HasPrefix(p, filepath.Join(".local", "share", "aim")) {
+			t.Errorf("BridgeStatus must not report %s", p)
+		}
+	}
+
+	// No link inside the profile may lead back to the profile or an ancestor.
+	_ = filepath.WalkDir(prof, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+		target, _ := filepath.EvalSymlinks(p)
+		if rel, err := filepath.Rel(target, prof); err == nil && filepath.IsLocal(rel) {
+			t.Errorf("%s -> %s leads back to the profile", p, target)
+		}
+		return nil
+	})
 }
