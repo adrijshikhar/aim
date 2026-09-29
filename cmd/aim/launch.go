@@ -76,11 +76,11 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 	}
 	var sigs chan os.Signal
 	if sess != nil {
-		// The runner forwards SIGINT/SIGTERM to the agent; until Finish they
-		// must not kill aim, or the host's items stay in the profile until the
-		// next launch recovers them.
+		// The runner forwards SIGINT/SIGTERM/SIGHUP to the agent; until Finish
+		// they must not kill aim, or the host's items stay in the profile until
+		// the next launch recovers them.
 		sigs = make(chan os.Signal, 1)
-		signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+		signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer signal.Stop(sigs)
 	}
 	code := run()
@@ -97,8 +97,8 @@ func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileNam
 }
 
 // exitDecider prompts on stdin when it is a terminal, else on the controlling
-// terminal; without either every change is kept. SIGINT or SIGTERM at the
-// prompt keeps every change.
+// terminal; without either every change is kept. SIGINT, SIGTERM or SIGHUP
+// at the prompt keeps every change.
 func exitDecider(sigs chan os.Signal, profile, agent string) func([]merge.Change) []merge.Decision {
 	return func(cs []merge.Change) []merge.Decision {
 		in, out, interactive := sessionPromptIn, io.Writer(os.Stderr), stdinIsTerminal()

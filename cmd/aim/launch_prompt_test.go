@@ -83,12 +83,15 @@ func TestWithSessionMerge_NoTerminalKeepsWithoutPrompt(t *testing.T) {
 	}
 }
 
-// blockingReader interrupts aim at the first read and never answers, like a
-// user pressing Ctrl+C at the prompt.
-type blockingReader struct{ done chan struct{} }
+// blockingReader signals aim at the first read and never answers, like a
+// user pressing Ctrl+C (or closing the terminal) at the prompt.
+type blockingReader struct {
+	done chan struct{}
+	sig  syscall.Signal
+}
 
 func (b blockingReader) Read([]byte) (int, error) {
-	_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	_ = syscall.Kill(os.Getpid(), b.sig)
 	<-b.done
 	return 0, io.EOF
 }
@@ -96,11 +99,20 @@ func (b blockingReader) Read([]byte) (int, error) {
 // A SIGINT while the agent runs must not kill aim before Finish, and one at
 // the exit prompt keeps every change.
 func TestWithSessionMerge_SIGINTDuringRunAndPromptKeeps(t *testing.T) {
-	br := blockingReader{done: make(chan struct{})}
+	testSignalDuringRunAndPromptKeeps(t, syscall.SIGINT)
+}
+
+// Closing the terminal sends SIGHUP; at the prompt it must keep and strip too.
+func TestWithSessionMerge_SIGHUPDuringRunAndPromptKeeps(t *testing.T) {
+	testSignalDuringRunAndPromptKeeps(t, syscall.SIGHUP)
+}
+
+func testSignalDuringRunAndPromptKeeps(t *testing.T, sig syscall.Signal) {
+	br := blockingReader{done: make(chan struct{}), sig: sig}
 	t.Cleanup(func() { close(br.done) })
 	ad, store, host, prof, run := promptSetup(t, true, br, nil)
 	interrupted := func() int {
-		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+		_ = syscall.Kill(os.Getpid(), sig)
 		time.Sleep(50 * time.Millisecond)
 		return run()
 	}
