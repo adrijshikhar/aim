@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,8 +19,9 @@ var (
 	consoleOutput  = true
 	logFile        *os.File
 	logFilePath    string
-	debugTagStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#c678dd")).Faint(true)
-	debugTimeStyle = lipgloss.NewStyle().Faint(true)
+	warnOut        io.Writer = os.Stderr
+	debugTagStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#c678dd")).Faint(true)
+	debugTimeStyle           = lipgloss.NewStyle().Faint(true)
 )
 
 // LogFilePath returns the current or default path for aim-debug.log.
@@ -79,6 +81,17 @@ func Reset() {
 		logFile = nil
 	}
 	logFilePath = ""
+	warnOut = os.Stderr
+}
+
+// SetWarnOutput redirects Warn's console output (tests); nil means os.Stderr.
+func SetWarnOutput(w io.Writer) {
+	mu.Lock()
+	defer mu.Unlock()
+	if w == nil {
+		w = os.Stderr
+	}
+	warnOut = w
 }
 
 // SetConsoleOutput controls whether debug messages are printed to os.Stderr.
@@ -131,7 +144,28 @@ func Debug(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "%s %s %s\n", debugTagStyle.Render("[AIM DEBUG]"), debugTimeStyle.Render(timeStr), msg)
 	}
 
-	// Persistent file output
+	writeLogLocked(now, "DEBUG", msg)
+}
+
+// Warn prints a message the user needs to see whether or not debug is on, as
+// "aim: <msg>" on stderr (unless console output is off, as in the TUI), and
+// records it in the debug log when debug is on.
+func Warn(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	debug := IsDebug()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if consoleOutput {
+		fmt.Fprintf(warnOut, "aim: %s\n", msg)
+	}
+	if debug {
+		writeLogLocked(time.Now(), "WARN", msg)
+	}
+}
+
+// writeLogLocked appends one line to aim-debug.log; mu must be held.
+func writeLogLocked(now time.Time, level, msg string) {
 	if logFile == nil {
 		if logFilePath == "" {
 			logFilePath = filepath.Join(config.StateDir(), "aim-debug.log")
@@ -144,7 +178,7 @@ func Debug(format string, args ...any) {
 	}
 	if logFile != nil {
 		timeStr := now.Format("2006-01-02 15:04:05.000")
-		fmt.Fprintf(logFile, "%s [DEBUG] %s\n", timeStr, msg)
+		fmt.Fprintf(logFile, "%s [%s] %s\n", timeStr, level, msg)
 	}
 }
 

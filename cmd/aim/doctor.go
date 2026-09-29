@@ -62,14 +62,15 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 			fmt.Printf("%s Unknown agent: %s\n", failBadge, agentName)
 			return false
 		}
-		ok := diagnoseAdapter(adapter, pm, cfg, reg)
+		ok := diagnoseAdapter(adapter, pm, cfg, reg, map[string]bool{})
 		diagnosePlatform(agentName, cfg)
 		return ok
 	}
 
 	allOK := true
+	bridged := map[string]bool{}
 	for _, adapter := range reg.All() {
-		if !diagnoseAdapter(adapter, pm, cfg, reg) {
+		if !diagnoseAdapter(adapter, pm, cfg, reg, bridged) {
 			allOK = false
 		}
 	}
@@ -114,7 +115,10 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 	}
 }
 
-func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry) bool {
+// diagnoseAdapter prints one agent's block. The Bridge results describe the
+// profile rather than the agent, so they are shown only under the first agent
+// that lists the profile; bridged records the profiles already shown.
+func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry, bridged map[string]bool) bool {
 	allOK := true
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render(fmt.Sprintf("[%s (%s)]", adapter.DisplayName(), adapter.Name())))
@@ -127,6 +131,14 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 		fmt.Println()
 		fmt.Printf("Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
 		results := adapter.Doctor(context.Background(), p, pm.ProfileDir(p))
+		if !bridged[p] {
+			bridged[p] = true
+			var extraPaths []string
+			if cfg != nil {
+				extraPaths = cfg.CustomBridgedPaths
+			}
+			results = append(results, profile.BridgeDiagnostics(p, config.RealHomeDir(), pm.ProfileDir(p), extraPaths...)...)
+		}
 		if cfg != nil {
 			if env := cfg.GetProfileEnv(p); len(env) > 0 {
 				results = append(results, agents.DiagnosticResult{

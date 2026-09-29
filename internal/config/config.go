@@ -12,10 +12,11 @@ import (
 )
 
 type ProfileConfig struct {
-	Agents    []string          `json:"agents,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-	Args      []string          `json:"args,omitempty"`
-	MCPGlobal *bool             `json:"mcp_global,omitempty"`
+	Agents        []string          `json:"agents,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	Args          []string          `json:"args,omitempty"`
+	MCPGlobal     *bool             `json:"mcp_global,omitempty"`
+	PluginsGlobal *bool             `json:"plugins_global,omitempty"`
 }
 
 func (p *ProfileConfig) UnmarshalJSON(data []byte) error {
@@ -220,6 +221,32 @@ func (c *Config) MCPGlobalEnabled(profile string) bool {
 		return true
 	}
 	return *p.MCPGlobal
+}
+
+// PluginsGlobalEnabled reports whether host plugin enablement is merged into
+// the profile's sessions. Absent means true.
+func (c *Config) PluginsGlobalEnabled(profile string) bool {
+	if c == nil {
+		return true
+	}
+	p, ok := c.Profiles[profile]
+	if !ok || p.PluginsGlobal == nil {
+		return true
+	}
+	return *p.PluginsGlobal
+}
+
+// GroupEnabled reports whether the host merge of a collection group is on for
+// the profile: "mcp" follows mcp_global, "plugins" plugins_global. Any other
+// group has no setting and is always merged.
+func (c *Config) GroupEnabled(profile, group string) bool {
+	switch group {
+	case "mcp":
+		return c.MCPGlobalEnabled(profile)
+	case "plugins":
+		return c.PluginsGlobalEnabled(profile)
+	}
+	return true
 }
 
 func (c *Config) GetProfileAgents(profile string) []string {

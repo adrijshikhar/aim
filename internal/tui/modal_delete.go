@@ -15,6 +15,7 @@ type deleteModalState struct {
 	isShared      bool
 	agents        []string
 	focusedIndex  int
+	err           string
 }
 
 func (m Model) IsDeleteModalActive() bool {
@@ -98,14 +99,16 @@ func (m Model) updateDeleteModal(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) executeDeleteChoice(idx int) (Model, tea.Cmd) {
 	target := m.deleteModal.targetProfile
 	isShared := m.deleteModal.isShared
+	open := m.deleteModal
 	m.deleteModal = deleteModalState{}
 
+	var err error
 	if !isShared {
 		if idx == 1 {
 			return m, nil
 		}
 		if m.pm != nil {
-			_ = m.pm.DeleteProfile(target, m.cfg)
+			err = m.pm.DeleteProfile(target, m.cfg)
 		}
 	} else {
 		if idx == 2 {
@@ -113,13 +116,19 @@ func (m Model) executeDeleteChoice(idx int) (Model, tea.Cmd) {
 		}
 		if idx == 0 {
 			if m.pm != nil {
-				_, _ = m.pm.RemoveAgent(target, m.agent, m.cfg)
+				_, err = m.pm.RemoveAgent(target, m.agent, m.cfg)
 			}
 		} else if idx == 1 {
 			if m.pm != nil {
-				_ = m.pm.DeleteProfile(target, m.cfg)
+				err = m.pm.DeleteProfile(target, m.cfg)
 			}
 		}
+	}
+	// A refusal (e.g. a running session) keeps the modal open and says why.
+	if err != nil {
+		open.err = err.Error()
+		m.deleteModal = open
+		return m, nil
 	}
 
 	if m.cache != nil {
@@ -202,6 +211,10 @@ func (m Model) renderDeleteModal() string {
 		b.WriteString(fmt.Sprintf("      %s      %s\n\n", btn0, btn1))
 		km := m.keys.DeleteModal
 		b.WriteString("  " + m.help.ShortHelpView(km.ShortHelpSingle()))
+	}
+
+	if m.deleteModal.err != "" {
+		b.WriteString("\n\n" + lipgloss.NewStyle().Foreground(StatusRed).Bold(true).Render("  ✕ "+m.deleteModal.err))
 	}
 
 	box := ModalBoxStyle.Render(b.String())

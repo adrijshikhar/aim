@@ -103,7 +103,11 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 	cfg, _ := config.LoadConfig()
 	m := tui.NewModel(reg, pm, cfg).WithVersion(Version)
 	p := tea.NewProgram(m)
+	// Console logging would draw over the TUI; the session it launches below
+	// runs after the TUI has closed and must show its warnings.
+	logger.SetConsoleOutput(false)
 	finalModel, err := p.Run()
+	logger.SetConsoleOutput(true)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 		return 1
@@ -117,8 +121,6 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 	switch res.Outcome() {
 	case tui.ActionRun:
 		return executeRun(reg, pm, agent, res.SelectedProfile(), nil)
-	case tui.ActionShell:
-		return executeShell(reg, pm, agent, res.SelectedProfile())
 	case tui.ActionLogin:
 		name := promptProfileName(agent, res.SelectedProfile())
 		if name != "" {
@@ -171,8 +173,6 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 }
 
 func runTUI(reg *agents.Registry, pm *profile.ProfileManager) int {
-	logger.SetConsoleOutput(false)
-	defer logger.SetConsoleOutput(true)
 	logger.Debug("[tui] Launching interactive TUI dashboard")
 	code := tuiRunner(reg, pm)
 	logger.Debug("[tui] TUI exited with code %d", code)

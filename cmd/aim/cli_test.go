@@ -332,23 +332,6 @@ func TestCLIExecuteLogin(t *testing.T) {
 	}
 }
 
-func TestCLIExecuteShell(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "aim-cli-test-*")
-	if err != nil {
-		t.Fatalf("temp dir error: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-	t.Setenv("AIM_HOME", tempDir)
-
-	pm := profile.NewProfileManager(tempDir)
-	reg := agents.NewRegistry()
-
-	// Unknown agent
-	if code := executeShell(reg, pm, "unknown", "work"); code != 1 {
-		t.Fatalf("expected 1, got %d", code)
-	}
-}
-
 func TestCLICorruptedConfigRecovery(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "aim-cli-test-*")
 	if err != nil {
@@ -464,16 +447,6 @@ func TestCLIDispatch(t *testing.T) {
 		{
 			name:     "incomplete run command with agent only",
 			args:     []string{"run", "mock"},
-			wantCode: 1,
-		},
-		{
-			name:     "incomplete shell command",
-			args:     []string{"shell"},
-			wantCode: 1,
-		},
-		{
-			name:     "incomplete shell command with agent only",
-			args:     []string{"shell", "mock"},
 			wantCode: 1,
 		},
 		{
@@ -629,6 +602,34 @@ func TestCLIDispatchUI(t *testing.T) {
 	codeUI := dispatch([]string{"ui"}, reg, pm)
 	if codeUI == 0 {
 		t.Errorf("expected dispatch([\"ui\"]) to fail since ui command is removed, got 0")
+	}
+}
+
+func TestCLIShellCommandRemoved(t *testing.T) {
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(t.TempDir())
+
+	// Agent admin runs through `aim run <agent> <profile> <native cmd>` now, so the
+	// subshell is gone: it must not be registered or listed in the root help.
+	root := newRootCmd(reg, pm)
+	for _, c := range root.Commands() {
+		if c.Name() == "shell" {
+			t.Fatalf("expected no 'shell' subcommand, found %q", c.Use)
+		}
+	}
+	if strings.Contains(root.Long, "shell <agent> <profile>") {
+		t.Errorf("root help still lists the shell command:\n%s", root.Long)
+	}
+
+	var code int
+	_, errOut := captureOutput(t, func() {
+		code = dispatch([]string{"shell", "mock", "work"}, reg, pm)
+	})
+	if code == 0 {
+		t.Errorf("expected dispatch([shell mock work]) to fail, got 0")
+	}
+	if !strings.Contains(errOut, "unknown command") {
+		t.Errorf("expected an unknown command error, got %q", errOut)
 	}
 }
 
@@ -1767,5 +1768,47 @@ func TestCLI_CodexIntegration(t *testing.T) {
 	cfgReloaded, _ := config.LoadConfig()
 	if !cfgReloaded.HasAgent("cloned-work", "codex") {
 		t.Errorf("expected cloned profile to have codex agent")
+	}
+}
+
+func TestCLI_Doctor_WarnsOnProfileOnlyBridgedCopy(t *testing.T) {
+	tmpDir := t.TempDir()
+	realHome := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+	t.Setenv("AIM_REAL_HOME", realHome)
+	pm := profile.NewProfileManager(tmpDir)
+	profDir, _ := pm.EnsureProfile("stale")
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{name: "mock", binaryPath: "/bin/sh"})
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("stale", "mock")
+	cfg.CustomBridgedPaths = []string{".hevo", ".claude-mem"}
+	_ = config.SaveConfig(cfg)
+
+	// Host has both; the profile holds its own non-empty .hevo (the field
+	// failure) and nothing for .claude-mem (linked by doctor's own EnsureDotfiles).
+	for _, p := range []string{filepath.Join(realHome, ".hevo"), filepath.Join(realHome, ".claude-mem"), filepath.Join(profDir, ".hevo")} {
+		if err := os.MkdirAll(p, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p, "data"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		runDoctor(reg, pm, "mock")
+	})
+
+	copyPath := filepath.Join(profDir, ".hevo")
+	if !strings.Contains(stdout, "stale: .hevo is a profile-only copy; the host's is not used. Remove it to share the host's: rm -rf "+copyPath) {
+		t.Errorf("expected profile-only copy warning for .hevo, got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, ".claude-mem is a profile-only copy") {
+		t.Errorf("did not expect .claude-mem to be flagged, got:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(copyPath, "data")); err != nil {
+		t.Errorf("doctor must not delete the profile copy: %v", err)
 	}
 }

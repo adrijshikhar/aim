@@ -22,9 +22,18 @@ func (a *Adapter) MCPCollections(profileDir, realHome string) []merge.Collection
 		HostPath:    filepath.Join(sharedConfigDir(realHome), "mcp_config.json"),
 		ProfilePath: filepath.Join(profileDir, ".gemini", "config", "mcp_config.json"),
 		Normalise:   agyNormalise,
+		Group:       "mcp",
+		Noun:        "server",
 	}}
 }
 
-func (a *Adapter) IsBackground(args []string) bool {
-	return agents.BackgroundMatch(args, nil, []string{"remote-control"})
+func (a *Adapter) IsBackground(profileArgs, args []string) bool {
+	return agents.ArgsMatch(profileArgs, args, nil, []string{"remote-control"})
+}
+
+// IsSession: agy parses Go-style flags, so -version and -help work beside
+// --version, -h and --help; `help` is a subcommand. -v is its log-verbosity
+// flag, not a version one, and there is no version subcommand.
+func (a *Adapter) IsSession(profileArgs, args []string) bool {
+	return !agents.ArgsMatch(profileArgs, args, []string{"--version", "-version", "-h", "--help", "-help"}, []string{"help"})
 }

@@ -1,15 +1,19 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/merge"
 	"github.com/mattn/go-isatty"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -18,6 +22,30 @@ var (
 	// whether it may be shown. Both are replaced in tests.
 	sessionPromptIn io.Reader = os.Stdin
 	stdinIsTerminal           = func() bool { return isatty.IsTerminal(os.Stdin.Fd()) }
+	// openTTY opens the controlling terminal for the prompt when stdin is
+	// piped. Replaced in tests.
+	openTTY = func() (io.ReadWriteCloser, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
+	// ttyIsForeground reports whether aim may read the terminal without being
+	// stopped: it is in the terminal's foreground process group, or the
+	// terminal is not its controlling one (ENOTTY), where SIGTTIN never
+	// applies. A background job reading its controlling terminal would be
+	// stopped. Replaced in tests.
+	ttyIsForeground = func(tty io.ReadWriteCloser) bool {
+		f, ok := tty.(*os.File)
+		if !ok {
+			return false
+		}
+		rc, err := f.SyscallConn() // not Fd(): that would make the tty blocking
+		if err != nil {
+			return false
+		}
+		pg := -1
+		_ = rc.Control(func(fd uintptr) { pg, err = unix.IoctlGetInt(int(fd), unix.TIOCGPGRP) })
+		if errors.Is(err, unix.ENOTTY) {
+			return true
+		}
+		return err == nil && pg == unix.Getpgrp()
+	}
 )
 
 func fmtWarn(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) }
@@ -41,33 +69,87 @@ func splitRunFlags(args []string) (bool, []string) {
 	return auto, rest
 }
 
-// withSessionMerge merges the host's MCP servers into the profile around run
-// (spec §5): Start before, Diff + decide + Finish after. A background launch
-// (IsBackground) merges and skips the exit step. profiles.<p>.args precede
-// extraArgs in the launched command, so a background arg there counts too.
+// withSessionMerge merges the host's MCP servers and plugin enablement into the
+// profile around run (spec §5): Start before, Diff + decide + Finish after. A
+// background launch (IsBackground) merges and skips the exit step.
+// profiles.<p>.args precede extraArgs in the launched command, so both checks
+// see them separately: a background arg there counts too, and profile flags
+// such as `--model o3` do not hide a first word like `app-server` in
+// extraArgs. A non-session invocation (the adapter's version or help
+// spelling) runs without Start at all, so a crashed or background session is
+// recovered by the next real session.
 func withSessionMerge(adapter agents.AgentAdapter, store merge.Store, profileName, pDir string, cfg *config.Config, extraArgs []string, run func() int) int {
 	mp, ok := adapter.(agents.MCPProvider)
 	if !ok {
 		return run()
 	}
+	profileArgs := cfg.GetProfileArgs(profileName)
+	if !mp.IsSession(profileArgs, extraArgs) {
+		return run()
+	}
 	eng := &merge.Engine{Store: store, Out: os.Stderr, Now: nowFunc}
 	cols := mp.MCPCollections(pDir, config.RealHomeDir())
-	native := append(cfg.GetProfileArgs(profileName), extraArgs...) // a copy: extraArgs is not aliased
-	opt := merge.StartOptions{Enabled: cfg.MCPGlobalEnabled(profileName), Background: mp.IsBackground(native)}
+	// Every collection goes to Start, switched-off groups included: recovery
+	// must still strip what an earlier background launch merged (spec §4).
+	enabled := func(c merge.Collection) bool { return cfg.GroupEnabled(profileName, c.Group) }
+	opt := merge.StartOptions{Enabled: enabled, Background: mp.IsBackground(profileArgs, extraArgs)}
+	// The runner forwards SIGINT/SIGTERM/SIGHUP to the agent; from Start to
+	// Finish they must not kill aim, or the host's items stay in the profile
+	// until the next launch recovers them.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigs)
 	sess, err := eng.Start(profileName, adapter.Name(), cols, opt)
 	if err != nil {
-		fmtWarn("aim: MCP merge: %v", err)
+		fmtWarn("aim: host merge: %v", err)
 	}
 	code := run()
 	if sess != nil {
 		changes, err := sess.Diff()
 		if err != nil {
-			fmtWarn("aim: MCP diff: %v", err)
+			fmtWarn("aim: host diff: %v", err)
 		}
-		decide := merge.Prompter(sessionPromptIn, os.Stderr, stdinIsTerminal(), profileName, adapter.Name())
-		if err := sess.Finish(changes, decide); err != nil {
-			fmtWarn("aim: MCP finish: %v", err)
+		if err := sess.Finish(changes, exitDecider(sigs, profileName, adapter.Name())); err != nil {
+			fmtWarn("aim: host finish: %v", err)
 		}
 	}
 	return code
+}
+
+// exitDecider prompts on stdin when it is a terminal, else on the controlling
+// terminal, in both cases only when aim is in the terminal's foreground process
+// group; otherwise every change is kept. SIGINT, SIGTERM or SIGHUP at the
+// prompt keeps every change.
+func exitDecider(sigs chan os.Signal, profile, agent string) func([]merge.Change) []merge.Decision {
+	return func(cs []merge.Change) []merge.Decision {
+		// A background job (`aim run … &`) keeps every change: reading the
+		// terminal, as stdin or as /dev/tty, would stop it with SIGTTIN.
+		in, out, interactive := sessionPromptIn, io.Writer(os.Stderr), stdinIsTerminal() && ttyIsForeground(os.Stdin)
+		if !interactive {
+			if tty, err := openTTY(); err == nil {
+				defer tty.Close()
+				if ttyIsForeground(tty) {
+					in, out, interactive = tty, tty, true
+				}
+			}
+		}
+		decide := merge.Prompter(in, out, interactive, profile, agent)
+		if !interactive {
+			return decide(cs)
+		}
+		for len(sigs) > 0 { // the Ctrl+C that ended the agent is not an answer
+			<-sigs
+		}
+		res := make(chan []merge.Decision, 1)
+		// After a signal this goroutine may stay blocked reading and dies with
+		// the process; on /dev/tty the deferred Close unblocks it.
+		go func() { res <- decide(cs) }()
+		select {
+		case d := <-res:
+			return d
+		case <-sigs:
+			fmt.Fprintf(out, "\n%d change(s) kept in %s (%s)\n", len(cs), profile, agent)
+			return make([]merge.Decision, len(cs)) // Keep is the zero Decision
+		}
+	}
 }

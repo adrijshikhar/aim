@@ -161,3 +161,20 @@ func TestInit_XDGStateDir(t *testing.T) {
 		t.Errorf("LogFilePath() = %q, want %q", got, expectedPath)
 	}
 }
+
+func TestWarn_PrintsWithoutDebugAndHonoursConsoleOutput(t *testing.T) {
+	defer Reset()
+	t.Setenv("AIM_DEBUG", "0")
+	var buf strings.Builder
+	SetWarnOutput(&buf)
+	Warn("seeding without %s failed", "plugins")
+	if buf.String() != "aim: seeding without plugins failed\n" {
+		t.Fatalf("warn output = %q", buf.String())
+	}
+	buf.Reset()
+	SetConsoleOutput(false)
+	Warn("hidden")
+	if buf.Len() != 0 {
+		t.Fatalf("console output off must silence Warn on the console: %q", buf.String())
+	}
+}

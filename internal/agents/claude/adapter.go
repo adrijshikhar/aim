@@ -1,7 +1,9 @@
 package claude
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +14,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 )
@@ -151,7 +154,14 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	}, nil
 }
 
-// rewriteSettingsHooks copies or rewrites settings.json hooks from the host home to the profile.
+// writeSettings writes the profile's first settings.json. Replaced in tests
+// (they count calls), so those tests must not use t.Parallel.
+var writeSettings = merge.AtomicWrite
+
+// rewriteSettingsHooks points host hook paths in the profile's settings.json at
+// the profile. The first copy from the host carries no plugin enablement: that
+// is merged per session (G5). Only the hooks member is rewritten, so a
+// marketplace path under the host .claude is never turned into a profile path.
 func rewriteSettingsHooks(hostHome, profileDir string) {
 	destDir := filepath.Join(profileDir, ".claude")
 	_ = os.MkdirAll(destDir, 0700)
@@ -159,30 +169,46 @@ func rewriteSettingsHooks(hostHome, profileDir string) {
 	hostClaude := filepath.Join(hostHome, ".claude")
 	destClaude := filepath.Join(profileDir, ".claude")
 
-	// If destSettings already exists, check and rewrite any host paths in it
-	if destData, err := os.ReadFile(destSettings); err == nil {
-		destContent := string(destData)
-		if strings.Contains(destContent, hostClaude) {
-			destContent = strings.ReplaceAll(destContent, hostClaude, destClaude)
-			if err := os.WriteFile(destSettings, []byte(destContent), 0644); err != nil {
-				logger.Debug("[claude] Failed to update rewritten settings.json at %s: %v", destSettings, err)
-			}
-		}
+	_, err := os.Stat(destSettings)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		seedSettings(filepath.Join(hostClaude, "settings.json"), destSettings, hostClaude, destClaude)
+		return
+	case err != nil:
+		logger.Warn("[claude] %s: %v; its hook paths are not rewritten", destSettings, err)
 		return
 	}
+	if _, err := merge.ReplaceInJSONMember(destSettings, "hooks", hostClaude, destClaude, 0o600); err != nil {
+		logger.Debug("[claude] Failed to update rewritten settings.json at %s: %v", destSettings, err)
+	}
+}
 
-	// Otherwise, copy from hostSettings if it exists, rewriting host paths
-	hostSettings := filepath.Join(hostHome, ".claude", "settings.json")
+// seedSettings makes the profile's first settings.json from the host's, in
+// memory and written once (0600): plugin enablement and marketplaces dropped,
+// hook paths pointed at the profile. A host file that cannot be stripped
+// safely is not copied at all; Claude then starts with its defaults rather
+// than with the host's enablement.
+func seedSettings(hostSettings, dest, hostClaude, destClaude string) {
 	data, err := os.ReadFile(hostSettings)
 	if err != nil {
 		return
 	}
-	content := string(data)
-	if strings.Contains(content, hostClaude) {
-		content = strings.ReplaceAll(content, hostClaude, destClaude)
+	if len(bytes.TrimSpace(data)) > 0 {
+		for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
+			if data, err = merge.DeleteJSONKeyBytes(data, key); err != nil {
+				break
+			}
+		}
+		if err == nil {
+			data, _, err = merge.ReplaceInJSONMemberBytes(data, "hooks", hostClaude, destClaude)
+		}
+		if err != nil {
+			logger.Warn("[claude] %s not copied to the profile (%v); Claude starts with its default settings", hostSettings, err)
+			return
+		}
 	}
-	if err := os.WriteFile(destSettings, []byte(content), 0644); err != nil {
-		logger.Debug("[claude] Failed to write settings.json to %s: %v", destSettings, err)
+	if err := writeSettings(dest, data, 0o600); err != nil {
+		logger.Warn("[claude] Failed to write settings.json to %s: %v", dest, err)
 	}
 }
 
@@ -246,16 +272,13 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 
 	// Hooks Check
 	profileSettings := filepath.Join(claudeDir, "settings.json")
-	if data, err := os.ReadFile(profileSettings); err == nil {
-		hostClaude := filepath.Join(config.RealHomeDir(), ".claude")
-		if strings.Contains(string(data), hostClaude) {
-			rewriteSettingsHooks(config.RealHomeDir(), profileDir)
-			results = append(results, agents.DiagnosticResult{
-				Category: "Hooks",
-				Status:   "OK",
-				Message:  "Auto-migrated host hook paths in settings.json to profile",
-			})
-		}
+	hostClaude := filepath.Join(config.RealHomeDir(), ".claude")
+	if changed, err := merge.ReplaceInJSONMember(profileSettings, "hooks", hostClaude, claudeDir, 0o600); err == nil && changed {
+		results = append(results, agents.DiagnosticResult{
+			Category: "Hooks",
+			Status:   "OK",
+			Message:  "Auto-migrated host hook paths in settings.json to profile",
+		})
 	}
 
 	return results

@@ -9,15 +9,26 @@ import (
 
 var kindMark = map[ChangeKind]string{Added: "+", Edited: "~", Removed: "−"}
 
+// label names the change with its collection (Claude and Codex merge more
+// than one) and the new enablement of a plugin, so a host-wide disable is
+// never promoted blind: the value of a scalar entry (Claude's enabledPlugins)
+// or the enabled flag of a table (Codex's [plugins."x"]).
 func label(c Change) string {
 	what := string(c.Kind)
 	if c.Kind != Added {
 		what += " (host item)"
 	}
+	if c.Kind != Removed {
+		if v, ok := c.Value["value"]; ok && len(c.Value) == 1 {
+			what += fmt.Sprintf(" → %v", v)
+		} else if on, ok := c.Value["enabled"].(bool); ok && c.Collection.Group == "plugins" {
+			what += fmt.Sprintf(" → enabled=%v", on)
+		}
+	}
 	if c.HostChanged {
 		what += "   host changed since start — promote is refused"
 	}
-	return fmt.Sprintf("  %s %-24s %s", kindMark[c.Kind], c.Name, what)
+	return fmt.Sprintf("  %s %-34s %s", kindMark[c.Kind], c.Collection.Name+"/"+c.Name, what)
 }
 
 // Prompter returns the exit decision function (spec §5 End step 2). Without a
@@ -55,7 +66,7 @@ func Prompter(in io.Reader, out io.Writer, interactive bool, profile, agent stri
 				d[i] = Promote
 				return true
 			}
-			a, ok := ask(fmt.Sprintf("Remove %s from the host (every profile)? [y/N] ", cs[i].Name))
+			a, ok := ask(fmt.Sprintf("Remove %s from the host (every profile)? [y/N] ", cs[i].Collection.Name+"/"+cs[i].Name))
 			if a == "y" || a == "yes" {
 				d[i] = Promote
 			}

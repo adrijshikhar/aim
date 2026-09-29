@@ -11,9 +11,11 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -288,20 +290,18 @@ func TestTUIModelActions(t *testing.T) {
 		t.Errorf("expected non-nil tea.Quit cmd")
 	}
 
-	// Test ActionShell ('S')
+	// 'S' used to open a subshell; it is no longer bound to any action
 	m = newTestModel(t, "alpha", "beta")
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = newM.(Model)
 	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = newM.(Model)
-	if m.Outcome() != ActionShell {
-		t.Errorf("expected ActionShell, got %v", m.Outcome())
+	if m.Outcome() != ActionNone {
+		t.Errorf("expected ActionNone for 'S', got %v", m.Outcome())
 	}
-	if m.SelectedProfile() != "beta" {
-		t.Errorf("expected selected profile 'beta', got '%s'", m.SelectedProfile())
+	if cmd != nil {
+		t.Errorf("expected nil cmd for 'S', the subshell action is removed")
 	}
-	if cmd == nil {
-		t.Errorf("expected non-nil tea.Quit cmd")
+	if strings.Contains(m.View(), "Shell") {
+		t.Errorf("expected footer hints to drop the Shell entry")
 	}
 
 	// Test ActionLogin ('l')
@@ -349,16 +349,6 @@ func TestTUIModelEmptyProfiles(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Errorf("expected nil cmd on empty profiles Enter")
-	}
-
-	// 'S' on empty profiles does not trigger Shell
-	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
-	m = newM.(Model)
-	if m.Outcome() != ActionNone {
-		t.Errorf("expected ActionNone on empty profiles 'S', got %v", m.Outcome())
-	}
-	if cmd != nil {
-		t.Errorf("expected nil cmd on empty profiles 'S'")
 	}
 
 	// View output includes empty prompt
@@ -947,6 +937,24 @@ func TestTUI_DeleteModal_SingleAgent_Confirm(t *testing.T) {
 	}
 	if len(mDel.Profiles()) != 0 {
 		t.Errorf("expected 0 profiles after deletion, got %v", mDel.Profiles())
+	}
+}
+
+func TestTUI_DeleteModal_RefusedWhileSessionRuns(t *testing.T) {
+	m := newTestModel(t, "work")
+	l, err := merge.LockShared(m.pm.MergeStateStore().SessionsLockPath("work", "agy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unlock()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	mY := updated.(Model)
+	if !mY.IsDeleteModalActive() || len(mY.Profiles()) != 1 {
+		t.Fatalf("refused delete must keep the modal and the profile: active=%v profiles=%v", mY.IsDeleteModalActive(), mY.Profiles())
+	}
+	if !strings.Contains(mY.View(), "running agy session") {
+		t.Errorf("modal must say why the delete was refused")
 	}
 }
 
@@ -1738,6 +1746,9 @@ func TestTUI_DecomposedModalsAndDrawers(t *testing.T) {
 	if !strings.Contains(helpView, "Keyboard Shortcuts") {
 		t.Errorf("expected help overlay view to contain 'Keyboard Shortcuts', got:\n%s", helpView)
 	}
+	if strings.Contains(helpView, "subshell") {
+		t.Errorf("expected help overlay to drop the removed subshell entry, got:\n%s", helpView)
+	}
 	mHelpClosed, _ := mHelp.updateHelpOverlay(tea.KeyMsg{Type: tea.KeyEsc})
 	if mHelpClosed.IsHelpActive() {
 		t.Errorf("expected help overlay to be closed after updateHelpOverlay(Esc)")
@@ -2508,6 +2519,20 @@ func TestResumeModal_FlagsInputAndSelectedArgs(t *testing.T) {
 	}
 	if len(m.SelectedArgs()) != 3 || m.SelectedArgs()[0] != "--yolo" || m.SelectedArgs()[1] != "-m" || m.SelectedArgs()[2] != "o3" {
 		t.Fatalf("expected SelectedArgs to be [--yolo, -m, o3], got %v", m.SelectedArgs())
+	}
+}
+
+func TestKeyMapHasNoShellBinding(t *testing.T) {
+	k := DefaultKeyMap()
+	var all []key.Binding
+	all = append(all, k.ShortHelp()...)
+	for _, row := range k.FullHelp() {
+		all = append(all, row...)
+	}
+	for _, b := range all {
+		if b.Help().Desc == "shell" {
+			t.Errorf("expected no shell binding in the help lists, found %q", b.Help().Key)
+		}
 	}
 }
 

@@ -23,6 +23,11 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 	if sourceProfile == targetProfile {
 		return fmt.Errorf("source and target profile names cannot be the same")
 	}
+	for _, p := range []string{sourceProfile, targetProfile} {
+		if err := m.refuseIfRunning(p); err != nil {
+			return err
+		}
+	}
 
 	if cfg == nil {
 		var err error
@@ -101,6 +106,7 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 	if len(remaining) == 0 {
 		_ = m.RemoveProfile(sourceProfile)
 		cfg.DeleteProfile(sourceProfile)
+		_ = m.MergeStateStore().Remove(sourceProfile)
 	}
 
 	return config.SaveConfig(cfg)

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -72,6 +74,13 @@ func (m Model) fetchDoctorDiagnostics() Model {
 		results = []agents.DiagnosticResult{
 			{Category: "Status", Status: "OK", Message: "All checks passed"},
 		}
+	}
+	if pDir != "" {
+		var extraPaths []string
+		if m.cfg != nil {
+			extraPaths = m.cfg.CustomBridgedPaths
+		}
+		results = append(results, profile.BridgeDiagnostics(p, config.RealHomeDir(), pDir, extraPaths...)...)
 	}
 	if m.cfg != nil {
 		if env := m.cfg.GetProfileEnv(p); len(env) > 0 {

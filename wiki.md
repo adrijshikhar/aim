@@ -14,20 +14,25 @@ AIM provides isolated sandboxes for AI coding assistants by virtualizing the use
 
 ### What is Isolated vs. Bridged
 
-To balance complete agent isolation with seamless developer workflow, AIM selectively bridges global developer tools while strictly walling off agent credentials:
+To balance complete agent isolation with seamless developer workflow, AIM shares the host home with every profile and walls off only agent state. On every launch (and on `aim doctor`) it links **every top-level dot entry of your real home** into the profile, except a fixed deny-list. A tool you install on the host after a profile was created is picked up on its next launch; there is no allow-list to extend.
 
 | Category | Path | Isolation Behavior |
 |---|---|---|
-| **Security & Keys** | `.ssh`, `.gnupg`, `.netrc` | **Bridged** (read/write access to host keys) |
+| **Host dotfiles** | every `~/.*` not denied below: `.gitconfig`, `.ssh`, `.gnupg`, `.config`, `.local`, `.cargo`, `.npmrc`, `.docker`, `.aws`, `.kube`, `.agents`, `.mcp-auth`, … | **Bridged** (one link per top-level entry; a dir that contains the profiles, such as `.local` on the default XDG layout where profiles live in `~/.local/share/aim/profiles`, is not linked itself: its children are, e.g. `.local/bin`, `.local/state`, `.local/share/claude`, down to but excluding the aim data dir) |
+| **Go path** | `go` (only if `~/go` exists) | **Bridged** (module and build cache shared, not duplicated per profile) |
 | **System Keychains** | `Library/Keychains` (macOS) | **Bridged with Agent Ignore List** (mounted for `gh`, `git`, certs; agent services purged) |
-| **Shell Configs** | `.zshrc`, `.bashrc`, `.profile`, `.config/fish` | **Bridged** (developer aliases & prompt settings) |
-| **Package Managers** | `.npmrc`, `.yarnrc`, `.pip/pip.conf`, `.cargo/` | **Bridged** (package registry auth & configs) |
-| **Cloud & Containers** | `.docker`, `.aws`, `.config/gcloud`, `.kube` | **Bridged** (cloud credentials) |
-| **Terminal & Tooling** | `.config/cxstatusline` | **Bridged** (Codex statusline themes & widget config) |
-| **AIM State** | `.aim` | **Isolated** (blocked from profile symlinks) |
-| **Antigravity State** | `.gemini/antigravity-cli/antigravity-oauth-token` | **Isolated** (per-profile token sandbox) |
-| **Claude State** | `.claude`, `.claude.json` | **Isolated** (per-profile token sandbox) |
+| **User caches** | `Library/Caches` (macOS) | **Bridged** (go-build, pip, Homebrew, Playwright, bun, … shared) |
+| **Claude extensions** | `.claude/plugins`, `.claude/skills`, `.claude/rules`, `.claude/commands`, `.claude/hooks` | **Bridged** inside the per-profile `.claude` |
+| **Per-app state** | `Library` itself, `Library/Application Support`, `Library/Preferences` | **Per profile** (not bridged) |
+| **AIM State** | `.aim` | **Isolated** (never linked) |
+| **Antigravity / Gemini State** | `.gemini` | **Isolated** (per-profile token sandbox; agy shares its conversation history separately, see below) |
+| **Claude State** | `.claude`, `.claude.json`, `.claude.json.*` (backups, temp files) | **Isolated** (per-profile token sandbox) |
 | **Codex State** | `.codex` | **Isolated** (per-profile token sandbox) |
+| **Host-only noise** | `.Trash`, `.DS_Store`, `.CFUserTextEncoding`, `.localized`, `*_history` (`.zsh_history`, `.python_history`, …), `.zsh_sessions`, `.bash_sessions`, `.zcompdump*` | **Not bridged** (each profile keeps its own) |
+
+`.mcp-auth` (OAuth tokens that `mcp-remote` caches for remote MCP servers) is shared, so an MCP server authorised on the host works in every profile. Sockets and fifos in the home are never linked.
+
+**Overriding per profile.** A real, non-empty file or dir in the profile at a bridged path is a profile override and is always kept: to give one profile its own `~/.npmrc` or `~/.config`, put it there. Only empty or known stub dirs (and dirs that hold nothing but links into the matching host dir, as left by older AIM versions) are replaced with a link; nothing else is ever removed. When a profile overrides a parent such as `.config`, `.cargo`, `.local` or `.pip`, AIM still links the credential-bearing children it knows about (`.config/gh`, `.config/git`, `.config/glab`, `.config/gcloud`, `.config/fish`, `.cargo/config.toml`, `.cargo/credentials.toml`, `.pip/pip.conf`, …) inside it. AIM never creates or removes anything below a profile path that is itself a link to the host. `aim doctor` lists every profile copy that shadows a host path, with the `rm -rf` that restores sharing.
 
 ### macOS Keychain Architecture & Agent Ignore List
 
@@ -93,8 +98,7 @@ Everything managed by AIM resides in `~/.aim/` (configurable via the `AIM_HOME` 
   "default_agent": "agy",
   "default_profile": "personal",
   "custom_bridged_paths": [
-    ".config/custom-tool",
-    ".my-creds"
+    "Library/Application Support/custom-tool"
   ],
   "custom_ignored_keychains": [
     "custom-agent-auth"
@@ -115,7 +119,8 @@ Everything managed by AIM resides in `~/.aim/` (configurable via the `AIM_HOME` 
 ```
 
 - **`debug`**: Enable verbose debug logging to stderr and `~/.aim/aim-debug.log` (`true` / `false`, default: `false`). Can also be toggled via `AIM_DEBUG=1` or `--debug`.
-- **`custom_bridged_paths`**: Additional dotfile or config paths to bridge from the host home into every profile sandbox.
+- **`custom_bridged_paths`**: Additional host paths to bridge into every profile sandbox. Top-level dotfiles are already bridged, so this is for paths outside that scan, such as `Library/Application Support/<tool>`. Paths that escape the home or name agent state (`.aim`, `.claude`, `.claude.json*`, `.codex`, `.gemini`) are refused.
+  A non-empty profile copy of a bridged path is kept as an override, so the host's is silently not used; `aim doctor` flags each such copy (and any link pointing elsewhere) with the `rm -rf` that restores sharing — it never deletes anything itself.
 - **`custom_ignored_keychains`**: List of additional macOS Keychain service names to scrub before and after agent execution to maintain strict profile isolation.
 - **`env`**: Profile-specific environment variables injected on launch.
 - **`args`**: Extra CLI arguments automatically passed to the agent binary when launched under this profile.
@@ -172,7 +177,7 @@ Launching `aim` without arguments opens the terminal user interface built with C
 - **Inspector Drawer**: Selecting a profile displays 5-hour limit, weekly limit, reset countdowns, credits remaining, and cache freshness.
 - **Actions**:
   - `[Enter]`: Launch selected profile immediately.
-  - `[s]`: Drop into an isolated subshell with the profile environment.
+  - `[s]`: Open the Sessions Explorer drawer.
   - `[l]`: Launch browser OAuth login to authenticate the profile.
   - `[d]`: Open the embedded Doctor diagnostics drawer.
   - `[m]` / `[R]`: Open the interactive profile rename modal.

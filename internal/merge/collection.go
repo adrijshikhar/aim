@@ -22,9 +22,20 @@ type Collection struct {
 	Format      Format
 	Key         string
 	Normalise   Normaliser
+	// Group ("mcp", "plugins") is what profiles.<p>.*_global switches; Noun
+	// ("server", "plugin", "marketplace") names one item in messages.
+	Group string
+	Noun  string
 }
 
 func (c Collection) ID() string { return c.Agent + "/" + c.Name }
+
+func (c Collection) noun() string {
+	if c.Noun != "" {
+		return c.Noun
+	}
+	return "server"
+}
 
 func (c Collection) norm() Normaliser {
 	if c.Normalise != nil {

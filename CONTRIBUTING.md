@@ -138,7 +138,7 @@ reg.Register(myagent.NewAdapter())
 ```
 
 Once registered, the new agent will automatically be supported across:
-* **CLI execution**: `aim run myagent <profile>`, `aim shell myagent <profile>`, `aim login myagent <profile>`
+* **CLI execution**: `aim run myagent <profile>`, `aim login myagent <profile>`
 * **Shell autocompletions**: `zsh`, `bash`, and `fish` tab-completion
 * **TUI Dashboard**: Interactive tabs and profile filtering
 * **Diagnostics**: `aim doctor myagent`

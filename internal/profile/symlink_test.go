@@ -178,15 +178,15 @@ func TestEnsureDotfiles_ComprehensiveDeveloperTools(t *testing.T) {
 		t.Fatalf("EnsureDotfiles failed: %v", err)
 	}
 
-	// Verify .config/gh symlink
-	targetGH := filepath.Join(profileDir, ".config", "gh")
-	fi, err := os.Lstat(targetGH)
-	if err != nil {
-		t.Fatalf("expected .config/gh to exist: %v", err)
+	// Nested configs are shared through their linked top-level parent.
+	for _, rel := range []string{".config", ".cargo"} {
+		if !isSymlink(filepath.Join(profileDir, rel)) {
+			t.Errorf("expected %s to be a symlink", rel)
+		}
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected .config/gh to be a symlink")
-	}
+	assertSharedWithHost(t, profileDir, fakeHome, filepath.Join(".config", "gh"))
+	assertSharedWithHost(t, profileDir, fakeHome, filepath.Join(".cargo", "config.toml"))
+	assertSharedWithHost(t, profileDir, fakeHome, filepath.Join(".config", "cxstatusline"))
 
 	// Verify .npmrc symlink
 	targetNpm := filepath.Join(profileDir, ".npmrc")
@@ -208,16 +208,6 @@ func TestEnsureDotfiles_ComprehensiveDeveloperTools(t *testing.T) {
 		t.Errorf("expected .docker to be a symlink")
 	}
 
-	// Verify .cargo/config.toml symlink
-	targetCargo := filepath.Join(profileDir, ".cargo", "config.toml")
-	fiCargo, err := os.Lstat(targetCargo)
-	if err != nil {
-		t.Fatalf("expected .cargo/config.toml to exist: %v", err)
-	}
-	if fiCargo.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected .cargo/config.toml to be a symlink")
-	}
-
 	// Verify .agents symlink
 	targetAgents := filepath.Join(profileDir, ".agents")
 	fiAgents, err := os.Lstat(targetAgents)
@@ -226,16 +216,6 @@ func TestEnsureDotfiles_ComprehensiveDeveloperTools(t *testing.T) {
 	}
 	if fiAgents.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("expected .agents to be a symlink")
-	}
-
-	// Verify .config/cxstatusline symlink
-	targetCX := filepath.Join(profileDir, ".config", "cxstatusline")
-	fiCX, err := os.Lstat(targetCX)
-	if err != nil {
-		t.Fatalf("expected .config/cxstatusline to exist: %v", err)
-	}
-	if fiCX.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected .config/cxstatusline to be a symlink")
 	}
 
 	// Verify custom path symlink
@@ -311,15 +291,13 @@ func TestProfileManager_EnsureAllProfilesDotfiles(t *testing.T) {
 		t.Fatalf("EnsureAllProfilesDotfiles failed: %v", err)
 	}
 
+	// .config did not exist on the host when the profiles were made; it is
+	// linked as a whole on the next run.
 	for _, p := range []string{"prof1", "prof2"} {
-		destGH := filepath.Join(pm.ProfileDir(p), ".config", "gh")
-		fi, err := os.Lstat(destGH)
-		if err != nil {
-			t.Fatalf("expected %s in %s to exist: %v", destGH, p, err)
+		if !isSymlink(filepath.Join(pm.ProfileDir(p), ".config")) {
+			t.Errorf("expected .config in %s to be a symlink", p)
 		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("expected %s to be symlink", destGH)
-		}
+		assertSharedWithHost(t, pm.ProfileDir(p), fakeHome, filepath.Join(".config", "gh"))
 	}
 }
 
@@ -358,6 +336,7 @@ func TestEnsureDotfiles_SecurityBoundaries(t *testing.T) {
 		".gemini/antigravity-cli",
 		".claude",
 		".claude.json",
+		".claude.json.backup",
 		".codex",
 	}
 
@@ -405,7 +384,6 @@ func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
 		filepath.Join(".claude", "rules"),
 		filepath.Join(".claude", "commands"),
 		filepath.Join(".claude", "hooks"),
-		filepath.Join(".config", "ccstatusline"),
 	} {
 		p := filepath.Join(profileDir, rel)
 		info, err := os.Lstat(p)
@@ -417,6 +395,7 @@ func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
 			t.Errorf("expected %s to be a symlink", p)
 		}
 	}
+	assertSharedWithHost(t, profileDir, hostHome, filepath.Join(".config", "ccstatusline"))
 }
 
 func TestEnsureDotfiles_ReplacesStubPluginDirectory(t *testing.T) {
@@ -513,14 +492,6 @@ func TestEnsureDotfiles_FishAndCargoSupport(t *testing.T) {
 		".fish-personal",
 		".fish_custom",
 	} {
-		p := filepath.Join(profileDir, check)
-		fi, err := os.Lstat(p)
-		if err != nil {
-			t.Errorf("expected bridged path %s to exist: %v", check, err)
-			continue
-		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("expected %s to be a symlink", check)
-		}
+		assertSharedWithHost(t, profileDir, hostHome, check)
 	}
 }

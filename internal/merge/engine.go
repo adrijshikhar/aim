@@ -35,10 +35,11 @@ const (
 	Promote
 )
 
-// StartOptions: Enabled is profiles.<p>.mcp_global; Background means merge,
-// run, no exit step (spec R2).
+// StartOptions: Enabled picks the collections to merge (profiles.<p>.mcp_global,
+// plugins_global; nil means every one) — recovery covers all of them either
+// way. Background means merge, run, no exit step (spec R2).
 type StartOptions struct {
-	Enabled    bool
+	Enabled    func(Collection) bool
 	Background bool
 }
 
@@ -53,6 +54,7 @@ type Session struct {
 	profile  string
 	agent    string
 	cols     []Collection // collections this session merged or joined
+	all      []Collection // every collection passed to Start: the last-session strip
 	sessions *Lock
 	active   bool // a foreground session with an exit step
 }
@@ -110,10 +112,10 @@ func hasSessionState(st *State, cols []Collection) bool {
 // lock for (profile, agent) when Start returns with active=true; a background
 // launch merges and returns a session whose Diff and Finish do nothing.
 func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOptions) (*Session, error) {
-	s := &Session{eng: e, profile: profile, agent: agent}
+	s := &Session{eng: e, profile: profile, agent: agent, all: cols}
 	ml, err := LockExclusive(e.Store.MergeLockPath(profile), lockTimeout)
 	if err != nil {
-		e.warnf("aim: MCP merge skipped for %s (%v)", profile, err)
+		e.warnf("aim: host merge skipped for %s (%v)", profile, err)
 		return s, nil
 	}
 	defer ml.Unlock()
@@ -136,13 +138,25 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 			}
 		}
 	}
-	if !opt.Enabled {
-		return s, e.Store.Save(profile, st)
-	}
-	backedUp := map[string]string{} // profile file → its one migration backup per Start
-	var undo []stripWrite
+	var allowed []Collection
 	for _, c := range cols {
-		w, err := e.startCollection(profile, c, st, alone, backedUp)
+		if opt.Enabled == nil || opt.Enabled(c) {
+			allowed = append(allowed, c)
+		}
+	}
+	if len(allowed) == 0 {
+		return s, e.Store.Save(profile, st) // no sessions lock: Diff and Finish do nothing
+	}
+	bk := newBackups()
+	if alone {
+		// Before anything is merged: a collection that migrates later in this
+		// loop must back up its file as Start found it, not with an earlier
+		// collection's host items already in it.
+		bk.snapshot(allowed, st)
+	}
+	var undo []stripWrite
+	for _, c := range allowed {
+		w, err := e.startCollection(profile, c, st, alone, bk)
 		if err != nil {
 			if !errors.Is(err, errNoHost) && !errors.Is(err, errNotMerged) {
 				e.warnf("aim: %s: %v — skipped", c.ID(), err)
@@ -156,7 +170,7 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 		// Nothing records the merge: take the host items out again, or they
 		// become the profile's own for good.
 		for _, w := range undo {
-			e.writeStrip(w)
+			e.writeStrip(w, "rollback")
 		}
 		return s, err
 	}
@@ -174,7 +188,7 @@ func (e *Engine) Start(profile, agent string, cols []Collection, opt StartOption
 // startCollection merges one collection and returns the write that undoes it
 // (skip when nothing was written). State is recorded only once the file holds
 // the merge.
-func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, backedUp map[string]string) (stripWrite, error) {
+func (e *Engine) startCollection(profile string, c Collection, st *State, alone bool, bk *backups) (stripWrite, error) {
 	none := stripWrite{c: c, skip: true}
 	if fi, err := os.Lstat(c.ProfilePath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return none, errors.New(c.ProfilePath + " is a symlink; not merging into a shared file")
@@ -199,7 +213,7 @@ func (e *Engine) startCollection(profile string, c Collection, st *State, alone 
 	id := c.ID()
 	norm := c.norm()
 	if _, done := st.Migrated[id]; !done {
-		if err := e.migrate(profile, c, host, &prof, st, backedUp); err != nil {
+		if err := e.migrate(profile, c, host, &prof, st, bk); err != nil {
 			return none, err
 		}
 	}
@@ -248,7 +262,7 @@ func (e *Engine) startCollection(profile string, c Collection, st *State, alone 
 // migrate runs once per collection: profile servers identical to the host's are
 // old copy-once leftovers (T4) and are removed after a backup; servers that
 // differ stay the profile's own (conflict rule). Both are listed once.
-func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entries, st *State, backedUp map[string]string) error {
+func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entries, st *State, bk *backups) error {
 	id := c.ID()
 	norm := c.norm()
 	var removed, differing []string
@@ -264,7 +278,7 @@ func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entri
 		}
 	}
 	if len(removed) > 0 {
-		name, err := e.backup(c.ProfilePath, backedUp)
+		name, err := e.backup(c.ProfilePath, bk)
 		if err != nil {
 			return err
 		}
@@ -272,31 +286,75 @@ func (e *Engine) migrate(profile string, c Collection, host Entries, prof *Entri
 			return err
 		}
 		if name != "" {
-			e.warnf("%s: %d server(s) in %s matched the host's (%s) and were removed; backup: %s",
-				c.Agent, len(removed), profile, strings.Join(removed, ", "), name)
+			e.warnf("%s: %d %s(s) in %s matched the host's (%s) and were removed; backup: %s",
+				c.Agent, len(removed), c.noun(), profile, strings.Join(removed, ", "), name)
 		}
 	}
 	if len(differing) > 0 {
-		e.warnf("%s: %d server(s) in %s differ from the host's (%s) and stay the profile's own",
-			c.Agent, len(differing), profile, strings.Join(differing, ", "))
+		e.warnf("%s: %d %s(s) in %s differ from the host's (%s) and stay the profile's own",
+			c.Agent, len(differing), c.noun(), profile, strings.Join(differing, ", "))
 	}
 	st.Migrated[id] = e.now()
 	return nil
 }
 
-// backup copies path to <path>.aim-backup-<UTC>[-n] (0600) once per Start and
-// never overwrites an existing backup. It returns the backup's name ("" when
-// path does not exist).
-func (e *Engine) backup(path string, done map[string]string) (string, error) {
-	if name, ok := done[path]; ok {
+// backups is one Start's migration backups: each profile file a collection
+// may migrate, as Start found it, and the one backup taken from it.
+type backups struct {
+	before map[string]snapshot
+	names  map[string]string
+}
+
+// snapshot is a file's bytes before the merge loop (exists=false: no file).
+type snapshot struct {
+	data   []byte
+	exists bool
+	err    error
+}
+
+func newBackups() *backups {
+	return &backups{before: map[string]snapshot{}, names: map[string]string{}}
+}
+
+// snapshot reads every profile file a collection that has not migrated yet
+// lives in. Two collections can share one file (Claude's settings.json, Codex's
+// config.toml), so the file is read once, before either merges into it.
+func (b *backups) snapshot(cols []Collection, st *State) {
+	for _, c := range cols {
+		if _, done := st.Migrated[c.ID()]; done {
+			continue
+		}
+		if _, ok := b.before[c.ProfilePath]; ok {
+			continue
+		}
+		data, err := os.ReadFile(c.ProfilePath)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			b.before[c.ProfilePath] = snapshot{}
+		case err != nil:
+			b.before[c.ProfilePath] = snapshot{err: err}
+		default:
+			b.before[c.ProfilePath] = snapshot{data: data, exists: true}
+		}
+	}
+}
+
+// backup writes path's pre-Start bytes to <path>.aim-backup-<UTC>[-n] (0600)
+// once per Start and never overwrites an existing backup. It returns the
+// backup's name ("" when path did not exist).
+func (e *Engine) backup(path string, b *backups) (string, error) {
+	if name, ok := b.names[path]; ok {
 		return name, nil
 	}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
+	snap, ok := b.before[path]
+	if !ok {
+		return "", errors.New(path + ": no pre-Start snapshot to back up")
 	}
-	if err != nil {
-		return "", err
+	if snap.err != nil {
+		return "", snap.err
+	}
+	if !snap.exists {
+		return "", nil
 	}
 	base := fmt.Sprintf("%s.aim-backup-%s", path, e.now().UTC().Format("20060102T150405Z"))
 	for i := 1; ; i++ {
@@ -311,14 +369,14 @@ func (e *Engine) backup(path string, done map[string]string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		_, werr := f.Write(data)
+		_, werr := f.Write(snap.data)
 		if cerr := f.Close(); werr == nil {
 			werr = cerr
 		}
 		if werr != nil {
 			return "", werr
 		}
-		done[path] = name
+		b.names[path] = name
 		return name, nil
 	}
 }
@@ -425,7 +483,7 @@ func (s *Session) Finish(changes []Change, decide func([]Change) []Decision) err
 	}
 	now, err := e.diff(s.cols, st)
 	if err != nil {
-		e.warnf("aim: MCP diff: %v", err)
+		e.warnf("aim: host diff: %v", err)
 	}
 	for _, ch := range now {
 		d := Keep
@@ -450,15 +508,19 @@ func (s *Session) Finish(changes []Change, decide func([]Change) []Decision) err
 	}
 	_ = probe.Unlock()
 	// Last session: plan the strip, save state first, then write (spec §5 End 4).
+	// It covers every collection a running session merged, not only this
+	// session's: a joiner with a group switched off can still be the last out.
 	var writes []stripWrite
-	for _, c := range s.cols {
-		writes = append(writes, e.planStrip(c, st))
+	for _, c := range s.all {
+		if _, ok := st.Active[c.ID()]; ok || st.AddedKey[c.ID()] {
+			writes = append(writes, e.planStrip(c, st))
+		}
 	}
 	if err := e.Store.Save(s.profile, st); err != nil {
 		return err
 	}
 	for _, w := range writes {
-		e.writeStrip(w)
+		e.writeStrip(w, "strip")
 	}
 	return nil
 }
@@ -526,7 +588,9 @@ func (e *Engine) planStrip(c Collection, st *State) stripWrite {
 	return w
 }
 
-func (e *Engine) writeStrip(w stripWrite) {
+// writeStrip writes w; verb names the operation in the failure warning ("strip",
+// or "rollback" when Start undoes a merge no saved state records).
+func (e *Engine) writeStrip(w stripWrite, verb string) {
 	if w.skip {
 		return
 	}
@@ -537,7 +601,7 @@ func (e *Engine) writeStrip(w stripWrite) {
 		_, err = w.c.Write(w.c.ProfilePath, w.prof)
 	}
 	if err != nil {
-		e.warnf("aim: %s: strip failed: %v", w.c.ID(), err)
+		e.warnf("aim: %s: %s failed: %v", w.c.ID(), verb, err)
 	}
 }
 
@@ -568,7 +632,7 @@ func (e *Engine) recover(profile, agent string, cols []Collection, st *State) er
 		return err
 	}
 	for _, w := range writes {
-		e.writeStrip(w)
+		e.writeStrip(w, "strip")
 	}
 	return nil
 }

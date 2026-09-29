@@ -10,11 +10,11 @@ import (
 func TestMCPCollections_Claude(t *testing.T) {
 	a := &Adapter{}
 	cols := a.MCPCollections("/p", "/h")
-	if len(cols) != 1 {
+	if len(cols) != 3 {
 		t.Fatalf("collections = %d", len(cols))
 	}
 	c := cols[0]
-	if c.ID() != "claude/mcpServers" || c.Format != merge.JSON || c.Key != "mcpServers" ||
+	if c.ID() != "claude/mcpServers" || c.Format != merge.JSON || c.Key != "mcpServers" || c.Group != "mcp" || c.Noun != "server" ||
 		c.HostPath != filepath.Join("/h", ".claude.json") ||
 		c.ProfilePath != filepath.Join("/p", ".claude", ".claude.json") {
 		t.Fatalf("collection = %+v", c)
@@ -24,7 +24,53 @@ func TestMCPCollections_Claude(t *testing.T) {
 	if merge.Hash(c.Normalise, written) != merge.Hash(c.Normalise, rewritten) {
 		t.Fatal("Claude's normalisation noise must not change the hash")
 	}
-	if !a.IsBackground([]string{"--bg"}) || !a.IsBackground([]string{"agents"}) || a.IsBackground([]string{"--resume", "x"}) {
+	if !a.IsBackground(nil, []string{"--bg"}) || !a.IsBackground(nil, []string{"agents"}) || a.IsBackground(nil, []string{"--resume", "x"}) {
 		t.Fatal("background forms")
+	}
+}
+
+func TestMCPCollections_ClaudePlugins(t *testing.T) {
+	cols := (&Adapter{}).MCPCollections("/p", "/h")
+	want := []struct{ name, noun string }{{"enabledPlugins", "plugin"}, {"extraKnownMarketplaces", "marketplace"}}
+	for i, w := range want {
+		c := cols[i+1]
+		if c.ID() != "claude/"+w.name || c.Key != w.name || c.Format != merge.JSON || c.Group != "plugins" || c.Noun != w.noun ||
+			c.HostPath != filepath.Join("/h", ".claude", "settings.json") ||
+			c.ProfilePath != filepath.Join("/p", ".claude", "settings.json") || c.Normalise != nil {
+			t.Fatalf("collection %d = %+v", i+1, c)
+		}
+	}
+	// the JSON codec wraps a bool as {"value": b}; the default normaliser keeps false
+	if merge.Hash(nil, map[string]any{"value": true}) == merge.Hash(nil, map[string]any{"value": false}) {
+		t.Fatal("enabled and disabled must hash differently")
+	}
+}
+
+// TestIsSession_Claude: the spellings `claude --help` lists (-v, --version,
+// -h, --help) plus -V, which 2.1.283 also accepts. Claude has no help or
+// version subcommand, so those words are a prompt and start a session.
+func TestIsSession_Claude(t *testing.T) {
+	a := &Adapter{}
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{"--resume", "x"}, true},
+		{[]string{"mcp", "list"}, true}, // shows the merged set, so it merges
+		{[]string{"-v"}, false},
+		{[]string{"-V"}, false},
+		{[]string{"--version"}, false},
+		{[]string{"-h"}, false},
+		{[]string{"--help"}, false},
+		{[]string{"--model", "opus", "--version"}, false},
+		{[]string{"version"}, true},
+		{[]string{"help"}, true},
+		{[]string{"fix", "--", "--help"}, true}, // after "--" belongs to the agent
+	}
+	for _, c := range cases {
+		if got := a.IsSession(nil, c.args); got != c.want {
+			t.Errorf("%v: got %v want %v", c.args, got, c.want)
+		}
 	}
 }
