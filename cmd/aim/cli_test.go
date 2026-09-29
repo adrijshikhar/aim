@@ -332,23 +332,6 @@ func TestCLIExecuteLogin(t *testing.T) {
 	}
 }
 
-func TestCLIExecuteShell(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "aim-cli-test-*")
-	if err != nil {
-		t.Fatalf("temp dir error: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-	t.Setenv("AIM_HOME", tempDir)
-
-	pm := profile.NewProfileManager(tempDir)
-	reg := agents.NewRegistry()
-
-	// Unknown agent
-	if code := executeShell(reg, pm, "unknown", "work"); code != 1 {
-		t.Fatalf("expected 1, got %d", code)
-	}
-}
-
 func TestCLICorruptedConfigRecovery(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "aim-cli-test-*")
 	if err != nil {
@@ -464,16 +447,6 @@ func TestCLIDispatch(t *testing.T) {
 		{
 			name:     "incomplete run command with agent only",
 			args:     []string{"run", "mock"},
-			wantCode: 1,
-		},
-		{
-			name:     "incomplete shell command",
-			args:     []string{"shell"},
-			wantCode: 1,
-		},
-		{
-			name:     "incomplete shell command with agent only",
-			args:     []string{"shell", "mock"},
 			wantCode: 1,
 		},
 		{
@@ -629,6 +602,34 @@ func TestCLIDispatchUI(t *testing.T) {
 	codeUI := dispatch([]string{"ui"}, reg, pm)
 	if codeUI == 0 {
 		t.Errorf("expected dispatch([\"ui\"]) to fail since ui command is removed, got 0")
+	}
+}
+
+func TestCLIShellCommandRemoved(t *testing.T) {
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(t.TempDir())
+
+	// Agent admin runs through `aim run <agent> <profile> <native cmd>` now, so the
+	// subshell is gone: it must not be registered or listed in the root help.
+	root := newRootCmd(reg, pm)
+	for _, c := range root.Commands() {
+		if c.Name() == "shell" {
+			t.Fatalf("expected no 'shell' subcommand, found %q", c.Use)
+		}
+	}
+	if strings.Contains(root.Long, "shell <agent> <profile>") {
+		t.Errorf("root help still lists the shell command:\n%s", root.Long)
+	}
+
+	var code int
+	_, errOut := captureOutput(t, func() {
+		code = dispatch([]string{"shell", "mock", "work"}, reg, pm)
+	})
+	if code == 0 {
+		t.Errorf("expected dispatch([shell mock work]) to fail, got 0")
+	}
+	if !strings.Contains(errOut, "unknown command") {
+		t.Errorf("expected an unknown command error, got %q", errOut)
 	}
 }
 

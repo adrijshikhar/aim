@@ -8,7 +8,6 @@ type KeyMap struct {
 	Down     key.Binding
 	Run      key.Binding
 	Sessions key.Binding
-	Shell    key.Binding
 	Login    key.Binding
 	Tab      key.Binding
 	Doctor   key.Binding
@@ -39,10 +38,6 @@ func DefaultKeyMap() KeyMap {
 		Sessions: key.NewBinding(
 			key.WithKeys("s"),
 			key.WithHelp("s", "sessions"),
-		),
-		Shell: key.NewBinding(
-			key.WithKeys("S", "$"),
-			key.WithHelp("S", "shell"),
 		),
 		Login: key.NewBinding(
 			key.WithKeys("l"),
@@ -89,14 +84,14 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns keybindings to be shown in the mini help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Run, k.Sessions, k.Shell, k.Login, k.Tab, k.Doctor, k.Rename, k.Move, k.Delete, k.Quit}
+	return []key.Binding{k.Run, k.Sessions, k.Login, k.Tab, k.Doctor, k.Rename, k.Move, k.Delete, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Run, k.Sessions},
-		{k.Shell, k.Login, k.Tab, k.Doctor},
+		{k.Login, k.Tab, k.Doctor},
 		{k.Rename, k.Move, k.Delete, k.Refresh, k.Filter, k.Help, k.Quit},
 	}
 }

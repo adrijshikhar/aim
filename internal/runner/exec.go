@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -124,23 +123,6 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	}
 	logger.Debug("[runner] Process exited cleanly (code 0)")
 	return 0, nil
-}
-
-func (r *Runner) RunShell(ctx context.Context, launch agents.LaunchEnv) (int, error) {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-	launch.BinaryPath = shell
-	launch.Args = nil
-	if launch.Env == nil {
-		launch.Env = make(map[string]string)
-	}
-	profileName := launch.Env["AIM_PROFILE"]
-	agentName := launch.Env["AIM_AGENT"]
-	launch.Env["PS1"] = fmt.Sprintf("[aim:%s:%s] $ ", agentName, profileName)
-	logger.Debug("[runner] Launching interactive shell %s for profile %q", shell, profileName)
-	return r.Run(ctx, launch, nil)
 }
 
 // BuildEnv constructs the execution environment by filtering out sensitive/managed variables

@@ -117,8 +117,6 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 	switch res.Outcome() {
 	case tui.ActionRun:
 		return executeRun(reg, pm, agent, res.SelectedProfile(), nil)
-	case tui.ActionShell:
-		return executeShell(reg, pm, agent, res.SelectedProfile())
 	case tui.ActionLogin:
 		name := promptProfileName(agent, res.SelectedProfile())
 		if name != "" {

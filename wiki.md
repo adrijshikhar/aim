@@ -172,7 +172,7 @@ Launching `aim` without arguments opens the terminal user interface built with C
 - **Inspector Drawer**: Selecting a profile displays 5-hour limit, weekly limit, reset countdowns, credits remaining, and cache freshness.
 - **Actions**:
   - `[Enter]`: Launch selected profile immediately.
-  - `[s]`: Drop into an isolated subshell with the profile environment.
+  - `[s]`: Open the Sessions Explorer drawer.
   - `[l]`: Launch browser OAuth login to authenticate the profile.
   - `[d]`: Open the embedded Doctor diagnostics drawer.
   - `[m]` / `[R]`: Open the interactive profile rename modal.

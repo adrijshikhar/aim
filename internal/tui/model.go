@@ -21,7 +21,6 @@ type ActionOutcome int
 const (
 	ActionNone ActionOutcome = iota
 	ActionRun
-	ActionShell
 	ActionLogin
 	ActionResumeExact
 	ActionResumeCatalyst
@@ -534,14 +533,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Sessions):
 			return m.openSessionsDrawer()
-		case key.Matches(msg, keys.Shell):
-			filtered := m.filteredProfiles()
-			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
-				m.selected = filtered[m.cursor]
-				m.outcome = ActionShell
-				m.cancelStream()
-				return m, tea.Quit
-			}
 		case key.Matches(msg, keys.Login):
 			m.outcome = ActionLogin
 			m.cancelStream()
@@ -672,7 +663,6 @@ func (m Model) View() string {
 	s.WriteString("\n  " +
 		HintKeyStyle.Render("[Enter]") + " " + HintLabelStyle.Render("Run  ") +
 		HintKeyStyle.Render("[s]") + " " + HintLabelStyle.Render("Sessions  ") +
-		HintKeyStyle.Render("[S]") + " " + HintLabelStyle.Render("Shell  ") +
 		HintKeyStyle.Render("[l]") + " " + HintLabelStyle.Render("Login  ") +
 		HintKeyStyle.Render("[Tab]") + " " + HintLabelStyle.Render("Switch Agent  ") +
 		HintKeyStyle.Render("[d]") + " " + HintLabelStyle.Render("Doctor  ") +

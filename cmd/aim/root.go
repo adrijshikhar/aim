@@ -77,7 +77,6 @@ Usage:
 
 Primary Commands:
   run <agent> <profile>      Execute agent under isolated profile
-  shell <agent> <profile>    Launch subshell with profile environment
   login <agent> <profile>    Authenticate new account via OAuth PKCE
   list [agent]               List all profiles and status
   sessions [agent]           List active and past conversation sessions
@@ -120,7 +119,6 @@ Flags:
 	// Add subcommands
 	rootCmd.AddCommand(
 		newRunCmd(reg, pm),
-		newShellCmd(reg, pm),
 		newLoginCmd(reg, pm),
 		newListCmd(reg, pm),
 		newSessionsCmd(reg, pm),

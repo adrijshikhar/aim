@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Real AIM -> /bin/sh -> AIM subprocess checks. No agent binaries are mocked or
-# invoked here; only macOS Keychain access is stubbed to protect host credentials.
+# Real AIM -> agent -> AIM subprocess checks through `aim run`. Each agent binary is
+# a shim that hands its stdin to /bin/sh, so the checks below run inside exactly the
+# environment `aim run` gives an agent. macOS Keychain access is stubbed to protect
+# host credentials.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
@@ -18,6 +20,14 @@ cat > "$TEST_ROOT/bin/security" <<'MOCK'
 exit 44
 MOCK
 chmod +x "$TEST_ROOT/bin/security"
+for shim in agy gemini codex claude; do
+  cat > "$TEST_ROOT/bin/$shim" <<'MOCK'
+#!/bin/sh
+# Record the argv aim passed (profile args included), then run the check on stdin.
+AIM_TEST_ARGS="$*" exec /bin/sh -s
+MOCK
+  chmod +x "$TEST_ROOT/bin/$shim"
+done
 export PATH="$TEST_ROOT/bin:$PATH"
 
 for mode in custom legacy xdg default; do
@@ -61,7 +71,7 @@ CONFIG
 
 for agent in agy gemini codex claude; do
   for profile in plain overridden; do
-    echo "Live shell: $mode/$agent/$profile"
+    echo "Live run: $mode/$agent/$profile"
     export AIM_TEST_EXPECTED_AGENT="$agent"
     export AIM_TEST_EXPECTED_PROFILE="$profile"
     # Inject stale managed values and fake tokens only into this test process.
@@ -70,7 +80,7 @@ for agent in agy gemini codex claude; do
       GEMINI_CLI_HOME=stale CODEX_HOME=stale CLAUDE_CONFIG_DIR=stale \
       SSH_CONNECTION=stale SSH_CLIENT=stale SSH_TTY=stale \
       CLAUDE_CODE_OAUTH_TOKEN=fake ANTHROPIC_API_KEY=fake CLAUDE_CODE_OAUTH_REFRESH_TOKEN=fake \
-      "$AIM_TEST_BINARY" shell "$agent" "$profile" <<'CHECK'
+      "$AIM_TEST_BINARY" run "$agent" "$profile" <<'CHECK'
 set -eu
 [ "${AIM_HOME-}" = "$AIM_TEST_EXPECTED_HOME" ] || { echo 'FAIL: storage mode changed'; exit 1; }
 [ "$HOME" = "$AIM_TEST_EXPECTED_STORE/profiles/$AIM_TEST_EXPECTED_PROFILE" ]
@@ -87,6 +97,7 @@ esac
 if [ "$AIM_PROFILE" = overridden ]; then
   [ "$AIM_TEST_INHERITED" = profile-value ]
   [ "$AIM_SESSION_ID" = explicit-session ]
+  case " $AIM_TEST_ARGS " in *" --agent-only-argument "*) ;; *) echo 'FAIL: profile args not passed'; exit 1 ;; esac
 else
   [ "$AIM_TEST_INHERITED" = benign-value ]
   [ -z "${AIM_SESSION_ID-}" ]
@@ -96,7 +107,7 @@ listing=$("$AIM_TEST_BINARY" list "$AIM_AGENT")
 printf '%s\n' "$listing" | grep -F "$AIM_TEST_EXPECTED_STORE/profiles/$AIM_TEST_EXPECTED_PROFILE" >/dev/null
 # Reset an inherited value so only reloading the parent's configuration can pass.
 if [ "$AIM_PROFILE" = overridden ]; then
-  env AIM_TEST_INHERITED=nested-stale "$AIM_TEST_BINARY" shell "$AIM_AGENT" overridden <<'NESTED'
+  env AIM_TEST_INHERITED=nested-stale "$AIM_TEST_BINARY" run "$AIM_AGENT" overridden <<'NESTED'
 set -eu
 [ "$AIM_TEST_INHERITED" = profile-value ]
 [ "$AIM_SESSION_ID" = explicit-session ]
@@ -107,11 +118,11 @@ CHECK
   done
 
   status=0
-  env HOME="$AIM_REAL_HOME" "$AIM_TEST_BINARY" shell "$agent" plain <<'CHECK' || status=$?
+  env HOME="$AIM_REAL_HOME" "$AIM_TEST_BINARY" run "$agent" plain <<'CHECK' || status=$?
 exit 17
 CHECK
-  [ "$status" -eq 17 ] || { echo "FAIL: $agent shell returned $status, expected 17"; exit 1; }
-  echo "PASS: $agent shell exit code propagated"
+  [ "$status" -eq 17 ] || { echo "FAIL: $agent run returned $status, expected 17"; exit 1; }
+  echo "PASS: $agent run exit code propagated"
 done
 done
-echo 'ALL LIVE CLI SHELL TESTS PASSED'
+echo 'ALL LIVE CLI RUN TESTS PASSED'

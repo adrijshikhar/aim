@@ -30,7 +30,7 @@ This guide provides actionable diagnosis and resolution steps for real-world iss
 - [6. Skill Context Budget Warnings](#6-skill-context-budget-warnings)
   - [Yellow Notice: `Skill descriptions were shortened to fit the skills context budget`](#yellow-notice-skill-descriptions-were-shortened-to-fit-the-skills-context-budget)
 - [7. macOS Keychain Isolation & Developer Credentials](#7-macos-keychain-isolation--developer-credentials)
-  - [Git or GitHub CLI (`gh`) Prompts for Login Inside Subshell](#git-or-github-cli-gh-prompts-for-login-inside-subshell)
+  - [Git or GitHub CLI (`gh`) Prompts for Login Inside a Profile](#git-or-github-cli-gh-prompts-for-login-inside-a-profile)
   - [Agent Credentials Leaking into macOS Keychain](#agent-credentials-leaking-into-macos-keychain)
 - [8. Terminal Ghost Sessions & Zombie PIDs](#8-terminal-ghost-sessions--zombie-pids)
   - [Session Remains Marked `[ACTIVE]` After Window Closed](#session-remains-marked-active-after-window-closed)
@@ -388,16 +388,13 @@ AIM automatically prevents this by initializing fresh databases using SQLite's n
 
 To manually recover a corrupted profile database:
 ```bash
-# 1. Open an isolated subshell for the profile:
-aim shell codex <profile>
+# 1. Back up and remove the conflicting SQLite files from the profile's Codex home:
+cd ~/.aim/profiles/<profile>/.codex
+mv state_5.sqlite state_5.sqlite.bak
+mv thread_history_1.sqlite thread_history_1.sqlite.bak
 
-# 2. Back up and remove the conflicting SQLite files:
-mv ~/.codex/state_5.sqlite ~/.codex/state_5.sqlite.bak
-mv ~/.codex/thread_history_1.sqlite ~/.codex/thread_history_1.sqlite.bak
-
-# 3. Launch codex once to allow sqlx to run clean migrations:
-codex --help
-exit
+# 2. Launch codex once through AIM to allow sqlx to run clean migrations:
+aim run codex <profile> --help
 ```
 Your authentication in `auth.json` remains untouched.
 
@@ -544,10 +541,10 @@ To silence the warning:
 
 ## 7. macOS Keychain Isolation & Developer Credentials
 
-### Git or GitHub CLI (`gh`) Prompts for Login Inside Subshell
+### Git or GitHub CLI (`gh`) Prompts for Login Inside a Profile
 
 #### Symptom
-Running `git push`, `git fetch`, or `gh pr create` inside `aim shell` or an agent session prompts for credentials or fails with:
+Running `git push`, `git fetch`, or `gh pr create` inside an agent session prompts for credentials or fails with:
 ```text
 fatal: could not read Username for 'https://github.com': terminal prompts disabled
 ```
@@ -567,7 +564,7 @@ However, if Git is configured to store credentials in a file inside `$HOME` (e.g
    # If empty, add your key:
    ssh-add ~/.ssh/id_ed25519
    ```
-3. If using `gh`, run `gh auth status` on the host, or run `gh auth login` once inside `aim shell <agent> <profile>`.
+3. If using `gh`, run `gh auth status` on the host. `gh` keeps its token in the macOS keychain, which profiles reach through the bridged `Library/Keychains`, so if it is missing run `gh auth login` on the host rather than inside a profile.
 
 ---
 

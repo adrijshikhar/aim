@@ -8,7 +8,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 )
@@ -94,42 +93,6 @@ func TestRunnerExecute_EnvAndArgs(t *testing.T) {
 	code, err := r.Run(context.Background(), env, []string{`[ "$TEST_FOO" = "bar123" ] && exit 0 || exit 1`})
 	if err != nil || code != 0 {
 		t.Fatalf("expected exit code 0 with env propagated, got %d, err: %v", code, err)
-	}
-}
-
-func TestRunnerRunShell(t *testing.T) {
-	sh, err := exec.LookPath("sh")
-	if err != nil {
-		t.Skip("sh not available")
-	}
-
-	// Override SHELL for this test
-	origShell := os.Getenv("SHELL")
-	defer os.Setenv("SHELL", origShell)
-	os.Setenv("SHELL", sh)
-
-	r := NewRunner()
-	launch := agents.LaunchEnv{
-		Env: map[string]string{
-			"AIM_AGENT":   "testagent",
-			"AIM_PROFILE": "testprofile",
-		},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// With stdin connected (closed/EOF in test runner), sh exits immediately with 0
-	code, err := r.RunShell(ctx, launch)
-	if err != nil {
-		t.Fatalf("RunShell failed: %v", err)
-	}
-	if code != 0 {
-		t.Errorf("expected exit code 0, got %d", code)
-	}
-
-	if launch.Env["PS1"] != "[aim:testagent:testprofile] $ " {
-		t.Errorf("expected PS1 to be set, got %q", launch.Env["PS1"])
 	}
 }
 

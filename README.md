@@ -92,7 +92,6 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim login <agent> <profile>` | Authenticate a new account via OAuth PKCE |
 | `aim whoami` | Show active profile, agent, session ID, and quota info |
 | `aim doctor [agent]` | Check environment, binary paths, tokens, ADC status, and keychain isolation |
-| `aim shell <agent> <profile>` | Subshell with the profile environment (deprecated with the front door) |
 | `aim clone <agent> <src> <dst>` | Duplicate profile settings without copying tokens |
 | `aim remove [agent] <profile>` | Unlink agent from profile (deletes dir if empty) |
 | `aim completion <shell>` | Generate shell completions (`zsh`, `bash`, `fish`) |
@@ -161,9 +160,8 @@ profile holding 17 plugin tables identical to the host's and one the host no lon
 loses the 17 (backed up), keeps the other as its own, and sees the host's plugins in its
 sessions. A new profile starts with none of the host's servers or plugins in its config.
 
-Agents started by hand in a profile, outside `aim run` (`aim shell`, an IDE pointed at
-the profile's `CLAUDE_CONFIG_DIR` or `CODEX_HOME`), see only the profile's own servers
-and plugins.
+Agents started by hand in a profile, outside `aim run` (an IDE pointed at the profile's
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME`), see only the profile's own servers and plugins.
 
 Turn the merge off per profile in `~/.aim/config.json`: `"mcp_global": false` for servers,
 `"plugins_global": false` for plugins.
@@ -179,7 +177,6 @@ When running `aim`, navigate using the following shortcuts:
 | `↑` / `k`, `↓` / `j` | Navigate profile list |
 | `Enter` | Launch selected profile in terminal |
 | `s` | Open Sessions Explorer drawer (navigate, resume exact, or catalyst handoff) |
-| `S` / `$` | Open isolated subshell |
 | `Tab` / `Shift+Tab` | Cycle agent tabs forward / backward |
 | `1` – `3` | Switch directly to agent tab (`[1] Antigravity`, `[2] Gemini`, `[3] Codex`) |
 | `/` | Live fuzzy profile filter (by profile or agent name) |

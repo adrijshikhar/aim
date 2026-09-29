@@ -57,7 +57,7 @@ func (m Model) renderHelpOverlay() string {
 
 	actionShortcuts := []shortcutEntry{
 		{"Enter", "Run profile"},
-		{"s", "Open subshell"},
+		{"s", "Browse sessions"},
 		{"l", "Login profile"},
 		{"d", "Doctor diagnostics"},
 		{"m / R", "Rename profile"},
