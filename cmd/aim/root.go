@@ -126,6 +126,7 @@ Flags:
 		newRunCmd(reg, pm),
 		newLoginCmd(reg, pm),
 		newListCmd(reg, pm),
+		newMCPCmd(reg, pm),
 		newSessionsCmd(reg, pm),
 		newResumeCmd(reg, pm),
 		newUsageCmd(reg, pm),

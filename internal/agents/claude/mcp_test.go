@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -72,5 +74,63 @@ func TestIsSession_Claude(t *testing.T) {
 		if got := a.IsSession(nil, c.args); got != c.want {
 			t.Errorf("%v: got %v want %v", c.args, got, c.want)
 		}
+	}
+}
+
+func TestClaude_ListMCPServers(t *testing.T) {
+	home := isolatedHome(t)
+	hostConfig := `{
+  "mcpServers": {
+    "host-tool": {
+      "command": "npx",
+      "args": ["-y", "host-tool@latest"]
+    },
+    "shared-api": {
+      "url": "https://mcp.shared.com/v1",
+      "headers": {"Authorization": "Bearer tok"}
+    }
+  }
+}`
+	_ = os.WriteFile(filepath.Join(home, ".claude.json"), []byte(hostConfig), 0o600)
+
+	prof := filepath.Join(home, "profiles", "dev")
+	profClaude := filepath.Join(prof, ".claude")
+	_ = os.MkdirAll(profClaude, 0o700)
+
+	profConfig := `{
+  "mcpServers": {
+    "prof-tool": {
+      "command": "/opt/tools/bin/tool",
+      "args": []
+    },
+    "shared-api": {
+      "url": "https://mcp.shared.com/v2"
+    }
+  }
+}`
+	_ = os.WriteFile(filepath.Join(profClaude, ".claude.json"), []byte(profConfig), 0o600)
+
+	a := &Adapter{}
+	servers, err := a.ListMCPServers(context.Background(), "dev", prof)
+	if err != nil {
+		t.Fatalf("ListMCPServers failed: %v", err)
+	}
+
+	if len(servers) != 3 {
+		t.Fatalf("expected 3 servers, got %d", len(servers))
+	}
+
+	// Sorted: host-tool, prof-tool, shared-api
+	if servers[0].Name != "host-tool" || servers[0].Origin != "host" || servers[0].Target != "npx -y host-tool@latest" {
+		t.Errorf("host-tool mismatch: %+v", servers[0])
+	}
+
+	if servers[1].Name != "prof-tool" || servers[1].Origin != "profile" || servers[1].Target != "tool" {
+		t.Errorf("prof-tool mismatch: %+v", servers[1])
+	}
+
+	// shared-api was overridden by profile
+	if servers[2].Name != "shared-api" || servers[2].Origin != "profile" || servers[2].Target != "https://mcp.shared.com/v2" {
+		t.Errorf("shared-api mismatch: %+v", servers[2])
 	}
 }

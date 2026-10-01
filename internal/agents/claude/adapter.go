@@ -87,6 +87,8 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		return fmt.Errorf("failed to create claude config dir: %w", err)
 	}
 
+	seedClaudeJSON(config.RealHomeDir(), profileDir)
+
 	bin := a.ResolveBinary()
 	cmd := exec.CommandContext(ctx, bin, "auth", "login")
 	cmd.Dir = profileDir
@@ -133,6 +135,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 		return agents.LaunchEnv{}, fmt.Errorf("failed to create claude config dir: %w", err)
 	}
 
+	seedClaudeJSON(config.RealHomeDir(), profileDir)
 	rewriteSettingsHooks(config.RealHomeDir(), profileDir)
 	_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
 
@@ -209,6 +212,38 @@ func seedSettings(hostSettings, dest, hostClaude, destClaude string) {
 	}
 	if err := writeSettings(dest, data, 0o600); err != nil {
 		logger.Warn("[claude] Failed to write settings.json to %s: %v", dest, err)
+	}
+}
+
+// seedClaudeJSON initializes the profile's .claude/.claude.json from the host's
+// ~/.claude.json if it does not already exist. It strips credentials (oauthAccount)
+// and static mcpServers (which Spec A merges dynamically per-session), while
+// preserving user onboarding state (hasCompletedOnboarding, lastOnboardingVersion),
+// theme, editor preferences, and projects trust (hasTrustDialogAccepted, hasClaudeMdExternalIncludesApproved).
+func seedClaudeJSON(hostHome, profileDir string) {
+	destDir := filepath.Join(profileDir, ".claude")
+	_ = os.MkdirAll(destDir, 0700)
+	dest := filepath.Join(destDir, ".claude.json")
+
+	if _, err := os.Stat(dest); err == nil {
+		return // already exists; do not overwrite profile overrides
+	}
+
+	src := filepath.Join(hostHome, ".claude.json")
+	data, err := os.ReadFile(src)
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return
+	}
+
+	for _, key := range []string{"oauthAccount", "mcpServers"} {
+		if data, err = merge.DeleteJSONKeyBytes(data, key); err != nil {
+			logger.Warn("[claude] Failed to strip %s from seeded .claude.json: %v", key, err)
+			return
+		}
+	}
+
+	if err := writeSettings(dest, data, 0o600); err != nil {
+		logger.Warn("[claude] Failed to write .claude.json to %s: %v", dest, err)
 	}
 }
 

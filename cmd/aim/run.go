@@ -136,6 +136,15 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 	r := runner.NewRunner()
 	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", extraArgs)
 	code := withSessionMerge(adapter, pm.MergeStateStore(), profileName, pDir, cfg, extraArgs, func() int {
+		if isMCPListInvocation(extraArgs) {
+			if listProv, ok := adapter.(agents.MCPListProvider); ok {
+				servers, listErr := listProv.ListMCPServers(context.Background(), profileName, pDir)
+				if listErr == nil {
+					renderMCPListTable(os.Stdout, adapter.Name(), profileName, servers)
+					return 0
+				}
+			}
+		}
 		c, runErr := r.Run(context.Background(), launchEnv, extraArgs)
 		err = runErr
 		return c
@@ -239,4 +248,19 @@ func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mg
 	}
 
 	return latest.ID, nil
+}
+
+func isMCPListInvocation(extraArgs []string) bool {
+	if len(extraArgs) < 2 {
+		return false
+	}
+	if extraArgs[0] == "mcp" && extraArgs[1] == "list" {
+		for _, arg := range extraArgs[2:] {
+			if arg == "--json" || arg == "--raw" || arg == "-h" || arg == "--help" {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }

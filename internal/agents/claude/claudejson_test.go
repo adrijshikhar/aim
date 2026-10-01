@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,67 @@ func TestPrepareEnvAndDoctor_NeverWriteRootClaudeJSON(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(fresh, ".claude.json")); !os.IsNotExist(err) {
 		t.Fatal("PrepareEnv must not create <p>/.claude.json from the host file")
+	}
+}
+
+func TestPrepareEnv_SeedsProfileClaudeJSON(t *testing.T) {
+	home := isolatedHome(t)
+	hostConfig := `{
+  "oauthAccount": {"email": "host@example.com", "accountUuid": "acc-1"},
+  "mcpServers": {"host-mcp": {"command": "npx"}},
+  "hasCompletedOnboarding": true,
+  "lastOnboardingVersion": "2.1.286",
+  "theme": "dark",
+  "projects": {
+    "/Users/test/project": {
+      "hasTrustDialogAccepted": true,
+      "hasClaudeMdExternalIncludesApproved": true
+    }
+  }
+}`
+	_ = os.WriteFile(filepath.Join(home, ".claude.json"), []byte(hostConfig), 0o600)
+
+	p := filepath.Join(home, "profiles", "dev")
+	_ = os.MkdirAll(p, 0o700)
+	a := &Adapter{}
+	if _, err := a.PrepareEnv("dev", p); err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+
+	dest := filepath.Join(p, ".claude", ".claude.json")
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("expected %s to be created: %v", dest, err)
+	}
+
+	content := string(data)
+	if strings.Contains(content, "oauthAccount") || strings.Contains(content, "host@example.com") {
+		t.Errorf("seeded config must NOT contain oauthAccount: %s", content)
+	}
+	if strings.Contains(content, "mcpServers") || strings.Contains(content, "host-mcp") {
+		t.Errorf("seeded config must NOT contain static mcpServers: %s", content)
+	}
+	if !strings.Contains(content, `"hasCompletedOnboarding":true`) && !strings.Contains(content, `"hasCompletedOnboarding": true`) {
+		t.Errorf("expected hasCompletedOnboarding to be preserved: %s", content)
+	}
+	if !strings.Contains(content, "hasTrustDialogAccepted") || !strings.Contains(content, "hasClaudeMdExternalIncludesApproved") {
+		t.Errorf("expected projects trust to be preserved: %s", content)
+	}
+
+	// Verify permissions are 0600
+	fi, err := os.Stat(dest)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("expected permissions 0600, got %v (err %v)", fi.Mode().Perm(), err)
+	}
+
+	// Verify existing .claude/.claude.json is NEVER overwritten
+	customContent := `{"custom":"profile-value"}`
+	_ = os.WriteFile(dest, []byte(customContent), 0o600)
+	if _, err := a.PrepareEnv("dev", p); err != nil {
+		t.Fatalf("second PrepareEnv failed: %v", err)
+	}
+	afterData, _ := os.ReadFile(dest)
+	if string(afterData) != customContent {
+		t.Errorf("existing profile config was overwritten: got %s, want %s", string(afterData), customContent)
 	}
 }
