@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/adrijshikhar/aim/compare/v0.10.1...v0.11.0) (2026-10-01)
+
+
+### Features
+
+* **mcp:** adapter-aware MCP list formatting, run interception, and Claude config seeding ([#66](https://github.com/adrijshikhar/aim/issues/66)) ([97df544](https://github.com/adrijshikhar/aim/commit/97df5444c027b20357d12eacf856412a14b108ac))
+
+
+### Bug Fixes
+
+* **build:** eliminate git describe hash suffixes from version output ([#68](https://github.com/adrijshikhar/aim/issues/68)) ([34d8afa](https://github.com/adrijshikhar/aim/commit/34d8afa23cf51dcdeab08fa4e4cc59ca52a36177))
+
 ## [0.10.1](https://github.com/adrijshikhar/aim/compare/v0.10.0...v0.10.1) (2026-10-01)
 
 
