@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/adrijshikhar/aim/compare/v0.11.1...v0.11.2) (2026-10-01)
+
+
+### Performance Improvements
+
+* **usage:** parallelize agy quota subprocesses and enable stale-while-revalidate ([#71](https://github.com/adrijshikhar/aim/issues/71)) ([ffcca81](https://github.com/adrijshikhar/aim/commit/ffcca81d073bfd3099b65bf7b5a54b55ee2933d5))
+
 ## [0.11.1](https://github.com/adrijshikhar/aim/compare/v0.11.0...v0.11.1) (2026-10-01)
 
 
