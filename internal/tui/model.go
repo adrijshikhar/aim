@@ -275,8 +275,10 @@ func (m Model) getReport(prof string) (usage.Report, bool) {
 	if rep, ok := m.reports[fmt.Sprintf("%s:%s", m.agent, prof)]; ok {
 		return rep, true
 	}
-	rep, ok := m.reports[prof]
-	return rep, ok
+	if rep, ok := m.reports[prof]; ok && (rep.Agent == "" || rep.Agent == m.agent) {
+		return rep, true
+	}
+	return usage.Report{}, false
 }
 
 func (m Model) getReportForAgent(agent, prof string) (usage.Report, bool) {

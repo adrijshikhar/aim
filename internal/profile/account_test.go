@@ -155,3 +155,60 @@ func TestGetProfileAccountInfo_Codex(t *testing.T) {
 		t.Errorf("expected agent email 'codex@test.io', got %q", agentInfo.Email)
 	}
 }
+
+func TestGetProfileAccountInfo_Claude(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	_ = os.MkdirAll(claudeDir, 0700)
+
+	claudeJSON := `{
+		"oauthAccount": {
+			"emailAddress": "adrij@hevodata.com",
+			"fullName": "Adrij Shikhar",
+			"organizationName": "Hevo-PED",
+			"organizationType": "claude_team",
+			"billingType": "stripe_subscription"
+		}
+	}`
+	_ = os.WriteFile(filepath.Join(claudeDir, ".claude.json"), []byte(claudeJSON), 0600)
+
+	// Agent-specific extraction
+	info := GetProfileAccountInfoForAgent(tmpDir, "claude")
+	if info.Email != "adrij@hevodata.com" {
+		t.Errorf("expected claude email 'adrij@hevodata.com', got %q", info.Email)
+	}
+	if info.Name != "Adrij Shikhar" {
+		t.Errorf("expected claude name 'Adrij Shikhar', got %q", info.Name)
+	}
+	if info.AuthMethod != "Claude Team (Hevo-PED)" {
+		t.Errorf("expected auth method 'Claude Team (Hevo-PED)', got %q", info.AuthMethod)
+	}
+}
+
+func TestGetProfileAccountInfo_AgentIsolation(t *testing.T) {
+	// A directory with ONLY Codex auth must NOT return anything when claude is requested
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+
+	authJSON := `{"tokens":{"access_token":"mock"},"email":"codex-only@test.io"}`
+	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(authJSON), 0600)
+
+	// Requesting claude must return EMPTY, never Codex's credentials
+	claudeInfo := GetProfileAccountInfoForAgent(tmpDir, "claude")
+	if claudeInfo.Email != "" || claudeInfo.AuthMethod != "" {
+		t.Fatalf("CRITICAL ISOLATION BREACH: claude requested but got codex credentials: %+v", claudeInfo)
+	}
+
+	// Requesting agy must return EMPTY
+	agyInfo := GetProfileAccountInfoForAgent(tmpDir, "agy")
+	if agyInfo.Email != "" || agyInfo.AuthMethod != "" {
+		t.Fatalf("CRITICAL ISOLATION BREACH: agy requested but got codex credentials: %+v", agyInfo)
+	}
+
+	// Requesting codex must return the credentials
+	codexInfo := GetProfileAccountInfoForAgent(tmpDir, "codex")
+	if codexInfo.Email != "codex-only@test.io" {
+		t.Errorf("expected codex email 'codex-only@test.io', got %q", codexInfo.Email)
+	}
+}

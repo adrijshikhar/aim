@@ -41,6 +41,10 @@ func (m Model) renderInspector(curProfile string) string {
 	var s strings.Builder
 	s.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextDim).Render("── Profile Details: "+curProfile+" ──") + "\n")
 	rep, hasReport := m.getReport(curProfile)
+	if hasReport && rep.Agent != "" && rep.Agent != m.agent {
+		hasReport = false
+		rep = usage.Report{}
+	}
 	lblStyle := lipgloss.NewStyle().Width(14).Foreground(TextSecondary)
 
 	// Resolve account info from credentials or report

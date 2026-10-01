@@ -230,6 +230,23 @@ func TestProfileManager_ListProfilesForAgent(t *testing.T) {
 	if nilPMProfiles != nil {
 		t.Errorf("expected nil profiles with nil ProfileManager, got %v", nilPMProfiles)
 	}
+
+	// 9. Explicitly configured profile with [agy] only must NOT match claude even if credentials exist on disk
+	_, _ = pm.EnsureProfile("office")
+	cfg.AddProfileAgent("office", "agy") // Explicitly agy only
+	claudeCreds := filepath.Join(pm.ProfileDir("office"), ".claude", ".credentials.json")
+	_ = os.MkdirAll(filepath.Dir(claudeCreds), 0755)
+	_ = os.WriteFile(claudeCreds, []byte(`{"claudeAiOauth":{"accessToken":"tok"}}`), 0600)
+
+	claudeMatches, err := pm.ListProfilesForAgent("claude", cfg, reg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, m := range claudeMatches {
+		if m == "office" {
+			t.Fatalf("CRITICAL: profile 'office' with explicit agents [agy] was matched for 'claude' due to disk credentials!")
+		}
+	}
 }
 
 func TestProfileManager_DeleteProfileAndRemoveAgent(t *testing.T) {

@@ -1494,6 +1494,70 @@ func TestTUI_ProfileDetails_AccountEmailDisplay(t *testing.T) {
 	}
 }
 
+func TestTUI_ClaudeTab_IsolationFromCodex(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+	pm := profile.NewProfileManager(tmpDir)
+	cfg := config.NewDefaultConfig()
+
+	// 1. Office profile has codex and claude
+	officeDir, err := pm.EnsureProfile("office")
+	if err != nil {
+		t.Fatalf("EnsureProfile failed: %v", err)
+	}
+	cfg.AddProfileAgent("office", "codex")
+	cfg.AddProfileAgent("office", "claude")
+
+	// Office has Codex auth (ChatGPT Pro)
+	claimsCodex := `{"email":"adrij@hevodata.com","name":"Adrij Shikhar","https://api.openai.com/auth":{"chatgpt_plan_type":"pro"}}`
+	b64Codex := base64.RawURLEncoding.EncodeToString([]byte(claimsCodex))
+	codexAuth := fmt.Sprintf(`{"tokens":{"id_token":"h.%s.s"}}`, b64Codex)
+	_ = os.MkdirAll(filepath.Join(officeDir, ".codex"), 0700)
+	_ = os.WriteFile(filepath.Join(officeDir, ".codex", "auth.json"), []byte(codexAuth), 0600)
+
+	// Office has Claude auth (Claude Team)
+	claudeJSON := `{"oauthAccount":{"emailAddress":"adrij@hevodata.com","fullName":"Adrij Shikhar","organizationName":"Hevo-PED","organizationType":"claude_team"}}`
+	_ = os.MkdirAll(filepath.Join(officeDir, ".claude"), 0700)
+	_ = os.WriteFile(filepath.Join(officeDir, ".claude", ".claude.json"), []byte(claudeJSON), 0600)
+
+	// 2. Work profile has codex and agy (NOT claude)
+	workDir, err := pm.EnsureProfile("work")
+	if err != nil {
+		t.Fatalf("EnsureProfile failed: %v", err)
+	}
+	cfg.AddProfileAgent("work", "codex")
+	cfg.AddProfileAgent("work", "agy")
+
+	// But work has stale Claude credentials on disk
+	_ = os.MkdirAll(filepath.Join(workDir, ".claude"), 0700)
+	_ = os.WriteFile(filepath.Join(workDir, ".claude", ".credentials.json"), []byte(`{"claudeAiOauth":{"subscriptionType":"team"}}`), 0600)
+
+	reg := agents.NewRegistry()
+	m := NewModel(reg, pm, cfg)
+
+	// Switch to Claude tab
+	mClaude, _ := m.switchAgent("claude")
+
+	// 1. Assert 'work' is NOT listed under Claude profiles
+	for _, p := range mClaude.Profiles() {
+		if p == "work" {
+			t.Fatalf("ISOLATION LEAK: 'work' [codex, agy] was listed under Claude tab!")
+		}
+	}
+	if len(mClaude.Profiles()) != 1 || mClaude.Profiles()[0] != "office" {
+		t.Fatalf("expected only ['office'] in Claude tab profiles, got: %v", mClaude.Profiles())
+	}
+
+	// 2. Assert Claude view renders Claude auth method, NOT ChatGPT from Codex
+	view := mClaude.View()
+	if strings.Contains(view, "ChatGPT") {
+		t.Fatalf("ISOLATION LEAK: Claude tab view contains 'ChatGPT' from Codex auth!\n%s", view)
+	}
+	if !strings.Contains(view, "Claude Team (Hevo-PED)") {
+		t.Errorf("expected view to contain 'Claude Team (Hevo-PED)', got:\n%s", view)
+	}
+}
+
 func TestTUI_NoProfiles_NoDefaultProfileLoaded(t *testing.T) {
 	emptyDir := t.TempDir()
 	t.Setenv("AIM_HOME", emptyDir)
