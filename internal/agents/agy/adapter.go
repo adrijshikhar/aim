@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -893,17 +894,27 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		usageErr   error
 		creditsOut []byte
 		creditsErr error
+		wg         sync.WaitGroup
 	)
 
-	cmdUsage := exec.CommandContext(ctx, bin, "--print", "/usage")
-	cmdUsage.Dir = profileDir
-	cmdUsage.Env = env
-	usageOut, usageErr = cmdUsage.Output()
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		cmdUsage := exec.CommandContext(ctx, bin, "--print", "/usage")
+		cmdUsage.Dir = profileDir
+		cmdUsage.Env = env
+		usageOut, usageErr = cmdUsage.Output()
+	}()
 
-	cmdCredits := exec.CommandContext(ctx, bin, "--print", "/credits")
-	cmdCredits.Dir = profileDir
-	cmdCredits.Env = env
-	creditsOut, creditsErr = cmdCredits.Output()
+	go func() {
+		defer wg.Done()
+		cmdCredits := exec.CommandContext(ctx, bin, "--print", "/credits")
+		cmdCredits.Dir = profileDir
+		cmdCredits.Env = env
+		creditsOut, creditsErr = cmdCredits.Output()
+	}()
+
+	wg.Wait()
 
 	if usageErr != nil {
 		report := &usage.Report{

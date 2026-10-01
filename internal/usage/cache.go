@@ -89,6 +89,36 @@ func (c *CacheStore) Get(agent, profile string) (Report, bool) {
 	return rep, true
 }
 
+// GetStale returns the cached report for the given agent and profile even if it has exceeded
+// its TTL. This implements stale-while-revalidate for instantaneous UI rendering on launch.
+func (c *CacheStore) GetStale(agent, profile string) (Report, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	rep, ok := c.reports[key(agent, profile)]
+	if !ok {
+		return Report{}, false
+	}
+
+	// Deep-copy Windows to avoid mutating shared slice backing array under RLock
+	if len(rep.Windows) > 0 {
+		windows := make([]LimitWindow, len(rep.Windows))
+		copy(windows, rep.Windows)
+		for i := range windows {
+			if !windows[i].ResetsAt.IsZero() {
+				rem := time.Until(windows[i].ResetsAt)
+				if rem < 0 {
+					rem = 0
+				}
+				windows[i].ResetsIn = rem
+			}
+		}
+		rep.Windows = windows
+	}
+	rep.FromCache = true
+	return rep, true
+}
+
 func (c *CacheStore) Put(report Report) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -115,7 +115,7 @@ func (m Model) loadCachedReports() Model {
 		return m
 	}
 	for _, p := range m.profiles {
-		if rep, found := m.cache.Get(m.agent, p); found {
+		if rep, found := m.cache.GetStale(m.agent, p); found {
 			if m.reports == nil {
 				m.reports = make(map[string]usage.Report)
 			}
@@ -313,13 +313,32 @@ func waitForUsageReport(ch <-chan usage.Report) tea.Cmd {
 	}
 }
 
-func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
+func (m Model) refreshTargets() []usage.TargetProfile {
 	reg := m.reg
 
 	var targets []usage.TargetProfile
 	if reg != nil {
 		if ad, err := reg.Get(m.agent); err == nil && ad != nil {
-			for _, p := range m.profiles {
+			orderedProfiles := m.profiles
+			filtered := m.filteredProfiles()
+			var selectedProfile string
+			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
+				selectedProfile = filtered[m.cursor]
+			} else if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
+				selectedProfile = m.profiles[m.cursor]
+			}
+
+			if selectedProfile != "" {
+				orderedProfiles = make([]string, 0, len(m.profiles))
+				orderedProfiles = append(orderedProfiles, selectedProfile)
+				for _, p := range m.profiles {
+					if p != selectedProfile {
+						orderedProfiles = append(orderedProfiles, p)
+					}
+				}
+			}
+
+			for _, p := range orderedProfiles {
 				pDir := ""
 				if m.pm != nil {
 					pDir = m.pm.ProfileDir(p)
@@ -333,6 +352,11 @@ func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
 			}
 		}
 	}
+	return targets
+}
+
+func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
+	targets := m.refreshTargets()
 
 	if m.usageStream == nil {
 		m.usageStream = &usageStream{}
