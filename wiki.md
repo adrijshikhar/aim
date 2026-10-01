@@ -175,15 +175,25 @@ Launching `aim` without arguments opens the terminal user interface built with C
   - 🟡 **Yellow (`10%–30%`)**: Approaching threshold.
   - 🔴 **Red (`<10%`)**: Depleted or near rate limit.
 - **Inspector Drawer**: Selecting a profile displays 5-hour limit, weekly limit, reset countdowns, credits remaining, and cache freshness.
-- **Actions**:
-  - `[Enter]`: Launch selected profile immediately.
-  - `[s]`: Open the Sessions Explorer drawer.
-  - `[l]`: Launch browser OAuth login to authenticate the profile.
-  - `[d]`: Open the embedded Doctor diagnostics drawer.
-  - `[m]` / `[R]`: Open the interactive profile rename modal.
-  - `[x]`: Open the interactive profile deletion modal.
-  - `[r]`: Bypass cache and force a live quota refresh.
-  - `[q]`: Quit.
+- **Keybindings** (press `?` in the dashboard for the same list):
+
+| Key | Action |
+|---|---|
+| `↑` / `k`, `↓` / `j` | Navigate profile list |
+| `Enter` | Launch selected profile |
+| `Tab` / `Shift+Tab` | Cycle agent tabs |
+| `1` – `3` | Jump to the first three agent tabs |
+| `/` | Live fuzzy filter (profile or agent name) |
+| `Esc` | Clear filter or close modal / drawer |
+| `s` | Sessions Explorer drawer (resume exact or Catalyst handoff) |
+| `l` | Browser OAuth login for the selected profile |
+| `d` | Doctor diagnostics drawer |
+| `m` / `R` | Rename selected profile |
+| `v` | Move selected profile |
+| `x` / `Delete` | Delete / unlink selected profile (with confirmation) |
+| `r` | Bypass cache and force a live quota refresh |
+| `?` | Toggle help overlay |
+| `q` / `Ctrl+C` | Quit |
 
 ---
 
@@ -237,18 +247,18 @@ When debug mode is active:
 
 ---
 
-## 5. Sessions, Cross-Profile Resumption & Catalyst Handoff
+## 7. Sessions, Cross-Profile Resumption & Catalyst Handoff
 
 AIM provides comprehensive conversation session discovery, cross-profile thread hydration, and vendor-neutral Catalyst handoffs across all configured profiles and host dotfiles.
 
-### 5.1 Multi-Source Discovery & Process Correlation
+### 7.1 Multi-Source Discovery & Process Correlation
 
 AIM inspects conversation storage across both virtualized profile homes (`~/.aim/profiles/*/`) and unmanaged host environments (`~/.gemini/antigravity-cli`, `~/.codex`):
 - **Antigravity (`agy`)**: Reads `conversation_summaries.db` extracting `conversation_id`, title, preview text, and last modified timestamps.
 - **Codex (`codex`)**: Scans `$CODEX_HOME/state_5.sqlite` (`threads` table) and falls back to JSONL index records (`session_index.jsonl`) and session rollout files (`sessions/*.jsonl`).
 - **Live Process Scanner**: Rather than relying on stale 0-byte `.lock` files, AIM inspects the active OS process table (`ps -eo pid,command`) matching `--conversation=<id>` (Antigravity) and `resume <id>` (Codex). Active processes are automatically marked with `Status: ACTIVE (PID <pid>)`.
 
-### 5.2 Dual-Mode Resumption
+### 7.2 Dual-Mode Resumption
 
 When resuming a conversation under a destination profile:
 1. **Exact Thread (`--exact` or `[Enter]` in TUI)**:
@@ -259,13 +269,13 @@ When resuming a conversation under a destination profile:
    - Extracts goal, decisions, and trajectory context into Catalyst's standard `.catalyst/handoffs/<branch>.json` brief.
    - Starts a fresh context window under the destination profile, primed with the condensed handoff brief. This eliminates context-rot and allows cross-vendor resumption (e.g. continuing an Antigravity task inside Codex).
 
-### 5.3 Codex Hook & Plugin Bridging
+### 7.3 Codex Hook & Plugin Bridging
 
 To ensure Catalyst handoff hooks fire reliably inside isolated Codex profiles, AIM automatically bridges:
 - Host `~/.codex/plugins/` → Profile `.codex/plugins/`
 - Host `~/.codex/hooks.json` & `~/.codex/hooks/` → Profile `.codex/hooks/` and `.codex/hooks.json`
 
-### 5.4 CLI Commands
+### 7.4 CLI Commands
 
 - `aim sessions [agent]`: Lists active and recent conversations formatted as tables, with `--profile`, `--agent`, `--active`, `--all`, and `--json` options.
 - `aim sessions show [agent] <session-id>`: Displays an instantaneous preview card with goal summary, metadata, status, and quick-resume tips (aliases: `preview`, `info`, `inspect`).
@@ -275,7 +285,66 @@ To ensure Catalyst handoff hooks fire reliably inside isolated Codex profiles, A
 
 ---
 
-## 6. Troubleshooting & Diagnostics
+## 8. Host Servers & Plugins
+
+MCP servers and enabled plugins in your normal agent config (the host) are available in
+every aim session. aim merges them into the profile when a session starts and takes them
+out again when the last session of that profile exits, so at rest a profile holds only
+its own. What is merged:
+
+| Agent | MCP servers | Plugins |
+|---|---|---|
+| Claude | `mcpServers` in `~/.claude.json` | `enabledPlugins` and `extraKnownMarketplaces` in `~/.claude/settings.json` |
+| Codex | `[mcp_servers.*]` in `~/.codex/config.toml` | `[plugins."<id>"]` in the same file, with the plugin's own sub-tables |
+| agy | `mcpServers` in the shared `mcp_config.json` | — (agy's plugins are fully shared already) |
+
+Only which plugins are on is scoped per profile; the installed plugin files and
+marketplaces stay shared with the host.
+
+When a session adds, edits or removes a server or plugin, aim asks at exit whether to
+promote the change to the host or keep it in that profile. When stdin is piped
+(`aim run claude work < file`) the prompt uses the controlling terminal (`/dev/tty`);
+without a terminal at all, or on Ctrl+C or a closed terminal at the prompt, the change is kept. A backgrounded run (`aim run … &`) keeps every change without prompting. Each change is listed with its collection, and a plugin switched on or off shows
+its new value (`~ enabledPlugins/x@m   edited (host item) → false`). A removed host item
+comes back next session. Background launches (`claude --bg`, `codex app-server`,
+`agy remote-control`) get the host items too; the next launch of that profile cleans up.
+Version and help invocations skip the merge entirely, as each CLI spells them: for
+`claude`, `-v`, `-V`, `--version`, `-h` and `--help`; for `codex`, `-V`, `--version`, `-h`,
+`--help` and `codex help`; for `agy`, `--version`, `-version`, `-h`, `--help`, `-help` and
+`agy help`. Anything else, such as `claude version` (a prompt), starts a session. Skipping
+the merge also leaves cleanup of a crashed or background session to the next real session.
+
+To switch a host plugin off in one profile only, disable it inside a session and keep the
+change: `aim run claude work plugin disable x@m` (for Codex, set `enabled = false` in the
+profile's `config.toml`). The profile's `false` is its own from then on and wins over the
+host's `true` in every later session. An item the profile defines always wins over the
+host's.
+
+To add a server or plugin to one profile only, run the agent's own command through aim and
+keep the change at exit: `aim run claude work mcp add -s user foo -- npx foo`.
+
+The first launch of an existing profile removes servers and plugins that are identical
+copies of the host's. Before it does, aim writes a backup next to the profile file, named
+`<file>.aim-backup-<UTC timestamp>`; delete those backups once the profile looks right. A
+profile entry that differs from the host's stays the profile's own. For example, a Codex
+profile holding 17 plugin tables identical to the host's and one the host no longer has
+loses the 17 (backed up), keeps the other as its own, and sees the host's plugins in its
+sessions. A new profile starts with none of the host's servers or plugins in its config.
+
+While a foreground `aim run` session of a profile is live, `aim remove`, `aim mv` and the TUI's
+rename, move and delete refuse with "profile <p> has a running <agent> session; exit it
+first"; `aim clone` still works. Background launches (`claude --bg`, `codex app-server`,
+`agy remote-control`) are not detected.
+
+Agents started by hand in a profile, outside `aim run` (an IDE pointed at the profile's
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME`), see only the profile's own servers and plugins.
+
+Turn the merge off per profile in `~/.aim/config.json`: `"mcp_global": false` for servers,
+`"plugins_global": false` for plugins.
+
+---
+
+## 9. Troubleshooting & Diagnostics
 
 For common operational issues, edge cases, and step-by-step remedies:
 - OAuth refresh token revocation (`Your access token could not be refreshed...`)

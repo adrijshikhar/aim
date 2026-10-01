@@ -9,6 +9,9 @@
       "exclude-paths": [
         "website",
         "docs"
+      ],
+      "extra-files": [
+        "install.sh"
       ]
     }
   }

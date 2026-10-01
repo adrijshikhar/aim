@@ -26,6 +26,8 @@ make build
 make install
 ```
 
+`make build` stamps the binary via `-ldflags`: `VERSION` comes from `git describe --tags` (leading `v` stripped), plus `COMMIT` and `DATE`. `aim --version` therefore prints e.g. `0.10.0` on a tag or `0.10.0-2-ge1835e2` between tags. Override with `make install VERSION=x.y.z`.
+
 ---
 
 ## 2. Testing & Quality Gates
