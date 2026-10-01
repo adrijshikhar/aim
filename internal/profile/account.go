@@ -3,6 +3,7 @@ package profile
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,23 +31,26 @@ func GetProfileAccountInfoForAgent(profileDir, agentName string) AccountInfo {
 	}
 
 	switch agentName {
+	case "claude", "claude-code":
+		return extractFromClaudeAuth(profileDir)
 	case "codex", "codex-cli", "openai-codex":
 		codexAuthPath := filepath.Join(profileDir, ".codex", "auth.json")
-		if info := extractFromCodexAuthFile(codexAuthPath); info.Email != "" || info.AuthMethod != "" {
-			return info
-		}
+		return extractFromCodexAuthFile(codexAuthPath)
 	case "gemini", "gemini-cli":
 		geminiTokenPath := filepath.Join(profileDir, ".gemini", "gemini-oauth-token")
-		if info := extractFromTokenFile(geminiTokenPath); info.Email != "" || info.AuthMethod != "" {
-			return info
-		}
+		return extractFromTokenFile(geminiTokenPath)
 	case "agy", "antigravity":
 		agyTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-		if info := extractFromTokenFile(agyTokenPath); info.Email != "" || info.AuthMethod != "" {
-			return info
-		}
+		return extractFromTokenFile(agyTokenPath)
 	}
 
+	// If a specific agent was requested, never fall through to check credentials
+	// of other agents. Doing so leaks another agent's account identity and auth method.
+	if agentName != "" {
+		return AccountInfo{}
+	}
+
+	// Unspecified agentName: check in priority order
 	// 1. Check Antigravity OAuth token
 	agyTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
 	if info := extractFromTokenFile(agyTokenPath); info.Email != "" || info.AuthMethod != "" {
@@ -71,7 +75,82 @@ func GetProfileAccountInfoForAgent(profileDir, agentName string) AccountInfo {
 		return info
 	}
 
+	// 5. Check Claude auth files
+	if info := extractFromClaudeAuth(profileDir); info.Email != "" || info.AuthMethod != "" {
+		return info
+	}
+
 	return AccountInfo{}
+}
+
+func extractFromClaudeAuth(profileDir string) AccountInfo {
+	claudeDir := filepath.Join(profileDir, ".claude")
+
+	var email, name, authMethod string
+
+	// 1. Try reading .claude/.claude.json
+	claudeJSONPath := filepath.Join(claudeDir, ".claude.json")
+	if data, err := os.ReadFile(claudeJSONPath); err == nil && len(data) > 0 {
+		var root struct {
+			OAuthAccount struct {
+				EmailAddress     string `json:"emailAddress"`
+				FullName         string `json:"fullName"`
+				DisplayName      string `json:"displayName"`
+				BillingType      string `json:"billingType"`
+				OrganizationName string `json:"organizationName"`
+				OrganizationType string `json:"organizationType"`
+				SeatTier         string `json:"seatTier"`
+			} `json:"oauthAccount"`
+		}
+		if err := json.Unmarshal(data, &root); err == nil && root.OAuthAccount.EmailAddress != "" {
+			email = root.OAuthAccount.EmailAddress
+			name = root.OAuthAccount.FullName
+			if name == "" {
+				name = root.OAuthAccount.DisplayName
+			}
+			if root.OAuthAccount.OrganizationName != "" {
+				if root.OAuthAccount.OrganizationType == "claude_team" {
+					authMethod = fmt.Sprintf("Claude Team (%s)", root.OAuthAccount.OrganizationName)
+				} else {
+					authMethod = fmt.Sprintf("Claude (%s)", root.OAuthAccount.OrganizationName)
+				}
+			} else if root.OAuthAccount.SeatTier != "" {
+				authMethod = fmt.Sprintf("Claude (%s)", root.OAuthAccount.SeatTier)
+			} else if root.OAuthAccount.BillingType != "" {
+				authMethod = fmt.Sprintf("Claude (%s)", root.OAuthAccount.BillingType)
+			} else {
+				authMethod = "Claude OAuth"
+			}
+		}
+	}
+
+	// 2. Try reading .claude/.credentials.json
+	credsPath := filepath.Join(claudeDir, ".credentials.json")
+	if data, err := os.ReadFile(credsPath); err == nil && len(data) > 0 {
+		var creds struct {
+			ClaudeAIOAuth struct {
+				SubscriptionType string `json:"subscriptionType"`
+			} `json:"claudeAiOauth"`
+		}
+		if err := json.Unmarshal(data, &creds); err == nil {
+			if authMethod == "" && creds.ClaudeAIOAuth.SubscriptionType != "" {
+				authMethod = fmt.Sprintf("Claude (%s)", creds.ClaudeAIOAuth.SubscriptionType)
+			} else if authMethod == "" && HasClaudeCredentials(data) {
+				authMethod = "Claude OAuth"
+			}
+		}
+	}
+
+	// 3. Check for API key in env
+	if authMethod == "" && os.Getenv("ANTHROPIC_API_KEY") != "" {
+		authMethod = "Anthropic API Key"
+	}
+
+	return AccountInfo{
+		Email:      email,
+		Name:       name,
+		AuthMethod: authMethod,
+	}
 }
 
 func extractFromTokenFile(path string) AccountInfo {

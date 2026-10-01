@@ -300,9 +300,14 @@ func (m *ProfileManager) ListProfilesForAgent(agentName string, cfg *config.Conf
 
 	matched := make([]string, 0)
 	for _, p := range all {
-		if cfg != nil && cfg.HasAgent(p, agentName) {
-			matched = append(matched, p)
-			continue
+		if cfg != nil {
+			agentsList := cfg.GetProfileAgents(p)
+			if len(agentsList) > 0 {
+				if cfg.HasAgent(p, agentName) {
+					matched = append(matched, p)
+				}
+				continue
+			}
 		}
 		if adapter != nil && adapter.HasCredentials(m.ProfileDir(p)) {
 			matched = append(matched, p)
