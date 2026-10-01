@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -770,6 +772,124 @@ func TestTUIUsage_TrueStreaming(t *testing.T) {
 	_ = updatedDone
 	if nilCmd != nil {
 		t.Fatalf("expected nil cmd after usageStreamClosedMsg")
+	}
+}
+
+type mockUsageOrderAdapter struct {
+	name    string
+	usageFn func(ctx context.Context, profileName, profileDir string) (*usage.Report, error)
+}
+
+func (m *mockUsageOrderAdapter) Name() string                          { return m.name }
+func (m *mockUsageOrderAdapter) DisplayName() string                   { return m.name }
+func (m *mockUsageOrderAdapter) Aliases() []string                     { return nil }
+func (m *mockUsageOrderAdapter) BinaryName() string                    { return m.name }
+func (m *mockUsageOrderAdapter) HasCredentials(profileDir string) bool { return true }
+func (m *mockUsageOrderAdapter) Login(ctx context.Context, profileName, profileDir string) error {
+	return nil
+}
+func (m *mockUsageOrderAdapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+	return agents.LaunchEnv{}, nil
+}
+func (m *mockUsageOrderAdapter) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {
+	return nil
+}
+func (m *mockUsageOrderAdapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	if m.usageFn != nil {
+		return m.usageFn(ctx, profileName, profileDir)
+	}
+	return &usage.Report{Agent: m.name, Profile: profileName, Status: usage.StatusOK}, nil
+}
+
+func TestTUIUsage_LoadCachedReports_Stale(t *testing.T) {
+	baseDir := t.TempDir()
+	pm := profile.NewProfileManager(baseDir)
+	cfg := config.NewDefaultConfig()
+	_, _ = pm.EnsureProfile("p1")
+	cfg.AddProfileAgent("p1", "agy")
+
+	// Pre-populate cache with an expired report (TTL = 1 millisecond)
+	store := usage.NewCacheStore(baseDir, 1*time.Millisecond)
+	rep := usage.Report{
+		Agent:     "agy",
+		Profile:   "p1",
+		Status:    usage.StatusOK,
+		Summary:   "100% left",
+		FetchedAt: time.Now().Add(-1 * time.Hour),
+	}
+	store.Put(rep)
+	time.Sleep(5 * time.Millisecond)
+
+	// Verify standard Get returns false (expired)
+	if _, found := store.Get("agy", "p1"); found {
+		t.Fatalf("expected Get to return false for expired cache entry")
+	}
+
+	reg := agents.NewRegistry()
+	m := NewModel(reg, pm, cfg)
+	m.cache = store
+	m = m.loadCachedReports()
+
+	// Should load stale report into m.reports immediately
+	cached, ok := m.reports["agy:p1"]
+	if !ok {
+		t.Fatalf("expected stale report to be loaded into m.reports")
+	}
+	if cached.Summary != "100% left" {
+		t.Fatalf("expected summary '100%% left', got %q", cached.Summary)
+	}
+}
+
+func TestTUIUsage_TriggerRefreshCmd_PrioritizesCursor(t *testing.T) {
+	baseDir := t.TempDir()
+	pm := profile.NewProfileManager(baseDir)
+	cfg := config.NewDefaultConfig()
+	_, _ = pm.EnsureProfile("alpha")
+	_, _ = pm.EnsureProfile("beta")
+	_, _ = pm.EnsureProfile("gamma")
+	cfg.AddProfileAgent("alpha", "agy")
+	cfg.AddProfileAgent("beta", "agy")
+	cfg.AddProfileAgent("gamma", "agy")
+
+	var invokedOrder []string
+	var mu sync.Mutex
+	fakeAdapter := &mockUsageOrderAdapter{
+		name: "agy",
+		usageFn: func(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+			mu.Lock()
+			invokedOrder = append(invokedOrder, profileName)
+			mu.Unlock()
+			return &usage.Report{Agent: "agy", Profile: profileName, Status: usage.StatusOK}, nil
+		},
+	}
+	reg := agents.NewRegistry()
+	reg.Register(fakeAdapter)
+
+	m := NewModel(reg, pm, cfg)
+	defer m.cancelStream()
+	// Set cursor to 1 ("beta")
+	m.cursor = 1
+
+	targets := m.refreshTargets()
+	if len(targets) != 3 {
+		t.Fatalf("expected 3 targets, got %d", len(targets))
+	}
+	if targets[0].Profile != "beta" {
+		t.Fatalf("expected beta to be prioritized first, got %q", targets[0].Profile)
+	}
+
+	cmd := m.triggerRefreshCmd(true)
+	if cmd == nil {
+		t.Fatalf("expected non-nil cmd")
+	}
+
+	// Drain reports until stream closes so background workers cleanly exit
+	for {
+		msg := cmd()
+		if _, ok := msg.(usageStreamClosedMsg); ok {
+			break
+		}
+		cmd = waitForUsageReport(m.usageStream.ch)
 	}
 }
 

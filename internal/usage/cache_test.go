@@ -72,6 +72,12 @@ func TestCacheStorePutGetAndExpiry(t *testing.T) {
 	if foundExpired {
 		t.Fatal("expected expired entry to be treated as cache miss")
 	}
+
+	// But GetStale still returns it for instant UI rendering
+	staleRep, foundStale := store.GetStale("agy", "work")
+	if !foundStale || staleRep.Status != usage.StatusOK {
+		t.Fatalf("expected GetStale to return expired entry for stale-while-revalidate: found=%v, %+v", foundStale, staleRep)
+	}
 }
 
 func TestCacheStoreConcurrentAccess(t *testing.T) {
