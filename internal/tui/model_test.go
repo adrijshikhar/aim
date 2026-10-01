@@ -780,11 +780,11 @@ type mockUsageOrderAdapter struct {
 	usageFn func(ctx context.Context, profileName, profileDir string) (*usage.Report, error)
 }
 
-func (m *mockUsageOrderAdapter) Name() string                                         { return m.name }
-func (m *mockUsageOrderAdapter) DisplayName() string                                  { return m.name }
-func (m *mockUsageOrderAdapter) Aliases() []string                                    { return nil }
-func (m *mockUsageOrderAdapter) BinaryName() string                                   { return m.name }
-func (m *mockUsageOrderAdapter) HasCredentials(profileDir string) bool               { return true }
+func (m *mockUsageOrderAdapter) Name() string                          { return m.name }
+func (m *mockUsageOrderAdapter) DisplayName() string                   { return m.name }
+func (m *mockUsageOrderAdapter) Aliases() []string                     { return nil }
+func (m *mockUsageOrderAdapter) BinaryName() string                    { return m.name }
+func (m *mockUsageOrderAdapter) HasCredentials(profileDir string) bool { return true }
 func (m *mockUsageOrderAdapter) Login(ctx context.Context, profileName, profileDir string) error {
 	return nil
 }
