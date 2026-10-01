@@ -126,3 +126,67 @@ func TestArgs_Codex_ProfileArgsFirst(t *testing.T) {
 		t.Error("codex --model opus exec app-server is a prompt, not the app server")
 	}
 }
+
+func TestCodex_ListMCPServers_FallbackConfig(t *testing.T) {
+	prof := t.TempDir()
+	codexDir := filepath.Join(prof, ".codex")
+	_ = os.MkdirAll(codexDir, 0o700)
+
+	cfg := `
+[mcp_servers.playwright]
+command = "npx"
+args = ["@playwright/mcp@latest"]
+
+[mcp_servers.atlassian-oauth]
+url = "https://mcp.atlassian.com/v2/mcp"
+
+[mcp_servers.disabled-srv]
+command = "echo"
+enabled = false
+
+[plugins."hevo@hevo".mcp_servers.hevo-srv]
+command = "sh"
+args = ["-c", "url=\"http://localhost\"; exec env URL=\"$url\" uvx mcp-hevo"]
+`
+	_ = os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(cfg), 0o600)
+
+	a := &Adapter{}
+	// Test direct fallback config parser
+	servers, err := a.listMCPServersFromConfig(prof)
+	if err != nil {
+		t.Fatalf("listMCPServersFromConfig failed: %v", err)
+	}
+
+	if len(servers) != 4 {
+		t.Fatalf("expected 4 servers, got %d", len(servers))
+	}
+
+	// Verify order is sorted
+	expectedNames := []string{"atlassian-oauth", "disabled-srv", "hevo-srv", "playwright"}
+	for i, name := range expectedNames {
+		if servers[i].Name != name {
+			t.Errorf("server[%d] name = %q, want %q", i, servers[i].Name, name)
+		}
+	}
+
+	// Check atlassian-oauth
+	if servers[0].Type != "http" || servers[0].Auth != "OAuth" || servers[0].Status != "enabled" {
+		t.Errorf("atlassian-oauth server info mismatch: %+v", servers[0])
+	}
+
+	// Check disabled-srv
+	if servers[1].Status != "disabled" {
+		t.Errorf("disabled-srv should be disabled: %+v", servers[1])
+	}
+
+	// Check hevo-srv from plugin
+	if servers[2].Origin != "plugin:hevo@hevo" || servers[2].Target != "uvx mcp-hevo" {
+		t.Errorf("hevo-srv info mismatch: %+v", servers[2])
+	}
+
+	// Check playwright
+	if servers[3].Target != "npx @playwright/mcp@latest" {
+		t.Errorf("playwright target mismatch: %s", servers[3].Target)
+	}
+}
+

@@ -78,6 +78,14 @@ if [ "\$1" = "auth" ] && [ "\$2" = "login" ]; then
   echo "mock $AGENT login successful"
   exit 0
 fi
+if [ "\$1" = "mcp" ] && [ "\$2" = "list" ]; then
+  if [ "\${3:-}" = "--json" ]; then
+    echo '[{"name":"atlassian-oauth","enabled":true,"transport":{"type":"streamable_http","url":"https://mcp.atlassian.com/v2/mcp"},"auth_status":"o_auth"},{"name":"playwright","enabled":true,"transport":{"type":"stdio","command":"npx","args":["@playwright/mcp@latest"]},"auth_status":"unsupported"}]'
+    exit 0
+  fi
+  echo "MOCK_NATIVE_MCP_LIST_RAN"
+  exit 0
+fi
 echo "AGENT_INVOKED: $AGENT" >> "$TEST_DIR/${AGENT}_invoked.log"
 echo "ARGS: \$*" >> "$TEST_DIR/${AGENT}_invoked.log"
 echo "HOME: \$HOME" >> "$TEST_DIR/${AGENT}_invoked.log"
@@ -1092,7 +1100,187 @@ done
 
 unset E2E_HOOK E2E_MCP_ADD E2E_MCP_REL E2E_MCP_KEY E2E_MCP_FORMAT E2E_SNAP E2E_MCP_MODE
 
+# ==============================================================================
+# 12. Claude Configuration Seeding & Onboarding Prevention
+# Verify host ~/.claude.json onboarding preferences & project trust are seeded
+# into new profiles without oauthAccount or static mcpServers leakage.
+# ==============================================================================
+echo ""
+echo "========================================================================"
+echo "  12. CLAUDE CONFIG SEEDING & ONBOARDING TRUST                          "
+echo "========================================================================"
+
+CLAUDE_PROF="claudefresh"
+mkdir -p "$AIM_REAL_HOME"
+cat << 'HOSTJSON' > "$AIM_REAL_HOME/.claude.json"
+{
+  "oauthAccount": {
+    "accountUuid": "acc-12345",
+    "emailAddress": "host-leaked@example.com"
+  },
+  "mcpServers": {
+    "host-static-mcp": {
+      "command": "npx",
+      "args": ["-y", "static-srv"]
+    }
+  },
+  "hasCompletedOnboarding": true,
+  "lastOnboardingVersion": "2.1.286",
+  "theme": "dark",
+  "projects": {
+    "/Users/test/workspace": {
+      "hasTrustDialogAccepted": true,
+      "hasClaudeMdExternalIncludesApproved": true
+    }
+  }
+}
+HOSTJSON
+
+echo "  Testing Claude profile launch seeds preferences without credential leakage..."
+"$AIM_BIN" run claude "$CLAUDE_PROF" --version > /dev/null
+
+SEEDED_CLAUDE="$AIM_HOME/profiles/$CLAUDE_PROF/.claude/.claude.json"
+if [ ! -f "$SEEDED_CLAUDE" ]; then
+  echo "FAIL: Expected seeded file $SEEDED_CLAUDE to exist"
+  exit 1
+fi
+
+SEEDED_CONTENT=$(cat "$SEEDED_CLAUDE")
+if echo "$SEEDED_CONTENT" | grep -q "oauthAccount" || echo "$SEEDED_CONTENT" | grep -q "host-leaked@example.com"; then
+  echo "FAIL: Seeded .claude.json leaked oauthAccount credentials!"
+  echo "$SEEDED_CONTENT"
+  exit 1
+fi
+
+if echo "$SEEDED_CONTENT" | grep -q "host-static-mcp"; then
+  echo "FAIL: Seeded .claude.json retained static mcpServers (Spec A requires dynamic session merge)!"
+  echo "$SEEDED_CONTENT"
+  exit 1
+fi
+
+if ! echo "$SEEDED_CONTENT" | grep -q '"hasCompletedOnboarding": *true'; then
+  echo "FAIL: Seeded .claude.json did NOT preserve hasCompletedOnboarding: true!"
+  echo "$SEEDED_CONTENT"
+  exit 1
+fi
+
+if ! echo "$SEEDED_CONTENT" | grep -q "hasTrustDialogAccepted" || ! echo "$SEEDED_CONTENT" | grep -q "hasClaudeMdExternalIncludesApproved"; then
+  echo "FAIL: Seeded .claude.json did NOT preserve project trust settings!"
+  echo "$SEEDED_CONTENT"
+  exit 1
+fi
+
+if [ -f "$AIM_HOME/profiles/$CLAUDE_PROF/.claude.json" ]; then
+  echo "FAIL: Invalid root file $AIM_HOME/profiles/$CLAUDE_PROF/.claude.json was created!"
+  exit 1
+fi
+
+echo "  ✔ Claude configuration correctly seeded: preferences and trust preserved with zero credential leakage"
+
+# ==============================================================================
+# 13. Adapter-Aware MCP List Output & Run Interception
+# Verify aim mcp list and transparent aim run <agent> <profile> mcp list interception
+# ==============================================================================
+echo ""
+echo "========================================================================"
+echo "  13. ADAPTER-AWARE MCP LIST OUTPUT & RUN INTERCEPTION                   "
+echo "========================================================================"
+
+MCP_TEST_PROF="mcptestprof"
+mkdir -p "$AIM_HOME/profiles/$MCP_TEST_PROF/.codex"
+cat << 'CODEXCFG' > "$AIM_HOME/profiles/$MCP_TEST_PROF/.codex/config.toml"
+[mcp_servers.playwright]
+command = "npx"
+args = ["@playwright/mcp@latest"]
+
+[mcp_servers.atlassian-oauth]
+url = "https://mcp.atlassian.com/v2/mcp"
+
+[mcp_servers.disabled-srv]
+command = "echo"
+enabled = false
+CODEXCFG
+
+mkdir -p "$AIM_HOME/profiles/$MCP_TEST_PROF/.claude"
+cat << 'CLAUDECFG' > "$AIM_HOME/profiles/$MCP_TEST_PROF/.claude/.claude.json"
+{
+  "mcpServers": {
+    "claude-tool": {
+      "command": "tool-bin",
+      "args": []
+    }
+  }
+}
+CLAUDECFG
+
+mkdir -p "$AIM_HOME/profiles/$MCP_TEST_PROF/.gemini/config"
+cat << 'AGYCFG' > "$AIM_HOME/profiles/$MCP_TEST_PROF/.gemini/config/mcp_config.json"
+{
+  "mcpServers": {
+    "agy-tool": {
+      "command": "agy-bin",
+      "args": []
+    }
+  }
+}
+AGYCFG
+
+echo "  [1/5] Testing 'aim mcp list codex $MCP_TEST_PROF' table output..."
+CODEX_TABLE=$("$AIM_BIN" mcp list codex "$MCP_TEST_PROF")
+if ! echo "$CODEX_TABLE" | grep -q "=== Configured MCP Servers (codex: $MCP_TEST_PROF) ==="; then
+  echo "FAIL: Missing codex table header"
+  echo "$CODEX_TABLE"
+  exit 1
+fi
+if ! echo "$CODEX_TABLE" | grep -q "atlassian-oauth" || ! echo "$CODEX_TABLE" | grep -q "playwright"; then
+  echo "FAIL: Missing codex servers in table output"
+  echo "$CODEX_TABLE"
+  exit 1
+fi
+echo "  ✔ Codex MCP list formatted table rendered cleanly"
+
+echo "  [2/5] Testing 'aim mcp list claude $MCP_TEST_PROF'..."
+CLAUDE_TABLE=$("$AIM_BIN" mcp list claude "$MCP_TEST_PROF")
+if ! echo "$CLAUDE_TABLE" | grep -q "claude-tool"; then
+  echo "FAIL: Missing claude-tool in claude table output"
+  echo "$CLAUDE_TABLE"
+  exit 1
+fi
+echo "  ✔ Claude MCP list rendered cleanly without hanging"
+
+echo "  [3/5] Testing 'aim mcp list agy $MCP_TEST_PROF'..."
+AGY_TABLE=$("$AIM_BIN" mcp list agy "$MCP_TEST_PROF")
+if ! echo "$AGY_TABLE" | grep -q "agy-tool"; then
+  echo "FAIL: Missing agy-tool in agy table output"
+  echo "$AGY_TABLE"
+  exit 1
+fi
+echo "  ✔ Agy MCP list rendered cleanly"
+
+echo "  [4/5] Testing 'aim mcp list codex $MCP_TEST_PROF --json'..."
+CODEX_JSON=$("$AIM_BIN" mcp list codex "$MCP_TEST_PROF" --json)
+if ! echo "$CODEX_JSON" | grep -q '"name": "atlassian-oauth"'; then
+  echo "FAIL: Expected json output for codex mcp list --json"
+  echo "$CODEX_JSON"
+  exit 1
+fi
+echo "  ✔ --json flag produced valid structured JSON"
+
+echo "  [5/5] Testing transparent interception of 'aim run codex $MCP_TEST_PROF mcp list'..."
+RUN_INTERCEPT=$("$AIM_BIN" run codex "$MCP_TEST_PROF" mcp list)
+if ! echo "$RUN_INTERCEPT" | grep -q "=== Configured MCP Servers (codex: $MCP_TEST_PROF) ==="; then
+  echo "FAIL: aim run codex mcp list was NOT intercepted into formatted table!"
+  echo "$RUN_INTERCEPT"
+  exit 1
+fi
+if echo "$RUN_INTERCEPT" | grep -q "MOCK_NATIVE_MCP_LIST_RAN"; then
+  echo "FAIL: native mock binary should NOT have run during interception"
+  exit 1
+fi
+echo "  ✔ 'aim run codex <profile> mcp list' was transparently intercepted into styled table"
+
 echo ""
 echo "========================================================================"
 echo "  ALL PARAMETERIZED E2E TESTS PASSED ACROSS ALL 4 ADAPTERS!              "
 echo "========================================================================"
+
