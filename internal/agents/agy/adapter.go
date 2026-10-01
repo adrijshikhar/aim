@@ -166,12 +166,12 @@ func (a *Adapter) IsTokenHealthy(profileName, profileDir string) bool {
 	}
 
 	// If access token is expired, check whether it is expired and cannot be refreshed
-	if expiryStr != "" {
+	if expiryStr != "" && refreshToken == "" {
 		if expiryTime, err := time.Parse(time.RFC3339, expiryStr); err == nil {
 			if time.Now().After(expiryTime) {
-				// If access token is expired, omit SSH_CONNECTION so that if refresh fails,
+				// If access token is expired and cannot be refreshed, omit SSH_CONNECTION so that
 				// Antigravity auto-opens the browser instead of suppressing it.
-				logger.Debug("[agy] IsTokenHealthy: false for profile %q (access token expired at %s)", profileName, expiryStr)
+				logger.Debug("[agy] IsTokenHealthy: false for profile %q (access token expired at %s and no refresh token)", profileName, expiryStr)
 				return false
 			}
 		}

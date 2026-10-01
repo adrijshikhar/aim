@@ -851,19 +851,33 @@ func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
 		t.Errorf("expected SSH_CONNECTION to be omitted when token is corrupt")
 	}
 
-	// 3. Expired token (past expiry) -> IsTokenHealthy should be false, SSH_CONNECTION omitted to enable browser auto-open
+	// 3. Expired token without refresh_token -> IsTokenHealthy should be false, SSH_CONNECTION omitted to enable browser auto-open
 	pastExpiry := time.Now().Add(-2 * time.Hour).Format(time.RFC3339)
-	expiredPayload := fmt.Sprintf(`{"token":{"access_token":"old_tok","refresh_token":"ref_tok","expiry":%q}}`, pastExpiry)
-	_ = os.WriteFile(tokenFile, []byte(expiredPayload), 0600)
+	expiredNoRefreshPayload := fmt.Sprintf(`{"token":{"access_token":"old_tok","refresh_token":"","expiry":%q}}`, pastExpiry)
+	_ = os.WriteFile(tokenFile, []byte(expiredNoRefreshPayload), 0600)
 	if adapter.IsTokenHealthy("testprof", profDir) {
-		t.Errorf("expected expired token to not be healthy")
+		t.Errorf("expected expired token without refresh_token to not be healthy")
 	}
 	envExpired, err := adapter.PrepareEnv("testprof", profDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
 	if _, exists := envExpired.Env["SSH_CONNECTION"]; exists {
-		t.Errorf("expected SSH_CONNECTION to be omitted when token is expired to enable browser auto-open")
+		t.Errorf("expected SSH_CONNECTION to be omitted when token is expired and cannot refresh")
+	}
+
+	// 3b. Expired access token WITH valid refresh_token -> IsTokenHealthy should be true, SSH_CONNECTION set for auto-refresh
+	expiredWithRefreshPayload := fmt.Sprintf(`{"token":{"access_token":"old_tok","refresh_token":"ref_tok","expiry":%q}}`, pastExpiry)
+	_ = os.WriteFile(tokenFile, []byte(expiredWithRefreshPayload), 0600)
+	if !adapter.IsTokenHealthy("testprof", profDir) {
+		t.Errorf("expected expired access token with valid refresh_token to be healthy (auto-refreshable)")
+	}
+	envAutoRefresh, err := adapter.PrepareEnv("testprof", profDir)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+	if envAutoRefresh.Env["SSH_CONNECTION"] != "127.0.0.1 50000 127.0.0.1 22" {
+		t.Errorf("expected SSH_CONNECTION to be set for auto-refreshable token, got %q", envAutoRefresh.Env["SSH_CONNECTION"])
 	}
 
 	// 4. Valid unexpired token -> IsTokenHealthy should be true, SSH_CONNECTION should be set
