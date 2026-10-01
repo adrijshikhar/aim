@@ -180,7 +180,6 @@ func CollapseCommand(cmd string, args []string) string {
 	return res
 }
 
-
 // MCPProvider is implemented by adapters whose config holds an MCP server map
 // that aim merges per session (spec §4).
 type MCPProvider interface {

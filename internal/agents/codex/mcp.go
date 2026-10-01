@@ -229,4 +229,3 @@ func (a *Adapter) listMCPServersFromConfig(profileDir string) ([]agents.MCPServe
 	})
 	return res, nil
 }
-

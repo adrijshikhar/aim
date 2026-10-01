@@ -189,4 +189,3 @@ args = ["-c", "url=\"http://localhost\"; exec env URL=\"$url\" uvx mcp-hevo"]
 		t.Errorf("playwright target mismatch: %s", servers[3].Target)
 	}
 }
-

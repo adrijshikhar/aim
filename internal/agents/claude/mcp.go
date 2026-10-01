@@ -145,4 +145,3 @@ func parseClaudeMCPServer(name string, v map[string]any, origin string) agents.M
 		Origin: origin,
 	}
 }
-

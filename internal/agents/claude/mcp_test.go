@@ -134,4 +134,3 @@ func TestClaude_ListMCPServers(t *testing.T) {
 		t.Errorf("shared-api mismatch: %+v", servers[2])
 	}
 }
-

@@ -118,4 +118,3 @@ func TestPrepareEnv_SeedsProfileClaudeJSON(t *testing.T) {
 		t.Errorf("existing profile config was overwritten: got %s, want %s", string(afterData), customContent)
 	}
 }
-
