@@ -74,9 +74,13 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 
 Add `--debug` to any command for verbose tracing.
 
+**`aim sessions`** — active and recent conversations across profiles and host:
+
 <p align="center">
   <img src="assets/cli-sessions.png" alt="aim sessions CLI Output" width="850" />
 </p>
+
+**`aim usage`** — quota limits, capacity gauges, and reset countdowns across accounts:
 
 <p align="center">
   <img src="assets/cli-usage.png" alt="aim usage Telemetry Table" width="850" />
