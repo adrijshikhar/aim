@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"runtime/debug"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
@@ -17,7 +18,7 @@ import (
 
 var (
 	// Version is the current version of AIM, injected at build time via -ldflags.
-	Version = "0.4.0"
+	Version = "dev"
 	// Commit is the git commit hash at build time.
 	Commit = "none"
 	// Date is the build timestamp.
@@ -27,8 +28,12 @@ var (
 )
 
 func init() {
-	if Commit == "none" {
-		if info, ok := debug.ReadBuildInfo(); ok {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		// `go install github.com/aim-cli/aim/cmd/aim@vX.Y.Z` records the module version.
+		if Version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			Version = strings.TrimPrefix(info.Main.Version, "v")
+		}
+		if Commit == "none" {
 			for _, setting := range info.Settings {
 				if setting.Key == "vcs.revision" && Commit == "none" {
 					Commit = setting.Value

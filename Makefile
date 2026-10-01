@@ -6,13 +6,19 @@ ZSH_COMPLETION_DIR   ?= $(HOME)/.zsh/completions
 BASH_COMPLETION_DIR  ?= $(HOME)/.local/share/bash-completion/completions
 FISH_COMPLETION_DIR  ?= $(HOME)/.config/fish/completions
 
+# Build metadata injected into cmd/aim (mirrors .goreleaser.yaml ldflags)
+VERSION ?= $(or $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//'),dev)
+COMMIT  ?= $(or $(shell git rev-parse --short HEAD 2>/dev/null),none)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Date=$(DATE)
+
 .PHONY: all build test conformance smoke live-test install install-completions uninstall uninstall-completions clean release release-snapshot
 
 all: build
 
 build:
 	@echo "Building aim..."
-	go build -ldflags="-s -w" -o aim ./cmd/aim
+	go build -ldflags="$(LDFLAGS)" -o aim ./cmd/aim
 
 test:
 	@echo "Running tests..."
