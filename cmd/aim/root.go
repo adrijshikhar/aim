@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"runtime/debug"
 	"strings"
 
@@ -25,7 +26,39 @@ var (
 	Date = "unknown"
 
 	debugFlag bool
+
+	gitDescribeSuffixRegex = regexp.MustCompile(`(-\d+)?-g[0-9a-fA-F]+(-dirty)?$`)
+	dirtySuffixRegex       = regexp.MustCompile(`-dirty$`)
+	commitHashOnlyRegex    = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 )
+
+// sanitizeVersion normalizes the version string to clean semantic versioning,
+// stripping any git describe commit distance/hash suffixes (-g<commit>),
+// dirty indicators, and ensuring raw commit hashes are not used as version numbers.
+func sanitizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	if v == "" || v == "none" || v == "unknown" {
+		return "dev"
+	}
+	// If the entire version string is just a git commit hash (e.g. from --always without tags), fall back to dev
+	if commitHashOnlyRegex.MatchString(v) {
+		return "dev"
+	}
+	// Go module VCS pseudo-version: v0.0.0-yyyymmddhhmmss-abcdef123456
+	if strings.HasPrefix(v, "0.0.0-") {
+		return "dev"
+	}
+	// Strip any git describe distance/hash suffix (e.g., "-5-g97df544" or "-g97df544" or "-1-g97df544-dirty")
+	v = gitDescribeSuffixRegex.ReplaceAllString(v, "")
+	// Strip any standalone -dirty suffix
+	v = dirtySuffixRegex.ReplaceAllString(v, "")
+
+	if v == "" {
+		return "dev"
+	}
+	return v
+}
 
 func init() {
 	if info, ok := debug.ReadBuildInfo(); ok {
@@ -47,6 +80,7 @@ func init() {
 			}
 		}
 	}
+	Version = sanitizeVersion(Version)
 	tui.Version = Version
 }
 
@@ -144,11 +178,18 @@ Flags:
 }
 
 func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
+	var verbose bool
+	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Show AIM version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("aim version %s\n", Version)
+			if verbose {
+				fmt.Printf("aim version %s (commit: %s, built at: %s)\n", Version, Commit, Date)
+			} else {
+				fmt.Printf("aim version %s\n", Version)
+			}
 		},
 	}
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show detailed build metadata (commit and date)")
+	return cmd
 }

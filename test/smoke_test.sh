@@ -67,6 +67,19 @@ export PATH="$MOCK_BIN:$PATH"
 
 echo "=== 1. Testing help & version ==="
 "$AIM_BIN" --version
+"$AIM_BIN" version
+if "$AIM_BIN" --version | grep -E -- '-g[0-9a-f]+'; then
+  echo "FAIL: aim --version output contains git commit hash suffix"
+  exit 1
+fi
+if "$AIM_BIN" version | grep -E -- '-g[0-9a-f]+'; then
+  echo "FAIL: aim version output contains git commit hash suffix"
+  exit 1
+fi
+if "$AIM_BIN" --version | grep -E -- '-dirty'; then
+  echo "FAIL: aim --version output contains -dirty suffix"
+  exit 1
+fi
 "$AIM_BIN" --help > /dev/null
 
 echo "=== 2. Testing initial empty listing ==="

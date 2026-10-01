@@ -7,7 +7,7 @@ BASH_COMPLETION_DIR  ?= $(HOME)/.local/share/bash-completion/completions
 FISH_COMPLETION_DIR  ?= $(HOME)/.config/fish/completions
 
 # Build metadata injected into cmd/aim (mirrors .goreleaser.yaml ldflags)
-VERSION ?= $(or $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//'),dev)
+VERSION ?= $(or $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//'),dev)
 COMMIT  ?= $(or $(shell git rev-parse --short HEAD 2>/dev/null),none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Date=$(DATE)
