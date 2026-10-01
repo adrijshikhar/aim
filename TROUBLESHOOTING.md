@@ -36,6 +36,7 @@ This guide provides actionable diagnosis and resolution steps for real-world iss
   - [Session Remains Marked `[ACTIVE]` After Window Closed](#session-remains-marked-active-after-window-closed)
 - [9. macOS Gatekeeper Quarantine](#9-macos-gatekeeper-quarantine)
   - [`"aim" cannot be opened because the developer cannot be verified`](#aim-cannot-be-opened-because-the-developer-cannot-be-verified)
+  - [`aim` Killed with `SIGKILL` After Reinstalling](#aim-killed-with-sigkill-after-reinstalling)
 - [Summary Diagnostics Matrix](#summary-diagnostics-matrix)
 
 ---
@@ -642,6 +643,21 @@ xattr -d com.apple.quarantine $(which aim)
 > brew install --cask aim
 > ```
 
+### `aim` Killed with `SIGKILL` After Reinstalling
+
+#### Symptom
+Every `aim` command dies immediately, e.g. fish reports `terminated by signal SIGKILL (Forced quit)`. `codesign -v $(which aim)` still says the binary is valid.
+
+#### Root Cause
+A new build was copied over the existing binary in place (`cp`, `go build -o ~/.local/bin/aim`). The file keeps its inode, macOS keeps the old cached code signature, and the kernel rejects the new contents. The crash report in `~/Library/Logs/DiagnosticReports/aim-*.ips` shows `SIGKILL (Code Signature Invalid)`.
+
+#### Resolution
+Replace the file instead of overwriting it:
+```bash
+rm "$(which aim)" && make install
+```
+`make install` already replaces the file, so the problem only appears with manual copies.
+
 ---
 
 ## Summary Diagnostics Matrix
@@ -659,6 +675,7 @@ xattr -d com.apple.quarantine $(which aim)
 | `Skill descriptions were shortened...` | Codex skills token budget reached | Harmless warning; prune unused skills if desired |
 | `fatal: could not read Username` in git | Git credential helper not set to osxkeychain | `git config --global credential.helper osxkeychain` |
 | macOS Gatekeeper popup | `com.apple.quarantine` flag | `xattr -d com.apple.quarantine $(which aim)` |
+| `SIGKILL (Code Signature Invalid)` on every run | Binary overwritten in place | `rm "$(which aim)" && make install` |
 
 ---
 
