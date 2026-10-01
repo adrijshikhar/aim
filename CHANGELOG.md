@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/adrijshikhar/aim/compare/v0.10.0...v0.10.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **agy:** preserve SSH_CONNECTION when valid refresh_token is present ([#62](https://github.com/adrijshikhar/aim/issues/62)) ([926b529](https://github.com/adrijshikhar/aim/commit/926b529abf9bce2ea5c34b74ce3c7c5d3e551eb5))
+* **build:** inject version via ldflags; refresh README and docs ([#64](https://github.com/adrijshikhar/aim/issues/64)) ([8e5ef3a](https://github.com/adrijshikhar/aim/commit/8e5ef3a4bf28e9b9dff88171270f6222044a1a7f))
+
 ## [0.10.0](https://github.com/adrijshikhar/aim/compare/v0.9.1...v0.10.0) (2026-09-29)
 
 
