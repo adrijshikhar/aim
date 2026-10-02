@@ -206,24 +206,6 @@ func TestCompleteSessionIDs(t *testing.T) {
 		}
 	})
 
-	t.Run("ImportCmd_ValidArgsFunction", func(t *testing.T) {
-		reg, pm := setupCompletionTestEnv(t)
-		cmd := newSessionsImportCmd(reg, pm)
-
-		comps, directive := cmd.ValidArgsFunction(cmd, []string{"codex", "work"}, "")
-		if directive != cobra.ShellCompDirectiveNoFileComp {
-			t.Errorf("expected directive ShellCompDirectiveNoFileComp, got %v", directive)
-		}
-		if len(comps) != len(expectedCodexCompletions) {
-			t.Fatalf("expected %d completions, got %d: %v", len(expectedCodexCompletions), len(comps), comps)
-		}
-		for i, expected := range expectedCodexCompletions {
-			if comps[i] != expected {
-				t.Errorf("completion[%d] = %q, want %q", i, comps[i], expected)
-			}
-		}
-	})
-
 	t.Run("CompleteAgentProfileAndSession_Arity", func(t *testing.T) {
 		reg, pm := setupCompletionTestEnv(t)
 

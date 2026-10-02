@@ -61,12 +61,9 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim list [agent]` | List profiles with inline quota badges |
 | `aim usage [agent] [profile] [-r] [--json]` | Remaining quota, reset timers, and credits |
 | `aim sessions [agent] [--active] [--json]` | Active and past sessions across profiles and host |
-| `aim sessions show [agent] <id>` | Preview card and metadata for a session |
-| `aim sessions import <agent> <profile> [id]` | Import a host conversation into a profile (`--all`, `--fork`) |
 | `aim resume <agent> <profile> [id] [-- args...]` | Resume verbatim (`--exact`) or via Catalyst (`--catalyst`) |
 | `aim whoami` | Active profile, agent, session, and quota |
 | `aim doctor [agent]` | Check binaries, tokens, ADC status, and keychain isolation |
-| `aim clone <agent> <src> <dst>` | Copy profile settings without tokens |
 | `aim mv` | Move an agent account and credentials to another profile |
 | `aim remove [agent] <profile>` | Delete profile credentials and state |
 | `aim completion <shell>` | Shell completions (`zsh`, `bash`, `fish`) |

@@ -277,10 +277,8 @@ To ensure Catalyst handoff hooks fire reliably inside isolated Codex profiles, A
 
 ### 7.4 CLI Commands
 
-- `aim sessions [agent]`: Lists active and recent conversations formatted as tables, with `--profile`, `--agent`, `--active`, `--all`, and `--json` options.
-- `aim sessions show [agent] <session-id>`: Displays an instantaneous preview card with goal summary, metadata, status, and quick-resume tips (aliases: `preview`, `info`, `inspect`).
+- `aim sessions [agent]`: Lists active and recent conversations formatted as tables, with `--profile`, `--agent`, `--active`, `--all`, and `--json` options (launches the interactive TUI Sessions Explorer in a terminal).
 - `aim resume <agent> <profile> [session-id]`: Resumes a session with prefix matching (e.g. `aim resume agy work 775e6ada`), active process collision warnings, and `--catalyst` or `--exact` modes.
-- `aim sessions import <agent> <target-profile> [session-id]`: Explicitly imports and hydrates conversations from host without launching them immediately (`--all`, `--fork`).
 - **Interactive TUI Drawer Preview**: In the TUI Sessions Drawer (`s`), an instant (0ms) preview box displays the full summary/goal of the currently highlighted session as you navigate with `↑`/`↓` (`k`/`j`), with a windowed list view preventing viewport overflow.
 
 ---
@@ -333,7 +331,7 @@ sessions. A new profile starts with none of the host's servers or plugins in its
 
 While a foreground `aim run` session of a profile is live, `aim remove`, `aim mv` and the TUI's
 rename, move and delete refuse with "profile <p> has a running <agent> session; exit it
-first"; `aim clone` still works. Background launches (`claude --bg`, `codex app-server`,
+first". Background launches (`claude --bg`, `codex app-server`,
 `agy remote-control`) are not detected.
 
 Agents started by hand in a profile, outside `aim run` (an IDE pointed at the profile's

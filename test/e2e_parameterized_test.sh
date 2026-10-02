@@ -1225,59 +1225,50 @@ cat << 'AGYCFG' > "$AIM_HOME/profiles/$MCP_TEST_PROF/.gemini/config/mcp_config.j
 }
 AGYCFG
 
-echo "  [1/5] Testing 'aim mcp list codex $MCP_TEST_PROF' table output..."
-CODEX_TABLE=$("$AIM_BIN" mcp list codex "$MCP_TEST_PROF")
-if ! echo "$CODEX_TABLE" | grep -q "=== Configured MCP Servers (codex: $MCP_TEST_PROF) ==="; then
-  echo "FAIL: Missing codex table header"
-  echo "$CODEX_TABLE"
+echo "  [1/4] Testing transparent interception of 'aim run codex $MCP_TEST_PROF mcp list'..."
+RUN_CODEX=$("$AIM_BIN" run codex "$MCP_TEST_PROF" mcp list)
+if ! echo "$RUN_CODEX" | grep -q "=== Configured MCP Servers (codex: $MCP_TEST_PROF) ==="; then
+  echo "FAIL: aim run codex mcp list was NOT intercepted into formatted table!"
+  echo "$RUN_CODEX"
   exit 1
 fi
-if ! echo "$CODEX_TABLE" | grep -q "atlassian-oauth" || ! echo "$CODEX_TABLE" | grep -q "playwright"; then
+if ! echo "$RUN_CODEX" | grep -q "atlassian-oauth" || ! echo "$RUN_CODEX" | grep -q "playwright"; then
   echo "FAIL: Missing codex servers in table output"
-  echo "$CODEX_TABLE"
+  echo "$RUN_CODEX"
+  exit 1
+fi
+if echo "$RUN_CODEX" | grep -q "MOCK_NATIVE_MCP_LIST_RAN"; then
+  echo "FAIL: native mock binary should NOT have run during interception"
   exit 1
 fi
 echo "  ✔ Codex MCP list formatted table rendered cleanly"
 
-echo "  [2/5] Testing 'aim mcp list claude $MCP_TEST_PROF'..."
-CLAUDE_TABLE=$("$AIM_BIN" mcp list claude "$MCP_TEST_PROF")
-if ! echo "$CLAUDE_TABLE" | grep -q "claude-tool"; then
+echo "  [2/4] Testing transparent interception of 'aim run claude $MCP_TEST_PROF mcp list'..."
+RUN_CLAUDE=$("$AIM_BIN" run claude "$MCP_TEST_PROF" mcp list)
+if ! echo "$RUN_CLAUDE" | grep -q "claude-tool"; then
   echo "FAIL: Missing claude-tool in claude table output"
-  echo "$CLAUDE_TABLE"
+  echo "$RUN_CLAUDE"
   exit 1
 fi
 echo "  ✔ Claude MCP list rendered cleanly without hanging"
 
-echo "  [3/5] Testing 'aim mcp list agy $MCP_TEST_PROF'..."
-AGY_TABLE=$("$AIM_BIN" mcp list agy "$MCP_TEST_PROF")
-if ! echo "$AGY_TABLE" | grep -q "agy-tool"; then
+echo "  [3/4] Testing transparent interception of 'aim run agy $MCP_TEST_PROF mcp list'..."
+RUN_AGY=$("$AIM_BIN" run agy "$MCP_TEST_PROF" mcp list)
+if ! echo "$RUN_AGY" | grep -q "agy-tool"; then
   echo "FAIL: Missing agy-tool in agy table output"
-  echo "$AGY_TABLE"
+  echo "$RUN_AGY"
   exit 1
 fi
 echo "  ✔ Agy MCP list rendered cleanly"
 
-echo "  [4/5] Testing 'aim mcp list codex $MCP_TEST_PROF --json'..."
-CODEX_JSON=$("$AIM_BIN" mcp list codex "$MCP_TEST_PROF" --json)
-if ! echo "$CODEX_JSON" | grep -q '"name": "atlassian-oauth"'; then
-  echo "FAIL: Expected json output for codex mcp list --json"
-  echo "$CODEX_JSON"
+echo "  [4/4] Testing passthrough on 'aim run codex $MCP_TEST_PROF mcp list --json'..."
+PASSTHROUGH_OUT=$("$AIM_BIN" run codex "$MCP_TEST_PROF" mcp list --json 2>&1 || true)
+if echo "$PASSTHROUGH_OUT" | grep -q "=== Configured MCP Servers"; then
+  echo "FAIL: passthrough flag --json was intercepted into formatted table"
+  echo "$PASSTHROUGH_OUT"
   exit 1
 fi
-echo "  ✔ --json flag produced valid structured JSON"
-
-echo "  [5/5] Testing transparent interception of 'aim run codex $MCP_TEST_PROF mcp list'..."
-RUN_INTERCEPT=$("$AIM_BIN" run codex "$MCP_TEST_PROF" mcp list)
-if ! echo "$RUN_INTERCEPT" | grep -q "=== Configured MCP Servers (codex: $MCP_TEST_PROF) ==="; then
-  echo "FAIL: aim run codex mcp list was NOT intercepted into formatted table!"
-  echo "$RUN_INTERCEPT"
-  exit 1
-fi
-if echo "$RUN_INTERCEPT" | grep -q "MOCK_NATIVE_MCP_LIST_RAN"; then
-  echo "FAIL: native mock binary should NOT have run during interception"
-  exit 1
-fi
-echo "  ✔ 'aim run codex <profile> mcp list' was transparently intercepted into styled table"
+echo "  ✔ Passthrough on --json succeeded"
 
 echo ""
 echo "========================================================================"
