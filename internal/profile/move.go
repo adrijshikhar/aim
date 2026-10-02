@@ -114,6 +114,18 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 
 func hasAgentCredentialsOnDisk(agent, dir string) bool {
 	switch agent {
+	case "claude":
+		p := filepath.Join(dir, ".claude.json")
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			return true
+		}
+		p2 := filepath.Join(dir, "claude.json")
+		if fi, err := os.Stat(p2); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			return true
+		}
+		pDir := filepath.Join(dir, ".claude")
+		fiDir, errDir := os.Stat(pDir)
+		return errDir == nil && fiDir.IsDir()
 	case "codex":
 		p := filepath.Join(dir, ".codex", "auth.json")
 		fi, err := os.Stat(p)
@@ -138,6 +150,26 @@ func hasAgentCredentialsOnDisk(agent, dir string) bool {
 
 func moveAgentData(agent, srcDir, dstDir string, force bool, adapter agents.AgentAdapter) error {
 	switch agent {
+	case "claude":
+		for _, entry := range []string{".claude.json", "claude.json"} {
+			src := filepath.Join(srcDir, entry)
+			dst := filepath.Join(dstDir, entry)
+			if fi, err := os.Stat(src); err == nil && !fi.IsDir() {
+				_ = os.Remove(dst)
+				if err := moveOrCopyFile(src, dst); err != nil {
+					return err
+				}
+			}
+		}
+		srcClaudeDir := filepath.Join(srcDir, ".claude")
+		dstClaudeDir := filepath.Join(dstDir, ".claude")
+		if fi, err := os.Stat(srcClaudeDir); err == nil && fi.IsDir() {
+			_ = os.RemoveAll(dstClaudeDir)
+			_ = os.MkdirAll(filepath.Dir(dstClaudeDir), 0700)
+			if err := moveOrCopyDir(srcClaudeDir, dstClaudeDir); err != nil {
+				return err
+			}
+		}
 	case "codex":
 		src := filepath.Join(srcDir, ".codex")
 		dst := filepath.Join(dstDir, ".codex")
