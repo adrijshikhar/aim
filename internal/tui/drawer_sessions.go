@@ -210,6 +210,27 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.sessionsDrawer.statusMessage = ""
 			m.sessionsDrawer.killConfirmPID = 0
 			return m, nil
+		case key.Matches(msg, filterKm.PageUp):
+			step := 10
+			if m.sessionsDrawer.cursor >= step {
+				m.sessionsDrawer.cursor -= step
+			} else {
+				m.sessionsDrawer.cursor = 0
+			}
+			m.sessionsDrawer.statusMessage = ""
+			m.sessionsDrawer.killConfirmPID = 0
+			return m, nil
+		case key.Matches(msg, filterKm.PageDown):
+			filtered := m.filteredSessions()
+			step := 10
+			if m.sessionsDrawer.cursor+step < len(filtered) {
+				m.sessionsDrawer.cursor += step
+			} else if len(filtered) > 0 {
+				m.sessionsDrawer.cursor = len(filtered) - 1
+			}
+			m.sessionsDrawer.statusMessage = ""
+			m.sessionsDrawer.killConfirmPID = 0
+			return m, nil
 		case key.Matches(msg, filterKm.Flags):
 			filtered := m.filteredSessions()
 			if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
@@ -297,6 +318,27 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		filtered := m.filteredSessions()
 		if m.sessionsDrawer.cursor < len(filtered)-1 {
 			m.sessionsDrawer.cursor++
+		}
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
+		return m, nil
+	case key.Matches(msg, km.PageUp):
+		step := 10
+		if m.sessionsDrawer.cursor >= step {
+			m.sessionsDrawer.cursor -= step
+		} else {
+			m.sessionsDrawer.cursor = 0
+		}
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
+		return m, nil
+	case key.Matches(msg, km.PageDown):
+		filtered := m.filteredSessions()
+		step := 10
+		if m.sessionsDrawer.cursor+step < len(filtered) {
+			m.sessionsDrawer.cursor += step
+		} else if len(filtered) > 0 {
+			m.sessionsDrawer.cursor = len(filtered) - 1
 		}
 		m.sessionsDrawer.statusMessage = ""
 		m.sessionsDrawer.killConfirmPID = 0
@@ -492,20 +534,30 @@ func (m Model) renderSessionsDrawer() string {
 	if len(filtered) == 0 {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextMuted).Render("(no conversation sessions found matching filter)") + "\n\n")
 	} else {
-		// Calculate maxVisible rows dynamically based on terminal height and preview state
-		maxVisible := 8
+		// Calculate maxVisible rows dynamically based on terminal height and preview state.
+		// Keep the default visible rows bounded to 10 so the list is compact and comfortable
+		// rather than stretching across the entire screen.
+		maxVisible := 10
 		if m.sessionsDrawer.hidePreview {
 			maxVisible = 16
-			if m.height > 10 {
+			if m.height > 0 && m.height < 24 {
 				maxVisible = m.height - 8
-				if maxVisible < 12 {
-					maxVisible = 12
+			}
+			if maxVisible < 6 {
+				maxVisible = 6
+			}
+			if maxVisible > 18 {
+				maxVisible = 18
+			}
+		} else {
+			if m.height > 0 && m.height < 28 {
+				maxVisible = m.height - 18
+				if maxVisible < 5 {
+					maxVisible = 5
 				}
 			}
-		} else if m.height > 20 {
-			maxVisible = m.height - 18
-			if maxVisible < 8 {
-				maxVisible = 8
+			if maxVisible > 10 {
+				maxVisible = 10
 			}
 		}
 
@@ -576,7 +628,7 @@ func (m Model) renderSessionsDrawer() string {
 				previewText = "(no summary recorded for this session)"
 			}
 
-			displayLines := wrapText(previewText, 89, 4)
+			displayLines := wrapText(previewText, 92, 4)
 			if len(displayLines) == 0 {
 				displayLines = []string{"(no summary recorded for this session)"}
 			}
@@ -586,7 +638,7 @@ func (m Model) renderSessionsDrawer() string {
 				BorderForeground(AccentCyan).
 				Padding(0, 1).
 				MarginTop(1).
-				Width(91)
+				Width(96)
 
 			var pb strings.Builder
 			statusLabel := lipgloss.NewStyle().Foreground(TextMuted).Render("IDLE")
@@ -625,14 +677,14 @@ func (m Model) renderSessionsDrawer() string {
 				}
 				pb.WriteString(fmt.Sprintf("%s %s\n",
 					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Workspace:"),
-					lipgloss.NewStyle().Foreground(AccentCyan).Render(truncateString(displayCwd, 76)),
+					lipgloss.NewStyle().Foreground(AccentCyan).Render(truncateString(displayCwd, 80)),
 				))
 			}
 
 			hasStructured := false
 			if sel.Goal != "" {
 				hasStructured = true
-				goalLines := wrapText(sel.Goal, 76, 2)
+				goalLines := wrapText(sel.Goal, 80, 2)
 				for idx, gl := range goalLines {
 					label := "Goal:     "
 					if idx > 0 {
@@ -648,12 +700,12 @@ func (m Model) renderSessionsDrawer() string {
 				hasStructured = true
 				pb.WriteString(fmt.Sprintf("%s %s\n",
 					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Progress: "),
-					lipgloss.NewStyle().Foreground(StatusGreen).Render(truncateString(sel.Progress, 76)),
+					lipgloss.NewStyle().Foreground(StatusGreen).Render(truncateString(sel.Progress, 80)),
 				))
 			}
 			if sel.Recent != "" && sel.Recent != sel.Goal {
 				hasStructured = true
-				recentLines := wrapText(sel.Recent, 76, 2)
+				recentLines := wrapText(sel.Recent, 80, 2)
 				for idx, rl := range recentLines {
 					label := "Latest:   "
 					if idx > 0 {

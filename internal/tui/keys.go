@@ -112,15 +112,17 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // SessionsDrawerKeyMap manages keys for the sessions explorer.
 type SessionsDrawerKeyMap struct {
-	Up          key.Binding
-	Down        key.Binding
-	Enter       key.Binding
-	Flags       key.Binding
-	Catalyst    key.Binding
-	Fork        key.Binding
-	Filter      key.Binding
-	TabFocus    key.Binding
-	AgentCycle  key.Binding
+	Up            key.Binding
+	Down          key.Binding
+	PageUp        key.Binding
+	PageDown      key.Binding
+	Enter         key.Binding
+	Flags         key.Binding
+	Catalyst      key.Binding
+	Fork          key.Binding
+	Filter        key.Binding
+	TabFocus      key.Binding
+	AgentCycle    key.Binding
 	AgentAll      key.Binding
 	AgentAgy      key.Binding
 	AgentCodex    key.Binding
@@ -144,6 +146,14 @@ func DefaultSessionsDrawerKeyMap() SessionsDrawerKeyMap {
 		),
 		Down: key.NewBinding(
 			key.WithKeys("down", "j", "ctrl+n"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("pgup", "ctrl+u"),
+			key.WithHelp("pgup", "page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("pgdown", "ctrl+d"),
+			key.WithHelp("pgdn", "page down"),
 		),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
@@ -231,6 +241,8 @@ func (k SessionsDrawerKeyMap) ForFilterMode() SessionsDrawerKeyMap {
 	m := k
 	m.Up = key.NewBinding(key.WithKeys("up", "ctrl+p", "ctrl+k"), key.WithHelp("[↑/↓]", "Navigate"))
 	m.Down = key.NewBinding(key.WithKeys("down", "ctrl+n", "ctrl+j"))
+	m.PageUp = key.NewBinding(key.WithKeys("pgup", "ctrl+u"))
+	m.PageDown = key.NewBinding(key.WithKeys("pgdown", "ctrl+d"))
 	m.Enter = key.NewBinding(key.WithKeys("enter"), key.WithHelp("[Enter]", "Resume"))
 	m.Flags = key.NewBinding(key.WithKeys("ctrl+f"), key.WithHelp("[Ctrl+F]", "Flags"))
 	m.TabFocus = key.NewBinding(key.WithKeys("tab", "esc"), key.WithHelp("[Tab/Esc]", "Exit Filter"))
@@ -269,7 +281,7 @@ func (k SessionsDrawerKeyMap) ShortHelpQuery() []key.Binding {
 // FullHelp returns grouped bindings for extended help views.
 func (k SessionsDrawerKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Enter},
+		{k.Up, k.Down, k.PageUp, k.PageDown, k.Enter},
 		{k.Flags, k.Catalyst, k.Fork},
 		{k.Kill, k.ToggleActive, k.TogglePreview, k.Copy, k.OpenDir},
 		{k.Filter, k.TabFocus, k.ClearFilter},

@@ -3052,5 +3052,50 @@ func TestSessionsDrawer_EnhancedNavigationAndControls(t *testing.T) {
 	if !strings.Contains(viewStr, "[3] Claude") {
 		t.Fatalf("expected view to contain '[3] Claude' tab")
 	}
+
+	// 7. Test maxVisible list capping and PageUp/PageDown navigation
+	var manySessions []session.Session
+	for i := 0; i < 30; i++ {
+		manySessions = append(manySessions, session.Session{
+			ID:           fmt.Sprintf("sess-uuid-%02d", i),
+			ShortID:      fmt.Sprintf("s-%02d", i),
+			Title:        fmt.Sprintf("Session number %d", i),
+			Agent:        "codex",
+			Profile:      "work",
+			Status:       session.StatusIdle,
+			LastActiveAt: time.Now().Add(-time.Duration(i) * time.Minute),
+			Cwd:          "/tmp/test-project",
+		})
+	}
+	m.SetSessionsForTest(manySessions)
+	m.sessionsDrawer.cursor = 0
+	m.height = 64 // Huge terminal height (like 64 lines)
+
+	// Even on a 64-line terminal, maxVisible should be bounded to 10 rows when preview is ON
+	viewStr = m.renderSessionsDrawer()
+	if !strings.Contains(viewStr, "(showing 1-10 of 30 sessions)") {
+		t.Fatalf("expected view to cap at 10 sessions, but got view:\n%s", viewStr)
+	}
+
+	// Test PageDown jumping by 10
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = updated.(Model)
+	if m.sessionsDrawer.cursor != 10 {
+		t.Fatalf("expected cursor to be 10 after PageDown, got %d", m.sessionsDrawer.cursor)
+	}
+
+	// Test PageUp jumping back
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = updated.(Model)
+	if m.sessionsDrawer.cursor != 0 {
+		t.Fatalf("expected cursor to be 0 after PageUp, got %d", m.sessionsDrawer.cursor)
+	}
+
+	// Test with preview toggled off: should expand up to 16
+	m.sessionsDrawer.hidePreview = true
+	viewStr = m.renderSessionsDrawer()
+	if !strings.Contains(viewStr, "(showing 1-16 of 30 sessions)") {
+		t.Fatalf("expected view with preview OFF to show 1-16, got:\n%s", viewStr)
+	}
 }
 
