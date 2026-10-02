@@ -3,13 +3,20 @@ package runner
 import (
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
-func setupSignalForwarding(proc *os.Process) func() {
+func setupSignalForwarding(proc *os.Process, isTerminal bool) func() {
 	sigChan := make(chan os.Signal, 1)
 	done := make(chan struct{})
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	// When connected to an interactive terminal, DO NOT forward SIGINT (os.Interrupt)
+	// because the terminal line discipline already delivers it to the foreground pgid.
+	if isTerminal {
+		signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGHUP)
+	} else {
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	}
 
 	stopResize := forwardWindowSize(proc)
 
@@ -26,11 +33,15 @@ func setupSignalForwarding(proc *os.Process) func() {
 		}
 	}()
 
+	var once sync.Once
 	return func() {
-		signal.Stop(sigChan)
-		close(done)
-		if stopResize != nil {
-			stopResize()
-		}
+		once.Do(func() {
+			signal.Stop(sigChan)
+			close(done)
+			if stopResize != nil {
+				stopResize()
+			}
+		})
 	}
 }
+

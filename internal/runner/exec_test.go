@@ -116,7 +116,7 @@ func TestSetupSignalForwarding(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep: %v", err)
 	}
-	cleanup := setupSignalForwarding(cmd.Process)
+	cleanup := setupSignalForwarding(cmd.Process, false)
 	if cleanup == nil {
 		_ = cmd.Process.Kill()
 		t.Fatal("expected non-nil cleanup function")

@@ -12,6 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/charmbracelet/x/term"
 )
 
 type Runner struct{}
@@ -21,6 +22,19 @@ func NewRunner() *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []string) (int, error) {
+	var oldState *term.State
+	isTerm := term.IsTerminal(os.Stdin.Fd())
+	if isTerm {
+		if state, err := term.GetState(os.Stdin.Fd()); err == nil {
+			oldState = state
+			defer func() {
+				if oldState != nil {
+					_ = term.Restore(os.Stdin.Fd(), oldState)
+				}
+			}()
+		}
+	}
+
 	args := append(launch.Args, extraArgs...)
 	logger.Debug("[runner] Executing binary %s with %d args (cwd: %s)", launch.BinaryPath, len(args), launch.WorkingDir)
 	logger.Debug("[runner] Environment: HOME=%s, AIM_PROFILE=%s, AIM_AGENT=%s", launch.Env["HOME"], launch.Env["AIM_PROFILE"], launch.Env["AIM_AGENT"])
@@ -107,7 +121,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	}
 	logger.Debug("[runner] Process started with PID %d", cmd.Process.Pid)
 
-	stopSignals := setupSignalForwarding(cmd.Process)
+	stopSignals := setupSignalForwarding(cmd.Process, isTerm)
 	defer stopSignals()
 
 	err := cmd.Wait()
