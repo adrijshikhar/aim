@@ -264,7 +264,7 @@ func (k SessionsDrawerKeyMap) ForFilterMode() SessionsDrawerKeyMap {
 
 // ShortHelp returns default navigation bindings for sessions drawer footer.
 func (k SessionsDrawerKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Enter, k.Flags, k.Catalyst, k.Fork, k.Kill, k.ToggleActive, k.TogglePreview, k.Copy, k.OpenDir, k.Filter, k.Close}
+	return []key.Binding{k.Up, k.Enter, k.Flags, k.Fork, k.Kill, k.Copy, k.Close}
 }
 
 // ShortHelpFilter returns bindings when text filter input is actively focused.
@@ -275,7 +275,7 @@ func (k SessionsDrawerKeyMap) ShortHelpFilter() []key.Binding {
 
 // ShortHelpQuery returns bindings when drawer has a filter query but list is focused.
 func (k SessionsDrawerKeyMap) ShortHelpQuery() []key.Binding {
-	return []key.Binding{k.Up, k.Enter, k.Flags, k.Catalyst, k.Fork, k.Kill, k.ToggleActive, k.TogglePreview, k.Copy, k.OpenDir, k.Filter, k.ClearFilter}
+	return []key.Binding{k.Up, k.Enter, k.Flags, k.Fork, k.Kill, k.Copy, k.ClearFilter}
 }
 
 // FullHelp returns grouped bindings for extended help views.

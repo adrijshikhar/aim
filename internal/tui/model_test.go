@@ -3071,17 +3071,22 @@ func TestSessionsDrawer_EnhancedNavigationAndControls(t *testing.T) {
 	m.sessionsDrawer.cursor = 0
 	m.height = 64 // Huge terminal height (like 64 lines)
 
-	// Even on a 64-line terminal, maxVisible should be bounded to 10 rows when preview is ON
+	// Even on a 64-line terminal, maxVisible should be bounded to 8 rows when preview is ON
 	viewStr = m.renderSessionsDrawer()
-	if !strings.Contains(viewStr, "(showing 1-10 of 30 sessions)") {
-		t.Fatalf("expected view to cap at 10 sessions, but got view:\n%s", viewStr)
+	if !strings.Contains(viewStr, "(showing 1-8 of 30 sessions)") {
+		t.Fatalf("expected view to cap at 8 sessions, but got view:\n%s", viewStr)
 	}
 
-	// Test PageDown jumping by 10
+	// Verify no duplicated action hints inside preview card
+	if strings.Contains(viewStr, "[Enter] Resume  [f] Flags  [b] Fork") {
+		t.Fatalf("expected preview card not to contain duplicated action hints string")
+	}
+
+	// Test PageDown jumping by 8
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 	m = updated.(Model)
-	if m.sessionsDrawer.cursor != 10 {
-		t.Fatalf("expected cursor to be 10 after PageDown, got %d", m.sessionsDrawer.cursor)
+	if m.sessionsDrawer.cursor != 8 {
+		t.Fatalf("expected cursor to be 8 after PageDown, got %d", m.sessionsDrawer.cursor)
 	}
 
 	// Test PageUp jumping back
@@ -3091,11 +3096,11 @@ func TestSessionsDrawer_EnhancedNavigationAndControls(t *testing.T) {
 		t.Fatalf("expected cursor to be 0 after PageUp, got %d", m.sessionsDrawer.cursor)
 	}
 
-	// Test with preview toggled off: should expand up to 16
+	// Test with preview toggled off: should expand up to 14
 	m.sessionsDrawer.hidePreview = true
 	viewStr = m.renderSessionsDrawer()
-	if !strings.Contains(viewStr, "(showing 1-16 of 30 sessions)") {
-		t.Fatalf("expected view with preview OFF to show 1-16, got:\n%s", viewStr)
+	if !strings.Contains(viewStr, "(showing 1-14 of 30 sessions)") {
+		t.Fatalf("expected view with preview OFF to show 1-14, got:\n%s", viewStr)
 	}
 }
 

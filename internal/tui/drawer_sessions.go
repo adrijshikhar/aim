@@ -211,7 +211,7 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.sessionsDrawer.killConfirmPID = 0
 			return m, nil
 		case key.Matches(msg, filterKm.PageUp):
-			step := 10
+			step := 8
 			if m.sessionsDrawer.cursor >= step {
 				m.sessionsDrawer.cursor -= step
 			} else {
@@ -222,7 +222,7 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, filterKm.PageDown):
 			filtered := m.filteredSessions()
-			step := 10
+			step := 8
 			if m.sessionsDrawer.cursor+step < len(filtered) {
 				m.sessionsDrawer.cursor += step
 			} else if len(filtered) > 0 {
@@ -323,7 +323,7 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.sessionsDrawer.killConfirmPID = 0
 		return m, nil
 	case key.Matches(msg, km.PageUp):
-		step := 10
+		step := 8
 		if m.sessionsDrawer.cursor >= step {
 			m.sessionsDrawer.cursor -= step
 		} else {
@@ -334,7 +334,7 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, km.PageDown):
 		filtered := m.filteredSessions()
-		step := 10
+		step := 8
 		if m.sessionsDrawer.cursor+step < len(filtered) {
 			m.sessionsDrawer.cursor += step
 		} else if len(filtered) > 0 {
@@ -534,30 +534,34 @@ func (m Model) renderSessionsDrawer() string {
 	if len(filtered) == 0 {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextMuted).Render("(no conversation sessions found matching filter)") + "\n\n")
 	} else {
-		// Calculate maxVisible rows dynamically based on terminal height and preview state.
-		// Keep the default visible rows bounded to 10 so the list is compact and comfortable
-		// rather than stretching across the entire screen.
-		maxVisible := 10
+		// Available vertical space for the sessions table.
+		// Keep the table compact (default 8 rows) and account for the profiles list above
+		// so that the PROFILES section remains fully visible on screen without scrolling off.
+		overhead := 18
+		if len(m.profiles) > 0 {
+			overhead += len(m.filteredProfiles())
+		}
+		maxVisible := 8
 		if m.sessionsDrawer.hidePreview {
-			maxVisible = 16
-			if m.height > 0 && m.height < 24 {
-				maxVisible = m.height - 8
+			maxVisible = 14
+			if m.height > 0 && m.height-overhead < maxVisible {
+				maxVisible = m.height - overhead
 			}
-			if maxVisible < 6 {
-				maxVisible = 6
+			if maxVisible < 5 {
+				maxVisible = 5
 			}
-			if maxVisible > 18 {
-				maxVisible = 18
+			if maxVisible > 16 {
+				maxVisible = 16
 			}
 		} else {
-			if m.height > 0 && m.height < 28 {
-				maxVisible = m.height - 18
-				if maxVisible < 5 {
-					maxVisible = 5
-				}
+			if m.height > 0 && m.height-overhead < maxVisible {
+				maxVisible = m.height - overhead
 			}
-			if maxVisible > 10 {
-				maxVisible = 10
+			if maxVisible < 4 {
+				maxVisible = 4
+			}
+			if maxVisible > 8 {
+				maxVisible = 8
 			}
 		}
 
@@ -723,9 +727,6 @@ func (m Model) renderSessionsDrawer() string {
 					pb.WriteString(lipgloss.NewStyle().Foreground(TextPrimary).Render(dl) + "\n")
 				}
 			}
-
-			actionHints := lipgloss.NewStyle().Foreground(TextMuted).Render("[Enter] Resume  [f] Flags  [b] Fork  [c] Catalyst  [x] Kill  [y] Copy  [o] Open")
-			pb.WriteString("\n" + actionHints)
 
 			b.WriteString(previewCard.Render(pb.String()) + "\n")
 		}
