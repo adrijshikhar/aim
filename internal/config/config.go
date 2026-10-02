@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -413,16 +414,33 @@ func SaveConfig(cfg *Config) error {
 		return errors.New("cannot save nil config")
 	}
 	dir := ConfigDir()
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmpFile := filepath.Join(dir, "config.json.tmp")
-	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
-		return err
+
+	tmp, err := os.CreateTemp(dir, "config.*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
 	}
-	return os.Rename(tmpFile, ConfigFilePath())
+	tmpName := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync temp config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp config: %w", err)
+	}
+
+	return os.Rename(tmpName, ConfigFilePath())
 }
