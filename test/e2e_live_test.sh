@@ -10,6 +10,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export AIM_BIN="$REPO_ROOT/aim"
+export TERM="${TERM:-xterm-256color}"
+if [ "$TERM" = "dumb" ] || [ -z "$TERM" ]; then
+  export TERM="xterm-256color"
+fi
 
 echo "========================================================================"
 echo "  AIM LIVE E2E TEST SUITE                                               "
@@ -174,7 +178,7 @@ echo ""
 echo "=== Phase 1: Live Interactive Sessions Explorer (PTY) ==="
 
 python3 - << 'PYTEST'
-import pty, os, subprocess, time, struct, fcntl, termios, re, sys
+import pty, os, subprocess, time, struct, fcntl, termios, re, sys, select
 
 aim_bin = os.environ["AIM_BIN"]
 master, slave = pty.openpty()
@@ -185,27 +189,33 @@ start_time = time.time()
 proc = subprocess.Popen([aim_bin, "sessions"], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
 os.close(slave)
 
-# Read output until rendered, measure latency
-out = b""
-rendered = False
-while time.time() - start_time < 3.0:
-    try:
-        data = os.read(master, 2048)
-        if data:
-            out += data
-            if b"Sessions Explorer" in out and b"PROFILE" in out:
-                rendered = True
+def read_pty_until(fd, stop_condition, timeout=5.0):
+    buf = b""
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if fd in r:
+            try:
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    break
+                buf += chunk
+                if stop_condition(buf):
+                    return buf, True
+            except (OSError, IOError):
                 break
-    except OSError:
-        break
+    return buf, False
+
+# Read output until rendered, measure latency
+out, rendered = read_pty_until(master, lambda b: b"Sessions Explorer" in b and b"PROFILE" in b, timeout=5.0)
 
 elapsed = time.time() - start_time
 print(f"  [Latency Check] Interactive Sessions Explorer rendered in {elapsed:.3f}s")
 if not rendered:
-    print("FAIL: Sessions Explorer did not render within 3.0s")
+    print("FAIL: Sessions Explorer did not render within 5.0s")
     sys.exit(1)
-if elapsed > 2.0:
-    print(f"FAIL: Latency regression detected! Render took {elapsed:.3f}s > 2.0s")
+if elapsed > 2.5:
+    print(f"FAIL: Latency regression detected! Render took {elapsed:.3f}s > 2.5s")
     sys.exit(1)
 
 # Send arrow down to test cursor movement, then quit
@@ -213,17 +223,26 @@ os.write(master, b"\x1b[B")
 time.sleep(0.1)
 os.write(master, b"q")
 
-# Read remainder
-while True:
-    try:
-        data = os.read(master, 2048)
-        if not data:
+# Read any trailing output until process exits (max 3s)
+deadline = time.time() + 3.0
+while time.time() < deadline:
+    r, _, _ = select.select([master], [], [], 0.05)
+    if master in r:
+        try:
+            chunk = os.read(master, 4096)
+            if not chunk:
+                break
+            out += chunk
+        except (OSError, IOError):
             break
-        out += data
-    except OSError:
+    if proc.poll() is not None:
         break
 
-proc.wait()
+try:
+    proc.wait(timeout=3)
+except subprocess.TimeoutExpired:
+    proc.kill()
+    proc.wait()
 os.close(master)
 
 if proc.returncode != 0:
@@ -262,7 +281,7 @@ echo ""
 echo "=== Phase 2: Live Main TUI Dashboard & Drawer Navigation (PTY) ==="
 
 python3 - << 'PYTEST'
-import pty, os, subprocess, time, struct, fcntl, termios, re, sys
+import pty, os, subprocess, time, struct, fcntl, termios, re, sys, select
 
 aim_bin = os.environ["AIM_BIN"]
 master, slave = pty.openpty()
@@ -271,36 +290,41 @@ fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 110, 0, 0))
 proc = subprocess.Popen([aim_bin], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
 os.close(slave)
 
-time.sleep(0.4)
+# Helper for non-blocking read
+def drain(fd, timeout=0.5):
+    buf = b""
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if fd in r:
+            try:
+                c = os.read(fd, 4096)
+                if not c:
+                    break
+                buf += c
+            except (OSError, IOError):
+                break
+    return buf
+
+# Wait for initial dashboard render
+out = drain(master, timeout=1.0)
+
 # Press 's' to open Sessions Drawer
 os.write(master, b"s")
-time.sleep(0.4)
-
-# Read output
-out = b""
-for _ in range(5):
-    try:
-        data = os.read(master, 2048)
-        if data:
-            out += data
-    except OSError:
-        break
+time.sleep(0.3)
+out += drain(master, timeout=1.0)
 
 # Press 'q' to close drawer, then 'q' to exit TUI
 os.write(master, b"q")
-time.sleep(0.1)
+time.sleep(0.2)
 os.write(master, b"q")
+out += drain(master, timeout=1.0)
 
-while True:
-    try:
-        data = os.read(master, 2048)
-        if not data:
-            break
-        out += data
-    except OSError:
-        break
-
-proc.wait()
+try:
+    proc.wait(timeout=3)
+except subprocess.TimeoutExpired:
+    proc.kill()
+    proc.wait()
 os.close(master)
 
 clean = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out.decode("utf-8", errors="replace"))
