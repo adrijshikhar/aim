@@ -10,6 +10,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/usage"
+	"time"
 )
 
 func TestAdapter_Metadata(t *testing.T) {
@@ -484,5 +485,168 @@ func TestRewriteSettingsHooks_StatErrorIsNotAbsent(t *testing.T) {
 	}
 	if !strings.Contains(warned.String(), dest) {
 		t.Fatalf("want a visible warning naming %s, got %q", dest, warned.String())
+	}
+}
+
+func TestParseClaudeUsage_Standard(t *testing.T) {
+	output := `You are currently using your subscription to power your Claude Code usage
+
+Current session: 4% used · resets Oct 2 at 3:19pm (Asia/Calcutta)
+Current week (all models): 37% used · resets Oct 7 at 7:29am (Asia/Calcutta)
+Current week (Fable): 11% used · resets Oct 7 at 7:29am (Asia/Calcutta)
+
+What's contributing to your limits usage?
+Approximate, based on local sessions on this machine — does not include other devices or claude.ai. Behaviors are independent characteristics, not a breakdown.
+
+Last 24h · 79 requests · 79 sessions
+  19% of your usage was while 4+ sessions ran in parallel
+
+Last 7d · 85 requests · 85 sessions
+  18% of your usage was while 4+ sessions ran in parallel`
+
+	now := time.Date(2026, time.October, 2, 8, 0, 0, 0, time.UTC)
+	windows := ParseClaudeUsage(output, now)
+	if len(windows) != 3 {
+		t.Fatalf("expected 3 windows, got %d", len(windows))
+	}
+
+	// Window 0: Current session
+	w0 := windows[0]
+	if w0.Name != "5h Limit" {
+		t.Errorf("w0: expected name '5h Limit', got %q", w0.Name)
+	}
+	if w0.Category != "All Models" {
+		t.Errorf("w0: expected category 'All Models', got %q", w0.Category)
+	}
+	if w0.RemainingPct != 96 {
+		t.Errorf("w0: expected RemainingPct 96, got %d", w0.RemainingPct)
+	}
+	if !w0.IsHourly() {
+		t.Errorf("w0: expected IsHourly() to be true")
+	}
+
+	// Window 1: Current week (all models)
+	w1 := windows[1]
+	if w1.Name != "Weekly Limit" {
+		t.Errorf("w1: expected name 'Weekly Limit', got %q", w1.Name)
+	}
+	if w1.Category != "All Models" {
+		t.Errorf("w1: expected category 'All Models', got %q", w1.Category)
+	}
+	if w1.RemainingPct != 63 {
+		t.Errorf("w1: expected RemainingPct 63, got %d", w1.RemainingPct)
+	}
+	if !w1.IsWeekly() {
+		t.Errorf("w1: expected IsWeekly() to be true")
+	}
+
+	// Window 2: Current week (Fable)
+	w2 := windows[2]
+	if w2.Name != "Weekly Limit" {
+		t.Errorf("w2: expected name 'Weekly Limit', got %q", w2.Name)
+	}
+	if w2.Category != "Fable" {
+		t.Errorf("w2: expected category 'Fable', got %q", w2.Category)
+	}
+	if w2.RemainingPct != 89 {
+		t.Errorf("w2: expected RemainingPct 89, got %d", w2.RemainingPct)
+	}
+
+	status := usage.CalculateStatus(windows)
+	if status != usage.StatusOK {
+		t.Errorf("expected status OK, got %v", status)
+	}
+}
+
+func TestParseClaudeUsage_EdgeCases(t *testing.T) {
+	output := `Current session: 100% used
+Current week (all models): 0% used · resets in 5 hours`
+
+	now := time.Now()
+	windows := ParseClaudeUsage(output, now)
+	if len(windows) != 2 {
+		t.Fatalf("expected 2 windows, got %d", len(windows))
+	}
+	if windows[0].RemainingPct != 0 {
+		t.Errorf("expected remaining 0, got %d", windows[0].RemainingPct)
+	}
+	if windows[1].RemainingPct != 100 {
+		t.Errorf("expected remaining 100, got %d", windows[1].RemainingPct)
+	}
+
+	status := usage.CalculateStatus(windows)
+	if status != usage.StatusExhausted {
+		t.Errorf("expected StatusExhausted, got %v", status)
+	}
+}
+
+func TestClaudeAdapter_GetUsage_NoCredentials(t *testing.T) {
+	tempDir := t.TempDir()
+	a := NewAdapter()
+	rep, err := a.GetUsage(context.Background(), "test", tempDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rep.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown, got %v", rep.Status)
+	}
+	if rep.Error != "no credentials" {
+		t.Errorf("expected 'no credentials', got %q", rep.Error)
+	}
+}
+
+func TestParseClaudeUsage_PassedResetTime(t *testing.T) {
+	output := `Current session: 50% used · resets Oct 2 at 3:19pm (Asia/Calcutta)`
+	// Now is after 3:19pm IST (15:19 IST = 09:49 UTC)
+	now := time.Date(2026, time.October, 2, 16, 0, 0, 0, time.UTC)
+	windows := ParseClaudeUsage(output, now)
+	if len(windows) != 1 {
+		t.Fatalf("expected 1 window, got %d", len(windows))
+	}
+	if windows[0].RemainingPct != 100 {
+		t.Errorf("expected remaining 100%% after reset passed, got %d", windows[0].RemainingPct)
+	}
+	if windows[0].ResetsIn != 0 {
+		t.Errorf("expected resetsIn 0 after reset passed, got %v", windows[0].ResetsIn)
+	}
+}
+
+func TestClaudeAdapter_GetUsage_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	binDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(binDir, 0755)
+
+	mockScript := filepath.Join(binDir, "claude")
+	content := "#!/bin/sh\n" +
+		"echo 'Current session: 5% used · resets in 2 hours'\n" +
+		"echo 'Current week (all models): 15% used · resets in 5 days'\n"
+	if err := os.WriteFile(mockScript, []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	profileDir := filepath.Join(tempDir, "profile")
+	_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0700)
+	_ = os.WriteFile(filepath.Join(profileDir, ".claude", "auth.json"), []byte(`{"apiKey":"test-key"}`), 0600)
+
+	a := NewAdapter()
+	rep, err := a.GetUsage(context.Background(), "test", profileDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rep.Status != usage.StatusOK {
+		t.Errorf("expected StatusOK, got %v (error: %q)", rep.Status, rep.Error)
+	}
+	if len(rep.Windows) != 2 {
+		t.Fatalf("expected 2 windows, got %d", len(rep.Windows))
+	}
+	if rep.Windows[0].RemainingPct != 95 {
+		t.Errorf("expected remaining 95, got %d", rep.Windows[0].RemainingPct)
+	}
+	if rep.Windows[1].RemainingPct != 85 {
+		t.Errorf("expected remaining 85, got %d", rep.Windows[1].RemainingPct)
+	}
+	if !strings.Contains(rep.Summary, "5h: 95%") {
+		t.Errorf("expected summary to contain '5h: 95%%', got %q", rep.Summary)
 	}
 }

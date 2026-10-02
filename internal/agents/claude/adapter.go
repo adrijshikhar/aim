@@ -1,13 +1,17 @@
 package claude
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -321,10 +325,255 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 
 // GetUsage returns the usage report for the Claude Code agent.
 func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
-	return &usage.Report{
-		Agent:     a.Name(),
-		Profile:   profileName,
-		Status:    usage.StatusUnknown,
-		FetchedAt: time.Now(),
-	}, nil
+	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
+
+	if !a.HasCredentials(profileDir) {
+		return &usage.Report{
+			Agent:        a.Name(),
+			Profile:      profileName,
+			Status:       usage.StatusUnknown,
+			FetchedAt:    time.Now(),
+			Error:        "no credentials",
+			AccountEmail: acc.Email,
+			AccountName:  acc.Name,
+			AuthMethod:   acc.AuthMethod,
+		}, nil
+	}
+
+	bin := a.ResolveBinary()
+	if _, err := exec.LookPath(bin); err != nil {
+		if _, statErr := os.Stat(bin); statErr != nil {
+			return &usage.Report{
+				Agent:        a.Name(),
+				Profile:      profileName,
+				Status:       usage.StatusUnknown,
+				FetchedAt:    time.Now(),
+				Error:        "binary not found",
+				AccountEmail: acc.Email,
+				AccountName:  acc.Name,
+				AuthMethod:   acc.AuthMethod,
+			}, nil
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, bin, "-p", "/usage")
+	cmd.Dir = profileDir
+	cmd.Env = append(os.Environ(),
+		"HOME="+profileDir,
+		"AIM_AGENT="+a.Name(),
+		"AIM_PROFILE="+profileName,
+	)
+
+	out, err := cmd.Output()
+	if err != nil {
+		report := &usage.Report{
+			Agent:        a.Name(),
+			Profile:      profileName,
+			Status:       usage.StatusUnknown,
+			FetchedAt:    time.Now(),
+			Error:        err.Error(),
+			AccountEmail: acc.Email,
+			AccountName:  acc.Name,
+			AuthMethod:   acc.AuthMethod,
+			Summary:      "Offline",
+		}
+		return report, nil
+	}
+
+	now := time.Now()
+	windows := ParseClaudeUsage(string(out), now)
+	status := usage.CalculateStatus(windows)
+
+	report := &usage.Report{
+		Agent:        a.Name(),
+		Profile:      profileName,
+		Status:       status,
+		Windows:      windows,
+		Credits:      "0",
+		AccountEmail: acc.Email,
+		AccountName:  acc.Name,
+		AuthMethod:   acc.AuthMethod,
+		FetchedAt:    now,
+	}
+
+	var parts []string
+	seen := make(map[string]bool)
+	for _, w := range windows {
+		var label string
+		if w.IsHourly() {
+			label = "5h"
+		} else if w.IsWeekly() {
+			label = "wk"
+		}
+		if label != "" {
+			if w.Category != "" && w.Category != "All Models" && w.Category != "Claude" {
+				label = fmt.Sprintf("%s %s", w.Category, label)
+			}
+			if !seen[label] {
+				seen[label] = true
+				parts = append(parts, fmt.Sprintf("%s: %d%%", label, w.RemainingPct))
+			}
+		}
+	}
+	if len(parts) > 0 {
+		report.Summary = strings.Join(parts, ", ")
+	} else if acc.AuthMethod != "" {
+		report.Summary = acc.AuthMethod
+	} else {
+		report.Summary = "Active credentials"
+	}
+
+	return report, nil
+}
+
+// ParseClaudeUsage parses the output of "claude -p /usage" into a slice of LimitWindow.
+func ParseClaudeUsage(output string, now time.Time) []usage.LimitWindow {
+	var windows []usage.LimitWindow
+	rePct := regexp.MustCompile(`(\d+(?:\.\d+)?)%`)
+	reResets := regexp.MustCompile(`(?i)resets\s+([^·\n]+)`)
+
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		if !strings.Contains(line, ":") || !strings.Contains(line, "%") {
+			continue
+		}
+
+		parts := strings.SplitN(line, ":", 2)
+		header := strings.TrimSpace(parts[0])
+		body := strings.TrimSpace(parts[1])
+
+		headerLower := strings.ToLower(header)
+		if strings.Contains(headerLower, "last 24h") || strings.Contains(headerLower, "last 7d") || strings.Contains(headerLower, "approximate") {
+			continue
+		}
+
+		pctMatch := rePct.FindStringSubmatch(body)
+		if len(pctMatch) < 2 {
+			continue
+		}
+
+		usedPct, err := strconv.ParseFloat(pctMatch[1], 64)
+		if err != nil {
+			continue
+		}
+
+		remainingPct := int(math.Round(100.0 - usedPct))
+		if remainingPct < 0 {
+			remainingPct = 0
+		} else if remainingPct > 100 {
+			remainingPct = 100
+		}
+
+		var windowName string
+		if strings.Contains(headerLower, "session") || strings.Contains(headerLower, "5h") || strings.Contains(headerLower, "hour") {
+			windowName = "5h Limit"
+		} else if strings.Contains(headerLower, "week") || strings.Contains(headerLower, "7d") || strings.Contains(headerLower, "wk") {
+			windowName = "Weekly Limit"
+		} else {
+			windowName = header
+		}
+
+		category := "All Models"
+		if idxOpen := strings.Index(header, "("); idxOpen != -1 {
+			if idxClose := strings.Index(header[idxOpen:], ")"); idxClose != -1 {
+				inside := strings.TrimSpace(header[idxOpen+1 : idxOpen+idxClose])
+				if strings.EqualFold(inside, "all models") || strings.EqualFold(inside, "all") {
+					category = "All Models"
+				} else if inside != "" {
+					category = inside
+				}
+			}
+		}
+
+		var resetsAt time.Time
+		var resetsIn time.Duration
+		if resetMatch := reResets.FindStringSubmatch(body); len(resetMatch) >= 2 {
+			rawReset := strings.TrimSpace(resetMatch[1])
+			resetsAt, resetsIn = parseClaudeResetTime(rawReset, now)
+		}
+
+		if !resetsAt.IsZero() && now.After(resetsAt) {
+			remainingPct = 100
+			resetsIn = 0
+		}
+
+		windows = append(windows, usage.LimitWindow{
+			Category:     category,
+			Name:         windowName,
+			RemainingPct: remainingPct,
+			ResetsAt:     resetsAt,
+			ResetsIn:     resetsIn,
+		})
+	}
+
+	return windows
+}
+
+func parseClaudeResetTime(s string, now time.Time) (time.Time, time.Duration) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, 0
+	}
+
+	loc := time.Local
+	if idxOpen := strings.LastIndex(s, "("); idxOpen != -1 {
+		if idxClose := strings.LastIndex(s, ")"); idxClose > idxOpen {
+			tzStr := strings.TrimSpace(s[idxOpen+1 : idxClose])
+			if l, err := time.LoadLocation(tzStr); err == nil {
+				loc = l
+			}
+			s = strings.TrimSpace(s[:idxOpen])
+		}
+	}
+
+	clean := strings.ReplaceAll(s, " at ", " ")
+	clean = strings.ReplaceAll(clean, ",", "")
+	clean = strings.Join(strings.Fields(clean), " ")
+
+	nowInLoc := now.In(loc)
+
+	layoutsWithYear := []string{
+		"Jan 2 2006 3:04pm",
+		"Jan 2 2006 3:04PM",
+		"Jan 2 2006 15:04",
+		"2006-01-02 15:04",
+	}
+	for _, l := range layoutsWithYear {
+		if t, err := time.ParseInLocation(l, clean, loc); err == nil {
+			rem := t.Sub(nowInLoc)
+			if rem < 0 {
+				rem = 0
+			}
+			return t, rem
+		}
+	}
+
+	layoutsWithoutYear := []string{
+		"Jan 2 3:04pm",
+		"Jan 2 3:04PM",
+		"Jan 2 15:04",
+		"January 2 3:04pm",
+		"January 2 3:04PM",
+		"January 2 15:04",
+	}
+	for _, l := range layoutsWithoutYear {
+		if t, err := time.ParseInLocation(l, clean, loc); err == nil {
+			res := time.Date(nowInLoc.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, loc)
+			if res.Before(nowInLoc.Add(-24 * time.Hour)) {
+				res = res.AddDate(1, 0, 0)
+			}
+			rem := res.Sub(nowInLoc)
+			if rem < 0 {
+				rem = 0
+			}
+			return res, rem
+		}
+	}
+
+	return time.Time{}, 0
 }
