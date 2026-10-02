@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
@@ -89,6 +90,25 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 				}
 
 				if cache != nil && ctx.Err() == nil {
+					// Stale-While-Revalidate: If fetch failed with StatusUnknown, but cache already contains
+					// a valid, healthy report with quota windows, preserve the existing valid quota!
+					if rep.Status == StatusUnknown {
+						errLower := strings.ToLower(rep.Error)
+						isAuthError := strings.Contains(errLower, "unauthorized") ||
+							strings.Contains(errLower, "invalid_grant") ||
+							strings.Contains(errLower, "credential")
+
+						if !isAuthError {
+							if existing, found := cache.GetStale(t.Agent, t.Profile); found && existing.Status != StatusUnknown && len(existing.Windows) > 0 {
+								// Retain existing valid report
+								select {
+								case <-ctx.Done():
+								case out <- existing:
+								}
+								return
+							}
+						}
+					}
 					_ = cache.Put(*rep)
 				}
 

@@ -928,11 +928,17 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 			AuthMethod:   acc.AuthMethod,
 			ProjectID:    acc.ProjectID,
 		}
-		dbPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "conversation_summaries.db")
-		if _, statErr := os.Stat(dbPath); statErr == nil {
-			report.Summary = "Offline (local session cache present)"
+		errLower := strings.ToLower(usageErr.Error())
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || strings.Contains(errLower, "timeout") || strings.Contains(errLower, "deadline exceeded") {
+			report.Summary = "Quota request timed out"
+			report.Error = "timeout"
 		} else {
-			report.Summary = "Offline"
+			dbPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "conversation_summaries.db")
+			if _, statErr := os.Stat(dbPath); statErr == nil {
+				report.Summary = "Offline (local session cache present)"
+			} else {
+				report.Summary = "Offline"
+			}
 		}
 		return report, nil
 	}

@@ -1715,6 +1715,73 @@ func TestTUI_FormatBadge_BottleneckWindow(t *testing.T) {
 	}
 }
 
+func TestTUI_FormatBadge_DistinguishesTimeoutAndOffline(t *testing.T) {
+	repTimeout := usage.Report{
+		Status: usage.StatusUnknown,
+		Error:  "request timeout: context deadline exceeded",
+	}
+	if b := formatBadge(repTimeout, false); b != "[timeout]" {
+		t.Errorf("expected [timeout] badge, got %q", b)
+	}
+
+	repOffline := usage.Report{
+		Status:  usage.StatusUnknown,
+		Summary: "Offline",
+		Error:   "dial tcp: lookup google.com: no such host",
+	}
+	if b := formatBadge(repOffline, false); b != "[offline]" {
+		t.Errorf("expected [offline] badge, got %q", b)
+	}
+
+	repNoCreds := usage.Report{
+		Status: usage.StatusUnknown,
+		Error:  "no credentials found",
+	}
+	if b := formatBadge(repNoCreds, false); b != "[no credentials]" {
+		t.Errorf("expected [no credentials] badge, got %q", b)
+	}
+}
+
+func TestTUI_RenderProfiles_ShowsRefreshingDuringLoading(t *testing.T) {
+	baseDir := t.TempDir()
+	pm := profile.NewProfileManager(baseDir)
+	_, _ = pm.EnsureProfile("work")
+	_, _ = pm.EnsureProfile("offline-prof")
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("work", "agy")
+	cfg.AddProfileAgent("offline-prof", "agy")
+	reg := agents.NewRegistry()
+
+	m := NewModel(reg, pm, cfg)
+	m.agent = "agy"
+	m.profiles = []string{"work", "offline-prof"}
+
+	// When m.loading is false, error badge shows [offline]
+	m.loading = false
+	m.reports = map[string]usage.Report{
+		"agy:offline-prof": {
+			Agent:   "agy",
+			Profile: "offline-prof",
+			Status:  usage.StatusUnknown,
+			Summary: "Offline",
+		},
+	}
+	viewIdle := m.View()
+	if !strings.Contains(viewIdle, "[offline]") {
+		t.Errorf("expected [offline] badge when not loading, got:\n%s", viewIdle)
+	}
+
+	// When m.loading is true, [offline] is replaced with [refreshing...]
+	m.loading = true
+	viewRefreshing := m.View()
+	if strings.Contains(viewRefreshing, "[offline]") {
+		t.Errorf("expected NO [offline] badge while loading is true, got:\n%s", viewRefreshing)
+	}
+	if !strings.Contains(viewRefreshing, "[refreshing...]") {
+		t.Errorf("expected [refreshing...] badge while loading is true, got:\n%s", viewRefreshing)
+	}
+}
+
 func TestTUI_Header_VersionDisplay(t *testing.T) {
 	baseDir := t.TempDir()
 	pm := profile.NewProfileManager(baseDir)

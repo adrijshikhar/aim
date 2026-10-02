@@ -535,3 +535,105 @@ func TestCanPrewarm(t *testing.T) {
 		t.Errorf("expected call with 0 cooldown to succeed")
 	}
 }
+
+func TestRefreshAsync_PreservesValidCacheOnTransientError(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	// Pre-seed a healthy profile with quota windows
+	_ = store.Put(usage.Report{
+		Agent:   "agy",
+		Profile: "work",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{
+			{Name: "Five-Hour", RemainingPct: 85},
+		},
+		FetchedAt: time.Now(),
+	})
+
+	// Run forced refresh where GetUsageFn fails due to transient network failure
+	targets := []usage.TargetProfile{
+		{
+			Agent:   "agy",
+			Profile: "work",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return nil, errors.New("transient network timeout")
+			},
+		},
+	}
+
+	reportsChan := usage.RefreshAsync(context.Background(), targets, store, true)
+	var received []usage.Report
+	for rep := range reportsChan {
+		received = append(received, rep)
+	}
+
+	if len(received) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(received))
+	}
+	// The yielded report should preserve the valid quota windows
+	if received[0].Status != usage.StatusOK || len(received[0].Windows) == 0 {
+		t.Errorf("expected yielded report to retain StatusOK and windows, got status %s", received[0].Status)
+	}
+
+	// Verify the cache store still retains the valid quota
+	cached, found := store.Get("agy", "work")
+	if !found {
+		t.Fatalf("expected work profile to remain in cache")
+	}
+	if cached.Status != usage.StatusOK || len(cached.Windows) == 0 {
+		t.Errorf("expected cache to preserve StatusOK, got %s", cached.Status)
+	}
+	if cached.Windows[0].RemainingPct != 85 {
+		t.Errorf("expected preserved quota of 85%%, got %d%%", cached.Windows[0].RemainingPct)
+	}
+}
+
+func TestRefreshAsync_UpdatesCacheOnAuthError(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	// Pre-seed healthy profile
+	_ = store.Put(usage.Report{
+		Agent:   "agy",
+		Profile: "work",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{
+			{Name: "Five-Hour", RemainingPct: 90},
+		},
+		FetchedAt: time.Now(),
+	})
+
+	// Run forced refresh where auth error occurs
+	targets := []usage.TargetProfile{
+		{
+			Agent:   "agy",
+			Profile: "work",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return &usage.Report{
+					Agent:   "agy",
+					Profile: p,
+					Status:  usage.StatusUnknown,
+					Error:   "401 Unauthorized: token expired",
+				}, nil
+			},
+		},
+	}
+
+	reportsChan := usage.RefreshAsync(context.Background(), targets, store, true)
+	for range reportsChan {
+	}
+
+	// Auth error should update cache so user is prompted to re-login
+	cached, found := store.Get("agy", "work")
+	if !found {
+		// Even if expired, GetStale should find it
+		cached, found = store.GetStale("agy", "work")
+	}
+	if !found {
+		t.Fatalf("expected profile in cache")
+	}
+	if cached.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown on auth error, got %s", cached.Status)
+	}
+}

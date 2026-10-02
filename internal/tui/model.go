@@ -404,9 +404,12 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
 			return "[no credentials]"
 		}
+		if strings.Contains(errLower, "timeout") || strings.Contains(summaryLower, "timeout") ||
+			strings.Contains(errLower, "deadline exceeded") {
+			return "[timeout]"
+		}
 		if strings.Contains(errLower, "offline") || strings.Contains(summaryLower, "offline") ||
-			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") ||
-			strings.Contains(errLower, "timeout") {
+			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") {
 			return "[offline]"
 		}
 		if rep.Error != "" {
@@ -645,9 +648,16 @@ func (m Model) View() string {
 			if rep, ok := m.getReport(p); ok {
 				badge := formatBadge(rep, isNarrow)
 				if badge != "" {
-					gaugeStyle := GaugeStyleForStatus(rep.Status)
-					badgeStr = "  " + gaugeStyle.Render(badge)
+					if m.loading && (badge == "[offline]" || badge == "[timeout]" || badge == "[unknown]") {
+						badgeStr = "  " + GaugeDimStyle.Render("[refreshing...]")
+					} else {
+						gaugeStyle := GaugeStyleForStatus(rep.Status)
+						badgeStr = "  " + gaugeStyle.Render(badge)
+					}
 				}
+			}
+			if badgeStr == "" && m.loading {
+				badgeStr = "  " + GaugeDimStyle.Render("[refreshing...]")
 			}
 
 			s.WriteString(fmt.Sprintf("%s%s%s\n", prefix, style.Render(label), badgeStr))

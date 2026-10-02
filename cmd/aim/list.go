@@ -51,9 +51,12 @@ func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string)
 		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
 			return "[no credentials]"
 		}
+		if strings.Contains(errLower, "timeout") || strings.Contains(summaryLower, "timeout") ||
+			strings.Contains(errLower, "deadline exceeded") {
+			return "[timeout]"
+		}
 		if strings.Contains(errLower, "offline") || strings.Contains(summaryLower, "offline") ||
-			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") ||
-			strings.Contains(errLower, "timeout") {
+			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") {
 			return "[offline]"
 		}
 		if rep.Error != "" {
