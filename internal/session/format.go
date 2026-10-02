@@ -32,11 +32,12 @@ func FormatDir(dir string, maxLen int) string {
 		}
 	}
 	base := filepath.Base(dir)
-	if len(base) <= maxLen {
+	r := []rune(base)
+	if len(r) <= maxLen {
 		return base
 	}
 	if maxLen > 3 {
-		return base[:maxLen-3] + "..."
+		return string(r[:maxLen-3]) + "..."
 	}
-	return base[:maxLen]
+	return string(r[:maxLen])
 }

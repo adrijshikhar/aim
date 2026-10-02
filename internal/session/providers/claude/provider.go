@@ -421,14 +421,46 @@ func parseClaudeSessionFile(filePath, sessionUUID, slug, profileDir string, isHo
 		}
 
 		// 3. Fast count of user/assistant messages without full JSON parsing
+		userToken := []byte(`"type":"user"`)
+		assistantToken := []byte(`"type":"assistant"`)
 		fastBuf := make([]byte, 512*1024)
 		_, _ = file.Seek(0, io.SeekStart)
+		var tail []byte
 		for {
 			n, err := file.Read(fastBuf)
 			if n > 0 {
 				chunk := fastBuf[:n]
-				messageCount += bytes.Count(chunk, []byte(`"type":"user"`))
-				messageCount += bytes.Count(chunk, []byte(`"type":"assistant"`))
+				messageCount += bytes.Count(chunk, userToken)
+				messageCount += bytes.Count(chunk, assistantToken)
+
+				// If there was a tail from the previous chunk, check if a token spanned the seam
+				if len(tail) > 0 {
+					for offset := 1; offset < len(userToken); offset++ {
+						if len(tail) >= offset && n >= len(userToken)-offset {
+							if bytes.Equal(tail[len(tail)-offset:], userToken[:offset]) &&
+								bytes.Equal(chunk[:len(userToken)-offset], userToken[offset:]) {
+								messageCount++
+								break
+							}
+						}
+					}
+					for offset := 1; offset < len(assistantToken); offset++ {
+						if len(tail) >= offset && n >= len(assistantToken)-offset {
+							if bytes.Equal(tail[len(tail)-offset:], assistantToken[:offset]) &&
+								bytes.Equal(chunk[:len(assistantToken)-offset], assistantToken[offset:]) {
+								messageCount++
+								break
+							}
+						}
+					}
+				}
+
+				maxTail := len(assistantToken) - 1
+				if n >= maxTail {
+					tail = append(tail[:0], chunk[n-maxTail:]...)
+				} else {
+					tail = append(tail[:0], chunk...)
+				}
 			}
 			if err != nil {
 				break

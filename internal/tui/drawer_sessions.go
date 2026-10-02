@@ -753,8 +753,12 @@ func (m Model) renderSessionsDrawer() string {
 func truncateString(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
-	if len(s) > maxLen {
-		return s[:maxLen-3] + "..."
+	r := []rune(s)
+	if len(r) > maxLen {
+		if maxLen > 3 {
+			return string(r[:maxLen-3]) + "..."
+		}
+		return string(r[:maxLen])
 	}
 	return s
 }
