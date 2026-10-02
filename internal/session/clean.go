@@ -6,12 +6,12 @@ import (
 )
 
 var (
-	// Matches screenshot file paths like:
-	// /var/folders/.../Screenshot 2026-10-02 at 2.26.50 PM.png
-	// /tmp/Screenshot 2026-10-02 at 2.26.50 PM.png
-	// /tmp/.../screenshot.png
-	// or [Image #1], [Image: /path]
-	screenshotPathRegex = regexp.MustCompile(`(?i)(?:^|\s)(?:\[Image(?:\s*#\d+|:\s*[^\]]+)?\]|/(?:private/)?(?:var/folders|tmp)/.*?Screenshot[^\n]+?\.(?:png|jpg|jpeg|gif|webp)|/(?:private/)?(?:var/folders|tmp)/[^\s\n]+\.(?:png|jpg|jpeg|gif|webp)|Screenshot\s+[\d\-]+\s+at\s+[\d\.\sAPMapm]+\.(?:png|jpg|jpeg|gif|webp))(?:\s+|$)`)
+	// Matches screenshot file paths, temporary captures, and image markers:
+	// - /var/folders/.../Screenshot... or /tmp/image.png
+	// - /Users/.../Desktop/Screenshot\ 2026-09-30\ at\ 2.54.59 PM.png (including escaped and unicode spaces)
+	// - bare Screenshot 2026-... or quoted paths
+	// - [Image #1], [Image: /path]
+	screenshotPathRegex = regexp.MustCompile(`(?i)(?:^|\s)(?:\[Image(?:\s*#\d+|:\s*[^\]]+)?\]|["']?(?:/(?:private/)?(?:var/folders|tmp)/[^\s\n"']+\.(?:png|jpg|jpeg|gif|webp))["']?|["']?(?:/[^\n"']*?/|~[^\n"']*?/)?Screenshot(?:\\ |[^\n"'])*?\.(?:png|jpg|jpeg|gif|webp)["']?)(?:\s+|$)`)
 
 	// Matches local-command-caveat tags and their content
 	localCaveatRegex = regexp.MustCompile(`(?s)<local-command-caveat>.*?</local-command-caveat>`)

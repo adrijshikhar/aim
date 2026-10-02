@@ -61,6 +61,26 @@ func TestCleanPromptText(t *testing.T) {
 			input:    strings.Repeat("a", 600),
 			expected: strings.Repeat("a", 500) + "...",
 		},
+		{
+			name:     "desktop screenshot with escaped spaces and unicode space",
+			input:    "/Users/nemesis/Desktop/Screenshot\\ 2026-09-30\\ at\\ 2.54.59\u202fPM.png check this in codex session",
+			expected: "check this in codex session",
+		},
+		{
+			name:     "quoted desktop screenshot path",
+			input:    "\"/Users/nemesis/Desktop/Screenshot 2026-09-30 at 2.54.59 PM.png\" fix it",
+			expected: "fix it",
+		},
+		{
+			name:     "only screenshot path yields empty string",
+			input:    "/Users/nemesis/Desktop/Screenshot\\ 2026-09-30\\ at\\ 2.54.59\u202fPM.png",
+			expected: "",
+		},
+		{
+			name:     "temporary folder image without screenshot prefix",
+			input:    "/var/folders/g4/cr6bc0b13_q2kdrkwt3j1l0w0000gn/T/test_img.png review diff",
+			expected: "review diff",
+		},
 	}
 
 	for _, tc := range tests {

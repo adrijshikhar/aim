@@ -171,11 +171,24 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 		return nil, fmt.Errorf("session ID or prefix cannot be empty")
 	}
 
+	var targetProviders []SessionProvider
 	if agent != "" {
 		if p, ok := m.providers[agent]; ok {
-			var matches []Session
-			profilesDir := filepath.Join(config.BaseDir(), "profiles")
-			entries, _ := os.ReadDir(profilesDir)
+			targetProviders = append(targetProviders, p)
+		}
+	} else {
+		for _, p := range m.providers {
+			targetProviders = append(targetProviders, p)
+		}
+	}
+
+	if len(targetProviders) > 0 {
+		var matches []Session
+		profilesDir := filepath.Join(config.BaseDir(), "profiles")
+		entries, _ := os.ReadDir(profilesDir)
+		hostDir := config.RealHomeDir()
+
+		for _, p := range targetProviders {
 			for _, entry := range entries {
 				if !entry.IsDir() {
 					continue
@@ -193,7 +206,6 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 					matches = append(matches, *s)
 				}
 			}
-			hostDir := config.RealHomeDir()
 			s, err := p.GetSession(ctx, idOrPrefix, hostDir, true)
 			if err != nil {
 				logger.Debug("[session] error querying session %q in host: %v", idOrPrefix, err)
@@ -205,9 +217,9 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 				s.IsHost = true
 				matches = append(matches, *s)
 			}
-			if len(matches) > 0 {
-				return matches, nil
-			}
+		}
+		if len(matches) > 0 {
+			return matches, nil
 		}
 	}
 

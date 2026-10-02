@@ -93,7 +93,7 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 		}
 
 		convID := strings.TrimSpace(parts[0])
-		title := strings.TrimSpace(parts[1])
+		title := session.CleanPromptText(strings.TrimSpace(parts[1]))
 		preview := strings.TrimSpace(parts[2])
 		rawTime := strings.TrimSpace(parts[3])
 		rawWorkspace := ""
@@ -129,12 +129,21 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 			}
 		}
 
-		if s.Title == "" {
+		if s.Title == "" || s.Title == "Untitled Session" {
 			if preview != "" {
-				s.Title = session.CleanPromptText(strings.Split(preview, "\n")[0])
+				cleanPrev := session.CleanPromptText(strings.Split(preview, "\n")[0])
+				if cleanPrev != "" {
+					s.Title = cleanPrev
+				}
 			}
 			if s.Title == "" {
-				s.Title = "Untitled Session"
+				if s.Goal != "" {
+					s.Title = s.Goal
+				} else if s.Recent != "" {
+					s.Title = s.Recent
+				} else {
+					s.Title = "Untitled Session"
+				}
 			}
 		}
 

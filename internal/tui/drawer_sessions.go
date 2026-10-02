@@ -397,10 +397,17 @@ func (m Model) renderSessionsDrawer() string {
 			hasStructured := false
 			if sel.Goal != "" {
 				hasStructured = true
-				pb.WriteString(fmt.Sprintf("%s %s\n",
-					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Goal:     "),
-					lipgloss.NewStyle().Foreground(TextBright).Render(truncateString(sel.Goal, 76)),
-				))
+				goalLines := wrapText(sel.Goal, 76, 2)
+				for idx, gl := range goalLines {
+					label := "Goal:     "
+					if idx > 0 {
+						label = "          "
+					}
+					pb.WriteString(fmt.Sprintf("%s %s\n",
+						lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render(label),
+						lipgloss.NewStyle().Foreground(TextBright).Render(gl),
+					))
+				}
 			}
 			if sel.Progress != "" {
 				hasStructured = true
@@ -411,10 +418,17 @@ func (m Model) renderSessionsDrawer() string {
 			}
 			if sel.Recent != "" && sel.Recent != sel.Goal {
 				hasStructured = true
-				pb.WriteString(fmt.Sprintf("%s %s\n",
-					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Latest:   "),
-					lipgloss.NewStyle().Foreground(AccentCyan).Render(truncateString(sel.Recent, 76)),
-				))
+				recentLines := wrapText(sel.Recent, 76, 2)
+				for idx, rl := range recentLines {
+					label := "Latest:   "
+					if idx > 0 {
+						label = "          "
+					}
+					pb.WriteString(fmt.Sprintf("%s %s\n",
+						lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render(label),
+						lipgloss.NewStyle().Foreground(AccentCyan).Render(rl),
+					))
+				}
 			}
 
 			if !hasStructured {
