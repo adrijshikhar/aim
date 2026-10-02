@@ -40,7 +40,7 @@ func (m *mockAdapter) HasCredentials(profileDir string) bool {
 func (m *mockAdapter) Login(ctx context.Context, profileName, profileDir string) error {
 	return m.exitErr
 }
-func (m *mockAdapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (m *mockAdapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	if m.exitErr != nil {
 		return agents.LaunchEnv{}, m.exitErr
 	}

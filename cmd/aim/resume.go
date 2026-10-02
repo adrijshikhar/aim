@@ -231,7 +231,11 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 	}
 	// Launch agent primed with Catalyst handoff resume
 	launchArgs := append([]string{"handoff resume"}, extraArgs...)
-	code := executeRunWithSession(reg, pm, agent, profile, sessID, launchArgs)
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	code := executeRunWithSession(ctx, reg, pm, agent, profile, sessID, launchArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -331,7 +335,7 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	)
 
 	sessID := displayID
-	code := executeRunWithSession(reg, pm, agent, profile, sessID, resumeArgs)
+	code := executeRunWithSession(ctx, reg, pm, agent, profile, sessID, resumeArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}

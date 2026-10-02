@@ -39,7 +39,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	return fmt.Errorf("gemini interactive login adapter coming soon")
 }
 
-func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	bin, _ := exec.LookPath(a.BinaryName())
 	if bin == "" {
 		bin = a.BinaryName()

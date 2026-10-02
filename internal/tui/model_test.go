@@ -788,7 +788,7 @@ func (m *mockUsageOrderAdapter) HasCredentials(profileDir string) bool { return 
 func (m *mockUsageOrderAdapter) Login(ctx context.Context, profileName, profileDir string) error {
 	return nil
 }
-func (m *mockUsageOrderAdapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (m *mockUsageOrderAdapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	return agents.LaunchEnv{}, nil
 }
 func (m *mockUsageOrderAdapter) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {

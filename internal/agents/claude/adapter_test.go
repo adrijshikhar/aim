@@ -67,7 +67,7 @@ func TestAdapter_PrepareEnv(t *testing.T) {
 	_ = os.MkdirAll(profileDir, 0755)
 
 	a := NewAdapter()
-	launchEnv, err := a.PrepareEnv("work", profileDir)
+	launchEnv, err := a.PrepareEnv(t.Context(), "work", profileDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestAdapter_PrepareEnv_StripsHostTokens(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "ambient-refresh")
 
 	a := NewAdapter()
-	launch, err := a.PrepareEnv("work", profileDir)
+	launch, err := a.PrepareEnv(t.Context(), "work", profileDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv returned error: %v", err)
 	}

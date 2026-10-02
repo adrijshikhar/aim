@@ -45,7 +45,7 @@ func TestAdapterEnvironmentIsolation(t *testing.T) {
 			if err := os.MkdirAll(profileDir, 0700); err != nil {
 				t.Fatal(err)
 			}
-			launch, err := adapter.PrepareEnv("work", profileDir)
+			launch, err := adapter.PrepareEnv(t.Context(), "work", profileDir)
 			if err != nil {
 				t.Fatal(err)
 			}

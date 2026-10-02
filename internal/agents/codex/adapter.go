@@ -155,7 +155,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	return nil
 }
 
-func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	codexDir := filepath.Join(profileDir, ".codex")
 	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		return agents.LaunchEnv{}, err
@@ -169,7 +169,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	copyHostConfig(realHome, codexDir)
 
 	// Probe and auto-start local sidecar proxy daemons (e.g. Caveman) if configured
-	ensureSidecarDaemons(realHome, codexDir)
+	ensureSidecarDaemons(ctx, realHome, codexDir)
 
 	// Bridge host plugins and hooks (e.g. Catalyst) into profile
 	bridgePluginsAndHooks(realHome, codexDir)
@@ -306,7 +306,7 @@ func stripTables(dir string, data []byte, keys ...string) []byte {
 	return out
 }
 
-func ensureSidecarDaemons(realHome, profileCodexDir string) {
+func ensureSidecarDaemons(ctx context.Context, realHome, profileCodexDir string) {
 	cfgPath := filepath.Join(profileCodexDir, "config.toml")
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
@@ -318,7 +318,9 @@ func ensureSidecarDaemons(realHome, profileCodexDir string) {
 	}
 
 	// 1. Probe port 8787
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 250*time.Millisecond)
+	var dialer net.Dialer
+	dialer.Timeout = 250 * time.Millisecond
+	conn, err := dialer.DialContext(ctx, "tcp", "127.0.0.1:8787")
 	if err == nil {
 		conn.Close()
 		return
@@ -349,8 +351,14 @@ func ensureSidecarDaemons(realHome, profileCodexDir string) {
 	// Wait up to 1.5s for the proxy to start listening
 	deadline := time.Now().Add(1500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
-		conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 150*time.Millisecond)
+		select {
+		case <-ctx.Done():
+			logger.Debug("[codex] context cancelled while waiting for caveman-proxy: %v", ctx.Err())
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+		dialer.Timeout = 150 * time.Millisecond
+		conn, err := dialer.DialContext(ctx, "tcp", "127.0.0.1:8787")
 		if err == nil {
 			conn.Close()
 			logger.Debug("[codex] caveman-proxy auto-started and listening on 127.0.0.1:8787")

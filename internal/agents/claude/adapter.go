@@ -133,7 +133,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 }
 
 // PrepareEnv sets up the execution environment for a Claude Code session.
-func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	claudeDir := filepath.Join(profileDir, ".claude")
 	if err := os.MkdirAll(claudeDir, 0700); err != nil {
 		return agents.LaunchEnv{}, fmt.Errorf("failed to create claude config dir: %w", err)

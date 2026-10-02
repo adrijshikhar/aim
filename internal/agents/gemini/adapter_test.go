@@ -41,7 +41,7 @@ func TestGeminiPrepareEnv(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	adapter := NewAdapter()
-	launchEnv, err := adapter.PrepareEnv("testprof", tempDir)
+	launchEnv, err := adapter.PrepareEnv(t.Context(), "testprof", tempDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestGeminiPrepareEnv_BinaryFallback(t *testing.T) {
 	t.Setenv("PATH", "")
 
 	adapter := NewAdapter()
-	launchEnv, err := adapter.PrepareEnv("testprof", tempDir)
+	launchEnv, err := adapter.PrepareEnv(t.Context(), "testprof", tempDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}

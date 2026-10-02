@@ -27,7 +27,7 @@ func (m *mockAdapter) HasCredentials(p string) bool {
 }
 func (m *mockAdapter) TokenPath(p string) string        { return filepath.Join(p, m.tokenPath) }
 func (m *mockAdapter) Login(ctx any, p, d string) error { return nil }
-func (m *mockAdapter) PrepareEnv(p, d string) (agents.LaunchEnv, error) {
+func (m *mockAdapter) PrepareEnv(ctx any, p, d string) (agents.LaunchEnv, error) {
 	return agents.LaunchEnv{}, nil
 }
 func (m *mockAdapter) Doctor(ctx any, p, d string) []agents.DiagnosticResult { return nil }

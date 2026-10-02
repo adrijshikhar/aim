@@ -665,7 +665,7 @@ func (m *mockAgentAdapter) HasCredentials(profileDir string) bool {
 func (m *mockAgentAdapter) Login(ctx context.Context, profileName, profileDir string) error {
 	return nil
 }
-func (m *mockAgentAdapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (m *mockAgentAdapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	return agents.LaunchEnv{}, nil
 }
 func (m *mockAgentAdapter) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {

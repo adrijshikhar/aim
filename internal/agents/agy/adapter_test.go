@@ -41,7 +41,7 @@ func TestAgyPrepareEnv(t *testing.T) {
 	t.Setenv("GEMINI_CLI_HOME", "/some/unwanted/path")
 
 	adapter := NewAdapter()
-	launchEnv, err := adapter.PrepareEnv("work", tempDir)
+	launchEnv, err := adapter.PrepareEnv(t.Context(), "work", tempDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestAgyPrepareEnv(t *testing.T) {
 	_ = os.MkdirAll(filepath.Dir(tokenFile), 0700)
 	_ = os.WriteFile(tokenFile, []byte(`{"token":{"access_token":"mock"}}`), 0600)
 
-	launchEnvWithCreds, err := adapter.PrepareEnv("work", tempDir)
+	launchEnvWithCreds, err := adapter.PrepareEnv(t.Context(), "work", tempDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv with creds failed: %v", err)
 	}
@@ -677,7 +677,7 @@ func TestAgyPrepareEnv_AIMHome(t *testing.T) {
 
 	profileDir := t.TempDir()
 	adapter := NewAdapter()
-	env, err := adapter.PrepareEnv("testprof", profileDir)
+	env, err := adapter.PrepareEnv(t.Context(), "testprof", profileDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -896,7 +896,7 @@ func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
 	if adapter.IsTokenHealthy("testprof", profDir) {
 		t.Errorf("expected missing token to not be healthy")
 	}
-	envMissing, err := adapter.PrepareEnv("testprof", profDir)
+	envMissing, err := adapter.PrepareEnv(t.Context(), "testprof", profDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -909,7 +909,7 @@ func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
 	if adapter.IsTokenHealthy("testprof", profDir) {
 		t.Errorf("expected corrupt token to not be healthy")
 	}
-	envCorrupt, err := adapter.PrepareEnv("testprof", profDir)
+	envCorrupt, err := adapter.PrepareEnv(t.Context(), "testprof", profDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -924,7 +924,7 @@ func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
 	if adapter.IsTokenHealthy("testprof", profDir) {
 		t.Errorf("expected expired token without refresh_token to not be healthy")
 	}
-	envExpired, err := adapter.PrepareEnv("testprof", profDir)
+	envExpired, err := adapter.PrepareEnv(t.Context(), "testprof", profDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -938,7 +938,7 @@ func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
 	if !adapter.IsTokenHealthy("testprof", profDir) {
 		t.Errorf("expected expired access token with valid refresh_token to be healthy (auto-refreshable)")
 	}
-	envAutoRefresh, err := adapter.PrepareEnv("testprof", profDir)
+	envAutoRefresh, err := adapter.PrepareEnv(t.Context(), "testprof", profDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -953,7 +953,7 @@ func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
 	if !adapter.IsTokenHealthy("testprof", profDir) {
 		t.Errorf("expected valid token with future expiry to be healthy")
 	}
-	envValid, err := adapter.PrepareEnv("testprof", profDir)
+	envValid, err := adapter.PrepareEnv(t.Context(), "testprof", profDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -973,7 +973,7 @@ func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
 	if adapter.IsTokenHealthy("testprof", profDir) {
 		t.Errorf("expected offline profile to not be healthy")
 	}
-	envOffline, err := adapter.PrepareEnv("testprof", profDir)
+	envOffline, err := adapter.PrepareEnv(t.Context(), "testprof", profDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}

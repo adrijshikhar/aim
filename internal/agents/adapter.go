@@ -26,7 +26,7 @@ type AgentAdapter interface {
 	BinaryName() string
 	HasCredentials(profileDir string) bool
 	Login(ctx context.Context, profileName, profileDir string) error
-	PrepareEnv(profileName, profileDir string) (LaunchEnv, error)
+	PrepareEnv(ctx context.Context, profileName, profileDir string) (LaunchEnv, error)
 	Doctor(ctx context.Context, profileName, profileDir string) []DiagnosticResult
 	GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error)
 }

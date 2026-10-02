@@ -391,7 +391,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	return nil
 }
 
-func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	tokenDir := filepath.Join(profileDir, ".gemini", "antigravity-cli")
 	if err := os.MkdirAll(tokenDir, 0700); err != nil {
 		return agents.LaunchEnv{}, err

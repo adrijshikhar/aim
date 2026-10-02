@@ -65,7 +65,7 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			}
 
 			sessID := runner.ExtractSessionID(extraArgs)
-			exitCode := executeRunWithSession(reg, pm, agentName, profileName, sessID, extraArgs)
+			exitCode := executeRunWithSession(cmd.Context(), reg, pm, agentName, profileName, sessID, extraArgs)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
 			}
@@ -79,10 +79,13 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 }
 
 func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string, extraArgs []string) int {
-	return executeRunWithSession(reg, pm, agentName, profileName, "", extraArgs)
+	return executeRunWithSession(context.Background(), reg, pm, agentName, profileName, "", extraArgs)
 }
 
-func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName, sessionID string, extraArgs []string) int {
+func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName, sessionID string, extraArgs []string) int {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	logger.Debug("[run] Executing agent %q with profile %q (sessionID=%s, extraArgs=%v)", agentName, profileName, sessionID, extraArgs)
 	adapter, err := reg.Get(agentName)
 	if err != nil {
@@ -104,7 +107,7 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 		_ = config.SaveConfig(cfg)
 	}
 
-	launchEnv, err := adapter.PrepareEnv(profileName, pDir)
+	launchEnv, err := adapter.PrepareEnv(ctx, profileName, pDir)
 	if err != nil {
 		logger.Debug("[run] PrepareEnv failed for %q: %v", profileName, err)
 		fmt.Fprintf(os.Stderr, "Error preparing launch environment: %v\n", err)
@@ -140,14 +143,14 @@ func executeRunWithSession(reg *agents.Registry, pm *profile.ProfileManager, age
 	code := withSessionMerge(adapter, pm.MergeStateStore(), profileName, pDir, cfg, extraArgs, func() int {
 		if isMCPListInvocation(extraArgs) {
 			if listProv, ok := adapter.(agents.MCPListProvider); ok {
-				servers, listErr := listProv.ListMCPServers(context.Background(), profileName, pDir)
+				servers, listErr := listProv.ListMCPServers(ctx, profileName, pDir)
 				if listErr == nil {
 					renderMCPListTable(os.Stdout, adapter.Name(), profileName, servers)
 					return 0
 				}
 			}
 		}
-		c, runErr := r.Run(context.Background(), launchEnv, extraArgs)
+		c, runErr := r.Run(ctx, launchEnv, extraArgs)
 		err = runErr
 		return c
 	})
