@@ -1,8 +1,12 @@
 package session_test
 
 import (
+	"os/exec"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aim-cli/aim/internal/session"
 )
@@ -99,5 +103,116 @@ func TestParseProcessLines(t *testing.T) {
 		if info5.PID != 66778 {
 			t.Errorf("expected PID 66778, got %d", info5.PID)
 		}
+	}
+}
+
+func TestGracefulTerminate_ValidProcess(t *testing.T) {
+	cmd := exec.Command("sleep", "10")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start dummy process: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	err := session.GracefulTerminate(pid, 2*time.Second)
+	if err != nil {
+		t.Fatalf("expected graceful termination, got error: %v", err)
+	}
+
+	// Verify process is no longer running
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("process %d is still running after GracefulTerminate", pid)
+	}
+}
+
+func TestGracefulTerminate_InvalidPID(t *testing.T) {
+	testCases := []int{0, -1, -100}
+	for _, pid := range testCases {
+		err := session.GracefulTerminate(pid, 100*time.Millisecond)
+		if err == nil {
+			t.Errorf("expected error for invalid PID %d, got nil", pid)
+		} else if !strings.Contains(err.Error(), "invalid PID") {
+			t.Errorf("expected 'invalid PID' in error, got %v", err)
+		}
+	}
+}
+
+func TestGracefulTerminate_AlreadyDeadPID(t *testing.T) {
+	cmd := exec.Command("sleep", "0.01")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start dummy process: %v", err)
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Wait()
+
+	// Terminating an already dead process should succeed cleanly (return nil)
+	err := session.GracefulTerminate(pid, 500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected nil for already dead process, got %v", err)
+	}
+
+	// Completely non-existent PID should also return nil
+	nonExistentPID := 9999999
+	err = session.GracefulTerminate(nonExistentPID, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected nil for non-existent PID %d, got %v", nonExistentPID, err)
+	}
+}
+
+func TestGracefulTerminate_TimeoutFallbackSIGKILL(t *testing.T) {
+	// Process ignores SIGTERM
+	cmd := exec.Command("sh", "-c", "trap '' TERM; while true; do sleep 1; done")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start process: %v", err)
+	}
+	pid := cmd.Process.Pid
+	defer func() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	}()
+
+	// Timeout should expire, sending SIGKILL
+	err := session.GracefulTerminate(pid, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected success on SIGKILL fallback, got error: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("process %d is still running after SIGKILL fallback", pid)
+	}
+}
+
+func TestGracefulTerminate_NonChildProcess(t *testing.T) {
+	// Spawn an orphaned process reparented away from the current test process
+	cmd := exec.Command("sh", "-c", "sleep 10 >/dev/null 2>&1 & echo $!")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("failed to spawn orphaned process: %v", err)
+	}
+
+	pidStr := strings.TrimSpace(string(out))
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 0 {
+		t.Fatalf("invalid spawned PID: %q", pidStr)
+	}
+
+	defer func() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}()
+
+	// Verify process is initially running
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("spawned background process %d is not running: %v", pid, err)
+	}
+
+	// GracefulTerminate on non-child process
+	err = session.GracefulTerminate(pid, 2*time.Second)
+	if err != nil {
+		t.Fatalf("expected graceful termination of non-child process, got: %v", err)
+	}
+
+	// Verify process is dead
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("non-child process %d is still running after GracefulTerminate", pid)
 	}
 }

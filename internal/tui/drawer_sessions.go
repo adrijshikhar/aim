@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -27,14 +26,7 @@ var (
 )
 
 func terminateProcess(pid int) error {
-	if pid <= 0 {
-		return fmt.Errorf("invalid PID: %d", pid)
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	return proc.Kill()
+	return session.GracefulTerminate(pid, 2*time.Second)
 }
 
 func copyToClipboard(text string) error {
