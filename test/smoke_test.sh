@@ -167,10 +167,6 @@ echo "=== 6. Testing shell completion ==="
 "$AIM_BIN" __complete run | grep "gemini"
 "$AIM_BIN" __complete run | grep "codex"
 "$AIM_BIN" __complete run | grep "claude"
-"$AIM_BIN" __complete clone | grep "agy"
-"$AIM_BIN" __complete clone | grep "gemini"
-"$AIM_BIN" __complete clone | grep "codex"
-"$AIM_BIN" __complete clone | grep "claude"
 "$AIM_BIN" __complete mv | grep "agy"
 "$AIM_BIN" __complete mv | grep "gemini"
 "$AIM_BIN" __complete mv | grep "codex"
@@ -180,8 +176,6 @@ echo "=== 6. Testing shell completion ==="
 "$AIM_BIN" __complete run agy | grep "smoke_profile"
 "$AIM_BIN" __complete run gemini | grep "smoke_profile"
 "$AIM_BIN" __complete run codex | grep "smoke_profile"
-"$AIM_BIN" __complete clone agy | grep "smoke_profile"
-"$AIM_BIN" __complete clone codex | grep "smoke_profile"
 "$AIM_BIN" __complete mv codex | grep "smoke_profile"
 
 # Shorthand completion rejected
@@ -246,35 +240,26 @@ echo "$RUN_SESS" | grep "mock agy executed with args: --conversation smoke-conv-
 
 echo "Conversation bridging and continuation flags OK!"
 
-echo "=== 12. Testing profile cloning and config overrides ==="
-# Clone smoke_profile to clone_prof for agy
-"$AIM_BIN" clone agy smoke_profile clone_prof
-[ -d "$TEST_AIM_HOME/profiles/clone_prof" ]
-[ -L "$TEST_AIM_HOME/profiles/clone_prof/.gitconfig" ]
-"$AIM_BIN" list agy | grep "clone_prof"
+echo "=== 12. Testing profile config overrides ==="
+# Create override_prof for agy
+"$AIM_BIN" run agy override_prof --auto-create -- echo setup > /dev/null
+[ -d "$TEST_AIM_HOME/profiles/override_prof" ]
+"$AIM_BIN" list agy | grep "override_prof"
 
-# Test sensitive token exclusion during clone
-mkdir -p "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli"
-echo "secret" > "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli/antigravity-oauth-token"
-"$AIM_BIN" clone agy smoke_profile clone_token_check
-[ ! -f "$TEST_AIM_HOME/profiles/clone_token_check/.gemini/antigravity-cli/antigravity-oauth-token" ]
-"$AIM_BIN" remove agy clone_token_check
-rm -f "$TEST_AIM_HOME/profiles/smoke_profile/.gemini/antigravity-cli/antigravity-oauth-token"
-
-# Configure custom env & args for clone_prof in config.json
+# Configure custom env & args for override_prof in config.json
 python3 -c "
 import json
 p = '$TEST_AIM_HOME/config.json'
 with open(p) as f:
     cfg = json.load(f)
-cfg['profiles']['clone_prof']['env'] = {'MOCK_CUSTOM_ENV': 'smoke_override_active'}
-cfg['profiles']['clone_prof']['args'] = ['--profile-flag']
+cfg['profiles']['override_prof']['env'] = {'MOCK_CUSTOM_ENV': 'smoke_override_active'}
+cfg['profiles']['override_prof']['args'] = ['--profile-flag']
 with open(p, 'w') as f:
     json.dump(cfg, f, indent=2)
 "
 
-# Run clone_prof and verify env and args injection
-RUN_OUT="$("$AIM_BIN" run agy clone_prof -- extra_cli_arg)"
+# Run override_prof and verify env and args injection
+RUN_OUT="$("$AIM_BIN" run agy override_prof -- extra_cli_arg)"
 echo "$RUN_OUT" | grep "mock agy executed with args: --profile-flag extra_cli_arg"
 echo "$RUN_OUT" | grep "mock agy received env: smoke_override_active"
 
@@ -283,10 +268,10 @@ DOCTOR_CLONE_OUT="$("$AIM_BIN" doctor agy)"
 echo "$DOCTOR_CLONE_OUT" | grep "1 custom env var(s) configured"
 echo "$DOCTOR_CLONE_OUT" | grep "1 custom launch arg(s) configured"
 
-# Remove clone_prof
-"$AIM_BIN" remove agy clone_prof
-[ ! -d "$TEST_AIM_HOME/profiles/clone_prof" ]
-echo "Profile clone and config overrides OK!"
+# Remove override_prof
+"$AIM_BIN" remove agy override_prof
+[ ! -d "$TEST_AIM_HOME/profiles/override_prof" ]
+echo "Profile config overrides OK!"
 
 echo "=== 12b. Verifying rename is not a CLI command (TUI action only) ==="
 if "$AIM_BIN" rename smoke_profile smoke_renamed 2>/dev/null; then
@@ -378,7 +363,7 @@ echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"gemini\""
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"codex\""
 echo "$DOCTOR_EMPTY" | grep "No profiles configured for agent \"claude\""
 
-echo "=== 15. Testing sessions, resume & import CLI commands ==="
+echo "=== 15. Testing sessions & resume CLI commands ==="
 # Test sessions help
 "$AIM_BIN" sessions --help > /dev/null
 "$AIM_BIN" chats --help > /dev/null
@@ -393,14 +378,7 @@ if "$AIM_BIN" resume 2>/dev/null; then
   echo "Error: bare 'aim resume' should fail"
   exit 1
 fi
-
-# Test sessions import help & validation
-"$AIM_BIN" sessions import --help > /dev/null
-if "$AIM_BIN" sessions import 2>/dev/null; then
-  echo "Error: bare 'aim sessions import' should fail"
-  exit 1
-fi
-echo "Sessions, resume & import CLI commands OK!"
+echo "Sessions & resume CLI commands OK!"
 
 echo "=== 16. Testing Claude Code adapter (run, doctor, sessions, resume) ==="
 # 1. Test aim run claude testprof

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +60,9 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 			continue
 		}
 		slug := entry.Name()
+		if isEphemeralProjectSlug(slug) {
+			continue
+		}
 		projPath := filepath.Join(projectsDir, slug)
 		files, err := os.ReadDir(projPath)
 		if err != nil {
@@ -66,15 +70,41 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 			continue
 		}
 
+		type fileInfoItem struct {
+			name    string
+			modTime time.Time
+		}
+		var validFiles []fileInfoItem
 		for _, f := range files {
 			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
 				continue
 			}
 			sessID := strings.TrimSuffix(f.Name(), ".jsonl")
-			if sessID == "" {
+			if sessID == "" || sessID == "costs" {
 				continue
 			}
-			filePath := filepath.Join(projPath, f.Name())
+			info, err := f.Info()
+			if err != nil {
+				continue
+			}
+			validFiles = append(validFiles, fileInfoItem{
+				name:    f.Name(),
+				modTime: info.ModTime(),
+			})
+		}
+
+		sort.Slice(validFiles, func(i, j int) bool {
+			return validFiles[i].modTime.After(validFiles[j].modTime)
+		})
+
+		const maxSessionsPerProject = 50
+		if len(validFiles) > maxSessionsPerProject {
+			validFiles = validFiles[:maxSessionsPerProject]
+		}
+
+		for _, item := range validFiles {
+			sessID := strings.TrimSuffix(item.name, ".jsonl")
+			filePath := filepath.Join(projPath, item.name)
 			sess, err := parseClaudeSessionFile(filePath, sessID, slug, profileDir, isHost)
 			if err != nil {
 				logger.Debug("[session/claude] Error parsing session file %s: %v", filePath, err)
@@ -89,39 +119,55 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 	return results, nil
 }
 
+func isEphemeralProjectSlug(slug string) bool {
+	if strings.Contains(slug, "claude-mem-observer") || strings.Contains(slug, "-observer-sessions") {
+		return true
+	}
+	if strings.HasPrefix(slug, "-private-var-folders-") ||
+		strings.HasPrefix(slug, "-var-folders-") ||
+		strings.HasPrefix(slug, "-private-tmp-") ||
+		strings.HasPrefix(slug, "-tmp-") {
+		return true
+	}
+	return false
+}
+
 // GetSession resolves a full ID or short ID prefix to a concrete Session.
 func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
 	if idOrPrefix == "" {
 		return nil, nil
 	}
 
-	sessions, err := p.ListSessions(ctx, profileDir, isHost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list sessions for claude: %w", err)
-	}
+	claudeDir := filepath.Join(profileDir, ".claude")
+	projectsDir := filepath.Join(claudeDir, "projects")
 
-	var matches []session.Session
-	for _, s := range sessions {
-		if s.ID == idOrPrefix || strings.HasPrefix(s.ID, idOrPrefix) || strings.HasPrefix(s.ShortID, idOrPrefix) {
-			matches = append(matches, s)
-		}
-	}
-
-	if len(matches) == 0 {
-		return nil, nil
-	}
-
-	if len(matches) > 1 {
-		for _, s := range matches {
-			if s.ID == idOrPrefix {
-				match := s
-				return &match, nil
+	pattern := filepath.Join(projectsDir, "*", idOrPrefix+"*.jsonl")
+	matches, err := filepath.Glob(pattern)
+	if err == nil && len(matches) > 0 {
+		var exactMatches []string
+		for _, m := range matches {
+			base := strings.TrimSuffix(filepath.Base(m), ".jsonl")
+			if base == idOrPrefix {
+				exactMatches = append(exactMatches, m)
 			}
 		}
-		return nil, fmt.Errorf("ambiguous session ID prefix %q matches %d sessions", idOrPrefix, len(matches))
+		var targetPath string
+		if len(exactMatches) == 1 {
+			targetPath = exactMatches[0]
+		} else if len(matches) == 1 {
+			targetPath = matches[0]
+		} else if len(exactMatches) > 1 {
+			targetPath = exactMatches[0]
+		} else {
+			return nil, fmt.Errorf("ambiguous session ID prefix %q matches %d sessions", idOrPrefix, len(matches))
+		}
+
+		sessID := strings.TrimSuffix(filepath.Base(targetPath), ".jsonl")
+		slug := filepath.Base(filepath.Dir(targetPath))
+		return parseClaudeSessionFile(targetPath, sessID, slug, profileDir, isHost)
 	}
 
-	return &matches[0], nil
+	return nil, nil
 }
 
 // Hydrate copies a conversation session to destProfileDir, either verbatim (fork=false)
@@ -245,63 +291,189 @@ func parseClaudeSessionFile(filePath, sessionUUID, slug, profileDir string, isHo
 		return nil, fmt.Errorf("failed to stat session file %s: %w", filePath, err)
 	}
 
+	var firstUserPrompt string
+	var latestUserPrompt string
 	var title string
 	var earliestTime time.Time
 	var latestTime time.Time
 	messageCount := 0
 
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 50*1024*1024)
+	const headSize = 64 * 1024
+	fileSize := fi.Size()
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
+	if fileSize <= headSize {
+		// Small file: full scan
+		scanner := bufio.NewScanner(file)
+		buf := make([]byte, 64*1024)
+		scanner.Buffer(buf, 10*1024*1024)
 
-		var ev claudeLineEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			logger.Debug("[session/claude] skipping malformed JSON line in %s: %v", filePath, err)
-			continue
-		}
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(bytes.TrimSpace(line)) == 0 {
+				continue
+			}
 
-		// Timestamp tracking
-		rawTS := ev.Timestamp
-		if rawTS == "" {
-			rawTS = ev.CreatedAt
-		}
-		if rawTS != "" {
-			if t, ok := parseTimestamp(rawTS); ok {
-				if earliestTime.IsZero() || t.Before(earliestTime) {
-					earliestTime = t
+			var ev claudeLineEvent
+			if err := json.Unmarshal(line, &ev); err != nil {
+				continue
+			}
+
+			rawTS := ev.Timestamp
+			if rawTS == "" {
+				rawTS = ev.CreatedAt
+			}
+			if rawTS != "" {
+				if t, ok := parseTimestamp(rawTS); ok {
+					if earliestTime.IsZero() || t.Before(earliestTime) {
+						earliestTime = t
+					}
+					if latestTime.IsZero() || t.After(latestTime) {
+						latestTime = t
+					}
 				}
-				if latestTime.IsZero() || t.After(latestTime) {
-					latestTime = t
+			}
+
+			if ev.Type == "user" || isUserMessage(ev.Message) {
+				promptText := extractPromptText(ev)
+				if promptText != "" {
+					cleaned := session.CleanPromptText(promptText)
+					if cleaned != "" {
+						if firstUserPrompt == "" {
+							firstUserPrompt = cleaned
+						}
+						latestUserPrompt = cleaned
+					}
+				}
+			}
+
+			if ev.Type == "user" || ev.Type == "assistant" || isUserOrAssistantMessage(ev.Message) {
+				messageCount++
+			}
+		}
+	} else {
+		// Large file: fast O(1) head + tail seeking
+		// 1. Read Head (first 64KB) for earliest time and first user prompt
+		headBuf := make([]byte, headSize)
+		if n, err := file.Read(headBuf); err == nil && n > 0 {
+			lines := strings.Split(string(headBuf[:n]), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				var ev claudeLineEvent
+				if err := json.Unmarshal([]byte(line), &ev); err == nil {
+					rawTS := ev.Timestamp
+					if rawTS == "" {
+						rawTS = ev.CreatedAt
+					}
+					if rawTS != "" {
+						if t, ok := parseTimestamp(rawTS); ok && (earliestTime.IsZero() || t.Before(earliestTime)) {
+							earliestTime = t
+						}
+					}
+					if firstUserPrompt == "" && (ev.Type == "user" || isUserMessage(ev.Message)) {
+						if pt := extractPromptText(ev); pt != "" {
+							firstUserPrompt = session.CleanPromptText(pt)
+						}
+					}
+				}
+				if firstUserPrompt != "" && !earliestTime.IsZero() {
+					break
 				}
 			}
 		}
 
-		// User prompt extraction for title
-		if title == "" && (ev.Type == "user" || isUserMessage(ev.Message)) {
-			promptText := extractPromptText(ev)
-			if promptText != "" {
-				title = promptText
+		// 2. Read Tail (last 64KB) for latest time and latest user prompt
+		tailBuf := make([]byte, headSize)
+		offset := fileSize - headSize
+		if _, err := file.ReadAt(tailBuf, offset); err == nil {
+			lines := strings.Split(string(tailBuf), "\n")
+			if len(lines) > 0 {
+				lines = lines[1:] // Discard partial first line
+			}
+			for i := len(lines) - 1; i >= 0; i-- {
+				line := strings.TrimSpace(lines[i])
+				if line == "" {
+					continue
+				}
+				var ev claudeLineEvent
+				if err := json.Unmarshal([]byte(line), &ev); err == nil {
+					rawTS := ev.Timestamp
+					if rawTS == "" {
+						rawTS = ev.CreatedAt
+					}
+					if rawTS != "" && latestTime.IsZero() {
+						if t, ok := parseTimestamp(rawTS); ok {
+							latestTime = t
+						}
+					}
+					if latestUserPrompt == "" && (ev.Type == "user" || isUserMessage(ev.Message)) {
+						if pt := extractPromptText(ev); pt != "" {
+							latestUserPrompt = session.CleanPromptText(pt)
+						}
+					}
+				}
+				if latestUserPrompt != "" && !latestTime.IsZero() {
+					break
+				}
 			}
 		}
 
-		// Message count tracking
-		if ev.Type == "user" || ev.Type == "assistant" || isUserOrAssistantMessage(ev.Message) {
-			messageCount++
-		}
-	}
+		// 3. Fast count of user/assistant messages without full JSON parsing
+		userToken := []byte(`"type":"user"`)
+		assistantToken := []byte(`"type":"assistant"`)
+		fastBuf := make([]byte, 512*1024)
+		_, _ = file.Seek(0, io.SeekStart)
+		var tail []byte
+		for {
+			n, err := file.Read(fastBuf)
+			if n > 0 {
+				chunk := fastBuf[:n]
+				messageCount += bytes.Count(chunk, userToken)
+				messageCount += bytes.Count(chunk, assistantToken)
 
-	if err := scanner.Err(); err != nil {
-		logger.Debug("[session/claude] scanner error on %s: %v", filePath, err)
+				// If there was a tail from the previous chunk, check if a token spanned the seam
+				if len(tail) > 0 {
+					for offset := 1; offset < len(userToken); offset++ {
+						if len(tail) >= offset && n >= len(userToken)-offset {
+							if bytes.Equal(tail[len(tail)-offset:], userToken[:offset]) &&
+								bytes.Equal(chunk[:len(userToken)-offset], userToken[offset:]) {
+								messageCount++
+								break
+							}
+						}
+					}
+					for offset := 1; offset < len(assistantToken); offset++ {
+						if len(tail) >= offset && n >= len(assistantToken)-offset {
+							if bytes.Equal(tail[len(tail)-offset:], assistantToken[:offset]) &&
+								bytes.Equal(chunk[:len(assistantToken)-offset], assistantToken[offset:]) {
+								messageCount++
+								break
+							}
+						}
+					}
+				}
+
+				maxTail := len(assistantToken) - 1
+				if n >= maxTail {
+					tail = append(tail[:0], chunk[n-maxTail:]...)
+				} else {
+					tail = append(tail[:0], chunk...)
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
 	}
 
 	if title == "" {
-		title = "Untitled Session"
+		if firstUserPrompt != "" {
+			title = firstUserPrompt
+		} else {
+			title = "Untitled Session"
+		}
 	}
 
 	createdAt := fi.ModTime()
@@ -323,12 +495,73 @@ func parseClaudeSessionFile(filePath, sessionUUID, slug, profileDir string, isHo
 	s.StartedAt = createdAt
 	s.CreatedAt = createdAt
 	s.LastActiveAt = lastActive
-	s.Summary = title
 	s.StoragePath = filePath
 	s.Cwd = SlugToPath(slug)
 	s.MessageCount = messageCount
+	s.Goal = firstUserPrompt
+	if messageCount > 0 {
+		s.Progress = fmt.Sprintf("%d messages", messageCount)
+	}
+	s.Recent = latestUserPrompt
+
+	sum := session.SessionSummary{
+		Goal:           s.Goal,
+		Progress:       s.Progress,
+		RecentActivity: s.Recent,
+		Raw:            title,
+	}
+	s.Summary = sum.Text()
 
 	return &s, nil
+}
+
+// ResolveCwd resolves the working directory for a Claude Code conversation session.
+func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, error) {
+	if s == nil {
+		return "", nil
+	}
+	if s.Cwd != "" {
+		return s.Cwd, nil
+	}
+	if s.StoragePath != "" {
+		slug := filepath.Base(filepath.Dir(s.StoragePath))
+		cwd := SlugToPath(slug)
+		if cwd != "" {
+			s.Cwd = cwd
+			return cwd, nil
+		}
+	}
+	return "", nil
+}
+
+// ResolveSummary resolves structured summary information for a Claude Code conversation session.
+func (p *Provider) ResolveSummary(ctx context.Context, s *session.Session) (session.SessionSummary, error) {
+	if s == nil {
+		return session.SessionSummary{}, nil
+	}
+	if s.Goal != "" || s.Recent != "" {
+		return session.SessionSummary{
+			Goal:           s.Goal,
+			Progress:       s.Progress,
+			RecentActivity: s.Recent,
+			Raw:            s.Summary,
+		}, nil
+	}
+	if s.StoragePath != "" {
+		slug := filepath.Base(filepath.Dir(s.StoragePath))
+		if parsed, err := parseClaudeSessionFile(s.StoragePath, s.ID, slug, s.Profile, s.IsHost); err == nil && parsed != nil {
+			return session.SessionSummary{
+				Goal:           parsed.Goal,
+				Progress:       parsed.Progress,
+				RecentActivity: parsed.Recent,
+				Raw:            parsed.Summary,
+			}, nil
+		}
+	}
+	return session.SessionSummary{
+		Goal: s.Title,
+		Raw:  s.Summary,
+	}, nil
 }
 
 func isUserMessage(rawMsg json.RawMessage) bool {

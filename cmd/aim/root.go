@@ -123,7 +123,6 @@ Primary Commands:
   usage [agent] [profile]    Display remaining quota and usage limits
   doctor [agent]             Diagnose environment, tokens, and binaries
   remove [agent] <profile>   Delete profile credentials and state
-  clone [agent] <src> <dst>  Duplicate profile settings without copying tokens
   mv <agent> <src> <dst>     Move agent account and credentials between profiles
   whoami                     Show active profile, agent, session, and quota
   completion <shell>         Generate shell completion script (zsh, bash, fish)
@@ -160,13 +159,11 @@ Flags:
 		newRunCmd(reg, pm),
 		newLoginCmd(reg, pm),
 		newListCmd(reg, pm),
-		newMCPCmd(reg, pm),
 		newSessionsCmd(reg, pm),
 		newResumeCmd(reg, pm),
 		newUsageCmd(reg, pm),
 		newDoctorCmd(reg, pm),
 		newRemoveCmd(reg, pm),
-		newCloneCmd(reg, pm),
 		newMvCmd(reg, pm),
 		newWhoamiCmd(reg, pm),
 		newPrewarmCmd(reg, pm),

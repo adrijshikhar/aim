@@ -112,21 +112,29 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // SessionsDrawerKeyMap manages keys for the sessions explorer.
 type SessionsDrawerKeyMap struct {
-	Up          key.Binding
-	Down        key.Binding
-	Enter       key.Binding
-	Flags       key.Binding
-	Catalyst    key.Binding
-	Fork        key.Binding
-	Filter      key.Binding
-	TabFocus    key.Binding
-	AgentCycle  key.Binding
-	AgentAll    key.Binding
-	AgentAgy    key.Binding
-	AgentCodex  key.Binding
-	ClearFilter key.Binding
-	Close       key.Binding
-	Quit        key.Binding
+	Up            key.Binding
+	Down          key.Binding
+	PageUp        key.Binding
+	PageDown      key.Binding
+	Enter         key.Binding
+	Flags         key.Binding
+	Catalyst      key.Binding
+	Fork          key.Binding
+	Filter        key.Binding
+	TabFocus      key.Binding
+	AgentCycle    key.Binding
+	AgentAll      key.Binding
+	AgentAgy      key.Binding
+	AgentCodex    key.Binding
+	AgentClaude   key.Binding
+	ToggleActive  key.Binding
+	TogglePreview key.Binding
+	Kill          key.Binding
+	Copy          key.Binding
+	OpenDir       key.Binding
+	ClearFilter   key.Binding
+	Close         key.Binding
+	Quit          key.Binding
 }
 
 // DefaultSessionsDrawerKeyMap returns default bindings for list navigation mode.
@@ -138,6 +146,14 @@ func DefaultSessionsDrawerKeyMap() SessionsDrawerKeyMap {
 		),
 		Down: key.NewBinding(
 			key.WithKeys("down", "j", "ctrl+n"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("pgup", "ctrl+u"),
+			key.WithHelp("pgup", "page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("pgdown", "ctrl+d"),
+			key.WithHelp("pgdn", "page down"),
 		),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
@@ -179,6 +195,30 @@ func DefaultSessionsDrawerKeyMap() SessionsDrawerKeyMap {
 			key.WithKeys("2"),
 			key.WithHelp("2", "codex"),
 		),
+		AgentClaude: key.NewBinding(
+			key.WithKeys("3"),
+			key.WithHelp("3", "claude"),
+		),
+		ToggleActive: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("[a]", "Active"),
+		),
+		TogglePreview: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("[p]", "Preview"),
+		),
+		Kill: key.NewBinding(
+			key.WithKeys("x", "K"),
+			key.WithHelp("[x]", "Kill"),
+		),
+		Copy: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("[y]", "Copy"),
+		),
+		OpenDir: key.NewBinding(
+			key.WithKeys("o"),
+			key.WithHelp("[o]", "Open"),
+		),
 		ClearFilter: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("[Esc]", "Clear"),
@@ -201,6 +241,8 @@ func (k SessionsDrawerKeyMap) ForFilterMode() SessionsDrawerKeyMap {
 	m := k
 	m.Up = key.NewBinding(key.WithKeys("up", "ctrl+p", "ctrl+k"), key.WithHelp("[↑/↓]", "Navigate"))
 	m.Down = key.NewBinding(key.WithKeys("down", "ctrl+n", "ctrl+j"))
+	m.PageUp = key.NewBinding(key.WithKeys("pgup", "ctrl+u"))
+	m.PageDown = key.NewBinding(key.WithKeys("pgdown", "ctrl+d"))
 	m.Enter = key.NewBinding(key.WithKeys("enter"), key.WithHelp("[Enter]", "Resume"))
 	m.Flags = key.NewBinding(key.WithKeys("ctrl+f"), key.WithHelp("[Ctrl+F]", "Flags"))
 	m.TabFocus = key.NewBinding(key.WithKeys("tab", "esc"), key.WithHelp("[Tab/Esc]", "Exit Filter"))
@@ -211,12 +253,18 @@ func (k SessionsDrawerKeyMap) ForFilterMode() SessionsDrawerKeyMap {
 	m.AgentAll.SetEnabled(false)
 	m.AgentAgy.SetEnabled(false)
 	m.AgentCodex.SetEnabled(false)
+	m.AgentClaude.SetEnabled(false)
+	m.ToggleActive.SetEnabled(false)
+	m.TogglePreview.SetEnabled(false)
+	m.Kill.SetEnabled(false)
+	m.Copy.SetEnabled(false)
+	m.OpenDir.SetEnabled(false)
 	return m
 }
 
 // ShortHelp returns default navigation bindings for sessions drawer footer.
 func (k SessionsDrawerKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Enter, k.Flags, k.Catalyst, k.Fork, k.Filter, k.Close}
+	return []key.Binding{k.Up, k.Enter, k.Flags, k.Fork, k.Kill, k.Copy, k.Close}
 }
 
 // ShortHelpFilter returns bindings when text filter input is actively focused.
@@ -227,16 +275,17 @@ func (k SessionsDrawerKeyMap) ShortHelpFilter() []key.Binding {
 
 // ShortHelpQuery returns bindings when drawer has a filter query but list is focused.
 func (k SessionsDrawerKeyMap) ShortHelpQuery() []key.Binding {
-	return []key.Binding{k.Up, k.Enter, k.Flags, k.Catalyst, k.Fork, k.Filter, k.ClearFilter}
+	return []key.Binding{k.Up, k.Enter, k.Flags, k.Fork, k.Kill, k.Copy, k.ClearFilter}
 }
 
 // FullHelp returns grouped bindings for extended help views.
 func (k SessionsDrawerKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Enter},
+		{k.Up, k.Down, k.PageUp, k.PageDown, k.Enter},
 		{k.Flags, k.Catalyst, k.Fork},
+		{k.Kill, k.ToggleActive, k.TogglePreview, k.Copy, k.OpenDir},
 		{k.Filter, k.TabFocus, k.ClearFilter},
-		{k.AgentAll, k.AgentAgy, k.AgentCodex, k.Close},
+		{k.AgentAll, k.AgentAgy, k.AgentCodex, k.AgentClaude, k.Close},
 	}
 }
 

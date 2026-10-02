@@ -820,3 +820,106 @@ INSERT INTO thread_spawn_edges VALUES ('%s', '%s', 'open');
 		t.Errorf("expected shell snapshot to exist at %s: %v", targetShellSnap, err)
 	}
 }
+
+func TestProvider_ResolveCwdAndSummary(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+	profileDir := filepath.Join(tmpDir, "profiles", "work")
+	codexDir := filepath.Join(profileDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatalf("failed to create mock codex dir: %v", err)
+	}
+
+	dbPath := filepath.Join(codexDir, "state_5.sqlite")
+	threadID := "01a09eb7-2f6c-7c52-895f-218f9ac9eecd"
+	rolloutPath := filepath.Join(codexDir, "sessions", "rollout1.jsonl")
+	stateSchema := fmt.Sprintf(`
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	title TEXT NOT NULL,
+	first_user_message TEXT NOT NULL DEFAULT '',
+	preview TEXT NOT NULL DEFAULT '',
+	cwd TEXT NOT NULL DEFAULT '',
+	updated_at INTEGER NOT NULL,
+	rollout_path TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO threads (id, title, first_user_message, preview, cwd, updated_at, rollout_path)
+VALUES ('%s', 'Initial Title', 'Implement auth flow', 'Implement auth flow', '/Users/mock/projects/codex-app', 1726300000, '%s');
+`, threadID, rolloutPath)
+	if err := exec.Command(sqliteBin, dbPath, stateSchema).Run(); err != nil {
+		t.Fatalf("failed to seed mock sqlite DB: %v", err)
+	}
+
+	historyDB := filepath.Join(codexDir, "thread_history_1.sqlite")
+	historySchema := fmt.Sprintf(`
+CREATE TABLE thread_turns (
+	thread_id TEXT NOT NULL,
+	turn_id TEXT NOT NULL,
+	PRIMARY KEY (thread_id, turn_id)
+);
+INSERT INTO thread_turns (thread_id, turn_id) VALUES ('%s', 'turn-1'), ('%s', 'turn-2');
+
+CREATE TABLE thread_items (
+	thread_id TEXT NOT NULL,
+	turn_id TEXT NOT NULL,
+	item_id TEXT NOT NULL,
+	rollout_ordinal INTEGER NOT NULL,
+	item_type TEXT NOT NULL,
+	item_json TEXT NOT NULL,
+	PRIMARY KEY (thread_id, turn_id, item_id)
+);
+INSERT INTO thread_items (thread_id, turn_id, item_id, rollout_ordinal, item_type, item_json)
+VALUES ('%s', 'turn-2', 'item-1', 5, 'userMessage', '{"content":[{"type":"text","text":"Run JWT refresh integration tests"}]}');
+`, threadID, threadID, threadID)
+	if err := exec.Command(sqliteBin, historyDB, historySchema).Run(); err != nil {
+		t.Fatalf("failed to seed mock history DB: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	sess, err := p.GetSession(ctx, threadID, profileDir, false)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if sess == nil {
+		t.Fatalf("expected session, got nil")
+	}
+
+	if sess.Cwd != "/Users/mock/projects/codex-app" {
+		t.Errorf("expected cwd '/Users/mock/projects/codex-app', got %q", sess.Cwd)
+	}
+	if sess.Goal != "Initial Title" {
+		t.Errorf("expected goal 'Initial Title', got %q", sess.Goal)
+	}
+	if sess.Progress != "2 turns" {
+		t.Errorf("expected progress '2 turns', got %q", sess.Progress)
+	}
+	if sess.Recent != "Run JWT refresh integration tests" {
+		t.Errorf("expected recent 'Run JWT refresh integration tests', got %q", sess.Recent)
+	}
+
+	cwd, err := p.ResolveCwd(ctx, sess)
+	if err != nil || cwd != "/Users/mock/projects/codex-app" {
+		t.Errorf("ResolveCwd returned (%q, %v); want '/Users/mock/projects/codex-app'", cwd, err)
+	}
+
+	sum, err := p.ResolveSummary(ctx, sess)
+	if err != nil {
+		t.Fatalf("ResolveSummary failed: %v", err)
+	}
+	if sum.Goal != "Initial Title" {
+		t.Errorf("expected summary Goal 'Initial Title', got %q", sum.Goal)
+	}
+	if sum.Progress != "2 turns" {
+		t.Errorf("expected summary Progress '2 turns', got %q", sum.Progress)
+	}
+	if sum.RecentActivity != "Run JWT refresh integration tests" {
+		t.Errorf("expected summary RecentActivity 'Run JWT refresh integration tests', got %q", sum.RecentActivity)
+	}
+}

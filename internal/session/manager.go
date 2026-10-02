@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
@@ -106,6 +107,9 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 	profilesDir := filepath.Join(config.BaseDir(), "profiles")
 	entries, _ := os.ReadDir(profilesDir)
 
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
 	for _, p := range targetProviders {
 		// 1. Scan configured profiles
 		for _, entry := range entries {
@@ -118,30 +122,48 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 			}
 
 			profDir := filepath.Join(profilesDir, profName)
-			sessions, err := p.ListSessions(ctx, profDir, false)
-			if err != nil {
-				logger.Debug("[session/manager] ListSessions error on %s: %v", profDir, err)
-				continue
-			}
+			provider := p
+			profile := profName
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sessions, err := provider.ListSessions(ctx, profDir, false)
+				if err != nil {
+					logger.Debug("[session/manager] ListSessions error on %s: %v", profDir, err)
+					return
+				}
 
-			for _, s := range sessions {
-				appendSession(s, profName, false)
-			}
+				mu.Lock()
+				for _, s := range sessions {
+					appendSession(s, profile, false)
+				}
+				mu.Unlock()
+			}()
 		}
 
 		// 2. Scan host storage (unless specifically filtering for a non-host profile)
 		if filterProfile == "" || hostOnly {
 			hostDir := config.RealHomeDir()
-			hostSessions, err := p.ListSessions(ctx, hostDir, true)
-			if err != nil {
-				logger.Debug("[session/manager] ListSessions error on host %s: %v", hostDir, err)
-			} else {
+			provider := p
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				hostSessions, err := provider.ListSessions(ctx, hostDir, true)
+				if err != nil {
+					logger.Debug("[session/manager] ListSessions error on host %s: %v", hostDir, err)
+					return
+				}
+
+				mu.Lock()
 				for _, s := range hostSessions {
 					appendSession(s, "<host>", true)
 				}
-			}
+				mu.Unlock()
+			}()
 		}
 	}
+
+	wg.Wait()
 
 	// Filter activeOnly if requested
 	if activeOnly {
@@ -171,11 +193,24 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 		return nil, fmt.Errorf("session ID or prefix cannot be empty")
 	}
 
+	var targetProviders []SessionProvider
 	if agent != "" {
 		if p, ok := m.providers[agent]; ok {
-			var matches []Session
-			profilesDir := filepath.Join(config.BaseDir(), "profiles")
-			entries, _ := os.ReadDir(profilesDir)
+			targetProviders = append(targetProviders, p)
+		}
+	} else {
+		for _, p := range m.providers {
+			targetProviders = append(targetProviders, p)
+		}
+	}
+
+	if len(targetProviders) > 0 {
+		var matches []Session
+		profilesDir := filepath.Join(config.BaseDir(), "profiles")
+		entries, _ := os.ReadDir(profilesDir)
+		hostDir := config.RealHomeDir()
+
+		for _, p := range targetProviders {
 			for _, entry := range entries {
 				if !entry.IsDir() {
 					continue
@@ -193,7 +228,6 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 					matches = append(matches, *s)
 				}
 			}
-			hostDir := config.RealHomeDir()
 			s, err := p.GetSession(ctx, idOrPrefix, hostDir, true)
 			if err != nil {
 				logger.Debug("[session] error querying session %q in host: %v", idOrPrefix, err)
@@ -205,9 +239,9 @@ func (m *Manager) FindAllSessionsByID(ctx context.Context, agent, idOrPrefix str
 				s.IsHost = true
 				matches = append(matches, *s)
 			}
-			if len(matches) > 0 {
-				return matches, nil
-			}
+		}
+		if len(matches) > 0 {
+			return matches, nil
 		}
 	}
 
@@ -363,4 +397,26 @@ func DeduplicateMatches(matches []Session) []Session {
 		return result[i].LastActiveAt.After(result[j].LastActiveAt)
 	})
 	return result
+}
+
+// ResolveCwd resolves the working directory for a session by delegating to its provider.
+func (m *Manager) ResolveCwd(ctx context.Context, s *Session) (string, error) {
+	if s == nil {
+		return "", nil
+	}
+	if p, ok := m.providers[s.Agent]; ok {
+		return p.ResolveCwd(ctx, s)
+	}
+	return s.Cwd, nil
+}
+
+// ResolveSummary resolves the structured summary for a session by delegating to its provider.
+func (m *Manager) ResolveSummary(ctx context.Context, s *Session) (SessionSummary, error) {
+	if s == nil {
+		return SessionSummary{}, nil
+	}
+	if p, ok := m.providers[s.Agent]; ok {
+		return p.ResolveSummary(ctx, s)
+	}
+	return SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
 }

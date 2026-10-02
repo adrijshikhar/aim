@@ -52,6 +52,20 @@ func (p *testCompProvider) Hydrate(ctx context.Context, srcSession *session.Sess
 	return srcSession.ID, nil
 }
 
+func (p *testCompProvider) ResolveCwd(ctx context.Context, s *session.Session) (string, error) {
+	if s != nil {
+		return s.Cwd, nil
+	}
+	return "", nil
+}
+
+func (p *testCompProvider) ResolveSummary(ctx context.Context, s *session.Session) (session.SessionSummary, error) {
+	if s != nil {
+		return session.SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
+	}
+	return session.SessionSummary{}, nil
+}
+
 func setupCompletionTestEnv(t *testing.T) (*agents.Registry, *profile.ProfileManager) {
 	t.Helper()
 	tempDir := t.TempDir()
@@ -189,24 +203,6 @@ func TestCompleteSessionIDs(t *testing.T) {
 		comps, _ = cmd.ValidArgsFunction(cmd, []string{"codex", "work"}, "xyz")
 		if len(comps) != 0 {
 			t.Fatalf("expected 0 completions for non-matching prefix 'xyz', got: %v", comps)
-		}
-	})
-
-	t.Run("ImportCmd_ValidArgsFunction", func(t *testing.T) {
-		reg, pm := setupCompletionTestEnv(t)
-		cmd := newSessionsImportCmd(reg, pm)
-
-		comps, directive := cmd.ValidArgsFunction(cmd, []string{"codex", "work"}, "")
-		if directive != cobra.ShellCompDirectiveNoFileComp {
-			t.Errorf("expected directive ShellCompDirectiveNoFileComp, got %v", directive)
-		}
-		if len(comps) != len(expectedCodexCompletions) {
-			t.Fatalf("expected %d completions, got %d: %v", len(expectedCodexCompletions), len(comps), comps)
-		}
-		for i, expected := range expectedCodexCompletions {
-			if comps[i] != expected {
-				t.Errorf("completion[%d] = %q, want %q", i, comps[i], expected)
-			}
 		}
 	})
 

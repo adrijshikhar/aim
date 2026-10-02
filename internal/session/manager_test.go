@@ -66,6 +66,20 @@ func (m *mockProvider) Hydrate(ctx context.Context, srcSession *session.Session,
 	return srcSession.ID, nil
 }
 
+func (m *mockProvider) ResolveCwd(ctx context.Context, s *session.Session) (string, error) {
+	if s != nil {
+		return s.Cwd, nil
+	}
+	return "", nil
+}
+
+func (m *mockProvider) ResolveSummary(ctx context.Context, s *session.Session) (session.SessionSummary, error) {
+	if s != nil {
+		return session.SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
+	}
+	return session.SessionSummary{}, nil
+}
+
 type mockProcessScanner struct {
 	active   map[string]session.ActiveProcessInfo
 	contexts []context.Context

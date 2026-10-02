@@ -269,6 +269,18 @@ func (m *testSessionProvider) GetSession(ctx context.Context, idOrPrefix string,
 func (m *testSessionProvider) Hydrate(ctx context.Context, srcSession *session.Session, destProfileDir string, fork bool) (string, error) {
 	return srcSession.ID, nil
 }
+func (m *testSessionProvider) ResolveCwd(ctx context.Context, s *session.Session) (string, error) {
+	if s != nil {
+		return s.Cwd, nil
+	}
+	return "", nil
+}
+func (m *testSessionProvider) ResolveSummary(ctx context.Context, s *session.Session) (session.SessionSummary, error) {
+	if s != nil {
+		return session.SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
+	}
+	return session.SessionSummary{}, nil
+}
 
 func TestResume_AmbiguousPrefixAcrossProfiles(t *testing.T) {
 	tempDir := t.TempDir()
@@ -432,6 +444,18 @@ func (m *mockForkProvider) Hydrate(ctx context.Context, srcSession *session.Sess
 		return "forked-uuid-11112222", nil
 	}
 	return srcSession.ID, nil
+}
+func (m *mockForkProvider) ResolveCwd(ctx context.Context, s *session.Session) (string, error) {
+	if s != nil {
+		return s.Cwd, nil
+	}
+	return "", nil
+}
+func (m *mockForkProvider) ResolveSummary(ctx context.Context, s *session.Session) (session.SessionSummary, error) {
+	if s != nil {
+		return session.SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
+	}
+	return session.SessionSummary{}, nil
 }
 
 func TestResumeCmd_ClaudeResumeArgs(t *testing.T) {

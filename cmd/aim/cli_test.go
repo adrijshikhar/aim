@@ -915,93 +915,6 @@ func TestCLI_ExecuteRemove_AliasResolution(t *testing.T) {
 	}
 }
 
-func TestCLI_ExecuteClone(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "aim-cli-clone-test-*")
-	if err != nil {
-		t.Fatalf("temp dir error: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	t.Setenv("AIM_HOME", tempDir)
-
-	reg := agents.NewRegistry()
-	reg.Register(agy.NewAdapter())
-	reg.Register(&mockAdapter{name: "mock"})
-
-	pm := profile.NewProfileManager(tempDir)
-	srcDir, _ := pm.EnsureProfile("orig")
-
-	// Write mock settings and sensitive token
-	_ = os.WriteFile(filepath.Join(srcDir, "custom.conf"), []byte("env=prod"), 0644)
-	tokenDir := filepath.Join(srcDir, ".gemini", "antigravity-cli")
-	_ = os.MkdirAll(tokenDir, 0700)
-	_ = os.WriteFile(filepath.Join(tokenDir, "token.json"), []byte(`{"secret": true}`), 0600)
-
-	cfg, _ := config.LoadConfig()
-	cfg.AddProfileAgent("orig", "agy")
-	cfg.AddProfileAgent("orig", "mock")
-	_ = config.SaveConfig(cfg)
-
-	// 1. Invalid usage with < 2 args
-	if code := executeClone(reg, pm, []string{}); code != 1 {
-		t.Errorf("expected exit code 1 for empty args, got %d", code)
-	}
-	if code := executeClone(reg, pm, []string{"orig"}); code != 1 {
-		t.Errorf("expected exit code 1 for 1 arg, got %d", code)
-	}
-
-	// 2. Clone all agents: aim clone orig cloned-all
-	if code := executeClone(reg, pm, []string{"orig", "cloned-all"}); code != 0 {
-		t.Fatalf("expected exit code 0 for 2-arg clone, got %d", code)
-	}
-	dstAllDir := pm.ProfileDir("cloned-all")
-	if _, err := os.Stat(dstAllDir); err != nil {
-		t.Fatalf("expected cloned-all directory to exist: %v", err)
-	}
-	// Non-sensitive file copied
-	if data, err := os.ReadFile(filepath.Join(dstAllDir, "custom.conf")); err != nil || string(data) != "env=prod" {
-		t.Errorf("expected custom.conf to be copied, got %s (err: %v)", string(data), err)
-	}
-	// Token NOT copied
-	if _, err := os.Stat(filepath.Join(dstAllDir, ".gemini", "antigravity-cli", "token.json")); !os.IsNotExist(err) {
-		t.Errorf("expected token.json NOT to be copied")
-	}
-	// Config inherited both agents
-	cfgReload, _ := config.LoadConfig()
-	if !cfgReload.HasAgent("cloned-all", "agy") || !cfgReload.HasAgent("cloned-all", "mock") {
-		t.Errorf("expected cloned-all to have agy and mock, got %v", cfgReload.GetProfileAgents("cloned-all"))
-	}
-
-	// 3. Clone with specific agent: aim clone mock orig cloned-mock
-	if code := executeClone(reg, pm, []string{"mock", "orig", "cloned-mock"}); code != 0 {
-		t.Fatalf("expected exit code 0 for agent-specific clone, got %d", code)
-	}
-	cfgReload2, _ := config.LoadConfig()
-	if !cfgReload2.HasAgent("cloned-mock", "mock") || cfgReload2.HasAgent("cloned-mock", "agy") {
-		t.Errorf("expected cloned-mock to only have mock, got %v", cfgReload2.GetProfileAgents("cloned-mock"))
-	}
-
-	// 4. Clone with agent alias: aim clone antigravity orig cloned-agy-alias
-	code := dispatch([]string{"clone", "antigravity", "orig", "cloned-agy-alias"}, reg, pm)
-	if code != 0 {
-		t.Fatalf("expected dispatch exit code 0 for alias clone, got %d", code)
-	}
-	cfgReload3, _ := config.LoadConfig()
-	if !cfgReload3.HasAgent("cloned-agy-alias", "agy") {
-		t.Errorf("expected cloned-agy-alias to have agy")
-	}
-
-	// 5. Clone unassociated agent
-	if code := executeClone(reg, pm, []string{"unassociated", "orig", "fail-dst"}); code != 1 {
-		t.Errorf("expected exit code 1 for unassociated agent clone, got %d", code)
-	}
-
-	// 6. Clone non-existent profile
-	if code := executeClone(reg, pm, []string{"ghost", "fail-dst"}); code != 1 {
-		t.Errorf("expected exit code 1 for non-existent source clone, got %d", code)
-	}
-}
-
 func TestCLI_RenameCommandNotRegistered(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
@@ -1753,21 +1666,6 @@ func TestCLI_CodexIntegration(t *testing.T) {
 	})
 	if !strings.Contains(outDoc, "Codex") {
 		t.Errorf("expected doctor output to mention Codex, got:\n%s", outDoc)
-	}
-
-	// 3. Test 'aim clone codex work cloned-work'
-	outClone, _ := captureOutput(t, func() {
-		code := dispatch([]string{"clone", "codex", "work", "cloned-work"}, reg, pm)
-		if code != 0 {
-			t.Errorf("expected exit code 0 for 'clone codex', got %d", code)
-		}
-	})
-	if !strings.Contains(outClone, "Cloned") {
-		t.Errorf("expected clone success output, got:\n%s", outClone)
-	}
-	cfgReloaded, _ := config.LoadConfig()
-	if !cfgReloaded.HasAgent("cloned-work", "codex") {
-		t.Errorf("expected cloned profile to have codex agent")
 	}
 }
 

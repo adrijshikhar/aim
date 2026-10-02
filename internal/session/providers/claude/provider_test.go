@@ -488,3 +488,66 @@ func TestProvider_ListSessions_ContextCanceled(t *testing.T) {
 		t.Fatalf("expected context cancellation error, got nil")
 	}
 }
+
+func TestProvider_ResolveCwdAndSummary(t *testing.T) {
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, "profiles", "work")
+	projectSlug := "-Users-nemesis-Projects-aim"
+	projDir := filepath.Join(profileDir, ".claude", "projects", projectSlug)
+	if err := os.MkdirAll(projDir, 0755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+
+	sessionUUID := "a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4a5b6c"
+	jsonlContent := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":"<local-command-caveat>Generated command</local-command-caveat> /tmp/Screenshot 2026-10-02 at 2.26.50 PM.png Initial bug report about sessions"},"timestamp":"2026-09-23T12:00:00.000Z","sessionId":"` + sessionUUID + `"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"Fixing the sessions bug."},"timestamp":"2026-09-23T12:01:00.000Z","sessionId":"` + sessionUUID + `"}`,
+		`{"type":"user","message":{"role":"user","content":"Now run the verification tests"},"timestamp":"2026-09-23T12:02:00.000Z","sessionId":"` + sessionUUID + `"}`,
+	}, "\n") + "\n"
+
+	sessionFile := filepath.Join(projDir, sessionUUID+".jsonl")
+	if err := os.WriteFile(sessionFile, []byte(jsonlContent), 0644); err != nil {
+		t.Fatalf("failed to write session file: %v", err)
+	}
+
+	p := NewProvider()
+	ctx := context.Background()
+
+	sessions, err := p.ListSessions(ctx, profileDir, false)
+	if err != nil {
+		t.Fatalf("ListSessions failed: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+
+	s := sessions[0]
+	if s.Goal != "Initial bug report about sessions" {
+		t.Errorf("expected clean goal 'Initial bug report about sessions', got %q", s.Goal)
+	}
+	if s.Recent != "Now run the verification tests" {
+		t.Errorf("expected clean recent 'Now run the verification tests', got %q", s.Recent)
+	}
+	if s.Progress != "3 messages" {
+		t.Errorf("expected progress '3 messages', got %q", s.Progress)
+	}
+	if s.Cwd != "/Users/nemesis/Projects/aim" {
+		t.Errorf("expected cwd '/Users/nemesis/Projects/aim', got %q", s.Cwd)
+	}
+
+	cwd, err := p.ResolveCwd(ctx, &s)
+	if err != nil || cwd != "/Users/nemesis/Projects/aim" {
+		t.Errorf("ResolveCwd returned (%q, %v); want '/Users/nemesis/Projects/aim'", cwd, err)
+	}
+
+	sum, err := p.ResolveSummary(ctx, &s)
+	if err != nil {
+		t.Fatalf("ResolveSummary failed: %v", err)
+	}
+	if sum.Goal != "Initial bug report about sessions" {
+		t.Errorf("expected summary Goal 'Initial bug report about sessions', got %q", sum.Goal)
+	}
+	if sum.RecentActivity != "Now run the verification tests" {
+		t.Errorf("expected summary RecentActivity 'Now run the verification tests', got %q", sum.RecentActivity)
+	}
+}

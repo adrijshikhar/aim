@@ -231,6 +231,14 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 				return nil, err
 			}
 			if s != nil {
+				if sum, err := p.ResolveSummary(ctx, s); err == nil {
+					s.Goal = sum.Goal
+					s.Progress = sum.Progress
+					s.Recent = sum.RecentActivity
+					if sum.Text() != "" {
+						s.Summary = sum.Text()
+					}
+				}
 				return s, nil
 			}
 		}
@@ -238,10 +246,135 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 
 	indexPath := filepath.Join(cDir, "session_index.jsonl")
 	if fi, err := os.Stat(indexPath); err == nil && fi.Size() > 0 {
-		return p.getFromJSONL(indexPath, idOrPrefix, profileName, isHost)
+		s, err := p.getFromJSONL(indexPath, idOrPrefix, profileName, isHost)
+		if err != nil {
+			return nil, err
+		}
+		if s != nil {
+			if sum, err := p.ResolveSummary(ctx, s); err == nil {
+				s.Goal = sum.Goal
+				s.Progress = sum.Progress
+				s.Recent = sum.RecentActivity
+				if sum.Text() != "" {
+					s.Summary = sum.Text()
+				}
+			}
+			return s, nil
+		}
 	}
 
 	return nil, nil
+}
+
+// ResolveCwd resolves the working directory for an OpenAI Codex CLI session.
+func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, error) {
+	if s == nil {
+		return "", nil
+	}
+	if s.Cwd != "" {
+		return s.Cwd, nil
+	}
+
+	cDir := ""
+	if s.StoragePath != "" {
+		if idx := strings.Index(s.StoragePath, ".codex"); idx != -1 {
+			cDir = s.StoragePath[:idx+len(".codex")]
+		}
+	}
+	if cDir == "" {
+		profileDir := ""
+		if !s.IsHost && s.Profile != "" {
+			profileDir = filepath.Join(config.BaseDir(), "profiles", s.Profile)
+		}
+		cDir = p.codexDir(profileDir, s.IsHost)
+	}
+	dbPath := filepath.Join(cDir, "state_5.sqlite")
+
+	if p.sqliteBin != "" {
+		query := fmt.Sprintf("SELECT cwd FROM threads WHERE id = '%s' LIMIT 1;\n", escapeSQL(s.ID))
+		cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath)
+		cmd.Stdin = strings.NewReader(query)
+		if out, err := cmd.Output(); err == nil {
+			cwd := strings.TrimSpace(string(out))
+			if cwd != "" {
+				s.Cwd = cwd
+				return cwd, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// ResolveSummary resolves structured summary information for an OpenAI Codex CLI session.
+func (p *Provider) ResolveSummary(ctx context.Context, s *session.Session) (session.SessionSummary, error) {
+	if s == nil {
+		return session.SessionSummary{}, nil
+	}
+
+	cDir := ""
+	if s.StoragePath != "" {
+		if idx := strings.Index(s.StoragePath, ".codex"); idx != -1 {
+			cDir = s.StoragePath[:idx+len(".codex")]
+		}
+	}
+	if cDir == "" {
+		profileDir := ""
+		if !s.IsHost && s.Profile != "" {
+			profileDir = filepath.Join(config.BaseDir(), "profiles", s.Profile)
+		}
+		cDir = p.codexDir(profileDir, s.IsHost)
+	}
+	historyDB := filepath.Join(cDir, "thread_history_1.sqlite")
+
+	goal := s.Goal
+	if goal == "" {
+		goal = session.CleanPromptText(s.Title)
+	}
+
+	progress := s.Progress
+	recent := s.Recent
+
+	if p.sqliteBin != "" && historyDB != "" {
+		if fi, err := os.Stat(historyDB); err == nil && fi.Size() > 0 {
+			// Query turns count if not already populated
+			if progress == "" {
+				turnQuery := fmt.Sprintf("SELECT COUNT(*) FROM thread_turns WHERE thread_id = '%s';\n", escapeSQL(s.ID))
+				cmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
+				cmd.Stdin = strings.NewReader(turnQuery)
+				if out, err := cmd.Output(); err == nil {
+					cntStr := strings.TrimSpace(string(out))
+					if cnt, err := strconv.Atoi(cntStr); err == nil && cnt > 0 {
+						progress = fmt.Sprintf("%d turns", cnt)
+					}
+				}
+			}
+
+			// Query latest user message
+			if recent == "" {
+				itemQuery := fmt.Sprintf("SELECT item_json FROM thread_items WHERE thread_id = '%s' AND item_type = 'userMessage' ORDER BY rollout_ordinal DESC LIMIT 1;\n", escapeSQL(s.ID))
+				cmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
+				cmd.Stdin = strings.NewReader(itemQuery)
+				if out, err := cmd.Output(); err == nil && len(out) > 0 {
+					var item struct {
+						Content []struct {
+							Text string `json:"text"`
+						} `json:"content"`
+					}
+					if err := json.Unmarshal(out, &item); err == nil && len(item.Content) > 0 {
+						recent = session.CleanPromptText(item.Content[0].Text)
+					}
+				}
+			}
+		}
+	}
+
+	sum := session.SessionSummary{
+		Goal:           goal,
+		Progress:       progress,
+		RecentActivity: recent,
+		Raw:            s.Summary,
+	}
+	return sum, nil
 }
 
 func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profileName string, isHost bool) (*session.Session, error) {
@@ -368,6 +501,39 @@ func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profil
 		hasHistory = true
 	}
 
+	type turnInfo struct {
+		maxTime   time.Time
+		turnCount int
+	}
+	turnsByThread := make(map[string]turnInfo)
+	if hasHistory && len(rows) > 0 {
+		var ids []string
+		for _, r := range rows {
+			if r.ID != "" {
+				ids = append(ids, fmt.Sprintf("'%s'", escapeSQL(r.ID)))
+			}
+		}
+		if len(ids) > 0 {
+			turnQuery := fmt.Sprintf("SELECT thread_id, MAX(COALESCE(completed_at, started_at, 0)), COUNT(*) FROM thread_turns WHERE thread_id IN (%s) GROUP BY thread_id;\n", strings.Join(ids, ","))
+			tCmd := exec.CommandContext(ctx, p.sqliteBin, historyDB, "-separator", "|")
+			tCmd.Stdin = strings.NewReader(turnQuery)
+			if tOut, err := tCmd.Output(); err == nil {
+				for _, line := range strings.Split(strings.TrimSpace(string(tOut)), "\n") {
+					parts := strings.Split(strings.TrimSpace(line), "|")
+					if len(parts) >= 3 {
+						tID := parts[0]
+						var tTime time.Time
+						if tSec, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64); err == nil && tSec > 0 {
+							tTime = time.Unix(tSec, 0)
+						}
+						cnt, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
+						turnsByThread[tID] = turnInfo{maxTime: tTime, turnCount: cnt}
+					}
+				}
+			}
+		}
+	}
+
 	var sessions []*session.Session
 	for _, row := range rows {
 		displayTitle := row.Name
@@ -375,24 +541,18 @@ func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profil
 			displayTitle = row.Title
 		}
 		if displayTitle == "" && row.FirstUserMessage != "" {
-			displayTitle = strings.TrimSpace(strings.Split(row.FirstUserMessage, "\n")[0])
+			displayTitle = session.CleanPromptText(strings.Split(row.FirstUserMessage, "\n")[0])
 		}
 		if displayTitle == "" && row.Preview != "" {
-			displayTitle = strings.TrimSpace(strings.Split(row.Preview, "\n")[0])
+			displayTitle = session.CleanPromptText(strings.Split(row.Preview, "\n")[0])
 		}
 		if displayTitle == "" {
 			displayTitle = "Untitled Session"
 		}
 
-		summary := row.FirstUserMessage
-		if summary == "" {
-			summary = row.Preview
-		}
-		if summary == "" && row.Title != "" && row.Title != displayTitle {
-			summary = row.Title
-		}
-		if summary == "" {
-			summary = displayTitle
+		cleanFirst := session.CleanPromptText(row.FirstUserMessage)
+		if cleanFirst == "" {
+			cleanFirst = session.CleanPromptText(row.Preview)
 		}
 
 		var sec int64
@@ -408,24 +568,31 @@ func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profil
 			}
 		}
 
-		if hasHistory {
-			turnQuery := fmt.Sprintf("SELECT MAX(COALESCE(completed_at, started_at, 0)) FROM thread_turns WHERE thread_id = '%s';\n", escapeSQL(row.ID))
-			tCmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
-			tCmd.Stdin = strings.NewReader(turnQuery)
-			if tOut, err := tCmd.Output(); err == nil {
-				if tSec, err := strconv.ParseInt(strings.TrimSpace(string(tOut)), 10, 64); err == nil && tSec > 0 {
-					tTime := time.Unix(tSec, 0)
-					if tTime.After(modTime) {
-						modTime = tTime
-					}
-				}
+		var turnCount int
+		if ti, ok := turnsByThread[row.ID]; ok {
+			if ti.maxTime.After(modTime) {
+				modTime = ti.maxTime
 			}
+			turnCount = ti.turnCount
 		}
 
 		s := session.NewSession(row.ID, displayTitle, "codex", profileName, isHost, modTime)
-		s.Summary = summary
+		s.Goal = session.CleanPromptText(displayTitle)
+		if s.Goal == "Untitled Session" && cleanFirst != "" {
+			s.Goal = cleanFirst
+		}
+		if turnCount > 0 {
+			s.Progress = fmt.Sprintf("%d turns", turnCount)
+		}
 		s.StoragePath = row.RolloutPath
 		s.Cwd = row.Cwd
+
+		sum := session.SessionSummary{
+			Goal:     s.Goal,
+			Progress: s.Progress,
+			Raw:      row.FirstUserMessage,
+		}
+		s.Summary = sum.Text()
 		sessions = append(sessions, &s)
 	}
 

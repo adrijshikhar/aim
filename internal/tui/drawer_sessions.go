@@ -3,6 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,14 +20,76 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var (
+	terminateProcessFunc = terminateProcess
+	copyToClipboardFunc  = copyToClipboard
+	openDirectoryFunc    = openDirectory
+)
+
+func terminateProcess(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid PID: %d", pid)
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Kill()
+}
+
+func copyToClipboard(text string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		if _, err := exec.LookPath("wl-copy"); err == nil {
+			cmd = exec.Command("wl-copy")
+		} else if _, err := exec.LookPath("xclip"); err == nil {
+			cmd = exec.Command("xclip", "-selection", "clipboard")
+		} else if _, err := exec.LookPath("xsel"); err == nil {
+			cmd = exec.Command("xsel", "--clipboard", "--input")
+		} else {
+			return fmt.Errorf("no clipboard utility found")
+		}
+	case "windows":
+		cmd = exec.Command("clip")
+	default:
+		return fmt.Errorf("unsupported platform for clipboard")
+	}
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
+}
+
+func openDirectory(dir string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", dir)
+	case "linux":
+		cmd = exec.Command("xdg-open", dir)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", dir)
+	default:
+		return fmt.Errorf("unsupported platform for opening directory")
+	}
+	return cmd.Start()
+}
+
 type sessionsDrawerState struct {
-	active       bool
-	sessions     []session.Session
-	cursor       int
-	filterActive bool
-	filterInput  textinput.Model
-	agentFilter  string
-	fork         bool
+	active         bool
+	standalone     bool
+	sessions       []session.Session
+	cursor         int
+	filterActive   bool
+	filterInput    textinput.Model
+	agentFilter    string
+	profileFilter  string
+	activeOnly     bool
+	hidePreview    bool
+	statusMessage  string
+	killConfirmPID int
+	fork           bool
 }
 
 func (m Model) IsSessionsDrawerActive() bool {
@@ -44,20 +109,27 @@ func (m Model) IsForkResume() bool {
 }
 
 func (m Model) openSessionsDrawer() (Model, tea.Cmd) {
+	return m.openSessionsDrawerConfig(m.agent, "", false, false), nil
+}
+
+func (m Model) openSessionsDrawerConfig(initialAgent, profileFilter string, activeOnly, standalone bool) Model {
 	ti := textinput.New()
-	ti.Placeholder = "Filter sessions by title, id, or profile..."
+	ti.Placeholder = "Filter sessions by title, id, profile, or workspace..."
 	ti.CharLimit = 64
 	ti.Prompt = "Filter: "
 	ti.PromptStyle = lipgloss.NewStyle().Bold(true).Foreground(AccentCyan)
 
 	m.sessionsDrawer = sessionsDrawerState{
-		active:      true,
-		filterInput: ti,
-		agentFilter: m.agent, // Default to currently selected agent tab
-		cursor:      0,
+		active:        true,
+		standalone:    standalone,
+		filterInput:   ti,
+		agentFilter:   initialAgent,
+		profileFilter: profileFilter,
+		activeOnly:    activeOnly,
+		cursor:        0,
 	}
 	m = m.fetchSessions()
-	return m, nil
+	return m
 }
 
 func (m Model) fetchSessions() Model {
@@ -66,7 +138,7 @@ func (m Model) fetchSessions() Model {
 	mgr.RegisterProvider(codex.NewProvider())
 	mgr.RegisterProvider(claudesess.NewProvider())
 
-	sessions, err := mgr.ListSessions(context.Background(), m.sessionsDrawer.agentFilter, "", false)
+	sessions, err := mgr.ListSessions(context.Background(), m.sessionsDrawer.agentFilter, m.sessionsDrawer.profileFilter, false)
 	if err != nil {
 		sessions = []session.Session{}
 	}
@@ -83,20 +155,29 @@ func (m Model) fetchSessions() Model {
 
 func (m Model) filteredSessions() []session.Session {
 	term := strings.ToLower(strings.TrimSpace(m.sessionsDrawer.filterInput.Value()))
-	if term == "" {
-		return m.sessionsDrawer.sessions
-	}
 	var res []session.Session
 	for _, s := range m.sessionsDrawer.sessions {
-		if strings.Contains(strings.ToLower(s.ID), term) ||
-			strings.Contains(strings.ToLower(s.ShortID), term) ||
-			strings.Contains(strings.ToLower(s.Title), term) ||
-			strings.Contains(strings.ToLower(s.Summary), term) ||
-			strings.Contains(strings.ToLower(s.Cwd), term) ||
-			strings.Contains(strings.ToLower(s.Profile), term) ||
-			strings.Contains(strings.ToLower(s.Agent), term) {
-			res = append(res, s)
+		if m.sessionsDrawer.activeOnly && s.Status != session.StatusActive {
+			continue
 		}
+		if m.sessionsDrawer.profileFilter != "" && !strings.EqualFold(s.Profile, m.sessionsDrawer.profileFilter) {
+			continue
+		}
+		if term != "" {
+			if !strings.Contains(strings.ToLower(s.ID), term) &&
+				!strings.Contains(strings.ToLower(s.ShortID), term) &&
+				!strings.Contains(strings.ToLower(s.Title), term) &&
+				!strings.Contains(strings.ToLower(s.Summary), term) &&
+				!strings.Contains(strings.ToLower(s.Goal), term) &&
+				!strings.Contains(strings.ToLower(s.Progress), term) &&
+				!strings.Contains(strings.ToLower(s.Recent), term) &&
+				!strings.Contains(strings.ToLower(s.Cwd), term) &&
+				!strings.Contains(strings.ToLower(s.Profile), term) &&
+				!strings.Contains(strings.ToLower(s.Agent), term) {
+				continue
+			}
+		}
+		res = append(res, s)
 	}
 	return res
 }
@@ -118,12 +199,37 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if m.sessionsDrawer.cursor > 0 {
 				m.sessionsDrawer.cursor--
 			}
+			m.sessionsDrawer.statusMessage = ""
+			m.sessionsDrawer.killConfirmPID = 0
 			return m, nil
 		case key.Matches(msg, filterKm.Down):
 			filtered := m.filteredSessions()
 			if m.sessionsDrawer.cursor < len(filtered)-1 {
 				m.sessionsDrawer.cursor++
 			}
+			m.sessionsDrawer.statusMessage = ""
+			m.sessionsDrawer.killConfirmPID = 0
+			return m, nil
+		case key.Matches(msg, filterKm.PageUp):
+			step := 8
+			if m.sessionsDrawer.cursor >= step {
+				m.sessionsDrawer.cursor -= step
+			} else {
+				m.sessionsDrawer.cursor = 0
+			}
+			m.sessionsDrawer.statusMessage = ""
+			m.sessionsDrawer.killConfirmPID = 0
+			return m, nil
+		case key.Matches(msg, filterKm.PageDown):
+			filtered := m.filteredSessions()
+			step := 8
+			if m.sessionsDrawer.cursor+step < len(filtered) {
+				m.sessionsDrawer.cursor += step
+			} else if len(filtered) > 0 {
+				m.sessionsDrawer.cursor = len(filtered) - 1
+			}
+			m.sessionsDrawer.statusMessage = ""
+			m.sessionsDrawer.killConfirmPID = 0
 			return m, nil
 		case key.Matches(msg, filterKm.Flags):
 			filtered := m.filteredSessions()
@@ -164,12 +270,20 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if key.Matches(msg, km.ClearFilter) && m.sessionsDrawer.filterInput.Value() != "" {
 			m.sessionsDrawer.filterInput.SetValue("")
 			m.sessionsDrawer.cursor = 0
+			m.sessionsDrawer.statusMessage = ""
+			m.sessionsDrawer.killConfirmPID = 0
 			return m, nil
+		}
+		if m.sessionsDrawer.standalone {
+			m.cancelStream()
+			return m, tea.Quit
 		}
 		m.sessionsDrawer = sessionsDrawerState{}
 		return m, nil
 	case key.Matches(msg, km.Filter):
 		m.sessionsDrawer.filterActive = true
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
 		cmd := m.sessionsDrawer.filterInput.Focus()
 		return m, cmd
 	case key.Matches(msg, km.TabFocus):
@@ -182,23 +296,52 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case "agy":
 			m.sessionsDrawer.agentFilter = "codex"
 		case "codex":
+			m.sessionsDrawer.agentFilter = "claude"
+		case "claude":
 			m.sessionsDrawer.agentFilter = ""
 		default:
 			m.sessionsDrawer.agentFilter = "agy"
 		}
 		m.sessionsDrawer.cursor = 0
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
 		m = m.fetchSessions()
 		return m, nil
 	case key.Matches(msg, km.Up):
 		if m.sessionsDrawer.cursor > 0 {
 			m.sessionsDrawer.cursor--
 		}
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
 		return m, nil
 	case key.Matches(msg, km.Down):
 		filtered := m.filteredSessions()
 		if m.sessionsDrawer.cursor < len(filtered)-1 {
 			m.sessionsDrawer.cursor++
 		}
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
+		return m, nil
+	case key.Matches(msg, km.PageUp):
+		step := 8
+		if m.sessionsDrawer.cursor >= step {
+			m.sessionsDrawer.cursor -= step
+		} else {
+			m.sessionsDrawer.cursor = 0
+		}
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
+		return m, nil
+	case key.Matches(msg, km.PageDown):
+		filtered := m.filteredSessions()
+		step := 8
+		if m.sessionsDrawer.cursor+step < len(filtered) {
+			m.sessionsDrawer.cursor += step
+		} else if len(filtered) > 0 {
+			m.sessionsDrawer.cursor = len(filtered) - 1
+		}
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
 		return m, nil
 	case key.Matches(msg, km.Enter):
 		filtered := m.filteredSessions()
@@ -224,21 +367,100 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 			target := filtered[m.sessionsDrawer.cursor]
 			return m.openResumeModal(&target, ActionResumeExact, true)
 		}
+	case key.Matches(msg, km.AgentAll):
+		m.sessionsDrawer.agentFilter = ""
+		m.sessionsDrawer.cursor = 0
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
+		m = m.fetchSessions()
+		return m, nil
 	case key.Matches(msg, km.AgentAgy):
 		m.sessionsDrawer.agentFilter = "agy"
 		m.sessionsDrawer.cursor = 0
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
 		m = m.fetchSessions()
 		return m, nil
 	case key.Matches(msg, km.AgentCodex):
 		m.sessionsDrawer.agentFilter = "codex"
 		m.sessionsDrawer.cursor = 0
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
 		m = m.fetchSessions()
 		return m, nil
-	case key.Matches(msg, km.AgentAll):
-		m.sessionsDrawer.agentFilter = ""
+	case key.Matches(msg, km.AgentClaude):
+		m.sessionsDrawer.agentFilter = "claude"
 		m.sessionsDrawer.cursor = 0
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
 		m = m.fetchSessions()
 		return m, nil
+	case key.Matches(msg, km.ToggleActive):
+		m.sessionsDrawer.activeOnly = !m.sessionsDrawer.activeOnly
+		m.sessionsDrawer.cursor = 0
+		m.sessionsDrawer.statusMessage = ""
+		m.sessionsDrawer.killConfirmPID = 0
+		return m, nil
+	case key.Matches(msg, km.TogglePreview):
+		m.sessionsDrawer.hidePreview = !m.sessionsDrawer.hidePreview
+		return m, nil
+	case key.Matches(msg, km.Kill):
+		filtered := m.filteredSessions()
+		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
+			target := filtered[m.sessionsDrawer.cursor]
+			if target.Status != session.StatusActive || target.PID <= 0 {
+				m.sessionsDrawer.statusMessage = fmt.Sprintf("Session %s is idle (no active process to terminate)", target.ShortID)
+				m.sessionsDrawer.killConfirmPID = 0
+				return m, nil
+			}
+			if m.sessionsDrawer.killConfirmPID != target.PID {
+				m.sessionsDrawer.killConfirmPID = target.PID
+				m.sessionsDrawer.statusMessage = fmt.Sprintf("Press 'x' again to terminate PID %d (%s)", target.PID, target.ShortID)
+				return m, nil
+			}
+			// Confirmed kill
+			err := terminateProcessFunc(target.PID)
+			if err != nil {
+				m.sessionsDrawer.statusMessage = fmt.Sprintf("Failed to terminate PID %d: %v", target.PID, err)
+			} else {
+				m.sessionsDrawer.statusMessage = fmt.Sprintf("Terminated PID %d (%s)", target.PID, target.ShortID)
+			}
+			m.sessionsDrawer.killConfirmPID = 0
+			m = m.fetchSessions()
+			return m, nil
+		}
+	case key.Matches(msg, km.Copy):
+		filtered := m.filteredSessions()
+		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
+			target := filtered[m.sessionsDrawer.cursor]
+			toCopy := target.Cwd
+			if toCopy == "" {
+				toCopy = target.ID
+			}
+			err := copyToClipboardFunc(toCopy)
+			if err == nil {
+				m.sessionsDrawer.statusMessage = fmt.Sprintf("Copied to clipboard: %s", toCopy)
+			} else {
+				m.sessionsDrawer.statusMessage = fmt.Sprintf("Copy failed: %v", err)
+			}
+			return m, nil
+		}
+	case key.Matches(msg, km.OpenDir):
+		filtered := m.filteredSessions()
+		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
+			target := filtered[m.sessionsDrawer.cursor]
+			if target.Cwd == "" {
+				m.sessionsDrawer.statusMessage = "No workspace directory recorded for this session"
+				return m, nil
+			}
+			err := openDirectoryFunc(target.Cwd)
+			if err == nil {
+				m.sessionsDrawer.statusMessage = fmt.Sprintf("Opened workspace: %s", target.Cwd)
+			} else {
+				m.sessionsDrawer.statusMessage = fmt.Sprintf("Failed to open directory: %v", err)
+			}
+			return m, nil
+		}
 	}
 
 	return m, nil
@@ -259,35 +481,93 @@ func (m Model) renderSessionsDrawer() string {
 	allActive := m.sessionsDrawer.agentFilter == ""
 	agyActive := m.sessionsDrawer.agentFilter == "agy"
 	codexActive := m.sessionsDrawer.agentFilter == "codex"
+	claudeActive := m.sessionsDrawer.agentFilter == "claude"
 
-	topBar := fmt.Sprintf("%s  %s %s %s  %s",
+	activeOnlyBadge := ""
+	if m.sessionsDrawer.activeOnly {
+		activeOnlyBadge = " " + lipgloss.NewStyle().Bold(true).Foreground(StatusGreen).Background(BgTabActive).Padding(0, 1).Render("[a] Active: ON")
+	}
+
+	previewBadge := ""
+	if m.sessionsDrawer.hidePreview {
+		previewBadge = " " + lipgloss.NewStyle().Foreground(TextMuted).Padding(0, 1).Render("[p] Preview: OFF")
+	}
+
+	topBar := fmt.Sprintf("%s  %s %s %s %s%s%s",
 		titleStyle.Render("Sessions Explorer"),
 		filterTabStyle(allActive).Render("[0] All"),
 		filterTabStyle(agyActive).Render("[1] Antigravity"),
 		filterTabStyle(codexActive).Render("[2] Codex"),
-		lipgloss.NewStyle().Foreground(TextMuted).Render("| [0-2] Tab | [/] Filter | [Esc] Close"),
+		filterTabStyle(claudeActive).Render("[3] Claude"),
+		activeOnlyBadge,
+		previewBadge,
 	)
-	b.WriteString(topBar + "\n\n")
+	cmdBar := lipgloss.NewStyle().Foreground(TextMuted).Render(
+		"  [0-3/Tab] Switch Agent • [a] Active Only • [p] Toggle Preview • [/] Filter • [Esc] Close",
+	)
+	b.WriteString(topBar + "\n")
+	b.WriteString(cmdBar + "\n\n")
+
+	// Status Message Notification Banner
+	if m.sessionsDrawer.statusMessage != "" {
+		msgStyle := lipgloss.NewStyle().Bold(true).Foreground(StatusYellow)
+		if strings.HasPrefix(m.sessionsDrawer.statusMessage, "Terminated") ||
+			strings.HasPrefix(m.sessionsDrawer.statusMessage, "Copied") ||
+			strings.HasPrefix(m.sessionsDrawer.statusMessage, "Opened") {
+			msgStyle = lipgloss.NewStyle().Bold(true).Foreground(StatusGreen)
+		}
+		b.WriteString("  " + msgStyle.Render("▶ "+m.sessionsDrawer.statusMessage) + "\n\n")
+	}
 
 	if m.sessionsDrawer.filterActive || m.sessionsDrawer.filterInput.Value() != "" {
 		b.WriteString(m.sessionsDrawer.filterInput.View() + "\n\n")
 	}
 
 	// Columns header
-	colProfile := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(10).Render("PROFILE")
-	colAgent := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(8).Render("AGENT")
-	colID := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(12).Render("SESSION ID")
-	colTitle := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(47).Render("TITLE")
-	colActive := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(14).Render("LAST ACTIVE")
+	colProfile := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(8).Render("PROFILE")
+	colAgent := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(7).Render("AGENT")
+	colID := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(10).Render("SESSION ID")
+	colDir := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(18).Render("DIR")
+	colTitle := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(34).Render("TITLE")
+	colActive := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(14).Render("STATUS / TIME")
 
-	b.WriteString(fmt.Sprintf("  %s %s %s %s %s\n", colProfile, colAgent, colID, colTitle, colActive))
+	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s\n", colProfile, colAgent, colID, colDir, colTitle, colActive))
 
 	filtered := m.filteredSessions()
 	if len(filtered) == 0 {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextMuted).Render("(no conversation sessions found matching filter)") + "\n\n")
 	} else {
-		// Windowed view if list has more than 8 items to fit comfortably in standard terminal heights
-		const maxVisible = 8
+		// Available vertical space for the sessions table.
+		// Keep the table compact (default 8 rows) and account for the profiles list above
+		// so that the PROFILES section remains fully visible on screen without scrolling off.
+		overhead := 18
+		if len(m.profiles) > 0 {
+			overhead += len(m.filteredProfiles())
+		}
+		maxVisible := 8
+		if m.sessionsDrawer.hidePreview {
+			maxVisible = 14
+			if m.height > 0 && m.height-overhead < maxVisible {
+				maxVisible = m.height - overhead
+			}
+			if maxVisible < 5 {
+				maxVisible = 5
+			}
+			if maxVisible > 16 {
+				maxVisible = 16
+			}
+		} else {
+			if m.height > 0 && m.height-overhead < maxVisible {
+				maxVisible = m.height - overhead
+			}
+			if maxVisible < 4 {
+				maxVisible = 4
+			}
+			if maxVisible > 8 {
+				maxVisible = 8
+			}
+		}
+
 		start := 0
 		if m.sessionsDrawer.cursor >= maxVisible {
 			start = m.sessionsDrawer.cursor - maxVisible + 1
@@ -310,23 +590,31 @@ func (m Model) renderSessionsDrawer() string {
 				rowStyle = SelectedRowStyle
 			}
 
-			titleStr := truncateString(s.Title, 45)
+			dirStr := session.FormatDir(s.Cwd, 18)
+			titleStr := truncateString(s.Title, 34)
 			if titleStr == "" {
 				titleStr = "(untitled)"
 			}
 
 			lastActiveStr := formatRelativeTime(s.LastActiveAt)
 			if s.Status == session.StatusActive {
-				lastActiveStr = "ACTIVE"
+				if s.PID > 0 {
+					lastActiveStr = lipgloss.NewStyle().Bold(true).Foreground(StatusGreen).Render(fmt.Sprintf("● PID %d", s.PID))
+				} else {
+					lastActiveStr = lipgloss.NewStyle().Bold(true).Foreground(StatusGreen).Render("● ACTIVE")
+				}
+			} else {
+				lastActiveStr = lipgloss.NewStyle().Foreground(TextMuted).Render(lastActiveStr)
 			}
 
-			cProfile := lipgloss.NewStyle().Width(10).Render(s.Profile)
-			cAgent := lipgloss.NewStyle().Width(8).Render(s.Agent)
-			cID := lipgloss.NewStyle().Width(12).Render(s.ShortID)
-			cTitle := lipgloss.NewStyle().Width(47).Render(titleStr)
+			cProfile := lipgloss.NewStyle().Width(8).Render(s.Profile)
+			cAgent := lipgloss.NewStyle().Width(7).Render(s.Agent)
+			cID := lipgloss.NewStyle().Width(10).Render(s.ShortID)
+			cDir := lipgloss.NewStyle().Width(18).Render(dirStr)
+			cTitle := lipgloss.NewStyle().Width(34).Render(titleStr)
 			cActive := lipgloss.NewStyle().Width(14).Render(lastActiveStr)
 
-			rowContent := fmt.Sprintf("%s%s %s %s %s %s", cursorStr, cProfile, cAgent, cID, cTitle, cActive)
+			rowContent := fmt.Sprintf("%s%s %s %s %s %s %s", cursorStr, cProfile, cAgent, cID, cDir, cTitle, cActive)
 			b.WriteString(rowStyle.Render(rowContent) + "\n")
 		}
 
@@ -335,8 +623,8 @@ func (m Model) renderSessionsDrawer() string {
 			b.WriteString(lipgloss.NewStyle().Foreground(TextMuted).Render(scrollInfo) + "\n")
 		}
 
-		// Dedicated Live Preview Box for the currently highlighted session
-		if m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
+		// Dedicated Live Preview Box for the currently highlighted session (when preview not toggled off)
+		if !m.sessionsDrawer.hidePreview && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
 			sel := filtered[m.sessionsDrawer.cursor]
 			previewText := sel.Summary
 			if previewText == "" {
@@ -347,7 +635,7 @@ func (m Model) renderSessionsDrawer() string {
 				previewText = "(no summary recorded for this session)"
 			}
 
-			displayLines := wrapText(previewText, 89, 4)
+			displayLines := wrapText(previewText, 92, 4)
 			if len(displayLines) == 0 {
 				displayLines = []string{"(no summary recorded for this session)"}
 			}
@@ -357,7 +645,7 @@ func (m Model) renderSessionsDrawer() string {
 				BorderForeground(AccentCyan).
 				Padding(0, 1).
 				MarginTop(1).
-				Width(91)
+				Width(96)
 
 			var pb strings.Builder
 			statusLabel := lipgloss.NewStyle().Foreground(TextMuted).Render("IDLE")
@@ -380,6 +668,15 @@ func (m Model) renderSessionsDrawer() string {
 				statusLabel,
 			)
 			pb.WriteString(previewHeader + "\n")
+
+			timeInfo := fmt.Sprintf("%s %s  %s %s",
+				lipgloss.NewStyle().Foreground(TextMuted).Render("Started:"),
+				lipgloss.NewStyle().Foreground(TextBright).Render(formatTimeOrRelative(sel.StartedAt, sel.LastActiveAt)),
+				lipgloss.NewStyle().Foreground(TextMuted).Render("Last Active:"),
+				lipgloss.NewStyle().Foreground(TextBright).Render(formatRelativeTime(sel.LastActiveAt)),
+			)
+			pb.WriteString(timeInfo + "\n")
+
 			if sel.Cwd != "" {
 				displayCwd := sel.Cwd
 				if home := config.RealHomeDir(); strings.HasPrefix(displayCwd, home) {
@@ -387,11 +684,51 @@ func (m Model) renderSessionsDrawer() string {
 				}
 				pb.WriteString(fmt.Sprintf("%s %s\n",
 					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Workspace:"),
-					lipgloss.NewStyle().Foreground(AccentCyan).Render(truncateString(displayCwd, 76)),
+					lipgloss.NewStyle().Foreground(AccentCyan).Render(truncateString(displayCwd, 80)),
 				))
 			}
-			for _, dl := range displayLines {
-				pb.WriteString(lipgloss.NewStyle().Foreground(TextPrimary).Render(dl) + "\n")
+
+			hasStructured := false
+			if sel.Goal != "" {
+				hasStructured = true
+				goalLines := wrapText(sel.Goal, 80, 2)
+				for idx, gl := range goalLines {
+					label := "Goal:     "
+					if idx > 0 {
+						label = "          "
+					}
+					pb.WriteString(fmt.Sprintf("%s %s\n",
+						lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render(label),
+						lipgloss.NewStyle().Foreground(TextBright).Render(gl),
+					))
+				}
+			}
+			if sel.Progress != "" {
+				hasStructured = true
+				pb.WriteString(fmt.Sprintf("%s %s\n",
+					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Progress: "),
+					lipgloss.NewStyle().Foreground(StatusGreen).Render(truncateString(sel.Progress, 80)),
+				))
+			}
+			if sel.Recent != "" && sel.Recent != sel.Goal {
+				hasStructured = true
+				recentLines := wrapText(sel.Recent, 80, 2)
+				for idx, rl := range recentLines {
+					label := "Latest:   "
+					if idx > 0 {
+						label = "          "
+					}
+					pb.WriteString(fmt.Sprintf("%s %s\n",
+						lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render(label),
+						lipgloss.NewStyle().Foreground(AccentCyan).Render(rl),
+					))
+				}
+			}
+
+			if !hasStructured {
+				for _, dl := range displayLines {
+					pb.WriteString(lipgloss.NewStyle().Foreground(TextPrimary).Render(dl) + "\n")
+				}
 			}
 
 			b.WriteString(previewCard.Render(pb.String()) + "\n")
@@ -416,10 +753,28 @@ func (m Model) renderSessionsDrawer() string {
 func truncateString(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
-	if len(s) > maxLen {
-		return s[:maxLen-3] + "..."
+	r := []rune(s)
+	if len(r) > maxLen {
+		if maxLen > 3 {
+			return string(r[:maxLen-3]) + "..."
+		}
+		return string(r[:maxLen])
 	}
 	return s
+}
+
+func formatTimeOrRelative(started, lastActive time.Time) string {
+	t := started
+	if t.IsZero() {
+		t = lastActive
+	}
+	if t.IsZero() {
+		return "-"
+	}
+	if time.Since(t) < 24*time.Hour {
+		return t.Format("3:04PM")
+	}
+	return t.Format("Jan 02 3:04PM")
 }
 
 func formatRelativeTime(t time.Time) string {

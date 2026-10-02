@@ -44,3 +44,6 @@ jobs:
 
       - name: Run Live CLI Tests
         run: bash ./test/live_cli_test.sh
+
+      - name: Run Live E2E Tests
+        run: bash ./test/e2e_live_test.sh
