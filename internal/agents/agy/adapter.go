@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,7 +37,13 @@ var (
 	// ClientID and ClientSecret provide backward-compatible access to default OAuth credentials.
 	ClientID     = DefaultClientID
 	ClientSecret = DefaultClientSecret
+
+	tokenRedactionRegex = regexp.MustCompile(`(?i)(bearer\s+|token[=:\s]+|key[=:\s]+|secret[=:\s]+)[a-zA-Z0-9_\-\.]{8,}`)
 )
+
+func redactTokens(s string) string {
+	return tokenRedactionRegex.ReplaceAllString(s, "$1[REDACTED]")
+}
 
 func getOAuthCredentials() (string, string) {
 	clientID := os.Getenv("AIM_AGY_CLIENT_ID")
@@ -921,6 +928,7 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		errMsg := usageErr.Error()
 		if errors.As(usageErr, &exitErr) && len(exitErr.Stderr) > 0 {
 			cleanStderr := strings.TrimSpace(string(exitErr.Stderr))
+			cleanStderr = redactTokens(cleanStderr)
 			if len(cleanStderr) > 200 {
 				cleanStderr = cleanStderr[:200] + "..."
 			}
@@ -940,9 +948,20 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 			ProjectID:    acc.ProjectID,
 		}
 
+		isAuth := strings.Contains(errLower, "unauthorized") ||
+			strings.Contains(errLower, "not logged in") ||
+			strings.Contains(errLower, "login required") ||
+			strings.Contains(errLower, "invalid_grant") ||
+			strings.Contains(errLower, "token expired") ||
+			strings.Contains(errLower, "re-auth") ||
+			strings.Contains(errLower, "authentication required")
+
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) || strings.Contains(errLower, "timeout") || strings.Contains(errLower, "deadline exceeded") {
 			report.Summary = "Quota request timed out"
 			report.Error = "timeout"
+		} else if isAuth {
+			report.Summary = "Authentication required (run 'aim login' to re-authenticate)"
+			report.Error = "unauthorized"
 		} else {
 			dbPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "conversation_summaries.db")
 			if _, statErr := os.Stat(dbPath); statErr == nil {

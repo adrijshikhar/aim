@@ -60,9 +60,10 @@ type Model struct {
 	height      int
 	usageStream *usageStream
 
-	loading bool
-	spinner spinner.Model
-	version string
+	loading  bool
+	inFlight map[string]bool
+	spinner  spinner.Model
+	version  string
 
 	deleteModal    deleteModalState
 	renameModal    renameModalState
@@ -104,6 +105,7 @@ func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Conf
 		cache:       usage.NewCacheStore(baseDir, usage.DefaultTTL),
 		usageStream: &usageStream{},
 		loading:     false,
+		inFlight:    make(map[string]bool),
 		spinner:     s,
 		keys:        DefaultKeyMap(),
 		help:        NewThemedHelp(),
@@ -375,6 +377,14 @@ func (m Model) refreshTargets() []usage.TargetProfile {
 
 func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
 	targets := m.refreshTargets()
+	if m.inFlight != nil {
+		for k := range m.inFlight {
+			delete(m.inFlight, k)
+		}
+		for _, t := range targets {
+			m.inFlight[t.Profile] = true
+		}
+	}
 
 	if m.usageStream == nil {
 		m.usageStream = &usageStream{}
@@ -418,6 +428,11 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
 			return "[no credentials]"
 		}
+		if strings.Contains(errLower, "auth") || strings.Contains(summaryLower, "auth") ||
+			strings.Contains(errLower, "unauthorized") || strings.Contains(summaryLower, "unauthorized") ||
+			strings.Contains(errLower, "login") || strings.Contains(summaryLower, "login") {
+			return "[auth required]"
+		}
 		if strings.Contains(errLower, "timeout") || strings.Contains(summaryLower, "timeout") ||
 			strings.Contains(errLower, "deadline exceeded") {
 			return "[timeout]"
@@ -427,7 +442,11 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 			return "[offline]"
 		}
 		if rep.Error != "" {
-			return fmt.Sprintf("[%s]", strings.ToLower(rep.Error))
+			cleanErr := strings.TrimSpace(strings.ReplaceAll(rep.Error, "\n", " "))
+			if len(cleanErr) > 20 {
+				cleanErr = cleanErr[:20] + "..."
+			}
+			return fmt.Sprintf("[%s]", strings.ToLower(cleanErr))
 		}
 		if rep.Status != "" {
 			return fmt.Sprintf("[%s]", strings.ToLower(string(rep.Status)))
@@ -478,6 +497,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		rep := usage.Report(msg)
 		m.reports[fmt.Sprintf("%s:%s", rep.Agent, rep.Profile)] = rep
+		if m.inFlight != nil {
+			delete(m.inFlight, rep.Profile)
+		}
 		var ch <-chan usage.Report
 		var sid uint64
 		if m.usageStream != nil {
@@ -490,6 +512,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.usageStream != nil && (msg.streamID == 0 || m.usageStream.id == msg.streamID) {
 			m.loading = false
 			m.usageStream.ch = nil
+			if m.inFlight != nil {
+				for k := range m.inFlight {
+					delete(m.inFlight, k)
+				}
+			}
 		}
 		return m, nil
 
@@ -660,11 +687,12 @@ func (m Model) View() string {
 				}
 			}
 
+			isProfileLoading := m.loading && (len(m.inFlight) == 0 || m.inFlight[p])
 			badgeStr := ""
 			if rep, ok := m.getReport(p); ok {
 				badge := formatBadge(rep, isNarrow)
 				if badge != "" {
-					if m.loading && (badge == "[offline]" || badge == "[timeout]" || badge == "[unknown]") {
+					if isProfileLoading && (badge == "[offline]" || badge == "[timeout]" || badge == "[unknown]") {
 						badgeStr = "  " + GaugeDimStyle.Render("[refreshing...]")
 					} else {
 						gaugeStyle := GaugeStyleForStatus(rep.Status)
@@ -672,7 +700,7 @@ func (m Model) View() string {
 					}
 				}
 			}
-			if badgeStr == "" && m.loading {
+			if badgeStr == "" && isProfileLoading {
 				badgeStr = "  " + GaugeDimStyle.Render("[refreshing...]")
 			}
 

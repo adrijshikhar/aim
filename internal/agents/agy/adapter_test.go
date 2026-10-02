@@ -981,3 +981,41 @@ func TestAgy_IsTokenHealthy_And_AutoOpen(t *testing.T) {
 		t.Errorf("expected SSH_CONNECTION to be omitted when profile is offline in usage cache")
 	}
 }
+
+func TestAgyGetUsage_AuthErrorCategorizationAndSecretRedaction(t *testing.T) {
+	adapter := NewAdapter()
+	tmpDir := t.TempDir()
+
+	// Seed credentials so HasCredentials returns true
+	tokenPath := adapter.TokenPath(tmpDir)
+	_ = os.MkdirAll(filepath.Dir(tokenPath), 0700)
+	_ = os.WriteFile(tokenPath, []byte(`{"access_token":"mock"}`), 0600)
+
+	// Create mock failing agy that emits an authentication error with bearer secret
+	binDir := t.TempDir()
+	failingScript := filepath.Join(binDir, "agy")
+	scriptContent := "#!/bin/sh\n>&2 echo 'Error: 401 Unauthorized: Bearer ya29.SECRET_TOKEN_DO_NOT_LEAK'\nexit 1\n"
+	if err := os.WriteFile(failingScript, []byte(scriptContent), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	rep, err := adapter.GetUsage(context.Background(), "auth_fail_prof", tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected GetUsage error: %v", err)
+	}
+
+	if rep.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown, got %s", rep.Status)
+	}
+	if rep.Error != "unauthorized" {
+		t.Errorf("expected error 'unauthorized', got %q", rep.Error)
+	}
+	if !strings.Contains(rep.Summary, "Authentication required") {
+		t.Errorf("expected summary to contain 'Authentication required', got %q", rep.Summary)
+	}
+	// Verify token was redacted and not leaked
+	if strings.Contains(rep.Summary, "SECRET_TOKEN_DO_NOT_LEAK") {
+		t.Errorf("FAIL: Secret token leaked in summary!")
+	}
+}

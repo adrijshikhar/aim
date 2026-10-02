@@ -1740,6 +1740,26 @@ func TestTUI_FormatBadge_DistinguishesTimeoutAndOffline(t *testing.T) {
 	if b := formatBadge(repNoCreds, false); b != "[no credentials]" {
 		t.Errorf("expected [no credentials] badge, got %q", b)
 	}
+
+	repAuth := usage.Report{
+		Status: usage.StatusUnknown,
+		Error:  "unauthorized: 401 token expired",
+	}
+	if b := formatBadge(repAuth, false); b != "[auth required]" {
+		t.Errorf("expected [auth required] badge, got %q", b)
+	}
+
+	repLongErr := usage.Report{
+		Status: usage.StatusUnknown,
+		Error:  "internal server panic: something failed very badly across multiple lines\nand broke everything",
+	}
+	bLong := formatBadge(repLongErr, false)
+	if !strings.HasPrefix(bLong, "[internal server pan") || !strings.HasSuffix(bLong, "...]") {
+		t.Errorf("expected clamped badge for long error, got %q", bLong)
+	}
+	if strings.Contains(bLong, "\n") {
+		t.Errorf("expected badge to contain NO newlines, got %q", bLong)
+	}
 }
 
 func TestTUI_RenderProfiles_ShowsRefreshingDuringLoading(t *testing.T) {
@@ -1915,6 +1935,44 @@ func TestTUI_StreamingReportUpdatesBadge(t *testing.T) {
 	}
 	if !strings.Contains(m3.View(), "[68%]") {
 		t.Errorf("expected [68%%] preserved after stream closed")
+	}
+}
+
+func TestTUI_PerProfile_InFlight_IndependentCompletion(t *testing.T) {
+	t.Parallel()
+	m := Model{
+		agent:    "agy",
+		profiles: []string{"profA", "profB"},
+		loading:  true,
+		inFlight: map[string]bool{
+			"profA": true,
+			"profB": true,
+		},
+	}
+
+	// Both profiles are in-flight: both render [refreshing...]
+	vInit := m.View()
+	if strings.Count(vInit, "[refreshing...]") < 2 {
+		t.Errorf("expected both profA and profB to show [refreshing...], got:\n%s", vInit)
+	}
+
+	// profA finishes first with [80%]
+	repA := usage.Report{
+		Agent:   "agy",
+		Profile: "profA",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{{Name: "5-Hour", RemainingPct: 80}},
+	}
+	mUpdated, _ := m.Update(usageReportMsg(repA))
+	m2 := mUpdated.(Model)
+
+	// profA should now show [80%], but profB should STILL show [refreshing...]!
+	vMid := m2.View()
+	if !strings.Contains(vMid, "[80%]") {
+		t.Errorf("expected profA to render [80%%] immediately, got:\n%s", vMid)
+	}
+	if !strings.Contains(vMid, "[refreshing...]") {
+		t.Errorf("expected profB to still render [refreshing...], got:\n%s", vMid)
 	}
 }
 

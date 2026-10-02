@@ -1414,6 +1414,27 @@ func TestCLIListWithUsageBadges(t *testing.T) {
 	if !strings.Contains(out, "timeout-prof") || !strings.Contains(out, "[timeout]") {
 		t.Errorf("expected '[timeout]' badge in aim list agy, got:\n%s", out)
 	}
+
+	// Non-operational: auth required
+	_, _ = pm.EnsureProfile("auth-prof")
+	cfg.AddProfileAgent("auth-prof", "agy")
+	_ = config.SaveConfig(cfg)
+	repAuth := usage.Report{
+		Agent:     "agy",
+		Profile:   "auth-prof",
+		Status:    usage.StatusUnknown,
+		Summary:   "Authentication required",
+		FetchedAt: time.Now(),
+		Error:     "unauthorized",
+	}
+	_ = cache.Put(repAuth)
+
+	out, _ = captureOutput(t, func() {
+		_ = runList(reg, pm, "agy")
+	})
+	if !strings.Contains(out, "auth-prof") || !strings.Contains(out, "[auth required]") {
+		t.Errorf("expected '[auth required]' badge in aim list agy, got:\n%s", out)
+	}
 }
 
 func TestCLIPrewarmCommand(t *testing.T) {

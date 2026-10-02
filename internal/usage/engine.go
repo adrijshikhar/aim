@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/logger"
 )
 
 type TargetProfile struct {
@@ -128,7 +130,9 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 							}
 						}
 					}
-					_ = cache.Put(*rep)
+					if err := cache.Put(*rep); err != nil {
+						logger.Debug("failed to write usage cache for %s:%s: %v", rep.Agent, rep.Profile, err)
+					}
 				}
 
 				select {
