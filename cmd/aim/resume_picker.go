@@ -64,6 +64,7 @@ func (m sessionPickerModel) filteredSessions() []session.Session {
 			strings.Contains(strings.ToLower(s.ShortID), term) ||
 			strings.Contains(strings.ToLower(s.Title), term) ||
 			strings.Contains(strings.ToLower(s.Summary), term) ||
+			strings.Contains(strings.ToLower(s.Cwd), term) ||
 			strings.Contains(strings.ToLower(s.Profile), term) {
 			res = append(res, s)
 		}
@@ -267,7 +268,8 @@ func (m sessionPickerModel) View() string {
 
 		badgeCol := lipgloss.NewStyle().Width(12).Render(profileBadge)
 		idCol := lipgloss.NewStyle().Width(10).Render(shortID)
-		titleCol := lipgloss.NewStyle().Width(42).Render(title)
+		dirCol := lipgloss.NewStyle().Width(16).Render(session.FormatDir(s.Cwd, 16))
+		titleCol := lipgloss.NewStyle().Width(36).Render(title)
 		timeCol := lipgloss.NewStyle().Width(12).Render(relTime)
 
 		cursorStr := "  "
@@ -275,7 +277,7 @@ func (m sessionPickerModel) View() string {
 			cursorStr = "❯ "
 		}
 
-		rowContent := fmt.Sprintf("%s%s %s %s %s", cursorStr, badgeCol, idCol, titleCol, timeCol)
+		rowContent := fmt.Sprintf("%s%s %s %s %s %s", cursorStr, badgeCol, idCol, dirCol, titleCol, timeCol)
 		if i == m.cursor {
 			b.WriteString(tui.SelectedRowStyle.Render(rowContent) + "\n")
 		} else {

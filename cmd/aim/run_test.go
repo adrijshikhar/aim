@@ -585,6 +585,19 @@ func (p *testRunProvider) GetSession(ctx context.Context, idOrPrefix string, pro
 func (p *testRunProvider) Hydrate(ctx context.Context, srcSession *session.Session, destProfileDir string, fork bool) (string, error) {
 	return srcSession.ID, nil
 }
+func (p *testRunProvider) ResolveCwd(ctx context.Context, s *session.Session) (string, error) {
+	if s != nil {
+		return s.Cwd, nil
+	}
+	return "", nil
+}
+func (p *testRunProvider) ResolveSummary(ctx context.Context, s *session.Session) (session.SessionSummary, error) {
+	if s != nil {
+		return session.SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
+	}
+	return session.SessionSummary{}, nil
+}
+
 
 func TestRunCmd_ExpandsShortPrefixToFullUUID(t *testing.T) {
 	tempDir := t.TempDir()

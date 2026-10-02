@@ -27,11 +27,36 @@ type Session struct {
 	LastActiveAt time.Time `json:"last_active_at"`
 	Status       Status    `json:"status"`
 	Summary      string    `json:"summary"`
+	Goal         string    `json:"goal,omitempty"`
+	Progress     string    `json:"progress,omitempty"`
+	Recent       string    `json:"recent,omitempty"`
 	StoragePath  string    `json:"storage_path"`
 	PID          int       `json:"pid,omitempty"`
 	Cwd          string    `json:"cwd,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	MessageCount int       `json:"message_count,omitempty"`
+}
+
+// SessionSummary encapsulates structured summary information for an agent session.
+type SessionSummary struct {
+	Goal           string `json:"goal,omitempty"`
+	Progress       string `json:"progress,omitempty"`
+	RecentActivity string `json:"recent_activity,omitempty"`
+	Raw            string `json:"raw,omitempty"`
+}
+
+// Text returns the best human-readable single string representation of the summary.
+func (ss SessionSummary) Text() string {
+	if ss.Goal != "" {
+		if ss.RecentActivity != "" && ss.RecentActivity != ss.Goal {
+			return ss.Goal + " -> " + ss.RecentActivity
+		}
+		return ss.Goal
+	}
+	if ss.RecentActivity != "" {
+		return ss.RecentActivity
+	}
+	return ss.Raw
 }
 
 // ComputeShortID returns the 8-character prefix of an ID.
@@ -77,4 +102,7 @@ type SessionProvider interface {
 	ListSessions(ctx context.Context, profileDir string, isHost bool) ([]Session, error)
 	GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*Session, error)
 	Hydrate(ctx context.Context, srcSession *Session, destProfileDir string, fork bool) (string, error)
+	ResolveCwd(ctx context.Context, s *Session) (string, error)
+	ResolveSummary(ctx context.Context, s *Session) (SessionSummary, error)
 }
+

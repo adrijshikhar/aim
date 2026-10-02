@@ -29,6 +29,7 @@ func sampleTestSessions() []session.Session {
 			IsHost:       false,
 			LastActiveAt: time.Now().Add(-10 * time.Minute),
 			Status:       session.StatusIdle,
+			Cwd:          "/Users/mock/projects/aim",
 		},
 		{
 			ID:           "session-2-uuid-2222",
@@ -39,6 +40,7 @@ func sampleTestSessions() []session.Session {
 			IsHost:       false,
 			LastActiveAt: time.Now().Add(-2 * time.Hour),
 			Status:       session.StatusIdle,
+			Cwd:          "/Users/mock/projects/cxstatusline",
 		},
 		{
 			ID:           "session-3-uuid-3333",
@@ -225,6 +227,30 @@ func TestResumePicker_ViewFormatting(t *testing.T) {
 	// Verify relative time
 	if !strings.Contains(view, "10m ago") && !strings.Contains(view, "ago") {
 		t.Errorf("expected view to contain relative time, got:\n%s", view)
+	}
+	// Verify DIR column formatting
+	if !strings.Contains(view, "projects/aim") {
+		t.Errorf("expected view to contain workspace dir 'projects/aim', got:\n%s", view)
+	}
+	if !strings.Contains(view, "cxstatusline") {
+		t.Errorf("expected view to contain workspace dir 'cxstatusline', got:\n%s", view)
+	}
+}
+
+func TestResumePicker_FilterByWorkspace(t *testing.T) {
+	// Filter by typing 'cxstatusline' and press Enter
+	cmd, _ := newTestCmdWithIO("/cxstatusline\n\n")
+	sessions := sampleTestSessions()
+
+	selected, err := promptSelectSession(cmd, sessions)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if selected == nil {
+		t.Fatalf("expected filtered session, got nil")
+	}
+	if selected.ID != "session-2-uuid-2222" {
+		t.Errorf("expected session-2-uuid-2222 (cxstatusline), got: %s", selected.ID)
 	}
 }
 

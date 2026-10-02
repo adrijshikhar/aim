@@ -132,7 +132,7 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 		fmt.Fprintln(w, headerStyle.Render("ACTIVE SESSIONS"))
 		t := table.New().
 			Border(lipgloss.HiddenBorder()).
-			Headers("PROFILE", "AGENT", "SESSION ID", "TITLE", "STARTED", "STATUS")
+			Headers("PROFILE", "AGENT", "SESSION ID", "DIR", "TITLE", "STARTED", "STATUS")
 
 		for _, s := range activeSessions {
 			title := truncateString(s.Title, 40)
@@ -144,11 +144,13 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 			if s.PID > 0 {
 				statusStr = fmt.Sprintf("ACTIVE (PID %d)", s.PID)
 			}
+			dir := session.FormatDir(s.Cwd, 20)
 
 			t.Row(
 				s.Profile,
 				s.Agent,
 				s.ShortID,
+				dir,
 				cyanStyle.Render(title),
 				started,
 				activeStatusStyle.Render(statusStr),
@@ -172,7 +174,7 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 		fmt.Fprintln(w, headerStyle.Render("RECENT SESSIONS"))
 		t := table.New().
 			Border(lipgloss.HiddenBorder()).
-			Headers("PROFILE", "AGENT", "SESSION ID", "TITLE", "LAST ACTIVE")
+			Headers("PROFILE", "AGENT", "SESSION ID", "DIR", "TITLE", "LAST ACTIVE")
 
 		for _, s := range recentSessions {
 			title := truncateString(s.Title, 46)
@@ -180,11 +182,13 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 				title = "(untitled)"
 			}
 			lastActive := formatRelativeTime(s.LastActiveAt)
+			dir := session.FormatDir(s.Cwd, 20)
 
 			t.Row(
 				s.Profile,
 				s.Agent,
 				s.ShortID,
+				dir,
 				title,
 				mutedStyle.Render(lastActive),
 			)

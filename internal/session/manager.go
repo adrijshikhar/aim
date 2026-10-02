@@ -364,3 +364,26 @@ func DeduplicateMatches(matches []Session) []Session {
 	})
 	return result
 }
+
+// ResolveCwd resolves the working directory for a session by delegating to its provider.
+func (m *Manager) ResolveCwd(ctx context.Context, s *Session) (string, error) {
+	if s == nil {
+		return "", nil
+	}
+	if p, ok := m.providers[s.Agent]; ok {
+		return p.ResolveCwd(ctx, s)
+	}
+	return s.Cwd, nil
+}
+
+// ResolveSummary resolves the structured summary for a session by delegating to its provider.
+func (m *Manager) ResolveSummary(ctx context.Context, s *Session) (SessionSummary, error) {
+	if s == nil {
+		return SessionSummary{}, nil
+	}
+	if p, ok := m.providers[s.Agent]; ok {
+		return p.ResolveSummary(ctx, s)
+	}
+	return SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
+}
+

@@ -45,7 +45,7 @@ func (m Model) IsForkResume() bool {
 
 func (m Model) openSessionsDrawer() (Model, tea.Cmd) {
 	ti := textinput.New()
-	ti.Placeholder = "Filter sessions by title, id, or profile..."
+	ti.Placeholder = "Filter sessions by title, id, profile, or workspace..."
 	ti.CharLimit = 64
 	ti.Prompt = "Filter: "
 	ti.PromptStyle = lipgloss.NewStyle().Bold(true).Foreground(AccentCyan)
@@ -274,13 +274,14 @@ func (m Model) renderSessionsDrawer() string {
 	}
 
 	// Columns header
-	colProfile := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(10).Render("PROFILE")
-	colAgent := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(8).Render("AGENT")
-	colID := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(12).Render("SESSION ID")
-	colTitle := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(47).Render("TITLE")
-	colActive := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(14).Render("LAST ACTIVE")
+	colProfile := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(8).Render("PROFILE")
+	colAgent := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(6).Render("AGENT")
+	colID := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(10).Render("SESSION ID")
+	colDir := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(16).Render("DIR")
+	colTitle := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(36).Render("TITLE")
+	colActive := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Width(12).Render("LAST ACTIVE")
 
-	b.WriteString(fmt.Sprintf("  %s %s %s %s %s\n", colProfile, colAgent, colID, colTitle, colActive))
+	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s\n", colProfile, colAgent, colID, colDir, colTitle, colActive))
 
 	filtered := m.filteredSessions()
 	if len(filtered) == 0 {
@@ -310,7 +311,8 @@ func (m Model) renderSessionsDrawer() string {
 				rowStyle = SelectedRowStyle
 			}
 
-			titleStr := truncateString(s.Title, 45)
+			dirStr := session.FormatDir(s.Cwd, 16)
+			titleStr := truncateString(s.Title, 36)
 			if titleStr == "" {
 				titleStr = "(untitled)"
 			}
@@ -320,13 +322,14 @@ func (m Model) renderSessionsDrawer() string {
 				lastActiveStr = "ACTIVE"
 			}
 
-			cProfile := lipgloss.NewStyle().Width(10).Render(s.Profile)
-			cAgent := lipgloss.NewStyle().Width(8).Render(s.Agent)
-			cID := lipgloss.NewStyle().Width(12).Render(s.ShortID)
-			cTitle := lipgloss.NewStyle().Width(47).Render(titleStr)
-			cActive := lipgloss.NewStyle().Width(14).Render(lastActiveStr)
+			cProfile := lipgloss.NewStyle().Width(8).Render(s.Profile)
+			cAgent := lipgloss.NewStyle().Width(6).Render(s.Agent)
+			cID := lipgloss.NewStyle().Width(10).Render(s.ShortID)
+			cDir := lipgloss.NewStyle().Width(16).Render(dirStr)
+			cTitle := lipgloss.NewStyle().Width(36).Render(titleStr)
+			cActive := lipgloss.NewStyle().Width(12).Render(lastActiveStr)
 
-			rowContent := fmt.Sprintf("%s%s %s %s %s %s", cursorStr, cProfile, cAgent, cID, cTitle, cActive)
+			rowContent := fmt.Sprintf("%s%s %s %s %s %s %s", cursorStr, cProfile, cAgent, cID, cDir, cTitle, cActive)
 			b.WriteString(rowStyle.Render(rowContent) + "\n")
 		}
 
@@ -390,8 +393,34 @@ func (m Model) renderSessionsDrawer() string {
 					lipgloss.NewStyle().Foreground(AccentCyan).Render(truncateString(displayCwd, 76)),
 				))
 			}
-			for _, dl := range displayLines {
-				pb.WriteString(lipgloss.NewStyle().Foreground(TextPrimary).Render(dl) + "\n")
+
+			hasStructured := false
+			if sel.Goal != "" {
+				hasStructured = true
+				pb.WriteString(fmt.Sprintf("%s %s\n",
+					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Goal:     "),
+					lipgloss.NewStyle().Foreground(TextBright).Render(truncateString(sel.Goal, 76)),
+				))
+			}
+			if sel.Progress != "" {
+				hasStructured = true
+				pb.WriteString(fmt.Sprintf("%s %s\n",
+					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Progress: "),
+					lipgloss.NewStyle().Foreground(StatusGreen).Render(truncateString(sel.Progress, 76)),
+				))
+			}
+			if sel.Recent != "" && sel.Recent != sel.Goal {
+				hasStructured = true
+				pb.WriteString(fmt.Sprintf("%s %s\n",
+					lipgloss.NewStyle().Bold(true).Foreground(TextMuted).Render("Latest:   "),
+					lipgloss.NewStyle().Foreground(AccentCyan).Render(truncateString(sel.Recent, 76)),
+				))
+			}
+
+			if !hasStructured {
+				for _, dl := range displayLines {
+					pb.WriteString(lipgloss.NewStyle().Foreground(TextPrimary).Render(dl) + "\n")
+				}
 			}
 
 			b.WriteString(previewCard.Render(pb.String()) + "\n")

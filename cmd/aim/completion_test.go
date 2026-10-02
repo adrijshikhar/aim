@@ -52,6 +52,20 @@ func (p *testCompProvider) Hydrate(ctx context.Context, srcSession *session.Sess
 	return srcSession.ID, nil
 }
 
+func (p *testCompProvider) ResolveCwd(ctx context.Context, s *session.Session) (string, error) {
+	if s != nil {
+		return s.Cwd, nil
+	}
+	return "", nil
+}
+
+func (p *testCompProvider) ResolveSummary(ctx context.Context, s *session.Session) (session.SessionSummary, error) {
+	if s != nil {
+		return session.SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
+	}
+	return session.SessionSummary{}, nil
+}
+
 func setupCompletionTestEnv(t *testing.T) (*agents.Registry, *profile.ProfileManager) {
 	t.Helper()
 	tempDir := t.TempDir()

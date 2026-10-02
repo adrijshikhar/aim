@@ -40,12 +40,13 @@ CREATE TABLE conversation_summaries (
 	conversation_id TEXT PRIMARY KEY,
 	title TEXT NOT NULL DEFAULT '',
 	preview TEXT NOT NULL DEFAULT '',
-	last_modified_time DATETIME NOT NULL
+	last_modified_time DATETIME NOT NULL,
+	workspace_uris TEXT NOT NULL DEFAULT ''
 );
-INSERT INTO conversation_summaries (conversation_id, title, preview, last_modified_time)
+INSERT INTO conversation_summaries (conversation_id, title, preview, last_modified_time, workspace_uris)
 VALUES 
-('775e6ada-1595-4e7e-84fa-ce0ea71e3007', 'Resume Handoff Request', 'Summary of handoff', '2026-09-14 10:00:00'),
-('deadbeef-1234-5678-90ab-cdef12345678', 'Past Idle Task', 'Past summary', '2026-09-13 10:00:00');
+('775e6ada-1595-4e7e-84fa-ce0ea71e3007', 'Resume Handoff Request', 'Summary of handoff', '2026-09-14 10:00:00', '["file:///Users/mock/projects/aim"]'),
+('deadbeef-1234-5678-90ab-cdef12345678', 'Past Idle Task', 'Past summary', '2026-09-13 10:00:00', '["file:///Users/mock/projects/cxstatusline"]');
 `
 	if err := exec.Command(sqliteBin, dbPath, schema).Run(); err != nil {
 		t.Fatalf("failed to seed mock sqlite DB: %v", err)
@@ -122,11 +123,17 @@ func TestSessionsCmd_Table(t *testing.T) {
 	if !strings.Contains(out, "RECENT SESSIONS") {
 		t.Errorf("expected output to have 'RECENT SESSIONS', got: %s", out)
 	}
+	if !strings.Contains(out, "DIR") {
+		t.Errorf("expected table to have 'DIR' column header, got: %s", out)
+	}
 	if !strings.Contains(out, "775e6ada") {
 		t.Errorf("expected output to contain short ID '775e6ada', got: %s", out)
 	}
 	if !strings.Contains(out, "Resume Handoff Request") {
 		t.Errorf("expected output to contain title, got: %s", out)
+	}
+	if !strings.Contains(out, "projects/aim") {
+		t.Errorf("expected output to contain workspace dir 'projects/aim', got: %s", out)
 	}
 }
 
@@ -192,6 +199,12 @@ func TestSessionsShowCmd(t *testing.T) {
 	}
 	if !strings.Contains(out, "Past summary") {
 		t.Errorf("expected output to contain summary preview, got: %s", out)
+	}
+	if !strings.Contains(out, "Workspace:") {
+		t.Errorf("expected output to contain 'Workspace:', got: %s", out)
+	}
+	if !strings.Contains(out, "/Users/mock/projects/cxstatusline") {
+		t.Errorf("expected output to contain workspace path, got: %s", out)
 	}
 	if !strings.Contains(out, "aim resume agy work deadbeef") {
 		t.Errorf("expected output to contain quick resume tip, got: %s", out)

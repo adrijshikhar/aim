@@ -2506,6 +2506,7 @@ func TestResumeModal_QuotaAndActiveBadges(t *testing.T) {
 
 	// Inject sessions: s1 idle in alpha, s2 active in beta
 	s1 := session.NewSession("11111111-2222-3333-4444-555566667777", "Session One", "agy", "alpha", false, time.Now())
+	s1.Cwd = "/workspace/my-projects/aim"
 	s2 := session.NewSession("88888888-9999-aaaa-bbbb-ccccddddeeee", "Session Two", "agy", "beta", false, time.Now())
 	s2.Status = session.StatusActive
 	m.SetSessionsForTest([]session.Session{s1, s2})
@@ -2541,6 +2542,12 @@ func TestResumeModal_QuotaAndActiveBadges(t *testing.T) {
 
 	if modalWidth != drawerWidth {
 		t.Errorf("expected modal width (%d) to equal drawer width (%d)", modalWidth, drawerWidth)
+	}
+	if !strings.Contains(drawerView, "DIR") {
+		t.Errorf("expected drawerView to contain 'DIR' column header, got:\n%s", drawerView)
+	}
+	if !strings.Contains(drawerView, "Workspace:") {
+		t.Errorf("expected drawerView to contain 'Workspace:' in preview card, got:\n%s", drawerView)
 	}
 
 	lines := strings.Split(modalView, "\n")
