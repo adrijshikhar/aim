@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,11 @@ func TestCleanPromptText(t *testing.T) {
 			name:     "preserves valid html tags in code prompt",
 			input:    "how to center a <div> element with CSS flexbox?",
 			expected: "how to center a <div> element with CSS flexbox?",
+		},
+		{
+			name:     "caps extremely long prompts to 500 characters",
+			input:    strings.Repeat("a", 600),
+			expected: strings.Repeat("a", 500) + "...",
 		},
 	}
 

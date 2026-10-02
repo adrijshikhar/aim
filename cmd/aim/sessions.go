@@ -372,13 +372,29 @@ func renderSessionPreviewCard(w io.Writer, s *session.Session) {
 	b.WriteString("\n" + labelStyle.Render("Title:") + "\n")
 	b.WriteString("  " + lipgloss.NewStyle().Bold(true).Render(s.Title) + "\n\n")
 
-	b.WriteString(labelStyle.Render("Summary / Goal:") + "\n")
-	lines := strings.Split(previewText, "\n")
-	for _, l := range lines {
-		b.WriteString("  " + valStyle.Render(l) + "\n")
+	if s.Goal != "" || s.Recent != "" || s.Progress != "" {
+		if s.Goal != "" {
+			b.WriteString(fmt.Sprintf("%s\n  %s\n\n", labelStyle.Render("Goal:"), valStyle.Render(s.Goal)))
+		}
+		if s.Progress != "" {
+			b.WriteString(fmt.Sprintf("%s %s\n\n", labelStyle.Render("Progress:"), cyanStyle.Render(s.Progress)))
+		}
+		if s.Recent != "" {
+			b.WriteString(fmt.Sprintf("%s\n  %s\n\n", labelStyle.Render("Latest:"), valStyle.Render(s.Recent)))
+		}
+	} else {
+		b.WriteString(labelStyle.Render("Summary / Goal:") + "\n")
+		lines := strings.Split(previewText, "\n")
+		if len(lines) > 10 {
+			lines = append(lines[:10], "...")
+		}
+		for _, l := range lines {
+			b.WriteString("  " + valStyle.Render(truncateString(l, 120)) + "\n")
+		}
+		b.WriteString("\n")
 	}
 
-	b.WriteString("\n" + mutedStyle.Render(fmt.Sprintf("Quick resume: aim resume %s %s %s", s.Agent, s.Profile, s.ShortID)) + "\n")
+	b.WriteString(mutedStyle.Render(fmt.Sprintf("Quick resume: aim resume %s %s %s", s.Agent, s.Profile, s.ShortID)) + "\n")
 
 	fmt.Fprint(w, cardStyle.Render(b.String())+"\n")
 }

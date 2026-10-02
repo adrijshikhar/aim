@@ -95,33 +95,36 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 		return nil, nil
 	}
 
-	sessions, err := p.ListSessions(ctx, profileDir, isHost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list sessions for claude: %w", err)
-	}
+	claudeDir := filepath.Join(profileDir, ".claude")
+	projectsDir := filepath.Join(claudeDir, "projects")
 
-	var matches []session.Session
-	for _, s := range sessions {
-		if s.ID == idOrPrefix || strings.HasPrefix(s.ID, idOrPrefix) || strings.HasPrefix(s.ShortID, idOrPrefix) {
-			matches = append(matches, s)
-		}
-	}
-
-	if len(matches) == 0 {
-		return nil, nil
-	}
-
-	if len(matches) > 1 {
-		for _, s := range matches {
-			if s.ID == idOrPrefix {
-				match := s
-				return &match, nil
+	pattern := filepath.Join(projectsDir, "*", idOrPrefix+"*.jsonl")
+	matches, err := filepath.Glob(pattern)
+	if err == nil && len(matches) > 0 {
+		var exactMatches []string
+		for _, m := range matches {
+			base := strings.TrimSuffix(filepath.Base(m), ".jsonl")
+			if base == idOrPrefix {
+				exactMatches = append(exactMatches, m)
 			}
 		}
-		return nil, fmt.Errorf("ambiguous session ID prefix %q matches %d sessions", idOrPrefix, len(matches))
+		var targetPath string
+		if len(exactMatches) == 1 {
+			targetPath = exactMatches[0]
+		} else if len(matches) == 1 {
+			targetPath = matches[0]
+		} else if len(exactMatches) > 1 {
+			targetPath = exactMatches[0]
+		} else {
+			return nil, fmt.Errorf("ambiguous session ID prefix %q matches %d sessions", idOrPrefix, len(matches))
+		}
+
+		sessID := strings.TrimSuffix(filepath.Base(targetPath), ".jsonl")
+		slug := filepath.Base(filepath.Dir(targetPath))
+		return parseClaudeSessionFile(targetPath, sessID, slug, profileDir, isHost)
 	}
 
-	return &matches[0], nil
+	return nil, nil
 }
 
 // Hydrate copies a conversation session to destProfileDir, either verbatim (fork=false)

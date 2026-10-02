@@ -83,5 +83,10 @@ func CleanPromptText(raw string) string {
 	raw = whitespaceRegex.ReplaceAllString(raw, " ")
 	raw = strings.TrimSpace(raw)
 
+	// 6. Cap to a sensible length for session titles/summaries
+	if len(raw) > 500 {
+		raw = strings.TrimSpace(raw[:500]) + "..."
+	}
+
 	return raw
 }
