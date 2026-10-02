@@ -493,7 +493,7 @@ func (m Model) renderSessionsDrawer() string {
 		previewBadge = " " + lipgloss.NewStyle().Foreground(TextMuted).Padding(0, 1).Render("[p] Preview: OFF")
 	}
 
-	topBar := fmt.Sprintf("%s  %s %s %s %s%s%s  %s",
+	topBar := fmt.Sprintf("%s  %s %s %s %s%s%s",
 		titleStyle.Render("Sessions Explorer"),
 		filterTabStyle(allActive).Render("[0] All"),
 		filterTabStyle(agyActive).Render("[1] Antigravity"),
@@ -501,9 +501,12 @@ func (m Model) renderSessionsDrawer() string {
 		filterTabStyle(claudeActive).Render("[3] Claude"),
 		activeOnlyBadge,
 		previewBadge,
-		lipgloss.NewStyle().Foreground(TextMuted).Render("| [0-3] Tab | [a] Active | [/] Filter | [Esc] Close"),
 	)
-	b.WriteString(topBar + "\n\n")
+	cmdBar := lipgloss.NewStyle().Foreground(TextMuted).Render(
+		"  [0-3/Tab] Switch Agent • [a] Active Only • [p] Toggle Preview • [/] Filter • [Esc] Close",
+	)
+	b.WriteString(topBar + "\n")
+	b.WriteString(cmdBar + "\n\n")
 
 	// Status Message Notification Banner
 	if m.sessionsDrawer.statusMessage != "" {
