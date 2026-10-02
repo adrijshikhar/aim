@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/adrijshikhar/aim/compare/v0.11.2...v0.12.0) (2026-10-02)
+
+
+### Features
+
+* **claude:** implement quota and usage reporting for Claude Code ([#73](https://github.com/adrijshikhar/aim/issues/73)) ([23bd74b](https://github.com/adrijshikhar/aim/commit/23bd74b7d705cb29991c1ea5c180d744b3433f2f))
+
 ## [0.11.2](https://github.com/adrijshikhar/aim/compare/v0.11.1...v0.11.2) (2026-10-01)
 
 
