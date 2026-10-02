@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -34,6 +36,7 @@ func newSessionsCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 		activeFlag  bool
 		allFlag     bool
 		jsonFlag    bool
+		plainFlag   bool
 	)
 
 	cmd := &cobra.Command{
@@ -51,7 +54,8 @@ Flags:
   -a, --agent <name>    Filter by agent (agy, codex, claude, etc.)
       --active          Show only currently active sessions
       --all             Show full history (default limits to 20 most recent)
-      --json            Output raw JSON for scripting and automation`,
+      --json            Output raw JSON for scripting and automation
+      --plain           Output static text table instead of interactive TUI`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			targetAgent := agentFlag
@@ -64,19 +68,34 @@ Flags:
 				}
 			}
 
-			mgr := defaultSessionManager()
-			sessions, err := mgr.ListSessions(cmd.Context(), targetAgent, profileFlag, activeFlag)
-			if err != nil {
-				return fmt.Errorf("failed to list sessions: %w", err)
-			}
-
 			if jsonFlag {
+				mgr := defaultSessionManager()
+				sessions, err := mgr.ListSessions(cmd.Context(), targetAgent, profileFlag, activeFlag)
+				if err != nil {
+					return fmt.Errorf("failed to list sessions: %w", err)
+				}
 				if sessions == nil {
 					sessions = []session.Session{}
 				}
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				return enc.Encode(sessions)
+			}
+
+			// If interactive terminal and not plain mode, launch interactive TUI directly!
+			if isInteractiveSessionsTerminal(cmd) && !plainFlag {
+				code := runTUISessions(reg, pm, targetAgent, profileFlag, activeFlag)
+				if code != 0 {
+					return &ExitError{Code: code}
+				}
+				return nil
+			}
+
+			// Non-interactive fallback (piped output, test buffer, or --plain)
+			mgr := defaultSessionManager()
+			sessions, err := mgr.ListSessions(cmd.Context(), targetAgent, profileFlag, activeFlag)
+			if err != nil {
+				return fmt.Errorf("failed to list sessions: %w", err)
 			}
 
 			if len(sessions) == 0 {
@@ -104,11 +123,22 @@ Flags:
 	cmd.Flags().BoolVar(&activeFlag, "active", false, "Show only currently active sessions")
 	cmd.Flags().BoolVar(&allFlag, "all", false, "Show full history (default limits to 20)")
 	cmd.Flags().BoolVar(&jsonFlag, "json", false, "Output raw JSON for scripting")
+	cmd.Flags().BoolVar(&plainFlag, "plain", false, "Output static text table instead of interactive TUI")
 
 	cmd.AddCommand(newSessionsImportCmd(reg, pm))
 	cmd.AddCommand(newSessionsShowCmd(reg, pm))
 
 	return cmd
+}
+
+var isInteractiveSessionsTerminal = func(cmd *cobra.Command) bool {
+	out := cmd.OutOrStdout()
+	f, ok := out.(*os.File)
+	if !ok || f != os.Stdout {
+		return false
+	}
+	return (isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())) &&
+		(isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd()))
 }
 
 func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly bool) {

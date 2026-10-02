@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
@@ -106,6 +107,9 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 	profilesDir := filepath.Join(config.BaseDir(), "profiles")
 	entries, _ := os.ReadDir(profilesDir)
 
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
 	for _, p := range targetProviders {
 		// 1. Scan configured profiles
 		for _, entry := range entries {
@@ -118,30 +122,48 @@ func (m *Manager) ListSessions(ctx context.Context, filterAgent, filterProfile s
 			}
 
 			profDir := filepath.Join(profilesDir, profName)
-			sessions, err := p.ListSessions(ctx, profDir, false)
-			if err != nil {
-				logger.Debug("[session/manager] ListSessions error on %s: %v", profDir, err)
-				continue
-			}
+			provider := p
+			profile := profName
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sessions, err := provider.ListSessions(ctx, profDir, false)
+				if err != nil {
+					logger.Debug("[session/manager] ListSessions error on %s: %v", profDir, err)
+					return
+				}
 
-			for _, s := range sessions {
-				appendSession(s, profName, false)
-			}
+				mu.Lock()
+				for _, s := range sessions {
+					appendSession(s, profile, false)
+				}
+				mu.Unlock()
+			}()
 		}
 
 		// 2. Scan host storage (unless specifically filtering for a non-host profile)
 		if filterProfile == "" || hostOnly {
 			hostDir := config.RealHomeDir()
-			hostSessions, err := p.ListSessions(ctx, hostDir, true)
-			if err != nil {
-				logger.Debug("[session/manager] ListSessions error on host %s: %v", hostDir, err)
-			} else {
+			provider := p
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				hostSessions, err := provider.ListSessions(ctx, hostDir, true)
+				if err != nil {
+					logger.Debug("[session/manager] ListSessions error on host %s: %v", hostDir, err)
+					return
+				}
+
+				mu.Lock()
 				for _, s := range hostSessions {
 					appendSession(s, "<host>", true)
 				}
-			}
+				mu.Unlock()
+			}()
 		}
 	}
+
+	wg.Wait()
 
 	// Filter activeOnly if requested
 	if activeOnly {

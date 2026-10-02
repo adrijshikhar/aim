@@ -501,6 +501,39 @@ func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profil
 		hasHistory = true
 	}
 
+	type turnInfo struct {
+		maxTime   time.Time
+		turnCount int
+	}
+	turnsByThread := make(map[string]turnInfo)
+	if hasHistory && len(rows) > 0 {
+		var ids []string
+		for _, r := range rows {
+			if r.ID != "" {
+				ids = append(ids, fmt.Sprintf("'%s'", escapeSQL(r.ID)))
+			}
+		}
+		if len(ids) > 0 {
+			turnQuery := fmt.Sprintf("SELECT thread_id, MAX(COALESCE(completed_at, started_at, 0)), COUNT(*) FROM thread_turns WHERE thread_id IN (%s) GROUP BY thread_id;\n", strings.Join(ids, ","))
+			tCmd := exec.CommandContext(ctx, p.sqliteBin, historyDB, "-separator", "|")
+			tCmd.Stdin = strings.NewReader(turnQuery)
+			if tOut, err := tCmd.Output(); err == nil {
+				for _, line := range strings.Split(strings.TrimSpace(string(tOut)), "\n") {
+					parts := strings.Split(strings.TrimSpace(line), "|")
+					if len(parts) >= 3 {
+						tID := parts[0]
+						var tTime time.Time
+						if tSec, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64); err == nil && tSec > 0 {
+							tTime = time.Unix(tSec, 0)
+						}
+						cnt, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
+						turnsByThread[tID] = turnInfo{maxTime: tTime, turnCount: cnt}
+					}
+				}
+			}
+		}
+	}
+
 	var sessions []*session.Session
 	for _, row := range rows {
 		displayTitle := row.Name
@@ -536,24 +569,11 @@ func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profil
 		}
 
 		var turnCount int
-		if hasHistory {
-			turnQuery := fmt.Sprintf("SELECT MAX(COALESCE(completed_at, started_at, 0)), COUNT(*) FROM thread_turns WHERE thread_id = '%s';\n", escapeSQL(row.ID))
-			tCmd := exec.CommandContext(ctx, p.sqliteBin, historyDB, "-separator", "|")
-			tCmd.Stdin = strings.NewReader(turnQuery)
-			if tOut, err := tCmd.Output(); err == nil {
-				parts := strings.Split(strings.TrimSpace(string(tOut)), "|")
-				if len(parts) >= 1 {
-					if tSec, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64); err == nil && tSec > 0 {
-						tTime := time.Unix(tSec, 0)
-						if tTime.After(modTime) {
-							modTime = tTime
-						}
-					}
-				}
-				if len(parts) >= 2 {
-					turnCount, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
-				}
+		if ti, ok := turnsByThread[row.ID]; ok {
+			if ti.maxTime.After(modTime) {
+				modTime = ti.maxTime
 			}
+			turnCount = ti.turnCount
 		}
 
 		s := session.NewSession(row.ID, displayTitle, "codex", profileName, isHost, modTime)

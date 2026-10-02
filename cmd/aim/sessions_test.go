@@ -12,6 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
+	"github.com/spf13/cobra"
 )
 
 func setupMockSessionEnv(t *testing.T) (string, *agents.Registry, *profile.ProfileManager) {
@@ -172,6 +173,91 @@ func TestSessionsCmd_Filters(t *testing.T) {
 	}
 	if len(sessions) != 2 {
 		t.Errorf("expected 2 agy sessions, got %d", len(sessions))
+	}
+}
+
+func TestSessionsCmd_InteractiveTerminal_LaunchesTUI(t *testing.T) {
+	_, reg, pm := setupMockSessionEnv(t)
+
+	origIsInteractive := isInteractiveSessionsTerminal
+	origRunner := tuiSessionsRunner
+	t.Cleanup(func() {
+		isInteractiveSessionsTerminal = origIsInteractive
+		tuiSessionsRunner = origRunner
+	})
+
+	isInteractiveSessionsTerminal = func(cmd *cobra.Command) bool {
+		return true
+	}
+
+	calledAgent := ""
+	calledProfile := ""
+	calledActiveOnly := false
+	tuiSessionsRunner = func(r *agents.Registry, p *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+		calledAgent = initialAgent
+		calledProfile = profileFilter
+		calledActiveOnly = activeOnly
+		return 0
+	}
+
+	var buf bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"sessions", "codex", "-p", "work", "--active"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if calledAgent != "codex" {
+		t.Errorf("expected calledAgent 'codex', got %q", calledAgent)
+	}
+	if calledProfile != "work" {
+		t.Errorf("expected calledProfile 'work', got %q", calledProfile)
+	}
+	if !calledActiveOnly {
+		t.Errorf("expected calledActiveOnly true")
+	}
+}
+
+func TestSessionsCmd_PlainFlag_RendersTableEvenInTerminal(t *testing.T) {
+	_, reg, pm := setupMockSessionEnv(t)
+
+	origIsInteractive := isInteractiveSessionsTerminal
+	origRunner := tuiSessionsRunner
+	t.Cleanup(func() {
+		isInteractiveSessionsTerminal = origIsInteractive
+		tuiSessionsRunner = origRunner
+	})
+
+	isInteractiveSessionsTerminal = func(cmd *cobra.Command) bool {
+		return true
+	}
+
+	tuiCalled := false
+	tuiSessionsRunner = func(r *agents.Registry, p *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+		tuiCalled = true
+		return 0
+	}
+
+	var buf bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"sessions", "--plain"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if tuiCalled {
+		t.Errorf("expected TUI runner NOT called when --plain is passed")
+	}
+	if !strings.Contains(buf.String(), "RECENT SESSIONS") {
+		t.Errorf("expected plain table output, got: %s", buf.String())
 	}
 }
 

@@ -51,6 +51,7 @@ type Model struct {
 	cache       *usage.CacheStore
 	reports     map[string]usage.Report
 	width       int
+	height      int
 	usageStream *usageStream
 
 	loading bool
@@ -184,6 +185,11 @@ func (m Model) IsFilterActive() bool {
 func (m Model) WithVersion(v string) Model {
 	m.version = v
 	return m
+}
+
+// WithSessionsDrawerConfig opens the sessions drawer on startup with the specified filters.
+func (m Model) WithSessionsDrawerConfig(initialAgent, profileFilter string, activeOnly, standalone bool) Model {
+	return m.openSessionsDrawerConfig(initialAgent, profileFilter, activeOnly, standalone)
 }
 
 // Version returns the version displayed in the header, falling back to package Version.
@@ -441,6 +447,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		if msg.Width > 8 {
 			m.help.Width = msg.Width - 8
 		} else {

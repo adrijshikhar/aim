@@ -2836,3 +2836,221 @@ func TestSessionsDrawer_FilterTabToggleAndCtrlF(t *testing.T) {
 		t.Fatalf("expected sessions drawer to be closed after second Esc")
 	}
 }
+
+func TestSessionsDrawer_EnhancedNavigationAndControls(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("AIM_HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	cfg := config.NewDefaultConfig()
+
+	// 1. Test standalone initialization with filters
+	m := NewModel(reg, pm, cfg).WithSessionsDrawerConfig("codex", "work", true, true)
+	if !m.IsSessionsDrawerActive() {
+		t.Fatalf("expected sessions drawer to be active")
+	}
+	if m.sessionsDrawer.agentFilter != "codex" {
+		t.Fatalf("expected agentFilter 'codex', got %q", m.sessionsDrawer.agentFilter)
+	}
+	if m.sessionsDrawer.profileFilter != "work" {
+		t.Fatalf("expected profileFilter 'work', got %q", m.sessionsDrawer.profileFilter)
+	}
+	if !m.sessionsDrawer.activeOnly {
+		t.Fatalf("expected activeOnly true")
+	}
+	if !m.sessionsDrawer.standalone {
+		t.Fatalf("expected standalone true")
+	}
+
+	// In standalone mode, pressing 'q' quits the program
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatalf("expected tea.Quit command on 'q' in standalone sessions drawer")
+	}
+
+	// 2. Test Claude Tab and cycling
+	m = NewModel(reg, pm, cfg).WithSessionsDrawerConfig("", "", false, false)
+	// Press '3' to filter to Claude
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = updated.(Model)
+	if m.sessionsDrawer.agentFilter != "claude" {
+		t.Fatalf("expected agentFilter 'claude' after key '3', got %q", m.sessionsDrawer.agentFilter)
+	}
+
+	// Press Tab to cycle from claude -> "" (all)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if m.sessionsDrawer.agentFilter != "" {
+		t.Fatalf("expected agentFilter '' after tab cycle, got %q", m.sessionsDrawer.agentFilter)
+	}
+
+	// Press Tab to cycle from "" -> "agy"
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if m.sessionsDrawer.agentFilter != "agy" {
+		t.Fatalf("expected agentFilter 'agy' after tab cycle, got %q", m.sessionsDrawer.agentFilter)
+	}
+
+	// Press Tab to cycle from "agy" -> "codex"
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if m.sessionsDrawer.agentFilter != "codex" {
+		t.Fatalf("expected agentFilter 'codex' after tab cycle, got %q", m.sessionsDrawer.agentFilter)
+	}
+
+	// 3. Test Toggle Active and Toggle Preview
+	if m.sessionsDrawer.activeOnly {
+		t.Fatalf("expected activeOnly initial false")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = updated.(Model)
+	if !m.sessionsDrawer.activeOnly {
+		t.Fatalf("expected activeOnly true after pressing 'a'")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = updated.(Model)
+	if m.sessionsDrawer.activeOnly {
+		t.Fatalf("expected activeOnly false after pressing 'a' again")
+	}
+
+	if m.sessionsDrawer.hidePreview {
+		t.Fatalf("expected hidePreview initial false")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = updated.(Model)
+	if !m.sessionsDrawer.hidePreview {
+		t.Fatalf("expected hidePreview true after pressing 'p'")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = updated.(Model)
+	if m.sessionsDrawer.hidePreview {
+		t.Fatalf("expected hidePreview false after pressing 'p' again")
+	}
+
+	// 4. Test Kill Process Workflow
+	origKill := terminateProcessFunc
+	killedPID := 0
+	terminateProcessFunc = func(pid int) error {
+		killedPID = pid
+		return nil
+	}
+	defer func() { terminateProcessFunc = origKill }()
+
+	sActive := session.Session{
+		ID:           "active-sess-uuid-1234",
+		ShortID:      "active-s",
+		Title:        "Active Running Session",
+		Agent:        "agy",
+		Profile:      "work",
+		Status:       session.StatusActive,
+		PID:          9999,
+		LastActiveAt: time.Now(),
+		Cwd:          "/Users/nemesis/Projects/aim",
+	}
+	sIdle := session.Session{
+		ID:           "idle-sess-uuid-5678",
+		ShortID:      "idle-s",
+		Title:        "Idle Past Session",
+		Agent:        "codex",
+		Profile:      "work",
+		Status:       session.StatusIdle,
+		LastActiveAt: time.Now().Add(-1 * time.Hour),
+	}
+
+	m.SetSessionsForTest([]session.Session{sActive, sIdle})
+	m.sessionsDrawer.cursor = 0
+
+	// First press 'x': prompt confirmation
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(Model)
+	if m.sessionsDrawer.killConfirmPID != 9999 {
+		t.Fatalf("expected killConfirmPID 9999, got %d", m.sessionsDrawer.killConfirmPID)
+	}
+	if !strings.Contains(m.sessionsDrawer.statusMessage, "Press 'x' again to terminate PID 9999") {
+		t.Fatalf("expected confirmation message, got %q", m.sessionsDrawer.statusMessage)
+	}
+
+	// Second press 'x': confirm kill
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(Model)
+	if killedPID != 9999 {
+		t.Fatalf("expected terminateProcessFunc called with 9999, got %d", killedPID)
+	}
+	if !strings.Contains(m.sessionsDrawer.statusMessage, "Terminated PID 9999") {
+		t.Fatalf("expected termination success message, got %q", m.sessionsDrawer.statusMessage)
+	}
+
+	// Cursor to idle session: press 'x' -> informs idle
+	m.SetSessionsForTest([]session.Session{sActive, sIdle})
+	m.sessionsDrawer.cursor = 1
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(Model)
+	if !strings.Contains(m.sessionsDrawer.statusMessage, "idle") {
+		t.Fatalf("expected idle notification, got %q", m.sessionsDrawer.statusMessage)
+	}
+
+	// 5. Test Clipboard Copy ('y') and Open Directory ('o')
+	origCopy := copyToClipboardFunc
+	copiedText := ""
+	copyToClipboardFunc = func(text string) error {
+		copiedText = text
+		return nil
+	}
+	defer func() { copyToClipboardFunc = origCopy }()
+
+	origOpen := openDirectoryFunc
+	openedDir := ""
+	openDirectoryFunc = func(dir string) error {
+		openedDir = dir
+		return nil
+	}
+	defer func() { openDirectoryFunc = origOpen }()
+
+	// Cursor at 0 (sActive with Cwd)
+	m.sessionsDrawer.cursor = 0
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(Model)
+	if copiedText != "/Users/nemesis/Projects/aim" {
+		t.Fatalf("expected copied text '/Users/nemesis/Projects/aim', got %q", copiedText)
+	}
+	if !strings.Contains(m.sessionsDrawer.statusMessage, "Copied to clipboard") {
+		t.Fatalf("expected copy success message, got %q", m.sessionsDrawer.statusMessage)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	m = updated.(Model)
+	if openedDir != "/Users/nemesis/Projects/aim" {
+		t.Fatalf("expected opened directory '/Users/nemesis/Projects/aim', got %q", openedDir)
+	}
+	if !strings.Contains(m.sessionsDrawer.statusMessage, "Opened workspace") {
+		t.Fatalf("expected open success message, got %q", m.sessionsDrawer.statusMessage)
+	}
+
+	// Cursor at 1 (sIdle without Cwd -> falls back to ID for copy, notifies for open)
+	m.sessionsDrawer.cursor = 1
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(Model)
+	if copiedText != "idle-sess-uuid-5678" {
+		t.Fatalf("expected copied session ID 'idle-sess-uuid-5678', got %q", copiedText)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	m = updated.(Model)
+	if !strings.Contains(m.sessionsDrawer.statusMessage, "No workspace directory recorded") {
+		t.Fatalf("expected no workspace message, got %q", m.sessionsDrawer.statusMessage)
+	}
+
+	// 6. Test rendering view with notifications and badges
+	viewStr := m.renderSessionsDrawer()
+	if !strings.Contains(viewStr, "Sessions Explorer") {
+		t.Fatalf("expected view to contain 'Sessions Explorer'")
+	}
+	if !strings.Contains(viewStr, "[3] Claude") {
+		t.Fatalf("expected view to contain '[3] Claude' tab")
+	}
+}
+

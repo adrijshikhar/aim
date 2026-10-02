@@ -99,24 +99,7 @@ func promptProfileName(agent, defaultProfile string) string {
 	return val
 }
 
-var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
-	cfg, _ := config.LoadConfig()
-	m := tui.NewModel(reg, pm, cfg).WithVersion(Version)
-	p := tea.NewProgram(m)
-	// Console logging would draw over the TUI; the session it launches below
-	// runs after the TUI has closed and must show its warnings.
-	logger.SetConsoleOutput(false)
-	finalModel, err := p.Run()
-	logger.SetConsoleOutput(true)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
-		return 1
-	}
-
-	res, ok := finalModel.(tui.Model)
-	if !ok {
-		return 0
-	}
+func handleTUIOutcome(res tui.Model, reg *agents.Registry, pm *profile.ProfileManager) int {
 	agent := res.SelectedAgent()
 	switch res.Outcome() {
 	case tui.ActionRun:
@@ -172,9 +155,61 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 	return 0
 }
 
+var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
+	cfg, _ := config.LoadConfig()
+	m := tui.NewModel(reg, pm, cfg).WithVersion(Version)
+	p := tea.NewProgram(m)
+	// Console logging would draw over the TUI; the session it launches below
+	// runs after the TUI has closed and must show its warnings.
+	logger.SetConsoleOutput(false)
+	finalModel, err := p.Run()
+	logger.SetConsoleOutput(true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+		return 1
+	}
+
+	res, ok := finalModel.(tui.Model)
+	if !ok {
+		return 0
+	}
+	return handleTUIOutcome(res, reg, pm)
+}
+
+var tuiSessionsRunner = func(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+	cfg, _ := config.LoadConfig()
+	m := tui.NewModel(reg, pm, cfg).
+		WithVersion(Version).
+		WithSessionsDrawerConfig(initialAgent, profileFilter, activeOnly, true)
+	p := tea.NewProgram(m)
+	logger.SetConsoleOutput(false)
+	finalModel, err := p.Run()
+	logger.SetConsoleOutput(true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+		return 1
+	}
+
+	res, ok := finalModel.(tui.Model)
+	if !ok {
+		return 0
+	}
+	return handleTUIOutcome(res, reg, pm)
+}
+
 func runTUI(reg *agents.Registry, pm *profile.ProfileManager) int {
 	logger.Debug("[tui] Launching interactive TUI dashboard")
 	code := tuiRunner(reg, pm)
 	logger.Debug("[tui] TUI exited with code %d", code)
+	return code
+}
+
+func runTUISessions(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+	logger.Debug("[tui] Launching interactive sessions drawer")
+	if pm == nil {
+		pm = profile.NewProfileManager(config.BaseDir())
+	}
+	code := tuiSessionsRunner(reg, pm, initialAgent, profileFilter, activeOnly)
+	logger.Debug("[tui] Sessions drawer exited with code %d", code)
 	return code
 }

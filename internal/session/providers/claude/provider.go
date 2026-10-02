@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +60,9 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 			continue
 		}
 		slug := entry.Name()
+		if isEphemeralProjectSlug(slug) {
+			continue
+		}
 		projPath := filepath.Join(projectsDir, slug)
 		files, err := os.ReadDir(projPath)
 		if err != nil {
@@ -66,15 +70,41 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 			continue
 		}
 
+		type fileInfoItem struct {
+			name    string
+			modTime time.Time
+		}
+		var validFiles []fileInfoItem
 		for _, f := range files {
 			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
 				continue
 			}
 			sessID := strings.TrimSuffix(f.Name(), ".jsonl")
-			if sessID == "" {
+			if sessID == "" || sessID == "costs" {
 				continue
 			}
-			filePath := filepath.Join(projPath, f.Name())
+			info, err := f.Info()
+			if err != nil {
+				continue
+			}
+			validFiles = append(validFiles, fileInfoItem{
+				name:    f.Name(),
+				modTime: info.ModTime(),
+			})
+		}
+
+		sort.Slice(validFiles, func(i, j int) bool {
+			return validFiles[i].modTime.After(validFiles[j].modTime)
+		})
+
+		const maxSessionsPerProject = 50
+		if len(validFiles) > maxSessionsPerProject {
+			validFiles = validFiles[:maxSessionsPerProject]
+		}
+
+		for _, item := range validFiles {
+			sessID := strings.TrimSuffix(item.name, ".jsonl")
+			filePath := filepath.Join(projPath, item.name)
 			sess, err := parseClaudeSessionFile(filePath, sessID, slug, profileDir, isHost)
 			if err != nil {
 				logger.Debug("[session/claude] Error parsing session file %s: %v", filePath, err)
@@ -87,6 +117,19 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 	}
 
 	return results, nil
+}
+
+func isEphemeralProjectSlug(slug string) bool {
+	if strings.Contains(slug, "claude-mem-observer") || strings.Contains(slug, "-observer-sessions") {
+		return true
+	}
+	if strings.HasPrefix(slug, "-private-var-folders-") ||
+		strings.HasPrefix(slug, "-var-folders-") ||
+		strings.HasPrefix(slug, "-private-tmp-") ||
+		strings.HasPrefix(slug, "-tmp-") {
+		return true
+	}
+	return false
 }
 
 // GetSession resolves a full ID or short ID prefix to a concrete Session.
@@ -378,7 +421,7 @@ func parseClaudeSessionFile(filePath, sessionUUID, slug, profileDir string, isHo
 		}
 
 		// 3. Fast count of user/assistant messages without full JSON parsing
-		fastBuf := make([]byte, 256*1024)
+		fastBuf := make([]byte, 512*1024)
 		_, _ = file.Seek(0, io.SeekStart)
 		for {
 			n, err := file.Read(fastBuf)

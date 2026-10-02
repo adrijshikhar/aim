@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // PathToSlug converts an absolute filesystem path to Claude Code's directory slug format.
@@ -27,6 +28,8 @@ func PathToSlug(path string) string {
 	return strings.ReplaceAll(toSlash, "/", "-")
 }
 
+var slugCache sync.Map
+
 // SlugToPath converts a Claude Code directory slug back to an absolute filesystem path.
 // e.g. -Users-nemesis-Projects-aim -> /Users/nemesis/Projects/aim
 // If directories exist on disk, filesystem resolution is used to disambiguate
@@ -35,7 +38,15 @@ func SlugToPath(slug string) string {
 	if slug == "" {
 		return ""
 	}
+	if cached, ok := slugCache.Load(slug); ok {
+		return cached.(string)
+	}
+	res := slugToPathUncached(slug)
+	slugCache.Store(slug, res)
+	return res
+}
 
+func slugToPathUncached(slug string) string {
 	trimmed := strings.Trim(slug, "-")
 	if trimmed == "" {
 		return "/"
