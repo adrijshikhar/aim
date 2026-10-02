@@ -2022,6 +2022,77 @@ func TestTUI_KeyRefresh_ConsecutivePresses(t *testing.T) {
 	}
 }
 
+func TestTUI_Inspector_ZeroOfflineDuringRefresh(t *testing.T) {
+	t.Parallel()
+	m := Model{
+		agent:    "agy",
+		profiles: []string{"bby"},
+		cursor:   0,
+		loading:  true,
+		reports: map[string]usage.Report{
+			"agy:bby": {
+				Agent:     "agy",
+				Profile:   "bby",
+				Status:    usage.StatusUnknown,
+				Summary:   "Offline (local session cache present)",
+				Error:     "process error",
+				Windows:   nil, // in-flight or uncached
+				FetchedAt: time.Now(),
+			},
+		},
+	}
+
+	view := m.View()
+
+	// 1. Badge in profile list must be [refreshing...], never [offline]
+	if !strings.Contains(view, "[refreshing...]") {
+		t.Errorf("expected [refreshing...] badge in profile list during loading, got:\n%s", view)
+	}
+	if strings.Contains(view, "bby  [offline]") {
+		t.Errorf("expected NO [offline] badge in profile list during loading")
+	}
+
+	// 2. Inspector Details Card must show refreshing quota and fetching quota, NEVER offline!
+	if !strings.Contains(view, "refreshing quota...") {
+		t.Errorf("expected inspector to show 'refreshing quota...' during loading, got:\n%s", view)
+	}
+	if !strings.Contains(view, "(fetching quota...)") {
+		t.Errorf("expected inspector to show '(fetching quota...)' during loading, got:\n%s", view)
+	}
+	if strings.Contains(view, "Status:        Offline") {
+		t.Errorf("FAIL: Inspector showed 'Status: Offline' while loading is true!\n%s", view)
+	}
+	if strings.Contains(view, "Resets At:     None") {
+		t.Errorf("FAIL: Inspector showed 'Resets At: None' while loading is true!\n%s", view)
+	}
+}
+
+func TestTUI_StreamID_SupersededStreamIgnored(t *testing.T) {
+	t.Parallel()
+	m := Model{
+		agent:       "agy",
+		profiles:    []string{"work"},
+		loading:     true,
+		usageStream: &usageStream{id: 42},
+	}
+
+	// Simulated close event from an old superseded stream (streamID = 41)
+	mOld, _ := m.Update(usageStreamClosedMsg{streamID: 41})
+	modelOld := mOld.(Model)
+
+	// Must STILL be loading! Old stream close must NOT cancel the active stream!
+	if !modelOld.loading {
+		t.Errorf("expected m.loading to remain true when superseded stream 41 closes")
+	}
+
+	// Active stream (streamID = 42) closes
+	mCur, _ := modelOld.Update(usageStreamClosedMsg{streamID: 42})
+	modelCur := mCur.(Model)
+	if modelCur.loading {
+		t.Errorf("expected m.loading to be false when active stream 42 closes")
+	}
+}
+
 func TestTUI_Header_VersionDisplay(t *testing.T) {
 	baseDir := t.TempDir()
 	pm := profile.NewProfileManager(baseDir)

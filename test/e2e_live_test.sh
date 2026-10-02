@@ -567,6 +567,7 @@ clean_initial = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out_initial.decode("utf-8",
 assert "[80%]" in clean_initial, f"Expected [80%] cached quota for work in initial render, got:\n{clean_initial}"
 assert "[refreshing...]" in clean_initial, f"Expected [refreshing...] badge for in-flight uncached profile, got:\n{clean_initial}"
 assert "[offline]" not in clean_initial, f"FAIL: [offline] badge appeared during active loading!\n{clean_initial}"
+assert "Offline" not in clean_initial, f"FAIL: 'Offline' status appeared in inspector during active loading!\n{clean_initial}"
 
 # Drain remaining output until mock agy finishes (0.6s)
 out_loaded = drain(master, timeout=0.8)
@@ -584,8 +585,9 @@ out_inflight = drain(master, timeout=0.2)
 clean_inflight = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out_inflight.decode("utf-8", errors="replace"))
 
 # In-flight assertions:
-# 1. [offline] MUST NOT appear in the differential update during active refresh!
+# 1. [offline] and 'Offline' MUST NOT appear in the differential update during active refresh!
 assert "[offline]" not in clean_inflight, f"FAIL: [offline] badge appeared during active quota refresh!\n{clean_inflight}"
+assert "Offline" not in clean_inflight, f"FAIL: 'Offline' status appeared during active quota refresh!\n{clean_inflight}"
 clean_accum = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", (out_loaded + out_inflight).decode("utf-8", errors="replace"))
 assert "[85%]" in clean_accum, f"FAIL: Valid cached quota was not present on screen during refresh!\n{clean_accum}"
 

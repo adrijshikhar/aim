@@ -917,9 +917,14 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 	wg.Wait()
 
 	if usageErr != nil {
+		var exitErr *exec.ExitError
 		errMsg := usageErr.Error()
-		if exitErr, ok := usageErr.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
-			errMsg = fmt.Sprintf("%s: %s", errMsg, strings.TrimSpace(string(exitErr.Stderr)))
+		if errors.As(usageErr, &exitErr) && len(exitErr.Stderr) > 0 {
+			cleanStderr := strings.TrimSpace(string(exitErr.Stderr))
+			if len(cleanStderr) > 200 {
+				cleanStderr = cleanStderr[:200] + "..."
+			}
+			errMsg = fmt.Sprintf("%s: %s", errMsg, cleanStderr)
 		}
 		errLower := strings.ToLower(errMsg)
 

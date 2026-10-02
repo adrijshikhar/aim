@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -28,12 +29,17 @@ const (
 )
 
 type usageReportMsg usage.Report
-type usageStreamClosedMsg struct{}
+type usageStreamClosedMsg struct {
+	streamID uint64
+}
 
 type usageStream struct {
+	id     uint64
 	ch     <-chan usage.Report
 	cancel context.CancelFunc
 }
+
+var nextStreamID uint64
 
 // Version is the package-level version string shown in the TUI header.
 var Version = "dev"
@@ -117,10 +123,12 @@ func (m Model) loadCachedReports() Model {
 	}
 	for _, p := range m.profiles {
 		if rep, found := m.cache.GetStale(m.agent, p); found {
-			if m.reports == nil {
-				m.reports = make(map[string]usage.Report)
+			if rep.Status != usage.StatusUnknown || len(rep.Windows) > 0 {
+				if m.reports == nil {
+					m.reports = make(map[string]usage.Report)
+				}
+				m.reports[fmt.Sprintf("%s:%s", m.agent, p)] = rep
 			}
-			m.reports[fmt.Sprintf("%s:%s", m.agent, p)] = rep
 		}
 	}
 	return m
@@ -306,14 +314,18 @@ func (m Model) getReportForAgent(agent, prof string) (usage.Report, bool) {
 	return m.getReport(prof)
 }
 
-func waitForUsageReport(ch <-chan usage.Report) tea.Cmd {
+func waitForUsageReport(ch <-chan usage.Report, sid ...uint64) tea.Cmd {
 	if ch == nil {
 		return nil
+	}
+	var streamID uint64
+	if len(sid) > 0 {
+		streamID = sid[0]
 	}
 	return func() tea.Msg {
 		rep, ok := <-ch
 		if !ok {
-			return usageStreamClosedMsg{}
+			return usageStreamClosedMsg{streamID: streamID}
 		}
 		return usageReportMsg(rep)
 	}
@@ -371,11 +383,13 @@ func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
 		m.usageStream.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	sid := atomic.AddUint64(&nextStreamID, 1)
+	m.usageStream.id = sid
 	m.usageStream.cancel = cancel
 
 	ch := usage.RefreshAsync(ctx, targets, m.cache, force...)
 	m.usageStream.ch = ch
-	return waitForUsageReport(ch)
+	return waitForUsageReport(ch, sid)
 }
 
 func (m Model) spinTickCmd() tea.Cmd {
@@ -465,14 +479,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		rep := usage.Report(msg)
 		m.reports[fmt.Sprintf("%s:%s", rep.Agent, rep.Profile)] = rep
 		var ch <-chan usage.Report
+		var sid uint64
 		if m.usageStream != nil {
 			ch = m.usageStream.ch
+			sid = m.usageStream.id
 		}
-		return m, waitForUsageReport(ch)
+		return m, waitForUsageReport(ch, sid)
 
 	case usageStreamClosedMsg:
-		m.loading = false
-		if m.usageStream != nil {
+		if m.usageStream != nil && (msg.streamID == 0 || m.usageStream.id == msg.streamID) {
+			m.loading = false
 			m.usageStream.ch = nil
 		}
 		return m, nil
