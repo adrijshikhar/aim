@@ -105,4 +105,3 @@ type SessionProvider interface {
 	ResolveCwd(ctx context.Context, s *Session) (string, error)
 	ResolveSummary(ctx context.Context, s *Session) (SessionSummary, error)
 }
-

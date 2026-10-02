@@ -551,4 +551,3 @@ func TestProvider_ResolveCwdAndSummary(t *testing.T) {
 		t.Errorf("expected summary RecentActivity 'Now run the verification tests', got %q", sum.RecentActivity)
 	}
 }
-

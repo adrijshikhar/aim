@@ -598,7 +598,6 @@ func (p *testRunProvider) ResolveSummary(ctx context.Context, s *session.Session
 	return session.SessionSummary{}, nil
 }
 
-
 func TestRunCmd_ExpandsShortPrefixToFullUUID(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)

@@ -282,7 +282,6 @@ func (m *testSessionProvider) ResolveSummary(ctx context.Context, s *session.Ses
 	return session.SessionSummary{}, nil
 }
 
-
 func TestResume_AmbiguousPrefixAcrossProfiles(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
@@ -458,7 +457,6 @@ func (m *mockForkProvider) ResolveSummary(ctx context.Context, s *session.Sessio
 	}
 	return session.SessionSummary{}, nil
 }
-
 
 func TestResumeCmd_ClaudeResumeArgs(t *testing.T) {
 	tempDir := t.TempDir()

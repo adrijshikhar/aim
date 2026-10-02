@@ -420,4 +420,3 @@ func (m *Manager) ResolveSummary(ctx context.Context, s *Session) (SessionSummar
 	}
 	return SessionSummary{Goal: s.Summary, Raw: s.Summary}, nil
 }
-

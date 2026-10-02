@@ -923,4 +923,3 @@ VALUES ('%s', 'turn-2', 'item-1', 5, 'userMessage', '{"content":[{"type":"text",
 		t.Errorf("expected summary RecentActivity 'Run JWT refresh integration tests', got %q", sum.RecentActivity)
 	}
 }
-

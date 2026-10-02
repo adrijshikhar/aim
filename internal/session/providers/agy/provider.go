@@ -616,4 +616,3 @@ func cleanURIPath(u string) string {
 	}
 	return filepath.Clean(u)
 }
-

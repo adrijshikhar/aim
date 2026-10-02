@@ -3103,4 +3103,3 @@ func TestSessionsDrawer_EnhancedNavigationAndControls(t *testing.T) {
 		t.Fatalf("expected view with preview OFF to show 1-14, got:\n%s", viewStr)
 	}
 }
-

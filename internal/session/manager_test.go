@@ -80,7 +80,6 @@ func (m *mockProvider) ResolveSummary(ctx context.Context, s *session.Session) (
 	return session.SessionSummary{}, nil
 }
 
-
 type mockProcessScanner struct {
 	active   map[string]session.ActiveProcessInfo
 	contexts []context.Context
