@@ -637,3 +637,296 @@ func TestRefreshAsync_UpdatesCacheOnAuthError(t *testing.T) {
 		t.Errorf("expected StatusUnknown on auth error, got %s", cached.Status)
 	}
 }
+
+func TestRefreshAsync_ConcurrentPreservation(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	// Pre-seed 3 profiles with valid quotas
+	for _, prof := range []string{"prof1", "prof2", "prof3"} {
+		_ = store.Put(usage.Report{
+			Agent:   "agy",
+			Profile: prof,
+			Status:  usage.StatusOK,
+			Windows: []usage.LimitWindow{
+				{Name: "Five-Hour", RemainingPct: 80},
+			},
+			FetchedAt: time.Now(),
+		})
+	}
+
+	targets := []usage.TargetProfile{
+		// prof1 succeeds with fresh 95%
+		{
+			Agent:   "agy",
+			Profile: "prof1",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return &usage.Report{
+					Agent:   "agy",
+					Profile: p,
+					Status:  usage.StatusOK,
+					Windows: []usage.LimitWindow{{Name: "Five-Hour", RemainingPct: 95}},
+				}, nil
+			},
+		},
+		// prof2 fails with transient network timeout -> should retain 80%
+		{
+			Agent:   "agy",
+			Profile: "prof2",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return nil, errors.New("i/o timeout")
+			},
+		},
+		// prof3 fails with auth error -> should update to StatusUnknown
+		{
+			Agent:   "agy",
+			Profile: "prof3",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return &usage.Report{
+					Agent:   "agy",
+					Profile: p,
+					Status:  usage.StatusUnknown,
+					Error:   "invalid_grant: token revoked",
+				}, nil
+			},
+		},
+	}
+
+	ch := usage.RefreshAsync(context.Background(), targets, store, true)
+	for range ch {
+	}
+
+	// prof1: updated to 95%
+	rep1, _ := store.Get("agy", "prof1")
+	if rep1.Windows[0].RemainingPct != 95 {
+		t.Errorf("expected prof1 updated to 95%%, got %d%%", rep1.Windows[0].RemainingPct)
+	}
+
+	// prof2: preserved at 80%
+	rep2, _ := store.Get("agy", "prof2")
+	if rep2.Status != usage.StatusOK || rep2.Windows[0].RemainingPct != 80 {
+		t.Errorf("expected prof2 preserved at 80%%, got status %s, pct %d%%", rep2.Status, rep2.Windows[0].RemainingPct)
+	}
+
+	// prof3: updated to StatusUnknown
+	rep3, _ := store.GetStale("agy", "prof3")
+	if rep3.Status != usage.StatusUnknown {
+		t.Errorf("expected prof3 updated to StatusUnknown on auth error, got %s", rep3.Status)
+	}
+}
+
+func TestRefreshAsync_MultiAgentPreservation(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	// Pre-seed across agy, codex, claude
+	agentsList := []string{"agy", "codex", "claude"}
+	for _, a := range agentsList {
+		_ = store.Put(usage.Report{
+			Agent:   a,
+			Profile: "work",
+			Status:  usage.StatusOK,
+			Windows: []usage.LimitWindow{
+				{Name: "Weekly", RemainingPct: 70},
+			},
+			FetchedAt: time.Now(),
+		})
+	}
+
+	// Refresh where all 3 fail with transient network failure
+	var targets []usage.TargetProfile
+	for _, a := range agentsList {
+		targets = append(targets, usage.TargetProfile{
+			Agent:   a,
+			Profile: "work",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return nil, errors.New("network is unreachable")
+			},
+		})
+	}
+
+	ch := usage.RefreshAsync(context.Background(), targets, store, true)
+	for range ch {
+	}
+
+	// All 3 should still retain their valid quotas in cache
+	for _, a := range agentsList {
+		rep, found := store.Get(a, "work")
+		if !found {
+			t.Fatalf("expected agent %s profile work to be in cache", a)
+		}
+		if rep.Status != usage.StatusOK || len(rep.Windows) == 0 || rep.Windows[0].RemainingPct != 70 {
+			t.Errorf("expected agent %s to retain 70%% quota, got status %s", a, rep.Status)
+		}
+	}
+}
+
+func TestRefreshAsync_ExpiredValidCachePreservedOnTransientFailure(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	// Short TTL of 1 second
+	store := usage.NewCacheStore(tmpDir, time.Second)
+
+	// Pre-seed with timestamp in the past (expired cache)
+	_ = store.Put(usage.Report{
+		Agent:     "agy",
+		Profile:   "work",
+		Status:    usage.StatusOK,
+		Windows:   []usage.LimitWindow{{Name: "5-Hour", RemainingPct: 88}},
+		FetchedAt: time.Now().Add(-10 * time.Minute),
+	})
+
+	targets := []usage.TargetProfile{
+		{
+			Agent:   "agy",
+			Profile: "work",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return nil, errors.New("connection reset by peer")
+			},
+		},
+	}
+
+	ch := usage.RefreshAsync(context.Background(), targets, store, true)
+	var received []usage.Report
+	for rep := range ch {
+		received = append(received, rep)
+	}
+
+	if len(received) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(received))
+	}
+	// Even though cache was expired, the transient error preserves the stale quota rather than setting offline
+	if received[0].Status != usage.StatusOK || received[0].Windows[0].RemainingPct != 88 {
+		t.Errorf("expected stale quota of 88%% preserved, got status %s", received[0].Status)
+	}
+}
+
+func TestRefreshAsync_PreservesExhaustedWindowOnTransientError(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	// Pre-seed with 0% exhausted window
+	_ = store.Put(usage.Report{
+		Agent:     "agy",
+		Profile:   "rate_limited_prof",
+		Status:    usage.StatusExhausted,
+		Windows:   []usage.LimitWindow{{Name: "Five Hour Limit Remaining", RemainingPct: 0}},
+		FetchedAt: time.Now(),
+	})
+
+	targets := []usage.TargetProfile{
+		{
+			Agent:   "agy",
+			Profile: "rate_limited_prof",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return nil, errors.New("temporary 503 Service Unavailable")
+			},
+		},
+	}
+
+	ch := usage.RefreshAsync(context.Background(), targets, store, true)
+	var received []usage.Report
+	for rep := range ch {
+		received = append(received, rep)
+	}
+
+	if len(received) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(received))
+	}
+	if received[0].Windows[0].RemainingPct != 0 {
+		t.Errorf("expected 0%% remaining pct to be preserved, got %d%%", received[0].Windows[0].RemainingPct)
+	}
+	cached, found := store.Get("agy", "rate_limited_prof")
+	if !found || cached.Windows[0].RemainingPct != 0 {
+		t.Errorf("expected cached report to retain 0%% remaining")
+	}
+}
+
+func TestRefreshAsync_ContextCancelledMidFlight(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	_ = store.Put(usage.Report{
+		Agent:     "agy",
+		Profile:   "work",
+		Status:    usage.StatusOK,
+		Windows:   []usage.LimitWindow{{Name: "Weekly", RemainingPct: 90}},
+		FetchedAt: time.Now(),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	targets := []usage.TargetProfile{
+		{
+			Agent:   "agy",
+			Profile: "work",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
+		},
+	}
+
+	ch := usage.RefreshAsync(ctx, targets, store, true)
+	for range ch {
+	}
+
+	// Cache must still hold the original 90%
+	cached, found := store.Get("agy", "work")
+	if !found {
+		t.Fatalf("expected work to remain in cache")
+	}
+	if cached.Windows[0].RemainingPct != 90 {
+		t.Errorf("expected 90%% to be preserved on context cancellation, got %d%%", cached.Windows[0].RemainingPct)
+	}
+}
+
+func TestRefreshAsync_MultipleWindowsPreserved(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	windows := []usage.LimitWindow{
+		{Name: "Five Hour Limit Remaining", RemainingPct: 45},
+		{Name: "Weekly Limit Remaining", RemainingPct: 75},
+	}
+
+	_ = store.Put(usage.Report{
+		Agent:     "agy",
+		Profile:   "work",
+		Status:    usage.StatusOK,
+		Windows:   windows,
+		FetchedAt: time.Now(),
+	})
+
+	targets := []usage.TargetProfile{
+		{
+			Agent:   "agy",
+			Profile: "work",
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return nil, errors.New("timeout dialing host")
+			},
+		},
+	}
+
+	ch := usage.RefreshAsync(context.Background(), targets, store, true)
+	var received []usage.Report
+	for rep := range ch {
+		received = append(received, rep)
+	}
+
+	if len(received) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(received))
+	}
+	if len(received[0].Windows) != 2 {
+		t.Fatalf("expected 2 windows preserved, got %d", len(received[0].Windows))
+	}
+	if received[0].Windows[0].RemainingPct != 45 || received[0].Windows[1].RemainingPct != 75 {
+		t.Errorf("window percentages not preserved correctly: %+v", received[0].Windows)
+	}
+}

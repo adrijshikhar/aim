@@ -1782,6 +1782,246 @@ func TestTUI_RenderProfiles_ShowsRefreshingDuringLoading(t *testing.T) {
 	}
 }
 
+func TestTUI_RenderProfiles_AllBadgeVariants(t *testing.T) {
+	t.Parallel()
+	baseDir := t.TempDir()
+	pm := profile.NewProfileManager(baseDir)
+	profiles := []string{"p_valid", "p_offline", "p_timeout", "p_nocreds", "p_uncached"}
+	cfg := config.NewDefaultConfig()
+	for _, p := range profiles {
+		_, _ = pm.EnsureProfile(p)
+		cfg.AddProfileAgent(p, "agy")
+	}
+	reg := agents.NewRegistry()
+
+	m := NewModel(reg, pm, cfg)
+	m.agent = "agy"
+	m.profiles = profiles
+
+	// Populate reports
+	m.reports = map[string]usage.Report{
+		"agy:p_valid": {
+			Agent:   "agy",
+			Profile: "p_valid",
+			Status:  usage.StatusOK,
+			Windows: []usage.LimitWindow{{Name: "Weekly", RemainingPct: 91}},
+		},
+		"agy:p_offline": {
+			Agent:   "agy",
+			Profile: "p_offline",
+			Status:  usage.StatusUnknown,
+			Summary: "Offline",
+			Error:   "dial tcp: connection refused",
+		},
+		"agy:p_timeout": {
+			Agent:   "agy",
+			Profile: "p_timeout",
+			Status:  usage.StatusUnknown,
+			Summary: "Quota request timed out",
+			Error:   "timeout",
+		},
+		"agy:p_nocreds": {
+			Agent:   "agy",
+			Profile: "p_nocreds",
+			Status:  usage.StatusUnknown,
+			Summary: "No credentials",
+			Error:   "no credentials",
+		},
+	}
+
+	// 1. While loading is TRUE:
+	m.loading = true
+	vLoading := m.View()
+	// p_valid should maintain [91%]
+	if !strings.Contains(vLoading, "[91%]") {
+		t.Errorf("expected [91%%] to stay visible while loading, got:\n%s", vLoading)
+	}
+	// p_nocreds should show [no credentials]
+	if !strings.Contains(vLoading, "[no credentials]") {
+		t.Errorf("expected [no credentials] to stay visible while loading, got:\n%s", vLoading)
+	}
+	// p_offline, p_timeout, p_uncached must NOT show [offline] or [timeout]
+	if strings.Contains(vLoading, "[offline]") {
+		t.Errorf("expected NO [offline] badge while loading is true, got:\n%s", vLoading)
+	}
+	if strings.Contains(vLoading, "[timeout]") {
+		t.Errorf("expected NO [timeout] badge while loading is true, got:\n%s", vLoading)
+	}
+	// Instead, they should show [refreshing...]
+	if !strings.Contains(vLoading, "[refreshing...]") {
+		t.Errorf("expected [refreshing...] while loading is true, got:\n%s", vLoading)
+	}
+
+	// 2. When loading is FALSE:
+	m.loading = false
+	vDone := m.View()
+	if !strings.Contains(vDone, "[91%]") {
+		t.Errorf("expected [91%%] when done loading, got:\n%s", vDone)
+	}
+	if !strings.Contains(vDone, "[offline]") {
+		t.Errorf("expected [offline] when done loading, got:\n%s", vDone)
+	}
+	if !strings.Contains(vDone, "[timeout]") {
+		t.Errorf("expected [timeout] when done loading, got:\n%s", vDone)
+	}
+	if !strings.Contains(vDone, "[no credentials]") {
+		t.Errorf("expected [no credentials] when done loading, got:\n%s", vDone)
+	}
+	if strings.Contains(vDone, "[refreshing...]") {
+		t.Errorf("expected NO [refreshing...] when loading is false, got:\n%s", vDone)
+	}
+}
+
+func TestTUI_StreamingReportUpdatesBadge(t *testing.T) {
+	t.Parallel()
+	baseDir := t.TempDir()
+	pm := profile.NewProfileManager(baseDir)
+	_, _ = pm.EnsureProfile("work")
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("work", "agy")
+	reg := agents.NewRegistry()
+
+	m := NewModel(reg, pm, cfg)
+	m.agent = "agy"
+	m.profiles = []string{"work"}
+	m.loading = true
+
+	// Initial view during loading shows [refreshing...]
+	if !strings.Contains(m.View(), "[refreshing...]") {
+		t.Errorf("expected initial loading state to show [refreshing...]")
+	}
+
+	// Stream arrives with quota report
+	freshRep := usage.Report{
+		Agent:   "agy",
+		Profile: "work",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{{Name: "5-Hour", RemainingPct: 68}},
+	}
+	updatedModel, _ := m.Update(usageReportMsg(freshRep))
+	m2 := updatedModel.(Model)
+
+	// Even while still loading other profiles, work immediately updates to [68%]!
+	vUpdated := m2.View()
+	if !strings.Contains(vUpdated, "[68%]") {
+		t.Errorf("expected [68%%] immediately upon receiving usageReportMsg, got:\n%s", vUpdated)
+	}
+
+	// Stream closes
+	finalModel, _ := m2.Update(usageStreamClosedMsg{})
+	m3 := finalModel.(Model)
+	if m3.loading {
+		t.Errorf("expected loading to be false after stream closed")
+	}
+	if !strings.Contains(m3.View(), "[68%]") {
+		t.Errorf("expected [68%%] preserved after stream closed")
+	}
+}
+
+func TestTUI_RenderProfiles_ExpiredCachedReportShowsQuotaNotOfflineDuringRefresh(t *testing.T) {
+	t.Parallel()
+	m := Model{
+		agent:    "agy",
+		profiles: []string{"work"},
+		loading:  true,
+		reports: map[string]usage.Report{
+			"agy:work": {
+				Agent:     "agy",
+				Profile:   "work",
+				Status:    usage.StatusOK,
+				Windows:   []usage.LimitWindow{{Name: "Weekly", RemainingPct: 77}},
+				FetchedAt: time.Now().Add(-2 * time.Hour), // Expired stale cache
+			},
+		},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "[77%]") {
+		t.Errorf("expected expired cached quota [77%%] to remain visible during refresh, got:\n%s", view)
+	}
+	if strings.Contains(view, "[offline]") {
+		t.Errorf("expected NO [offline] badge for profile with valid cached quota during refresh")
+	}
+}
+
+func TestTUI_RenderProfiles_ZeroPercentQuotaPreservedDuringLoading(t *testing.T) {
+	t.Parallel()
+	m := Model{
+		agent:    "agy",
+		profiles: []string{"exhausted_prof"},
+		loading:  true,
+		reports: map[string]usage.Report{
+			"agy:exhausted_prof": {
+				Agent:     "agy",
+				Profile:   "exhausted_prof",
+				Status:    usage.StatusExhausted,
+				Windows:   []usage.LimitWindow{{Name: "Weekly", RemainingPct: 0}},
+				FetchedAt: time.Now(),
+			},
+		},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "[0%]") {
+		t.Errorf("expected [0%%] badge to be preserved during loading, got:\n%s", view)
+	}
+	if strings.Contains(view, "[offline]") {
+		t.Errorf("expected NO [offline] badge for exhausted profile during refresh")
+	}
+}
+
+func TestTUI_KeyRefresh_ConsecutivePresses(t *testing.T) {
+	t.Parallel()
+	baseDir := t.TempDir()
+	pm := profile.NewProfileManager(baseDir)
+	_, _ = pm.EnsureProfile("work")
+	cfg := config.NewDefaultConfig()
+	cfg.AddProfileAgent("work", "agy")
+	reg := agents.NewRegistry()
+
+	m := NewModel(reg, pm, cfg)
+	m.agent = "agy"
+	m.profiles = []string{"work"}
+	m.reports = map[string]usage.Report{
+		"agy:work": {
+			Agent:   "agy",
+			Profile: "work",
+			Status:  usage.StatusOK,
+			Windows: []usage.LimitWindow{{Name: "5-Hour", RemainingPct: 92}},
+		},
+	}
+
+	// Press 'r' first time
+	m1, cmd1 := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model1 := m1.(Model)
+	if !model1.loading {
+		t.Errorf("expected model to be loading after first 'r'")
+	}
+	if cmd1 == nil {
+		t.Errorf("expected non-nil cmd after first 'r'")
+	}
+	if !strings.Contains(model1.View(), "[92%]") {
+		t.Errorf("expected [92%%] to remain visible after first 'r'")
+	}
+
+	// Press 'r' second time immediately while still loading
+	m2, cmd2 := model1.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model2 := m2.(Model)
+	if !model2.loading {
+		t.Errorf("expected model to still be loading after second 'r'")
+	}
+	if cmd2 == nil {
+		t.Errorf("expected non-nil cmd after second 'r'")
+	}
+	// Quota is still preserved, no panic, no clobbering to offline
+	if !strings.Contains(model2.View(), "[92%]") {
+		t.Errorf("expected [92%%] to remain visible after consecutive 'r'")
+	}
+	if strings.Contains(model2.View(), "[offline]") {
+		t.Errorf("expected NO [offline] badge on consecutive 'r'")
+	}
+}
+
 func TestTUI_Header_VersionDisplay(t *testing.T) {
 	baseDir := t.TempDir()
 	pm := profile.NewProfileManager(baseDir)

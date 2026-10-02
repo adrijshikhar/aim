@@ -68,6 +68,15 @@ if [ "$1" = "--version" ]; then
   echo "agy 1.0.0"
   exit 0
 fi
+if [ "$1" = "--print" ] && [ "$2" = "/usage" ]; then
+  sleep 0.4
+  printf "Quota:\nGemini Models\tWeekly Limit Remaining\t85%%\t2026-10-09T04:14:05Z\nGemini Models\tFive Hour Limit Remaining\t85%%\t2026-10-02T20:48:53Z\n"
+  exit 0
+fi
+if [ "$1" = "--print" ] && [ "$2" = "/credits" ]; then
+  echo "credits"
+  exit 0
+fi
 echo "mock agy invoked with: $*"
 MOCK
 chmod +x "$MOCK_BIN/agy"
@@ -168,6 +177,28 @@ args = ["@playwright/mcp@latest"]
 [mcp_servers.atlassian-oauth]
 url = "https://mcp.atlassian.com/v2/mcp"
 CODEXCFG
+
+# Seed agy credentials and pre-cached quota for live refresh test
+mkdir -p "$AIM_HOME/profiles/work/.gemini/antigravity-cli" "$AIM_HOME/profiles/staging/.gemini/antigravity-cli"
+echo '{"token":{"access_token":"mock-live-token"}}' > "$AIM_HOME/profiles/work/.gemini/antigravity-cli/antigravity-oauth-token"
+echo '{"token":{"access_token":"mock-live-token"}}' > "$AIM_HOME/profiles/staging/.gemini/antigravity-cli/antigravity-oauth-token"
+
+mkdir -p "$AIM_HOME/cache"
+cat << 'JSON' > "$AIM_HOME/cache/usage.json"
+{
+  "version": "1",
+  "updated_at": "2026-10-02T22:00:00Z",
+  "reports": {
+    "agy:work": {
+      "agent": "agy",
+      "profile": "work",
+      "status": "OK",
+      "windows": [{"category": "Gemini Models", "name": "Weekly Limit Remaining", "remaining_pct": 80}],
+      "fetched_at": "2026-10-02T22:00:00Z"
+    }
+  }
+}
+JSON
 
 echo "✔ Sandbox seeded with 15 sessions across 3 profiles"
 
@@ -462,6 +493,122 @@ else
   echo "FAIL: 'aim sessions import' behaved unexpectedly: $IMPORT_OUT"
   exit 1
 fi
+
+# ==============================================================================
+# PHASE 7: Live Quota Refresh & SWR In-Flight Feedback (PTY)
+# ==============================================================================
+echo ""
+echo "=== Phase 7: Live Quota Refresh & SWR In-Flight Feedback (PTY) ==="
+
+# Ensure config.json binds agy to work and staging
+cat << 'CFG' > "$AIM_HOME/config.json"
+{
+  "profiles": {
+    "work": {
+      "agents": ["codex", "agy"]
+    },
+    "staging": {
+      "agents": ["agy"]
+    }
+  }
+}
+CFG
+
+# Seed pre-cached quota for work (80%), staging left uncached to test in-flight [refreshing...]
+mkdir -p "$AIM_HOME/cache"
+cat << 'JSON' > "$AIM_HOME/cache/usage.json"
+{
+  "version": "1",
+  "updated_at": "2026-10-02T22:00:00Z",
+  "reports": {
+    "agy:work": {
+      "agent": "agy",
+      "profile": "work",
+      "status": "OK",
+      "windows": [{"category": "Gemini Models", "name": "Weekly Limit Remaining", "remaining_pct": 80}],
+      "fetched_at": "2026-10-02T22:00:00Z"
+    }
+  }
+}
+JSON
+
+python3 - << 'PYTEST'
+import pty, os, subprocess, time, struct, fcntl, termios, re, sys, select
+
+aim_bin = os.environ["AIM_BIN"]
+master, slave = pty.openpty()
+fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 110, 0, 0))
+
+proc = subprocess.Popen([aim_bin], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+os.close(slave)
+
+def drain(fd, timeout=0.5):
+    buf = b""
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if fd in r:
+            try:
+                c = os.read(fd, 4096)
+                if not c:
+                    break
+                buf += c
+            except (OSError, IOError):
+                break
+    return buf
+
+# Initial render (within 0.2s, mock agy is sleeping 0.5s):
+# 1. work should immediately display cached [80%]
+# 2. staging is uncached and loading, should display [refreshing...]
+# 3. [offline] MUST NEVER appear for any profile during active loading!
+out_initial = drain(master, timeout=0.2)
+clean_initial = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out_initial.decode("utf-8", errors="replace"))
+
+assert "[80%]" in clean_initial, f"Expected [80%] cached quota for work in initial render, got:\n{clean_initial}"
+assert "[refreshing...]" in clean_initial, f"Expected [refreshing...] badge for in-flight uncached profile, got:\n{clean_initial}"
+assert "[offline]" not in clean_initial, f"FAIL: [offline] badge appeared during active loading!\n{clean_initial}"
+
+# Drain remaining output until mock agy finishes (0.6s)
+out_loaded = drain(master, timeout=0.8)
+clean_loaded = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", (out_initial + out_loaded).decode("utf-8", errors="replace"))
+
+# After refresh completes, fresh 85% quota should be visible
+assert "[85%]" in clean_loaded, f"Expected fresh [85%] after refresh completed, got:\n{clean_loaded}"
+assert "[offline]" not in clean_loaded, f"FAIL: [offline] appeared after refresh completed:\n{clean_loaded}"
+
+# Now press 'r' to trigger an explicit force refresh while in TUI
+os.write(master, b"r")
+
+# Drain in-flight buffer immediately while mock agy sleeps 0.5s
+out_inflight = drain(master, timeout=0.2)
+clean_inflight = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out_inflight.decode("utf-8", errors="replace"))
+
+# In-flight assertions:
+# 1. [offline] MUST NOT appear in the differential update during active refresh!
+assert "[offline]" not in clean_inflight, f"FAIL: [offline] badge appeared during active quota refresh!\n{clean_inflight}"
+clean_accum = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", (out_loaded + out_inflight).decode("utf-8", errors="replace"))
+assert "[85%]" in clean_accum, f"FAIL: Valid cached quota was not present on screen during refresh!\n{clean_accum}"
+
+# Drain final output until second refresh completes
+out_final = drain(master, timeout=0.8)
+clean_final = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", (clean_accum + out_final.decode("utf-8", errors="replace")))
+
+assert "[85%]" in clean_final, f"Expected [85%] after second refresh completed, got:\n{clean_final}"
+
+# Clean exit
+os.write(master, b"q")
+try:
+    proc.wait(timeout=3)
+except subprocess.TimeoutExpired:
+    proc.kill()
+    proc.wait()
+os.close(master)
+
+print("  ✔ SWR verified: cached quota [80%] remained visible during initial load")
+print("  ✔ In-flight feedback verified: uncached profile displayed [refreshing...]")
+print("  ✔ Zero false offline verified: [offline] never appeared during active quota refresh")
+print("  ✔ Seamless quota update verified: fresh [85%] rendered after refresh completed")
+PYTEST
 
 echo ""
 echo "========================================================================"

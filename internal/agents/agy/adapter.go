@@ -917,18 +917,24 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 	wg.Wait()
 
 	if usageErr != nil {
+		errMsg := usageErr.Error()
+		if exitErr, ok := usageErr.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		errLower := strings.ToLower(errMsg)
+
 		report := &usage.Report{
 			Agent:        a.Name(),
 			Profile:      profileName,
 			Status:       usage.StatusUnknown,
 			FetchedAt:    time.Now(),
-			Error:        usageErr.Error(),
+			Error:        errMsg,
 			AccountEmail: acc.Email,
 			AccountName:  acc.Name,
 			AuthMethod:   acc.AuthMethod,
 			ProjectID:    acc.ProjectID,
 		}
-		errLower := strings.ToLower(usageErr.Error())
+
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) || strings.Contains(errLower, "timeout") || strings.Contains(errLower, "deadline exceeded") {
 			report.Summary = "Quota request timed out"
 			report.Error = "timeout"

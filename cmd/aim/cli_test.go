@@ -1393,6 +1393,27 @@ func TestCLIListWithUsageBadges(t *testing.T) {
 	if !strings.Contains(out, "offline-prof") || !strings.Contains(out, "[offline]") {
 		t.Errorf("expected '[offline]' badge in aim list agy, got:\n%s", out)
 	}
+
+	// Non-operational: timeout
+	_, _ = pm.EnsureProfile("timeout-prof")
+	cfg.AddProfileAgent("timeout-prof", "agy")
+	_ = config.SaveConfig(cfg)
+	repTimeout := usage.Report{
+		Agent:     "agy",
+		Profile:   "timeout-prof",
+		Status:    usage.StatusUnknown,
+		Summary:   "Quota request timed out",
+		FetchedAt: time.Now(),
+		Error:     "timeout",
+	}
+	_ = cache.Put(repTimeout)
+
+	out, _ = captureOutput(t, func() {
+		_ = runList(reg, pm, "agy")
+	})
+	if !strings.Contains(out, "timeout-prof") || !strings.Contains(out, "[timeout]") {
+		t.Errorf("expected '[timeout]' badge in aim list agy, got:\n%s", out)
+	}
 }
 
 func TestCLIPrewarmCommand(t *testing.T) {

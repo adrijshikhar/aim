@@ -492,6 +492,38 @@ func TestAntigravityAdapterGetUsage_Timeout(t *testing.T) {
 	}
 }
 
+func TestAntigravityAdapterGetUsage_StderrTimeout(t *testing.T) {
+	adapter := NewAdapter()
+	tmpDir := t.TempDir()
+
+	tokenPath := adapter.TokenPath(tmpDir)
+	_ = os.MkdirAll(filepath.Dir(tokenPath), 0700)
+	_ = os.WriteFile(tokenPath, []byte(`{"access_token":"dummy"}`), 0600)
+
+	binDir := t.TempDir()
+	failingScript := filepath.Join(binDir, "agy")
+	// Binary logs "network timeout: failed to reach API" to stderr and exits 1
+	scriptContent := "#!/bin/sh\necho 'network timeout: failed to reach API' >&2\nexit 1\n"
+	if err := os.WriteFile(failingScript, []byte(scriptContent), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	rep, err := adapter.GetUsage(context.Background(), "test_prof", tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rep.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown, got %s", rep.Status)
+	}
+	if rep.Error != "timeout" {
+		t.Errorf("expected error 'timeout', got '%s'", rep.Error)
+	}
+	if rep.Summary != "Quota request timed out" {
+		t.Errorf("expected summary 'Quota request timed out', got '%s'", rep.Summary)
+	}
+}
+
 func TestAntigravityAdapterGetUsage_Success(t *testing.T) {
 	adapter := NewAdapter()
 	tmpDir := t.TempDir()
