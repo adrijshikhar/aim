@@ -12,7 +12,7 @@ COMMIT  ?= $(or $(shell git rev-parse --short HEAD 2>/dev/null),none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Date=$(DATE)
 
-.PHONY: all build test conformance smoke live-test install install-completions uninstall uninstall-completions clean release release-snapshot
+.PHONY: all build test conformance smoke e2e live-test install install-completions uninstall uninstall-completions clean release release-snapshot
 
 all: build
 
@@ -31,7 +31,15 @@ smoke: build
 	@echo "Running smoke tests..."
 	./test/smoke_test.sh
 
-live-test:
+e2e: build
+	@echo "Running complete live E2E test suite..."
+	bash ./test/e2e_live_test.sh
+	bash ./test/e2e_parameterized_test.sh
+	bash ./test/live_cli_test.sh
+
+live-test: build
+	@echo "Running live CLI and TUI tests..."
+	bash ./test/e2e_live_test.sh
 	bash ./test/live_cli_test.sh
 
 release-snapshot:
