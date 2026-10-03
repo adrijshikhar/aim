@@ -14,9 +14,22 @@ import (
 	"github.com/aim-cli/aim/internal/merge"
 )
 
+// SessionChecker verifies whether a profile has running foreground sessions.
+type SessionChecker interface {
+	HasActiveSessions(profileName string) (bool, error)
+}
+
+// DetailedSessionChecker is optionally implemented by session checkers that can report
+// which specific agents have running sessions in the profile.
+type DetailedSessionChecker interface {
+	SessionChecker
+	ActiveSessions(profileName string) ([]string, error)
+}
+
 type ProfileManager struct {
-	BaseDir      string
-	profilesRoot string
+	BaseDir        string
+	profilesRoot   string
+	SessionChecker SessionChecker
 	// MergeStore overrides where session-merge state lives (tests); the zero
 	// value means StateDir()/profile-merge, resolved at use time.
 	MergeStore merge.Store
@@ -30,10 +43,38 @@ func (m *ProfileManager) MergeStateStore() merge.Store {
 	return merge.Store{Dir: filepath.Join(config.StateDir(), "profile-merge")}
 }
 
+// WithSessionChecker sets the SessionChecker for the ProfileManager and returns it.
+func (m *ProfileManager) WithSessionChecker(checker SessionChecker) *ProfileManager {
+	if m != nil {
+		m.SessionChecker = checker
+	}
+	return m
+}
+
 // refuseIfRunning fails while any agent has a running aim session in the
 // profile: its exit step would write into a moved or deleted directory, or
 // into merge state keyed by the old name.
 func (m *ProfileManager) refuseIfRunning(profile string) error {
+	if m != nil && m.SessionChecker != nil {
+		if dsc, ok := m.SessionChecker.(DetailedSessionChecker); ok {
+			running, err := dsc.ActiveSessions(profile)
+			if err != nil {
+				return fmt.Errorf("checking running sessions of %s: %w", profile, err)
+			}
+			if len(running) > 0 {
+				return fmt.Errorf("profile %s has a running %s session; exit it first", profile, running[0])
+			}
+			return nil
+		}
+		active, err := m.SessionChecker.HasActiveSessions(profile)
+		if err != nil {
+			return fmt.Errorf("checking running sessions of %s: %w", profile, err)
+		}
+		if active {
+			return fmt.Errorf("profile %s has a running session; exit it first", profile)
+		}
+		return nil
+	}
 	running, err := m.MergeStateStore().ActiveSessions(profile)
 	if err != nil {
 		return fmt.Errorf("checking running sessions of %s: %w", profile, err)
@@ -44,11 +85,15 @@ func (m *ProfileManager) refuseIfRunning(profile string) error {
 	return nil
 }
 
-func NewProfileManager(baseDir string) *ProfileManager {
-	return &ProfileManager{
+func NewProfileManager(baseDir string, checker ...SessionChecker) *ProfileManager {
+	pm := &ProfileManager{
 		BaseDir:      baseDir,
 		profilesRoot: filepath.Join(baseDir, "profiles"),
 	}
+	if len(checker) > 0 && checker[0] != nil {
+		pm.SessionChecker = checker[0]
+	}
+	return pm
 }
 
 func validateProfileName(name string) error {

@@ -714,3 +714,62 @@ func TestMergeStateStore_DefaultsUnderStateDir(t *testing.T) {
 		t.Fatalf("default store = %s", got)
 	}
 }
+
+type stubSessionChecker struct {
+	active bool
+	agents []string
+	err    error
+}
+
+func (s *stubSessionChecker) HasActiveSessions(profileName string) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
+	return s.active || len(s.agents) > 0, nil
+}
+
+func (s *stubSessionChecker) ActiveSessions(profileName string) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.agents, nil
+}
+
+type stubSimpleChecker struct {
+	active bool
+}
+
+func (s *stubSimpleChecker) HasActiveSessions(profileName string) (bool, error) {
+	return s.active, nil
+}
+
+func TestProfileManager_SessionCheckerMock(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("AIM_HOME", base)
+	cfg := config.NewDefaultConfig()
+
+	checker := &stubSessionChecker{active: false}
+	pm := NewProfileManager(base, checker)
+	_, err := pm.EnsureProfile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should succeed when no active sessions
+	if err := pm.refuseIfRunning("work"); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	// When active with detailed checker, should refuse with agent name
+	checker.agents = []string{"codex"}
+	if err := pm.DeleteProfile("work", cfg); err == nil || !strings.Contains(err.Error(), "running codex session") {
+		t.Fatalf("expected refusal with codex session, got %v", err)
+	}
+
+	// Test checker with only HasActiveSessions (not DetailedSessionChecker)
+	simpleChecker := &stubSimpleChecker{active: true}
+	pm.WithSessionChecker(simpleChecker)
+	if err := pm.DeleteProfile("work", cfg); err == nil || !strings.Contains(err.Error(), "has a running session; exit it first") {
+		t.Fatalf("expected generic session refusal, got %v", err)
+	}
+}
