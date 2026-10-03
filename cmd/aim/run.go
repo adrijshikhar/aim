@@ -53,7 +53,7 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 				}
 			}
 
-			mgr := defaultSessionManager()
+			mgr := getSessionManager(cmd.Context())
 			resolvedID, err := ensureRunSessionHydrated(cmd, pm, mgr, agentName, profileName, extraArgs)
 			if err != nil {
 				return err
@@ -125,7 +125,7 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 		if launchEnv.Env["AIM_SESSION_ID"] == "" {
 			launchEnv.Env["AIM_SESSION_ID"] = sessionID
 		}
-		mgr := defaultSessionManager()
+		mgr := getSessionManager(ctx)
 		if prov := mgr.Provider(agentName); prov != nil {
 			if sanitizable, ok := prov.(interface {
 				SanitizeSession(context.Context, string, string) error
@@ -190,7 +190,7 @@ func ensureRunSessionHydrated(cmd *cobra.Command, pm *profile.ProfileManager, mg
 	}
 
 	if mgr == nil {
-		mgr = defaultSessionManager()
+		mgr = getSessionManager(cmd.Context())
 	}
 
 	ctx := cmd.Context()

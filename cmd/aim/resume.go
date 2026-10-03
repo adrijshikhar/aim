@@ -77,7 +77,7 @@ Flags:
 				}
 			}
 
-			mgr := defaultSessionManager()
+			mgr := getSessionManager(cmd.Context())
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
@@ -244,7 +244,7 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 
 func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, mgr *session.Manager, agent, profile, pDir string, sess *session.Session, fork bool, extraArgs []string) error {
 	if mgr == nil {
-		mgr = defaultSessionManager()
+		mgr = getSessionManager(cmd.Context())
 	}
 
 	resumeID := sess.ID
@@ -367,7 +367,7 @@ func getGitBranch(repoRoot string) string {
 }
 
 func isInteractive(r io.Reader) bool {
-	return isInteractiveFunc(r)
+	return checkInteractive(nil, r)
 }
 
 func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, agent, sessionID string) (*session.Session, error) {

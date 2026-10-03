@@ -141,7 +141,7 @@ Flags:
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				code := runTUI(reg, pm)
+				code := runTUIWithContext(cmd.Context(), reg, pm)
 				if code != 0 {
 					return &ExitError{Code: code}
 				}

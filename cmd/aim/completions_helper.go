@@ -88,7 +88,7 @@ func completeSessionsForAgent(reg *agents.Registry, agent string, toComplete str
 			agent = ad.Name()
 		}
 	}
-	mgr := defaultSessionManager()
+	mgr := getSessionManager(context.Background())
 	if mgr == nil {
 		return nil
 	}
