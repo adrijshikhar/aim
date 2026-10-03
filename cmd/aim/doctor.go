@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -275,9 +276,10 @@ func generateDiagnosticReport(reg *agents.Registry, pm *profile.ProfileManager, 
 				}
 				results = append(results, profile.BridgeDiagnostics(p, config.RealHomeDir(), pm.ProfileDir(p), extraPaths...)...)
 			}
+			profRegex := regexp.MustCompile(`\b` + regexp.QuoteMeta(p) + `\b`)
 			for _, r := range results {
 				sanitizedMsg := sanitize(r.Message)
-				sanitizedMsg = strings.ReplaceAll(sanitizedMsg, p, fmt.Sprintf("[profile-%d]", idx+1))
+				sanitizedMsg = profRegex.ReplaceAllString(sanitizedMsg, fmt.Sprintf("[profile-%d]", idx+1))
 				b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", adapter.Name(), r.Category, r.Status, sanitizedMsg))
 			}
 		}
