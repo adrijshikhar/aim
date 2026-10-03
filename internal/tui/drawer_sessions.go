@@ -73,6 +73,7 @@ type sessionsDrawerState struct {
 	loading        bool
 	standalone     bool
 	sessions       []session.Session
+	index          *SessionsIndex
 	cursor         int
 	filterActive   bool
 	filterInput    textinput.Model
@@ -104,6 +105,7 @@ func (m Model) SessionsDrawerList() []session.Session {
 
 func (m *Model) setSessions(sessions []session.Session) {
 	m.sessionsDrawer.sessions = sessions
+	m.sessionsDrawer.index = NewSessionsIndex(sessions)
 	if m.sessionsDrawer.cursor >= len(sessions) {
 		if len(sessions) > 0 {
 			m.sessionsDrawer.cursor = len(sessions) - 1
@@ -179,32 +181,12 @@ func (m Model) fetchSessions() Model {
 }
 
 func (m Model) filteredSessions() []session.Session {
-	term := strings.ToLower(strings.TrimSpace(m.sessionsDrawer.filterInput.Value()))
-	var res []session.Session
-	for _, s := range m.sessionsDrawer.sessions {
-		if m.sessionsDrawer.activeOnly && s.Status != session.StatusActive {
-			continue
-		}
-		if m.sessionsDrawer.profileFilter != "" && !strings.EqualFold(s.Profile, m.sessionsDrawer.profileFilter) {
-			continue
-		}
-		if term != "" {
-			if !strings.Contains(strings.ToLower(s.ID), term) &&
-				!strings.Contains(strings.ToLower(s.ShortID), term) &&
-				!strings.Contains(strings.ToLower(s.Title), term) &&
-				!strings.Contains(strings.ToLower(s.Summary), term) &&
-				!strings.Contains(strings.ToLower(s.Goal), term) &&
-				!strings.Contains(strings.ToLower(s.Progress), term) &&
-				!strings.Contains(strings.ToLower(s.Recent), term) &&
-				!strings.Contains(strings.ToLower(s.Cwd), term) &&
-				!strings.Contains(strings.ToLower(s.Profile), term) &&
-				!strings.Contains(strings.ToLower(s.Agent), term) {
-				continue
-			}
-		}
-		res = append(res, s)
+	idx := m.sessionsDrawer.index
+	if idx == nil {
+		idx = NewSessionsIndex(m.sessionsDrawer.sessions)
 	}
-	return res
+	term := m.sessionsDrawer.filterInput.Value()
+	return idx.SearchWithProfile(term, m.sessionsDrawer.activeOnly, m.sessionsDrawer.profileFilter)
 }
 
 func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {

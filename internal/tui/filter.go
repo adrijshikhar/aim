@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aim-cli/aim/internal/session"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -141,3 +142,69 @@ func (m Model) updateFilter(msg tea.Msg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 }
+
+// IndexedSession wraps a session.Session with a pre-computed lowercase search corpus.
+type IndexedSession struct {
+	session.Session
+	searchCorpus string // Pre-computed lowercase corpus
+}
+
+// NewIndexedSession builds an IndexedSession with its lowercase search corpus pre-computed.
+func NewIndexedSession(s session.Session) IndexedSession {
+	return IndexedSession{
+		Session: s,
+		searchCorpus: strings.ToLower(strings.Join([]string{
+			s.ID, s.ShortID, s.Title, s.Summary, s.Goal,
+			s.Progress, s.Recent, s.Cwd, s.Profile, s.Agent,
+		}, "\x00")),
+	}
+}
+
+// SessionsIndex manages an in-memory pre-indexed collection of sessions for fast filtering.
+type SessionsIndex struct {
+	items []IndexedSession
+}
+
+// NewSessionsIndex creates a new SessionsIndex from a slice of sessions.
+func NewSessionsIndex(sessions []session.Session) *SessionsIndex {
+	items := make([]IndexedSession, len(sessions))
+	for i, s := range sessions {
+		items[i] = NewIndexedSession(s)
+	}
+	return &SessionsIndex{items: items}
+}
+
+// Search filters sessions by query and active status using the pre-computed corpus.
+func (idx *SessionsIndex) Search(query string, activeOnly bool) []session.Session {
+	return idx.SearchWithProfile(query, activeOnly, "")
+}
+
+// SearchWithProfile filters sessions by query, active status, and optional profile filter.
+func (idx *SessionsIndex) SearchWithProfile(query string, activeOnly bool, profileFilter string) []session.Session {
+	if idx == nil || len(idx.items) == 0 {
+		return nil
+	}
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" && !activeOnly && profileFilter == "" {
+		res := make([]session.Session, len(idx.items))
+		for i, item := range idx.items {
+			res[i] = item.Session
+		}
+		return res
+	}
+
+	res := make([]session.Session, 0, 32)
+	for _, item := range idx.items {
+		if activeOnly && item.Status != session.StatusActive {
+			continue
+		}
+		if profileFilter != "" && !strings.EqualFold(item.Profile, profileFilter) {
+			continue
+		}
+		if query == "" || strings.Contains(item.searchCorpus, query) {
+			res = append(res, item.Session)
+		}
+	}
+	return res
+}
+
