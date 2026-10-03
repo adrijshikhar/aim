@@ -149,7 +149,10 @@ func TestParameterized_AllAdapters_Doctor(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			results := adapter.Doctor(ctx, "prof-"+tc.agent, profDir)
+			var results []agents.DiagnosticResult
+			if diag, ok := adapter.(agents.Diagnostician); ok {
+				results = diag.Doctor(ctx, "prof-"+tc.agent, profDir)
+			}
 			if len(results) == 0 {
 				t.Errorf("expected doctor diagnostic results for adapter %q", tc.agent)
 			}

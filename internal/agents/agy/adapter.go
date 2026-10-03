@@ -57,14 +57,24 @@ func getOAuthCredentials() (string, string) {
 	return clientID, clientSecret
 }
 
-// Compile-time assertions that Adapter implements agents.AgentAdapter and agents.PostLauncher.
+// Compile-time assertions that Adapter implements the segregated agent interfaces.
 var (
-	_ agents.AgentAdapter = (*Adapter)(nil)
-	_ agents.PostLauncher = (*Adapter)(nil)
+	_ agents.AgentAdapter        = (*Adapter)(nil)
+	_ agents.Authenticator       = (*Adapter)(nil)
+	_ agents.Diagnostician       = (*Adapter)(nil)
+	_ agents.UsageProvider       = (*Adapter)(nil)
+	_ agents.AccountInfoProvider = (*Adapter)(nil)
+	_ agents.FullAdapter         = (*Adapter)(nil)
+	_ agents.PostLauncher        = (*Adapter)(nil)
 )
 
 type Adapter struct {
 	agents.BaseAdapter
+}
+
+func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {
+	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
+	return acc.Email, acc.AuthMethod, acc.ProjectID
 }
 
 func NewAdapter() *Adapter {

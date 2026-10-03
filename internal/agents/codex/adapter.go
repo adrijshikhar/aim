@@ -24,11 +24,23 @@ import (
 	"github.com/aim-cli/aim/internal/usage"
 )
 
-// Compile-time assertion that Adapter implements agents.AgentAdapter.
-var _ agents.AgentAdapter = (*Adapter)(nil)
+// Compile-time assertions that Adapter implements the segregated agent interfaces.
+var (
+	_ agents.AgentAdapter        = (*Adapter)(nil)
+	_ agents.Authenticator       = (*Adapter)(nil)
+	_ agents.Diagnostician       = (*Adapter)(nil)
+	_ agents.UsageProvider       = (*Adapter)(nil)
+	_ agents.AccountInfoProvider = (*Adapter)(nil)
+	_ agents.FullAdapter         = (*Adapter)(nil)
+)
 
 type Adapter struct {
 	agents.BaseAdapter
+}
+
+func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {
+	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
+	return acc.Email, acc.AuthMethod, acc.ProjectID
 }
 
 func NewAdapter() *Adapter {

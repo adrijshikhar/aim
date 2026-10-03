@@ -377,11 +377,15 @@ func (m Model) refreshTargets() []usage.TargetProfile {
 				if m.pm != nil {
 					pDir = m.pm.ProfileDir(p)
 				}
+				var usageFn func(context.Context, string, string) (*usage.Report, error)
+				if up, ok := ad.(agents.UsageProvider); ok {
+					usageFn = up.GetUsage
+				}
 				targets = append(targets, usage.TargetProfile{
 					Agent:      ad.Name(),
 					Profile:    p,
 					ProfileDir: pDir,
-					GetUsageFn: ad.GetUsage,
+					GetUsageFn: usageFn,
 				})
 			}
 		}

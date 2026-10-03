@@ -130,7 +130,10 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 	for _, p := range profiles {
 		fmt.Println()
 		fmt.Printf("Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
-		results := adapter.Doctor(context.Background(), p, pm.ProfileDir(p))
+		var results []agents.DiagnosticResult
+		if diag, ok := adapter.(agents.Diagnostician); ok {
+			results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
+		}
 		if !bridged[p] {
 			bridged[p] = true
 			var extraPaths []string

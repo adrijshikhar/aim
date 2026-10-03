@@ -115,11 +115,15 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			}
 			pDir := pm.ProfileDir(p)
 			adapter := ad
+			var usageFn func(context.Context, string, string) (*usage.Report, error)
+			if up, ok := adapter.(agents.UsageProvider); ok {
+				usageFn = up.GetUsage
+			}
 			targets = append(targets, usage.TargetProfile{
 				Agent:      adapter.Name(),
 				Profile:    p,
 				ProfileDir: pDir,
-				GetUsageFn: adapter.GetUsage,
+				GetUsageFn: usageFn,
 			})
 		}
 	}

@@ -45,12 +45,16 @@ func runPrewarm(reg *agents.Registry, pm *profile.ProfileManager, targetAgent st
 	var targets []usage.TargetProfile
 	for _, ad := range adapters {
 		profs, _ := pm.ListProfilesForAgent(ad.Name(), cfg, reg)
+		var usageFn func(context.Context, string, string) (*usage.Report, error)
+		if up, ok := ad.(agents.UsageProvider); ok {
+			usageFn = up.GetUsage
+		}
 		for _, p := range profs {
 			targets = append(targets, usage.TargetProfile{
 				Agent:      ad.Name(),
 				Profile:    p,
 				ProfileDir: pm.ProfileDir(p),
-				GetUsageFn: ad.GetUsage,
+				GetUsageFn: usageFn,
 			})
 		}
 	}

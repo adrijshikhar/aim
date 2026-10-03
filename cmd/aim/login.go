@@ -54,7 +54,12 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
 	}()
 
-	if err := adapter.Login(context.Background(), profileName, pDir); err != nil {
+	auth, ok := adapter.(agents.Authenticator)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Agent %s does not support login\n", adapter.Name())
+		return 1
+	}
+	if err := auth.Login(context.Background(), profileName, pDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		return 1
 	}

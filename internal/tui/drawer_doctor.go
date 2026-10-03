@@ -182,7 +182,9 @@ func (m Model) fetchDoctorDiagnosticsCmd() tea.Cmd {
 		var results []agents.DiagnosticResult
 		if reg != nil {
 			if ad, err := reg.Get(targetAgent); err == nil && ad != nil {
-				results = ad.Doctor(ctx, targetProfile, pDir)
+				if diag, ok := ad.(agents.Diagnostician); ok {
+					results = diag.Doctor(ctx, targetProfile, pDir)
+				}
 			}
 		}
 		if len(results) == 0 {
@@ -262,7 +264,9 @@ func (m Model) fetchDoctorDiagnostics() Model {
 	var results []agents.DiagnosticResult
 	if reg != nil {
 		if ad, err := reg.Get(m.agent); err == nil && ad != nil {
-			results = ad.Doctor(context.Background(), p, pDir)
+			if diag, ok := ad.(agents.Diagnostician); ok {
+				results = diag.Doctor(context.Background(), p, pDir)
+			}
 		}
 	}
 	if len(results) == 0 {

@@ -117,8 +117,10 @@ set -eu
 			if err := os.MkdirAll(dir, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err := adapter.Login(context.Background(), "work", dir); err != nil {
-				t.Fatal(err)
+			if auth, ok := adapter.(agents.Authenticator); ok {
+				if err := auth.Login(context.Background(), "work", dir); err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
 	}
