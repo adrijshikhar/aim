@@ -66,7 +66,7 @@ func (p *testCompProvider) ResolveSummary(ctx context.Context, s *session.Sessio
 	return session.SessionSummary{}, nil
 }
 
-func setupCompletionTestEnv(t *testing.T) (*agents.Registry, *profile.ProfileManager) {
+func setupCompletionTestEnv(t *testing.T) (context.Context, *agents.Registry, *profile.ProfileManager) {
 	t.Helper()
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
@@ -134,11 +134,6 @@ func setupCompletionTestEnv(t *testing.T) (*agents.Registry, *profile.ProfileMan
 		},
 	}
 
-	oldMgr := defaultSessionManager
-	t.Cleanup(func() {
-		defaultSessionManager = oldMgr
-	})
-
 	mockMgr := session.NewManager()
 	mockMgr.RegisterProvider(&testCompProvider{
 		agent:    "codex",
@@ -148,11 +143,9 @@ func setupCompletionTestEnv(t *testing.T) (*agents.Registry, *profile.ProfileMan
 		agent:    "agy",
 		sessions: agySessions,
 	})
-	defaultSessionManager = func() *session.Manager {
-		return mockMgr
-	}
 
-	return reg, pm
+	ctx := WithSessionManager(context.Background(), mockMgr)
+	return ctx, reg, pm
 }
 
 func TestCompleteSessionIDs(t *testing.T) {
@@ -163,8 +156,9 @@ func TestCompleteSessionIDs(t *testing.T) {
 	}
 
 	t.Run("ResumeCmd_ValidArgsFunction", func(t *testing.T) {
-		reg, pm := setupCompletionTestEnv(t)
+		ctx, reg, pm := setupCompletionTestEnv(t)
 		cmd := newResumeCmd(reg, pm)
+		cmd.SetContext(ctx)
 
 		comps, directive := cmd.ValidArgsFunction(cmd, []string{"codex", "work"}, "")
 		if directive != cobra.ShellCompDirectiveNoFileComp {
@@ -181,8 +175,9 @@ func TestCompleteSessionIDs(t *testing.T) {
 	})
 
 	t.Run("ResumeCmd_PrefixFiltering", func(t *testing.T) {
-		reg, pm := setupCompletionTestEnv(t)
+		ctx, reg, pm := setupCompletionTestEnv(t)
 		cmd := newResumeCmd(reg, pm)
+		cmd.SetContext(ctx)
 
 		// Prefix "01" should only match 01a09eb7
 		comps, directive := cmd.ValidArgsFunction(cmd, []string{"codex", "work"}, "01")
@@ -207,10 +202,10 @@ func TestCompleteSessionIDs(t *testing.T) {
 	})
 
 	t.Run("CompleteAgentProfileAndSession_Arity", func(t *testing.T) {
-		reg, pm := setupCompletionTestEnv(t)
+		ctx, reg, pm := setupCompletionTestEnv(t)
 
 		// 0 args -> completes agents
-		comps, directive := completeAgentProfileAndSession(reg, pm, []string{}, "")
+		comps, directive := completeAgentProfileAndSession(ctx, reg, pm, []string{}, "")
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("expected NoFileComp directive, got %v", directive)
 		}
@@ -232,7 +227,7 @@ func TestCompleteSessionIDs(t *testing.T) {
 		}
 
 		// 1 arg -> completes profiles
-		comps, directive = completeAgentProfileAndSession(reg, pm, []string{"codex"}, "")
+		comps, directive = completeAgentProfileAndSession(ctx, reg, pm, []string{"codex"}, "")
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("expected NoFileComp directive, got %v", directive)
 		}
@@ -241,7 +236,7 @@ func TestCompleteSessionIDs(t *testing.T) {
 		}
 
 		// 2 args -> completes sessions
-		comps, directive = completeAgentProfileAndSession(reg, pm, []string{"codex", "work"}, "")
+		comps, directive = completeAgentProfileAndSession(ctx, reg, pm, []string{"codex", "work"}, "")
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("expected NoFileComp directive, got %v", directive)
 		}
@@ -250,7 +245,7 @@ func TestCompleteSessionIDs(t *testing.T) {
 		}
 
 		// 3 args -> returns nil
-		comps, directive = completeAgentProfileAndSession(reg, pm, []string{"codex", "work", "01a09eb7"}, "")
+		comps, directive = completeAgentProfileAndSession(ctx, reg, pm, []string{"codex", "work", "01a09eb7"}, "")
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("expected NoFileComp directive, got %v", directive)
 		}
@@ -260,20 +255,20 @@ func TestCompleteSessionIDs(t *testing.T) {
 	})
 
 	t.Run("AgentIsolation", func(t *testing.T) {
-		reg, pm := setupCompletionTestEnv(t)
+		ctx, reg, pm := setupCompletionTestEnv(t)
 
 		// Completing for "agy" should return only agy's session
-		comps, _ := completeAgentProfileAndSession(reg, pm, []string{"agy", "work"}, "")
+		comps, _ := completeAgentProfileAndSession(ctx, reg, pm, []string{"agy", "work"}, "")
 		if len(comps) != 1 || comps[0] != "99f99f99\tAgy session [work]" {
 			t.Fatalf("expected only agy session '99f99f99\tAgy session [work]', got: %v", comps)
 		}
 	})
 
 	t.Run("EdgeCases", func(t *testing.T) {
-		reg, pm := setupCompletionTestEnv(t)
+		ctx, reg, pm := setupCompletionTestEnv(t)
 
 		// Unknown agent
-		comps, directive := completeAgentProfileAndSession(reg, pm, []string{"nonexistent-agent", "work"}, "")
+		comps, directive := completeAgentProfileAndSession(ctx, reg, pm, []string{"nonexistent-agent", "work"}, "")
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("expected NoFileComp directive, got %v", directive)
 		}
@@ -282,7 +277,7 @@ func TestCompleteSessionIDs(t *testing.T) {
 		}
 
 		// Nil registry
-		comps, directive = completeAgentProfileAndSession(nil, pm, []string{"codex", "work"}, "")
+		comps, directive = completeAgentProfileAndSession(ctx, nil, pm, []string{"codex", "work"}, "")
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("expected NoFileComp directive, got %v", directive)
 		}
@@ -291,7 +286,7 @@ func TestCompleteSessionIDs(t *testing.T) {
 		}
 
 		// Nil profile manager
-		comps, directive = completeAgentProfileAndSession(reg, nil, []string{"codex", "work"}, "")
+		comps, directive = completeAgentProfileAndSession(ctx, reg, nil, []string{"codex", "work"}, "")
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("expected NoFileComp directive, got %v", directive)
 		}

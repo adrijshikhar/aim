@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,7 +13,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 )
 
-func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) int {
+func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registry, pm *profile.ProfileManager) int {
 	logger.Init(config.BaseDir())
 	defer logger.Close()
 
@@ -49,7 +50,10 @@ func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) i
 
 	rootCmd.SetArgs(normalizedArgs)
 
-	err := rootCmd.Execute()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	err := rootCmd.ExecuteContext(ctx)
 	if err == nil {
 		return 0
 	}
@@ -61,6 +65,10 @@ func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) i
 
 	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 	return 1
+}
+
+func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) int {
+	return dispatchWithContext(context.Background(), args, reg, pm)
 }
 
 func main() {

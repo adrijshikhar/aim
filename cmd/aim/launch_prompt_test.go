@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -216,13 +217,11 @@ func TestRunTUI_LaunchedSessionShowsWarnings(t *testing.T) {
 	var buf bytes.Buffer
 	logger.SetWarnOutput(&buf)
 	t.Cleanup(func() { logger.SetWarnOutput(nil) })
-	orig := tuiRunner
-	tuiRunner = func(*agents.Registry, *profile.ProfileManager) int {
+	ctx := WithTUIRunner(context.Background(), func(*agents.Registry, *profile.ProfileManager) int {
 		logger.Warn("seeding refused")
 		return 0
-	}
-	t.Cleanup(func() { tuiRunner = orig })
-	runTUI(nil, nil)
+	})
+	runTUIWithContext(ctx, nil, nil)
 	if !strings.Contains(buf.String(), "aim: seeding refused") {
 		t.Fatalf("warning from the launched session was hidden: %q", buf.String())
 	}

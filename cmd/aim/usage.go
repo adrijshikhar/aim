@@ -344,4 +344,3 @@ func findCategoryWindows(windows []usage.LimitWindow) (*usage.LimitWindow, *usag
 	}
 	return primary, weekly
 }
-

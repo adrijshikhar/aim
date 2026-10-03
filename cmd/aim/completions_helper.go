@@ -82,17 +82,20 @@ func completeAgentAndProfile(reg *agents.Registry, pm *profile.ProfileManager, a
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
-func completeSessionsForAgent(reg *agents.Registry, agent string, toComplete string) []string {
+func completeSessionsForAgent(ctx context.Context, reg *agents.Registry, agent string, toComplete string) []string {
 	if reg != nil {
 		if ad, err := reg.Get(agent); err == nil {
 			agent = ad.Name()
 		}
 	}
-	mgr := getSessionManager(context.Background())
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	mgr := getSessionManager(ctx)
 	if mgr == nil {
 		return nil
 	}
-	sessions, err := mgr.ListSessions(context.Background(), agent, "", false)
+	sessions, err := mgr.ListSessions(ctx, agent, "", false)
 	if err != nil {
 		return nil
 	}
@@ -123,7 +126,7 @@ func completeSessionsForAgent(reg *agents.Registry, agent string, toComplete str
 	return res
 }
 
-func completeAgentProfileAndSession(reg *agents.Registry, pm *profile.ProfileManager, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func completeAgentProfileAndSession(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 {
 		return completeAgents(reg, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
@@ -131,7 +134,7 @@ func completeAgentProfileAndSession(reg *agents.Registry, pm *profile.ProfileMan
 		return completeProfilesForAgent(pm, reg, args[0], toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 	if len(args) == 2 {
-		return completeSessionsForAgent(reg, args[0], toComplete), cobra.ShellCompDirectiveNoFileComp
+		return completeSessionsForAgent(ctx, reg, args[0], toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }

@@ -13,11 +13,12 @@ import (
 )
 
 type (
-	sessionManagerCtxKey       struct{}
-	interactiveCheckerCtxKey   struct{}
-	tuiRunnerCtxKey            struct{}
-	tuiSessionsRunnerCtxKey    struct{}
-	interactiveTerminalCtxKey  struct{}
+	sessionManagerCtxKey      struct{}
+	interactiveCheckerCtxKey  struct{}
+	tuiRunnerCtxKey           struct{}
+	tuiSessionsRunnerCtxKey   struct{}
+	interactiveTerminalCtxKey struct{}
+	sessionPickerRunnerCtxKey struct{}
 )
 
 // WithSessionManager injects a session.Manager into the context.
@@ -36,12 +37,12 @@ func SessionManagerFromContext(ctx context.Context) *session.Manager {
 	return nil
 }
 
-// getSessionManager returns the session.Manager from context if present, or falls back to defaultSessionManager().
+// getSessionManager returns the session.Manager from context if present, or falls back to NewDefaultSessionManager().
 func getSessionManager(ctx context.Context) *session.Manager {
 	if mgr := SessionManagerFromContext(ctx); mgr != nil {
 		return mgr
 	}
-	return defaultSessionManager()
+	return NewDefaultSessionManager()
 }
 
 // WithInteractiveCheck injects an interactivity predicate into the context.
@@ -60,14 +61,14 @@ func InteractiveCheckFromContext(ctx context.Context) func(io.Reader) bool {
 	return nil
 }
 
-// checkInteractive returns whether r is interactive, consulting context, then isInteractiveFunc.
+// checkInteractive returns whether r is interactive, consulting context, then defaultIsInteractive.
 func checkInteractive(cmd *cobra.Command, r io.Reader) bool {
 	if cmd != nil {
 		if fn := InteractiveCheckFromContext(cmd.Context()); fn != nil {
 			return fn(r)
 		}
 	}
-	return isInteractiveFunc(r)
+	return defaultIsInteractive(r)
 }
 
 // WithTUIRunner injects a custom TUI runner into the context.
@@ -113,6 +114,22 @@ func InteractiveTerminalFromContext(ctx context.Context) func(cmd *cobra.Command
 		return nil
 	}
 	if fn, ok := ctx.Value(interactiveTerminalCtxKey{}).(func(cmd *cobra.Command) bool); ok && fn != nil {
+		return fn
+	}
+	return nil
+}
+
+// WithSessionPickerRunner injects a custom session picker runner into the context.
+func WithSessionPickerRunner(ctx context.Context, fn SessionPickerRunner) context.Context {
+	return context.WithValue(ctx, sessionPickerRunnerCtxKey{}, fn)
+}
+
+// SessionPickerRunnerFromContext retrieves an injected session picker runner from context, if any.
+func SessionPickerRunnerFromContext(ctx context.Context) SessionPickerRunner {
+	if ctx == nil {
+		return nil
+	}
+	if fn, ok := ctx.Value(sessionPickerRunnerCtxKey{}).(SessionPickerRunner); ok && fn != nil {
 		return fn
 	}
 	return nil

@@ -310,4 +310,3 @@ func TestTerminalStateRestoration(t *testing.T) {
 		}
 	}
 }
-

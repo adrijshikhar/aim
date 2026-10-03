@@ -27,8 +27,6 @@ type DoctorDrawer struct {
 	pendingAction tea.Msg
 }
 
-type doctorDrawerState = DoctorDrawer
-
 var _ SubModel = DoctorDrawer{}
 
 type DoctorCloseMsg struct{}

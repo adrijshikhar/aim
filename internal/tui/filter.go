@@ -207,4 +207,3 @@ func (idx *SessionsIndex) SearchWithProfile(query string, activeOnly bool, profi
 	}
 	return res
 }
-

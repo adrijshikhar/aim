@@ -93,8 +93,6 @@ type SessionsDrawer struct {
 	pendingAction tea.Msg
 }
 
-type sessionsDrawerState = SessionsDrawer
-
 var _ SubModel = SessionsDrawer{}
 
 type SessionsCloseMsg struct{}

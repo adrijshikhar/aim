@@ -44,4 +44,3 @@ func setupSignalForwarding(proc *os.Process, isTerminal bool) func() {
 		})
 	}
 }
-

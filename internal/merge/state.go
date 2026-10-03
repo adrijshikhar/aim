@@ -126,12 +126,3 @@ func (s Store) ActiveSessions(profile string) ([]string, error) {
 	}
 	return running, nil
 }
-
-// HasActiveSessions reports whether any agent has a running foreground session in the profile.
-func (s Store) HasActiveSessions(profile string) (bool, error) {
-	running, err := s.ActiveSessions(profile)
-	if err != nil {
-		return false, err
-	}
-	return len(running) > 0, nil
-}

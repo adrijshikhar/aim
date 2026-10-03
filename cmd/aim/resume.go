@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -129,7 +128,7 @@ Flags:
 
 			var sess *session.Session
 			if sessionID == "" {
-				if isInteractive(cmd.InOrStdin()) {
+				if checkInteractive(cmd, cmd.InOrStdin()) {
 					sessions, err := mgr.ListSessions(ctx, agentName, "", false)
 					if err != nil {
 						return fmt.Errorf("failed to list sessions: %w", err)
@@ -161,7 +160,7 @@ Flags:
 
 			// Active process check
 			if sess.Status == session.StatusActive && !forceFlag {
-				if isInteractive(cmd.InOrStdin()) {
+				if checkInteractive(cmd, cmd.InOrStdin()) {
 					fmt.Fprintf(cmd.OutOrStdout(), "Session %s (%q) is currently ACTIVE in PID %d.\nResume anyway? [y/N]: ", sess.ShortID, sess.Title, sess.PID)
 					reader := bufio.NewReader(cmd.InOrStdin())
 					ans, _ := reader.ReadString('\n')
@@ -195,7 +194,7 @@ Flags:
 			return executeExactResume(cmd, reg, pm, mgr, agentName, profileName, pDir, sess, forkFlag, extraArgs)
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return completeAgentProfileAndSession(reg, pm, args, toComplete)
+			return completeAgentProfileAndSession(cmd.Context(), reg, pm, args, toComplete)
 		},
 	}
 
@@ -364,10 +363,6 @@ func getGitBranch(repoRoot string) string {
 		return strings.TrimSpace(string(out))
 	}
 	return "main"
-}
-
-func isInteractive(r io.Reader) bool {
-	return checkInteractive(nil, r)
 }
 
 func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, agent, sessionID string) (*session.Session, error) {

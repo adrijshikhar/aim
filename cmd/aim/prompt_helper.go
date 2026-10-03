@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var isInteractiveFunc = func(r io.Reader) bool {
+func defaultIsInteractive(r io.Reader) bool {
 	if f, ok := r.(*os.File); ok {
 		return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 	}

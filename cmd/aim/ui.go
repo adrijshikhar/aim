@@ -156,7 +156,7 @@ func handleTUIOutcome(res tui.Model, reg *agents.Registry, pm *profile.ProfileMa
 	return 0
 }
 
-var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
+func defaultTUIRunner(reg *agents.Registry, pm *profile.ProfileManager) int {
 	cfg, _ := config.LoadConfig()
 	m := tui.NewModel(reg, pm, cfg).WithVersion(Version)
 	p := tea.NewProgram(m)
@@ -177,7 +177,7 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 	return handleTUIOutcome(res, reg, pm)
 }
 
-var tuiSessionsRunner = func(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+func defaultTUISessionsRunner(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
 	cfg, _ := config.LoadConfig()
 	m := tui.NewModel(reg, pm, cfg).
 		WithVersion(Version).
@@ -205,7 +205,7 @@ func runTUIWithContext(ctx context.Context, reg *agents.Registry, pm *profile.Pr
 			return fn(reg, pm)
 		}
 	}
-	code := tuiRunner(reg, pm)
+	code := defaultTUIRunner(reg, pm)
 	logger.Debug("[tui] TUI exited with code %d", code)
 	return code
 }
@@ -224,7 +224,7 @@ func runTUISessionsWithContext(ctx context.Context, reg *agents.Registry, pm *pr
 			return fn(reg, pm, initialAgent, profileFilter, activeOnly)
 		}
 	}
-	code := tuiSessionsRunner(reg, pm, initialAgent, profileFilter, activeOnly)
+	code := defaultTUISessionsRunner(reg, pm, initialAgent, profileFilter, activeOnly)
 	logger.Debug("[tui] Sessions drawer exited with code %d", code)
 	return code
 }

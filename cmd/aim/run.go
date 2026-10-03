@@ -268,4 +268,3 @@ func isMCPListInvocation(extraArgs []string) bool {
 	}
 	return false
 }
-

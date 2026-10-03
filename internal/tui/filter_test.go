@@ -146,16 +146,16 @@ func BenchmarkSessionsIndex_Search(b *testing.B) {
 	sessions := make([]session.Session, 1000)
 	for i := 0; i < 1000; i++ {
 		s := session.Session{
-			ID:       fmt.Sprintf("session-%04d-uuid-000000000000", i),
-			ShortID:  fmt.Sprintf("%04d", i),
-			Title:    fmt.Sprintf("Feature Implementation Task #%d", i),
-			Summary:  fmt.Sprintf("Building component %d for subsystem", i%10),
-			Goal:     fmt.Sprintf("Deliver module #%d on time", i),
-			Progress: fmt.Sprintf("Completed %d percent", i%100),
-			Recent:   fmt.Sprintf("Committed changes to branch-%d", i),
-			Cwd:      fmt.Sprintf("/Users/workspace/project-%d", i%5),
-			Profile:  fmt.Sprintf("profile-%d", i%8),
-			Agent:    "agy",
+			ID:        fmt.Sprintf("session-%04d-uuid-000000000000", i),
+			ShortID:   fmt.Sprintf("%04d", i),
+			Title:     fmt.Sprintf("Feature Implementation Task #%d", i),
+			Summary:   fmt.Sprintf("Building component %d for subsystem", i%10),
+			Goal:      fmt.Sprintf("Deliver module #%d on time", i),
+			Progress:  fmt.Sprintf("Completed %d percent", i%100),
+			Recent:    fmt.Sprintf("Committed changes to branch-%d", i),
+			Cwd:       fmt.Sprintf("/Users/workspace/project-%d", i%5),
+			Profile:   fmt.Sprintf("profile-%d", i%8),
+			Agent:     "agy",
 			StartedAt: time.Now(),
 		}
 		if i%3 == 0 {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -293,7 +294,10 @@ func (m sessionPickerModel) View() string {
 	return b.String()
 }
 
-var sessionPickerRunner = func(m sessionPickerModel, in io.Reader, out io.Writer) (*session.Session, error) {
+// SessionPickerRunner defines the function signature for running the interactive session picker.
+type SessionPickerRunner func(m sessionPickerModel, in io.Reader, out io.Writer) (*session.Session, error)
+
+func defaultSessionPickerRunner(m sessionPickerModel, in io.Reader, out io.Writer) (*session.Session, error) {
 	p := tea.NewProgram(
 		m,
 		tea.WithInput(in),
@@ -317,7 +321,11 @@ func promptSelectSession(cmd *cobra.Command, sessions []session.Session) (*sessi
 
 	var in io.Reader = os.Stdin
 	var out io.Writer = os.Stdout
+	var ctx context.Context = context.Background()
 	if cmd != nil {
+		if cmd.Context() != nil {
+			ctx = cmd.Context()
+		}
 		if cmd.InOrStdin() != nil {
 			in = cmd.InOrStdin()
 		}
@@ -327,5 +335,9 @@ func promptSelectSession(cmd *cobra.Command, sessions []session.Session) (*sessi
 	}
 
 	m := newSessionPickerModel(sessions)
-	return sessionPickerRunner(m, in, out)
+	runner := SessionPickerRunnerFromContext(ctx)
+	if runner == nil {
+		runner = defaultSessionPickerRunner
+	}
+	return runner(m, in, out)
 }

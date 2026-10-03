@@ -14,15 +14,9 @@ import (
 	"github.com/aim-cli/aim/internal/merge"
 )
 
-// SessionChecker verifies whether a profile has running foreground sessions.
+// SessionChecker verifies whether a profile has running foreground sessions
+// and returns the names of running agents.
 type SessionChecker interface {
-	HasActiveSessions(profileName string) (bool, error)
-}
-
-// DetailedSessionChecker is optionally implemented by session checkers that can report
-// which specific agents have running sessions in the profile.
-type DetailedSessionChecker interface {
-	SessionChecker
 	ActiveSessions(profileName string) ([]string, error)
 }
 
@@ -55,27 +49,16 @@ func (m *ProfileManager) WithSessionChecker(checker SessionChecker) *ProfileMana
 // profile: its exit step would write into a moved or deleted directory, or
 // into merge state keyed by the old name.
 func (m *ProfileManager) refuseIfRunning(profile string) error {
+	var checker SessionChecker
 	if m != nil && m.SessionChecker != nil {
-		if dsc, ok := m.SessionChecker.(DetailedSessionChecker); ok {
-			running, err := dsc.ActiveSessions(profile)
-			if err != nil {
-				return fmt.Errorf("checking running sessions of %s: %w", profile, err)
-			}
-			if len(running) > 0 {
-				return fmt.Errorf("profile %s has a running %s session; exit it first", profile, running[0])
-			}
-			return nil
-		}
-		active, err := m.SessionChecker.HasActiveSessions(profile)
-		if err != nil {
-			return fmt.Errorf("checking running sessions of %s: %w", profile, err)
-		}
-		if active {
-			return fmt.Errorf("profile %s has a running session; exit it first", profile)
-		}
+		checker = m.SessionChecker
+	} else if m != nil {
+		checker = m.MergeStateStore()
+	}
+	if checker == nil {
 		return nil
 	}
-	running, err := m.MergeStateStore().ActiveSessions(profile)
+	running, err := checker.ActiveSessions(profile)
 	if err != nil {
 		return fmt.Errorf("checking running sessions of %s: %w", profile, err)
 	}

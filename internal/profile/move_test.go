@@ -367,4 +367,3 @@ func TestHasAgentCredentialsOnDisk_Claude(t *testing.T) {
 		t.Error("expected true for .claude directory")
 	}
 }
-

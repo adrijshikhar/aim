@@ -20,7 +20,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var defaultSessionManager = func() *session.Manager {
+// NewDefaultSessionManager creates and registers all standard session providers.
+func NewDefaultSessionManager() *session.Manager {
 	mgr := session.NewManager()
 	mgr.RegisterProvider(agy.NewProvider())
 	mgr.RegisterProvider(codex.NewProvider())
@@ -77,7 +78,7 @@ func (sc *SessionsCmd) checkInteractiveTerminal(cmd *cobra.Command) bool {
 	if fn := InteractiveTerminalFromContext(cmd.Context()); fn != nil {
 		return fn(cmd)
 	}
-	return isInteractiveSessionsTerminal(cmd)
+	return defaultIsInteractiveTerminal(cmd)
 }
 
 func (sc *SessionsCmd) runTUI(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, targetAgent, profileFlag string, activeFlag bool) int {
@@ -190,8 +191,6 @@ Flags:
 
 	return cmd
 }
-
-var isInteractiveSessionsTerminal = defaultIsInteractiveTerminal
 
 func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly bool) {
 	var activeSessions []session.Session
