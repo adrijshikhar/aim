@@ -300,9 +300,7 @@ func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, 
 
 	if p.sqliteBin != "" {
 		query := fmt.Sprintf("SELECT cwd FROM threads WHERE id = '%s' LIMIT 1;\n", escapeSQL(s.ID))
-		cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath)
-		cmd.Stdin = strings.NewReader(query)
-		if out, err := cmd.Output(); err == nil {
+		if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, dbPath, query); err == nil {
 			cwd := strings.TrimSpace(string(out))
 			if cwd != "" {
 				s.Cwd = cwd
@@ -347,9 +345,7 @@ func (p *Provider) ResolveSummary(ctx context.Context, s *session.Session) (sess
 			// Query turns count if not already populated
 			if progress == "" {
 				turnQuery := fmt.Sprintf("SELECT COUNT(*) FROM thread_turns WHERE thread_id = '%s';\n", escapeSQL(s.ID))
-				cmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
-				cmd.Stdin = strings.NewReader(turnQuery)
-				if out, err := cmd.Output(); err == nil {
+				if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, historyDB, turnQuery); err == nil {
 					cntStr := strings.TrimSpace(string(out))
 					if cnt, err := strconv.Atoi(cntStr); err == nil && cnt > 0 {
 						progress = fmt.Sprintf("%d turns", cnt)
@@ -360,9 +356,7 @@ func (p *Provider) ResolveSummary(ctx context.Context, s *session.Session) (sess
 			// Query latest user message
 			if recent == "" {
 				itemQuery := fmt.Sprintf("SELECT item_json FROM thread_items WHERE thread_id = '%s' AND item_type = 'userMessage' ORDER BY rollout_ordinal DESC LIMIT 1;\n", escapeSQL(s.ID))
-				cmd := exec.CommandContext(ctx, p.sqliteBin, historyDB)
-				cmd.Stdin = strings.NewReader(itemQuery)
-				if out, err := cmd.Output(); err == nil && len(out) > 0 {
+				if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, historyDB, itemQuery); err == nil && len(out) > 0 {
 					var item struct {
 						Content []struct {
 							Text string `json:"text"`
@@ -486,9 +480,7 @@ type sqliteThreadRow struct {
 }
 
 func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profileName string, isHost bool) ([]*session.Session, error) {
-	cmd := exec.CommandContext(ctx, p.sqliteBin, "-json", dbPath)
-	cmd.Stdin = strings.NewReader(query)
-	out, err := cmd.Output()
+	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, dbPath, query, "-json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
 	}
@@ -523,9 +515,7 @@ func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profil
 		}
 		if len(ids) > 0 {
 			turnQuery := fmt.Sprintf("SELECT thread_id, MAX(COALESCE(completed_at, started_at, 0)), COUNT(*) FROM thread_turns WHERE thread_id IN (%s) GROUP BY thread_id;\n", strings.Join(ids, ","))
-			tCmd := exec.CommandContext(ctx, p.sqliteBin, historyDB, "-separator", "|")
-			tCmd.Stdin = strings.NewReader(turnQuery)
-			if tOut, err := tCmd.Output(); err == nil {
+			if tOut, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, historyDB, turnQuery, "-separator", "|"); err == nil {
 				for _, line := range strings.Split(strings.TrimSpace(string(tOut)), "\n") {
 					parts := strings.Split(strings.TrimSpace(line), "|")
 					if len(parts) >= 3 {
@@ -1044,9 +1034,7 @@ func (p *Provider) findRolloutPath(ctx context.Context, codexDir, sessionID stri
 		dbPath := filepath.Join(codexDir, "state_5.sqlite")
 		if _, err := os.Stat(dbPath); err == nil {
 			query := fmt.Sprintf("SELECT rollout_path FROM threads WHERE id = '%s' LIMIT 1;\n", escapeSQL(sessionID))
-			cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath)
-			cmd.Stdin = strings.NewReader(query)
-			if out, err := cmd.Output(); err == nil {
+			if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, dbPath, query); err == nil {
 				path := strings.TrimSpace(string(out))
 				if path != "" {
 					if _, statErr := os.Stat(path); statErr == nil {
@@ -1080,9 +1068,7 @@ func (p *Provider) getTableColumns(ctx context.Context, dbPath, table string) ([
 		return nil, fmt.Errorf("invalid table name %q", table)
 	}
 	query := fmt.Sprintf("PRAGMA table_info(%s);\n", table)
-	cmd := exec.CommandContext(ctx, p.sqliteBin, dbPath, "-separator", "|")
-	cmd.Stdin = strings.NewReader(query)
-	out, err := cmd.Output()
+	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, dbPath, query, "-separator", "|")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query table info for %s in %s: %w", table, dbPath, err)
 	}
