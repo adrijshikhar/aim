@@ -70,6 +70,7 @@ func openDirectory(dir string) error {
 
 type sessionsDrawerState struct {
 	active         bool
+	loading        bool
 	standalone     bool
 	sessions       []session.Session
 	cursor         int
@@ -84,24 +85,63 @@ type sessionsDrawerState struct {
 	fork           bool
 }
 
+type sessionsLoadedMsg struct {
+	sessions []session.Session
+	err      error
+}
+
 func (m Model) IsSessionsDrawerActive() bool {
 	return m.sessionsDrawer.active
+}
+
+func (m Model) IsSessionsLoading() bool {
+	return m.sessionsDrawer.loading
 }
 
 func (m Model) SessionsDrawerList() []session.Session {
 	return m.sessionsDrawer.sessions
 }
 
-func (m *Model) SetSessionsForTest(sessions []session.Session) {
+func (m *Model) setSessions(sessions []session.Session) {
 	m.sessionsDrawer.sessions = sessions
+	if m.sessionsDrawer.cursor >= len(sessions) {
+		if len(sessions) > 0 {
+			m.sessionsDrawer.cursor = len(sessions) - 1
+		} else {
+			m.sessionsDrawer.cursor = 0
+		}
+	}
+}
+
+func (m *Model) SetSessionsForTest(sessions []session.Session) {
+	m.setSessions(sessions)
 }
 
 func (m Model) IsForkResume() bool {
 	return m.sessionsDrawer.fork
 }
 
+func (m Model) fetchSessionsCmd() tea.Cmd {
+	agentFilter := m.sessionsDrawer.agentFilter
+	profileFilter := m.sessionsDrawer.profileFilter
+	return func() tea.Msg {
+		mgr := session.NewManager()
+		mgr.RegisterProvider(agy.NewProvider())
+		mgr.RegisterProvider(codex.NewProvider())
+		mgr.RegisterProvider(claudesess.NewProvider())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		sessions, err := mgr.ListSessions(ctx, agentFilter, profileFilter, false)
+		return sessionsLoadedMsg{sessions: sessions, err: err}
+	}
+}
+
 func (m Model) openSessionsDrawer() (Model, tea.Cmd) {
-	return m.openSessionsDrawerConfig(m.agent, "", false, false), nil
+	m = m.openSessionsDrawerConfig(m.agent, "", false, false)
+	m.sessionsDrawer.loading = true
+	return m, m.fetchSessionsCmd()
 }
 
 func (m Model) openSessionsDrawerConfig(initialAgent, profileFilter string, activeOnly, standalone bool) Model {
@@ -134,14 +174,7 @@ func (m Model) fetchSessions() Model {
 	if err != nil {
 		sessions = []session.Session{}
 	}
-	m.sessionsDrawer.sessions = sessions
-	if m.sessionsDrawer.cursor >= len(sessions) {
-		if len(sessions) > 0 {
-			m.sessionsDrawer.cursor = len(sessions) - 1
-		} else {
-			m.sessionsDrawer.cursor = 0
-		}
-	}
+	m.setSessions(sessions)
 	return m
 }
 
@@ -297,8 +330,9 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.sessionsDrawer.cursor = 0
 		m.sessionsDrawer.statusMessage = ""
 		m.sessionsDrawer.killConfirmPID = 0
+		m.sessionsDrawer.loading = true
 		m = m.fetchSessions()
-		return m, nil
+		return m, m.fetchSessionsCmd()
 	case key.Matches(msg, km.Up):
 		if m.sessionsDrawer.cursor > 0 {
 			m.sessionsDrawer.cursor--
@@ -364,29 +398,33 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.sessionsDrawer.cursor = 0
 		m.sessionsDrawer.statusMessage = ""
 		m.sessionsDrawer.killConfirmPID = 0
+		m.sessionsDrawer.loading = true
 		m = m.fetchSessions()
-		return m, nil
+		return m, m.fetchSessionsCmd()
 	case key.Matches(msg, km.AgentAgy):
 		m.sessionsDrawer.agentFilter = "agy"
 		m.sessionsDrawer.cursor = 0
 		m.sessionsDrawer.statusMessage = ""
 		m.sessionsDrawer.killConfirmPID = 0
+		m.sessionsDrawer.loading = true
 		m = m.fetchSessions()
-		return m, nil
+		return m, m.fetchSessionsCmd()
 	case key.Matches(msg, km.AgentCodex):
 		m.sessionsDrawer.agentFilter = "codex"
 		m.sessionsDrawer.cursor = 0
 		m.sessionsDrawer.statusMessage = ""
 		m.sessionsDrawer.killConfirmPID = 0
+		m.sessionsDrawer.loading = true
 		m = m.fetchSessions()
-		return m, nil
+		return m, m.fetchSessionsCmd()
 	case key.Matches(msg, km.AgentClaude):
 		m.sessionsDrawer.agentFilter = "claude"
 		m.sessionsDrawer.cursor = 0
 		m.sessionsDrawer.statusMessage = ""
 		m.sessionsDrawer.killConfirmPID = 0
+		m.sessionsDrawer.loading = true
 		m = m.fetchSessions()
-		return m, nil
+		return m, m.fetchSessionsCmd()
 	case key.Matches(msg, km.ToggleActive):
 		m.sessionsDrawer.activeOnly = !m.sessionsDrawer.activeOnly
 		m.sessionsDrawer.cursor = 0
@@ -418,8 +456,9 @@ func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.sessionsDrawer.statusMessage = fmt.Sprintf("Terminated PID %d (%s)", target.PID, target.ShortID)
 			}
 			m.sessionsDrawer.killConfirmPID = 0
+			m.sessionsDrawer.loading = true
 			m = m.fetchSessions()
-			return m, nil
+			return m, m.fetchSessionsCmd()
 		}
 	case key.Matches(msg, km.Copy):
 		filtered := m.filteredSessions()

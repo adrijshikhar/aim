@@ -240,10 +240,16 @@ func (m Model) switchAgent(targetAgent string) (Model, tea.Cmd) {
 	m.cursor = 0
 	m = m.refreshProfiles()
 	m = m.loadCachedReports()
+	var docCmd tea.Cmd
 	if m.doctorDrawer.active {
 		m = m.fetchDoctorDiagnostics()
+		m.doctorDrawer.loading = true
+		docCmd = m.fetchDoctorDiagnosticsCmd()
 	}
 	m.loading = true
+	if docCmd != nil {
+		return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), docCmd)
+	}
 	return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
 }
 
@@ -517,6 +523,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delete(m.inFlight, k)
 				}
 			}
+		}
+		return m, nil
+
+	case sessionsLoadedMsg:
+		m.sessionsDrawer.loading = false
+		if msg.err == nil {
+			m.setSessions(msg.sessions)
+		}
+		return m, nil
+
+	case doctorDiagnosticsLoadedMsg:
+		m.doctorDrawer.loading = false
+		if msg.targetAgent == m.agent && (msg.targetProfile == m.doctorDrawer.targetProfile || m.doctorDrawer.targetProfile == "") {
+			m.doctorDrawer.results = msg.results
 		}
 		return m, nil
 
