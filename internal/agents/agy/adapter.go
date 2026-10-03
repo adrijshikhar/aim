@@ -57,8 +57,11 @@ func getOAuthCredentials() (string, string) {
 	return clientID, clientSecret
 }
 
-// Compile-time assertion that Adapter implements agents.AgentAdapter.
-var _ agents.AgentAdapter = (*Adapter)(nil)
+// Compile-time assertions that Adapter implements agents.AgentAdapter and agents.PostLauncher.
+var (
+	_ agents.AgentAdapter = (*Adapter)(nil)
+	_ agents.PostLauncher = (*Adapter)(nil)
+)
 
 type Adapter struct {
 	agents.BaseAdapter
@@ -413,10 +416,44 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 
 	cwd, _ := os.Getwd()
 	return agents.LaunchEnv{
-		BinaryPath: bin,
-		Env:        envMap,
-		WorkingDir: cwd,
+		BinaryPath:   bin,
+		Env:          envMap,
+		WorkingDir:   cwd,
+		PostLauncher: a,
 	}, nil
+}
+
+// PostLaunch monitors and harvests OAuth tokens from macOS Keychain for unauthenticated profiles.
+// Authenticated profiles run with SSH_CONNECTION (keyring bypass mode) and never touch the Keychain.
+func (a *Adapter) PostLaunch(ctx context.Context, profileName, profileDir string) {
+	if profileDir == "" {
+		return
+	}
+
+	tokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	if fi, err := os.Stat(tokenPath); err == nil && fi.Size() > 0 {
+		return
+	}
+	adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
+	if fi, err := os.Stat(adcPath); err == nil && fi.Size() > 0 {
+		return
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
+			return
+		case <-ticker.C:
+			if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
+				logger.Debug("[agy] Successfully harvested token during active session")
+				return
+			}
+		}
+	}
 }
 
 // sharedConfigDir is the host layer for agy: the real ~/.gemini/config when it

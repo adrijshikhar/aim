@@ -13,10 +13,18 @@ type DiagnosticResult struct {
 }
 
 type LaunchEnv struct {
-	BinaryPath string
-	Args       []string
-	Env        map[string]string
-	WorkingDir string
+	BinaryPath   string
+	Args         []string
+	Env          map[string]string
+	WorkingDir   string
+	PostLauncher PostLauncher
+}
+
+// PostLauncher is optionally implemented by adapters that need to perform background work
+// (such as credentials synchronization or keychain harvesting) during the active lifetime
+// of the running process.
+type PostLauncher interface {
+	PostLaunch(ctx context.Context, profileName, profileDir string)
 }
 
 type AgentAdapter interface {

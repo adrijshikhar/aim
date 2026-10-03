@@ -4,20 +4,23 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
-	"github.com/aim-cli/aim/internal/profile"
 	"github.com/charmbracelet/x/term"
 )
 
-type Runner struct{}
+type Runner struct {
+	adapter agents.AgentAdapter
+}
 
-func NewRunner() *Runner {
-	return &Runner{}
+func NewRunner(adapter ...agents.AgentAdapter) *Runner {
+	var a agents.AgentAdapter
+	if len(adapter) > 0 {
+		a = adapter[0]
+	}
+	return &Runner{adapter: a}
 }
 
 func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []string) (int, error) {
@@ -58,60 +61,20 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		defer ResetTerminalTitle(os.Stdout)
 	}
 
-	// Keyring bypass and keychain harvesting for agents with global shared keychains (e.g. agy).
-	// Profiles use file-based credentials and never purge host keychains.
-	if agentName == "agy" {
-		profileDir := launch.Env["HOME"]
-		hasCreds := false
-		if profileDir != "" {
-			if _, hasSSH := launch.Env["SSH_CONNECTION"]; hasSSH {
-				hasCreds = true
-			} else {
-				tokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-				if fi, err := os.Stat(tokenPath); err == nil && fi.Size() > 0 {
-					hasCreds = true
-				} else {
-					adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
-					if fi, err := os.Stat(adcPath); err == nil && fi.Size() > 0 {
-						hasCreds = true
-					}
-				}
-			}
+	// Dispatch optional PostLauncher hook (e.g. background token synchronization or harvesting)
+	var postLauncher agents.PostLauncher
+	if r != nil && r.adapter != nil {
+		if pl, ok := r.adapter.(agents.PostLauncher); ok {
+			postLauncher = pl
 		}
-
-		// Only unauthenticated sessions might need to harvest credentials from the macOS Keychain.
-		// Authenticated profiles run with SSH_CONNECTION (keyring bypass mode) and never touch the Keychain.
-		// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
-		if !hasCreds {
-			// Start background watcher that harvests the token into the profile once
-			// the user completes authentication in the browser.
-			stopWatcher := make(chan struct{})
-			doneWatcher := make(chan struct{})
-			go func() {
-				defer close(doneWatcher)
-				ticker := time.NewTicker(1 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-stopWatcher:
-						return
-					case <-ticker.C:
-						if profile.HarvestKeychainTokenToProfile(agentName, profileDir) {
-							logger.Debug("[runner] Successfully harvested token during active session")
-							return
-						}
-					}
-				}
-			}()
-
-			defer func() {
-				close(stopWatcher)
-				<-doneWatcher
-				if profileDir != "" {
-					_ = profile.HarvestKeychainTokenToProfile(agentName, profileDir)
-				}
-			}()
-		}
+	}
+	if postLauncher == nil && launch.PostLauncher != nil {
+		postLauncher = launch.PostLauncher
+	}
+	if postLauncher != nil {
+		postCtx, postCancel := context.WithCancel(ctx)
+		defer postCancel()
+		go postLauncher.PostLaunch(postCtx, profileName, launch.Env["HOME"])
 	}
 
 	if err := cmd.Start(); err != nil {

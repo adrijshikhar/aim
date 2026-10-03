@@ -138,7 +138,7 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 
 	applyProfileOverrides(&launchEnv, cfg, profileName, true)
 
-	r := runner.NewRunner()
+	r := runner.NewRunner(adapter)
 	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", extraArgs)
 	code := withSessionMerge(adapter, pm.MergeStateStore(), profileName, pDir, cfg, extraArgs, func() int {
 		if isMCPListInvocation(extraArgs) {
