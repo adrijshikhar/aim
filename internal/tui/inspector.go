@@ -104,15 +104,18 @@ func (m Model) renderInspector(curProfile string) string {
 	}
 	s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Agents:"), lipgloss.NewStyle().Foreground(TextDim).Render(strings.Join(agentsList, ", "))))
 
-	if hasReport && rep.Error != "" {
+	isProfileLoading := m.loading && (len(m.inFlight) == 0 || m.inFlight[curProfile])
+	if hasReport && rep.Error != "" && !isProfileLoading {
 		statusMsg := rep.Summary
 		if statusMsg == "" {
 			statusMsg = rep.Error
 		}
 		s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Status:"), lipgloss.NewStyle().Foreground(StatusYellow).Render(statusMsg)))
+	} else if isProfileLoading && (!hasReport || len(rep.Windows) == 0) {
+		s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Status:"), lipgloss.NewStyle().Foreground(TextMuted).Render("refreshing quota...")))
 	}
 
-	if hasReport {
+	if hasReport && len(rep.Windows) > 0 {
 		modelGroups := rep.ModelGroups()
 		if len(modelGroups) > 0 {
 			for _, g := range modelGroups {
@@ -147,7 +150,7 @@ func (m Model) renderInspector(curProfile string) string {
 
 				s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render(modelShort+":"), lineContent))
 			}
-		} else if len(rep.Windows) > 0 {
+		} else {
 			for _, w := range rep.Windows {
 				bar := usage.RenderBar(w.RemainingPct, 10)
 				winStatus := usage.CalculateStatus([]usage.LimitWindow{w})
@@ -192,7 +195,7 @@ func (m Model) renderInspector(curProfile string) string {
 			}
 		}
 		s.WriteString(fmt.Sprintf("    %s %s\n", lblStyle.Render("Refreshed:"), lipgloss.NewStyle().Foreground(TextMuted).Render(refreshedStr)))
-	} else if m.loading {
+	} else if isProfileLoading {
 		s.WriteString("    " + lipgloss.NewStyle().Foreground(TextMuted).Render("(fetching quota...)") + "\n")
 	} else {
 		s.WriteString("    (no quota data available - press 'r' to refresh)\n")

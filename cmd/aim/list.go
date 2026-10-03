@@ -51,13 +51,25 @@ func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string)
 		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
 			return "[no credentials]"
 		}
+		if strings.Contains(errLower, "auth") || strings.Contains(summaryLower, "auth") ||
+			strings.Contains(errLower, "unauthorized") || strings.Contains(summaryLower, "unauthorized") ||
+			strings.Contains(errLower, "login") || strings.Contains(summaryLower, "login") {
+			return "[auth required]"
+		}
+		if strings.Contains(errLower, "timeout") || strings.Contains(summaryLower, "timeout") ||
+			strings.Contains(errLower, "deadline exceeded") {
+			return "[timeout]"
+		}
 		if strings.Contains(errLower, "offline") || strings.Contains(summaryLower, "offline") ||
-			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") ||
-			strings.Contains(errLower, "timeout") {
+			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") {
 			return "[offline]"
 		}
 		if rep.Error != "" {
-			return fmt.Sprintf("[%s]", strings.ToLower(rep.Error))
+			cleanErr := strings.TrimSpace(strings.ReplaceAll(rep.Error, "\n", " "))
+			if len(cleanErr) > 20 {
+				cleanErr = cleanErr[:20] + "..."
+			}
+			return fmt.Sprintf("[%s]", strings.ToLower(cleanErr))
 		}
 		return "[unknown]"
 	}

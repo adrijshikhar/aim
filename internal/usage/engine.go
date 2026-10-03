@@ -2,8 +2,12 @@ package usage
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/logger"
 )
 
 type TargetProfile struct {
@@ -89,7 +93,46 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 				}
 
 				if cache != nil && ctx.Err() == nil {
-					_ = cache.Put(*rep)
+					// Stale-While-Revalidate: If fetch failed with StatusUnknown, but cache already contains
+					// a valid, healthy report with quota windows, preserve the existing valid quota!
+					if rep.Status == StatusUnknown {
+						errLower := strings.ToLower(rep.Error)
+						summaryLower := strings.ToLower(rep.Summary)
+						combinedErr := errLower + " " + summaryLower
+
+						isAuthError := strings.Contains(combinedErr, "unauthorized") ||
+							strings.Contains(combinedErr, "invalid_grant") ||
+							strings.Contains(combinedErr, "credential") ||
+							strings.Contains(combinedErr, "re-auth") ||
+							strings.Contains(combinedErr, "login")
+
+						isTransient := !isAuthError && (errors.Is(ctx.Err(), context.DeadlineExceeded) ||
+							strings.Contains(combinedErr, "timeout") ||
+							strings.Contains(combinedErr, "deadline exceeded") ||
+							strings.Contains(combinedErr, "connection refused") ||
+							strings.Contains(combinedErr, "network is unreachable") ||
+							strings.Contains(combinedErr, "no route to host") ||
+							strings.Contains(combinedErr, "temporary") ||
+							strings.Contains(combinedErr, "503") ||
+							strings.Contains(combinedErr, "unavailable") ||
+							strings.Contains(combinedErr, "service unavailable") ||
+							strings.Contains(combinedErr, "offline") ||
+							strings.Contains(combinedErr, "reset by peer"))
+
+						if isTransient {
+							if existing, found := cache.GetStale(t.Agent, t.Profile); found && existing.Status != StatusUnknown && len(existing.Windows) > 0 {
+								// Retain existing valid report
+								select {
+								case <-ctx.Done():
+								case out <- existing:
+								}
+								return
+							}
+						}
+					}
+					if err := cache.Put(*rep); err != nil {
+						logger.Debug("failed to write usage cache for %s:%s: %v", rep.Agent, rep.Profile, err)
+					}
 				}
 
 				select {

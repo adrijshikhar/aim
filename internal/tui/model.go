@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -28,12 +29,17 @@ const (
 )
 
 type usageReportMsg usage.Report
-type usageStreamClosedMsg struct{}
+type usageStreamClosedMsg struct {
+	streamID uint64
+}
 
 type usageStream struct {
+	id     uint64
 	ch     <-chan usage.Report
 	cancel context.CancelFunc
 }
+
+var nextStreamID uint64
 
 // Version is the package-level version string shown in the TUI header.
 var Version = "dev"
@@ -54,9 +60,10 @@ type Model struct {
 	height      int
 	usageStream *usageStream
 
-	loading bool
-	spinner spinner.Model
-	version string
+	loading  bool
+	inFlight map[string]bool
+	spinner  spinner.Model
+	version  string
 
 	deleteModal    deleteModalState
 	renameModal    renameModalState
@@ -98,6 +105,7 @@ func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Conf
 		cache:       usage.NewCacheStore(baseDir, usage.DefaultTTL),
 		usageStream: &usageStream{},
 		loading:     false,
+		inFlight:    make(map[string]bool),
 		spinner:     s,
 		keys:        DefaultKeyMap(),
 		help:        NewThemedHelp(),
@@ -117,10 +125,12 @@ func (m Model) loadCachedReports() Model {
 	}
 	for _, p := range m.profiles {
 		if rep, found := m.cache.GetStale(m.agent, p); found {
-			if m.reports == nil {
-				m.reports = make(map[string]usage.Report)
+			if rep.Status != usage.StatusUnknown || len(rep.Windows) > 0 {
+				if m.reports == nil {
+					m.reports = make(map[string]usage.Report)
+				}
+				m.reports[fmt.Sprintf("%s:%s", m.agent, p)] = rep
 			}
-			m.reports[fmt.Sprintf("%s:%s", m.agent, p)] = rep
 		}
 	}
 	return m
@@ -306,14 +316,18 @@ func (m Model) getReportForAgent(agent, prof string) (usage.Report, bool) {
 	return m.getReport(prof)
 }
 
-func waitForUsageReport(ch <-chan usage.Report) tea.Cmd {
+func waitForUsageReport(ch <-chan usage.Report, sid ...uint64) tea.Cmd {
 	if ch == nil {
 		return nil
+	}
+	var streamID uint64
+	if len(sid) > 0 {
+		streamID = sid[0]
 	}
 	return func() tea.Msg {
 		rep, ok := <-ch
 		if !ok {
-			return usageStreamClosedMsg{}
+			return usageStreamClosedMsg{streamID: streamID}
 		}
 		return usageReportMsg(rep)
 	}
@@ -363,6 +377,14 @@ func (m Model) refreshTargets() []usage.TargetProfile {
 
 func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
 	targets := m.refreshTargets()
+	if m.inFlight != nil {
+		for k := range m.inFlight {
+			delete(m.inFlight, k)
+		}
+		for _, t := range targets {
+			m.inFlight[t.Profile] = true
+		}
+	}
 
 	if m.usageStream == nil {
 		m.usageStream = &usageStream{}
@@ -371,11 +393,13 @@ func (m Model) triggerRefreshCmd(force ...bool) tea.Cmd {
 		m.usageStream.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	sid := atomic.AddUint64(&nextStreamID, 1)
+	m.usageStream.id = sid
 	m.usageStream.cancel = cancel
 
 	ch := usage.RefreshAsync(ctx, targets, m.cache, force...)
 	m.usageStream.ch = ch
-	return waitForUsageReport(ch)
+	return waitForUsageReport(ch, sid)
 }
 
 func (m Model) spinTickCmd() tea.Cmd {
@@ -404,13 +428,25 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
 			return "[no credentials]"
 		}
+		if strings.Contains(errLower, "auth") || strings.Contains(summaryLower, "auth") ||
+			strings.Contains(errLower, "unauthorized") || strings.Contains(summaryLower, "unauthorized") ||
+			strings.Contains(errLower, "login") || strings.Contains(summaryLower, "login") {
+			return "[auth required]"
+		}
+		if strings.Contains(errLower, "timeout") || strings.Contains(summaryLower, "timeout") ||
+			strings.Contains(errLower, "deadline exceeded") {
+			return "[timeout]"
+		}
 		if strings.Contains(errLower, "offline") || strings.Contains(summaryLower, "offline") ||
-			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") ||
-			strings.Contains(errLower, "timeout") {
+			strings.Contains(errLower, "connect") || strings.Contains(errLower, "network") {
 			return "[offline]"
 		}
 		if rep.Error != "" {
-			return fmt.Sprintf("[%s]", strings.ToLower(rep.Error))
+			cleanErr := strings.TrimSpace(strings.ReplaceAll(rep.Error, "\n", " "))
+			if len(cleanErr) > 20 {
+				cleanErr = cleanErr[:20] + "..."
+			}
+			return fmt.Sprintf("[%s]", strings.ToLower(cleanErr))
 		}
 		if rep.Status != "" {
 			return fmt.Sprintf("[%s]", strings.ToLower(string(rep.Status)))
@@ -461,16 +497,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		rep := usage.Report(msg)
 		m.reports[fmt.Sprintf("%s:%s", rep.Agent, rep.Profile)] = rep
+		if m.inFlight != nil {
+			delete(m.inFlight, rep.Profile)
+		}
 		var ch <-chan usage.Report
+		var sid uint64
 		if m.usageStream != nil {
 			ch = m.usageStream.ch
+			sid = m.usageStream.id
 		}
-		return m, waitForUsageReport(ch)
+		return m, waitForUsageReport(ch, sid)
 
 	case usageStreamClosedMsg:
-		m.loading = false
-		if m.usageStream != nil {
+		if m.usageStream != nil && (msg.streamID == 0 || m.usageStream.id == msg.streamID) {
+			m.loading = false
 			m.usageStream.ch = nil
+			if m.inFlight != nil {
+				for k := range m.inFlight {
+					delete(m.inFlight, k)
+				}
+			}
 		}
 		return m, nil
 
@@ -641,13 +687,21 @@ func (m Model) View() string {
 				}
 			}
 
+			isProfileLoading := m.loading && (len(m.inFlight) == 0 || m.inFlight[p])
 			badgeStr := ""
 			if rep, ok := m.getReport(p); ok {
 				badge := formatBadge(rep, isNarrow)
 				if badge != "" {
-					gaugeStyle := GaugeStyleForStatus(rep.Status)
-					badgeStr = "  " + gaugeStyle.Render(badge)
+					if isProfileLoading && (badge == "[offline]" || badge == "[timeout]" || badge == "[unknown]") {
+						badgeStr = "  " + GaugeDimStyle.Render("[refreshing...]")
+					} else {
+						gaugeStyle := GaugeStyleForStatus(rep.Status)
+						badgeStr = "  " + gaugeStyle.Render(badge)
+					}
 				}
+			}
+			if badgeStr == "" && isProfileLoading {
+				badgeStr = "  " + GaugeDimStyle.Render("[refreshing...]")
 			}
 
 			s.WriteString(fmt.Sprintf("%s%s%s\n", prefix, style.Render(label), badgeStr))
