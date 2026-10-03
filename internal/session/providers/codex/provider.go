@@ -203,6 +203,14 @@ func (p *Provider) listFromJSONL(indexPath, profileName string, isHost bool) ([]
 
 		s := session.NewSession(rec.ID, title, "codex", profileName, isHost, modTime)
 		s.StoragePath = rec.FilePath
+		if s.StoragePath != "" {
+			if f, err := os.Open(s.StoragePath); err == nil {
+				if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
+					s.Progress = fmt.Sprintf("%d turns", tc)
+				}
+				_ = f.Close()
+			}
+		}
 		sessions = append(sessions, s)
 	}
 
@@ -574,6 +582,14 @@ func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profil
 				modTime = ti.maxTime
 			}
 			turnCount = ti.turnCount
+		}
+		if turnCount == 0 && row.RolloutPath != "" {
+			if f, err := os.Open(row.RolloutPath); err == nil {
+				if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
+					turnCount = tc
+				}
+				_ = f.Close()
+			}
 		}
 
 		s := session.NewSession(row.ID, displayTitle, "codex", profileName, isHost, modTime)
