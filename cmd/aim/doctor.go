@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
@@ -17,6 +21,7 @@ import (
 
 func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var check bool
+	var report bool
 	cmd := &cobra.Command{
 		Use:   "doctor [agent]",
 		Short: "Diagnose environment, tokens, and binaries",
@@ -25,6 +30,10 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 			agent := ""
 			if len(args) > 0 {
 				agent = args[0]
+			}
+			if report {
+				fmt.Print(generateDiagnosticReport(reg, pm, agent))
+				return nil
 			}
 			ok := runDoctor(reg, pm, agent)
 			if check && !ok {
@@ -40,6 +49,7 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 		},
 	}
 	cmd.Flags().BoolVar(&check, "check", false, "Exit with non-zero status if any diagnostic check fails")
+	cmd.Flags().BoolVar(&report, "report", false, "Generate an anonymized Markdown diagnostic report for issue submission")
 	return cmd
 }
 
@@ -169,3 +179,106 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 	}
 	return allOK
 }
+
+func generateDiagnosticReport(reg *agents.Registry, pm *profile.ProfileManager, agentName string) string {
+	var b strings.Builder
+	homeDir, _ := os.UserHomeDir()
+	realHome := config.RealHomeDir()
+	sanitize := func(s string) string {
+		return diagnostics.SanitizeText(s, homeDir, realHome)
+	}
+
+	cfg, _ := config.LoadConfig()
+
+	b.WriteString("# AIM Diagnostic Report\n\n")
+
+	b.WriteString("## System & Environment\n")
+	b.WriteString(fmt.Sprintf("- AIM Version: %s (commit: %s)\n", Version, Commit))
+	b.WriteString(fmt.Sprintf("- Environment: %s/%s (%s)\n", runtime.GOOS, runtime.GOARCH, runtime.Version()))
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "unknown"
+	}
+	b.WriteString(fmt.Sprintf("- Shell: %s\n", sanitize(shell)))
+	if pm != nil {
+		b.WriteString(fmt.Sprintf("- AIM Base Directory: %s\n", sanitize(pm.BaseDir)))
+	}
+	b.WriteString("\n")
+
+	b.WriteString("## Agents & Tooling\n")
+	b.WriteString("| Agent | Installed | Binary Path | Configured Profiles |\n")
+	b.WriteString("| --- | --- | --- | --- |\n")
+
+	var adapters []agents.AgentAdapter
+	if reg != nil {
+		if agentName != "" {
+			if a, err := reg.Get(agentName); err == nil {
+				adapters = append(adapters, a)
+			}
+		} else {
+			adapters = reg.All()
+		}
+	}
+
+	for _, adapter := range adapters {
+		binPath, err := exec.LookPath(adapter.BinaryName())
+		installed := "Yes"
+		if err != nil {
+			installed = "No"
+			binPath = "not found"
+		} else {
+			binPath = sanitize(binPath)
+		}
+		profCount := 0
+		if pm != nil {
+			profs, _ := pm.ListProfilesForAgent(adapter.Name(), cfg, reg)
+			profCount = len(profs)
+		}
+		b.WriteString(fmt.Sprintf("| %s | %s | %s | %d |\n", adapter.Name(), installed, binPath, profCount))
+	}
+	b.WriteString("\n")
+
+	totalProfiles := 0
+	if pm != nil {
+		allProfs, _ := pm.ListProfiles()
+		totalProfiles = len(allProfs)
+	}
+	b.WriteString("## Profiles Configuration\n")
+	b.WriteString(fmt.Sprintf("- Total Configured Profiles: %d\n", totalProfiles))
+	if cfg != nil {
+		b.WriteString(fmt.Sprintf("- Custom Bridged Paths: %d\n", len(cfg.CustomBridgedPaths)))
+		b.WriteString(fmt.Sprintf("- Custom Ignored Keychains: %d\n", len(cfg.CustomIgnoredKeychains)))
+	}
+	b.WriteString("\n")
+
+	b.WriteString("## Diagnostics Checks\n")
+	b.WriteString("| Agent | Category | Status | Message |\n")
+	b.WriteString("| --- | --- | --- | --- |\n")
+
+	bridged := map[string]bool{}
+	for _, adapter := range adapters {
+		if pm == nil {
+			continue
+		}
+		profiles, _ := pm.ListProfilesForAgent(adapter.Name(), cfg, reg)
+		for idx, p := range profiles {
+			results := adapter.Doctor(context.Background(), p, pm.ProfileDir(p))
+			if !bridged[p] {
+				bridged[p] = true
+				var extraPaths []string
+				if cfg != nil {
+					extraPaths = cfg.CustomBridgedPaths
+				}
+				results = append(results, profile.BridgeDiagnostics(p, config.RealHomeDir(), pm.ProfileDir(p), extraPaths...)...)
+			}
+			for _, r := range results {
+				sanitizedMsg := sanitize(r.Message)
+				sanitizedMsg = strings.ReplaceAll(sanitizedMsg, p, fmt.Sprintf("[profile-%d]", idx+1))
+				b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", adapter.Name(), r.Category, r.Status, sanitizedMsg))
+			}
+		}
+	}
+
+	return b.String()
+}
+

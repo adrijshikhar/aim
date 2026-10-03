@@ -5,17 +5,32 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
-func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registry, pm *profile.ProfileManager) int {
+func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registry, pm *profile.ProfileManager) (exitCode int) {
 	logger.Init(config.BaseDir())
 	defer logger.Close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			stack := debug.Stack()
+			home, _ := os.UserHomeDir()
+			issueURL, report := diagnostics.HandlePanic(r, stack, home, Version, Commit)
+			logger.Error("Unhandled panic in AIM: %v\n%s", r, report)
+			fmt.Fprintf(os.Stderr, "\n\x1b[31;1m⚠️  AIM encountered an unexpected crash: %v\x1b[0m\n", r)
+			fmt.Fprintf(os.Stderr, "A sanitized crash report has been logged to %s\n\n", logger.LogFilePath())
+			fmt.Fprintf(os.Stderr, "Help improve AIM by reporting this issue:\n\x1b[36m%s\x1b[0m\n\n", issueURL)
+			exitCode = 1
+		}
+	}()
 
 	cfg, _ := config.LoadConfig()
 	if cfg != nil && cfg.Debug {

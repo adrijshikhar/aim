@@ -1,0 +1,70 @@
+name: Bug Report
+description: Report an issue, crash, or unexpected behavior in AIM
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please provide as much detail as possible to help us diagnose and reproduce the problem.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: A concise summary of the issue.
+      placeholder: "e.g. Quota refresh times out when switching profiles"
+    validations:
+      required: true
+  - type: checkboxes
+    id: agents
+    attributes:
+      label: Affected Agent(s)
+      description: Which agent adapters or components are affected?
+      options:
+        - label: Claude Code (`claude`)
+        - label: Codex (`codex`)
+        - label: Antigravity (`agy`)
+        - label: Gemini (`gemini`)
+        - label: AIM TUI / Core CLI
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed sequence of actions to reproduce the bug.
+      placeholder: |
+        1. Run `aim list`
+        2. Press 'r' to refresh
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: doctor-report
+    attributes:
+      label: Diagnostic Report (`aim doctor --report`)
+      description: |
+        Please run `aim doctor --report` in your terminal and paste the sanitized markdown output below.
+        Sensitive filesystem paths and tokens are automatically scrubbed by AIM.
+      render: markdown
+      placeholder: "Paste output of `aim doctor --report` here"
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I verified that no personal authentication tokens or secret credentials are in this report.
+          required: true
