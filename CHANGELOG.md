@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/adrijshikhar/aim/compare/v0.12.0...v0.13.0) (2026-10-03)
+
+
+### Features
+
+* **session:** add generic CWD resolution and rich session summaries across adapters ([#75](https://github.com/adrijshikhar/aim/issues/75)) ([51d6865](https://github.com/adrijshikhar/aim/commit/51d6865bb99025954673fd8f2d007d7c60c84cc9))
+
+
+### Bug Fixes
+
+* **usage:** prevent false offline badge during quota refresh and preserve cached quotas ([#77](https://github.com/adrijshikhar/aim/issues/77)) ([eeb7375](https://github.com/adrijshikhar/aim/commit/eeb737549b629b599b2b7a37a625463166293298))
+
 ## [0.12.0](https://github.com/adrijshikhar/aim/compare/v0.11.2...v0.12.0) (2026-10-02)
 
 
