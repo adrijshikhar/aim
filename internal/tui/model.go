@@ -593,22 +593,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case feedbackResultMsg:
-		if msg.err != nil {
-			if msg.fallbackURL != "" {
-				m.statusMessage = "Feedback fallback issue URL: " + msg.fallbackURL
-			} else {
-				m.statusMessage = "Feedback error: " + msg.err.Error()
-			}
-		} else {
-			m.statusMessage = "✓ Thank you! Your feedback helps shape AIM."
-		}
-		return m, nil
-
-	case updateAvailableMsg:
-		m.updateAvailable = msg.latestVersion
-		return m, nil
-
 	case tea.KeyMsg:
 		if m.feedbackModal.active {
 			return m.updateFeedbackModal(msg)

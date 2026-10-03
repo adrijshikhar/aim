@@ -267,7 +267,10 @@ func generateDiagnosticReport(reg *agents.Registry, pm *profile.ProfileManager, 
 		}
 		profiles, _ := pm.ListProfilesForAgent(adapter.Name(), cfg, reg)
 		for idx, p := range profiles {
-			results := adapter.Doctor(context.Background(), p, pm.ProfileDir(p))
+			var results []agents.DiagnosticResult
+			if diag, ok := adapter.(agents.Diagnostician); ok {
+				results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
+			}
 			if !bridged[p] {
 				bridged[p] = true
 				var extraPaths []string
