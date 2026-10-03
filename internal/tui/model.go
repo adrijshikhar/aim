@@ -11,6 +11,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/updater"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -71,8 +72,9 @@ type Model struct {
 
 	loading  bool
 	inFlight map[string]bool
-	spinner  spinner.Model
-	version  string
+	spinner         spinner.Model
+	version         string
+	updateAvailable string
 
 	deleteModal    deleteModalState
 	renameModal    renameModalState
@@ -479,13 +481,30 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 		return ""
 	}
 
-	// Always report the bottleneck / most constrained limit percentage so the
+// Always report the bottleneck / most constrained limit percentage so the
 	// displayed percentage is strictly consistent with the badge color/status.
 	return fmt.Sprintf("[%d%%]", rep.BottleneckPct())
 }
 
+type updateAvailableMsg struct {
+	latestVersion string
+}
+
+func (m Model) checkForUpdateCmd() tea.Cmd {
+	v := m.Version()
+	cacheDir := config.CacheDir()
+	return func() tea.Msg {
+		cached := updater.CheckCached(v, cacheDir)
+		if cached != nil && cached.UpdateAvailable {
+			return updateAvailableMsg{latestVersion: cached.LatestVersion}
+		}
+		updater.MaybeTriggerBackgroundCheck(v, cacheDir)
+		return nil
+	}
+}
+
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), tickEvery(5*time.Minute))
+	return tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), m.checkForUpdateCmd(), tickEvery(5*time.Minute))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -567,6 +586,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMessage = "✓ Thank you! Your feedback helps shape AIM."
 		}
+		return m, nil
+
+	case updateAvailableMsg:
+		m.updateAvailable = msg.latestVersion
 		return m, nil
 
 	case tea.KeyMsg:

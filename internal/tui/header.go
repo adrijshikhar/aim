@@ -81,6 +81,10 @@ func (m Model) renderHeader() string {
 	if v := m.formatVersionTag(); v != "" {
 		tagLine += " " + versionStyle.Render(v)
 	}
+	if m.updateAvailable != "" {
+		updateStyle := lipgloss.NewStyle().Bold(true).Foreground(StatusYellow)
+		tagLine += " " + updateStyle.Render(fmt.Sprintf("[Update Available: %s]", m.updateAvailable))
+	}
 
 	var out strings.Builder
 	if m.width > 0 && m.width < 70 {

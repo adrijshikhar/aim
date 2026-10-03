@@ -13,6 +13,7 @@ import (
 	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/updater"
 )
 
 func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registry, pm *profile.ProfileManager) (exitCode int) {
@@ -69,6 +70,7 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 		ctx = context.Background()
 	}
 	err := rootCmd.ExecuteContext(ctx)
+	notifyUpdate(args)
 	if err == nil {
 		return 0
 	}
@@ -84,6 +86,22 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 
 func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) int {
 	return dispatchWithContext(context.Background(), args, reg, pm)
+}
+
+func notifyUpdate(args []string) {
+	if len(args) > 0 && args[0] == "__complete" {
+		return
+	}
+	for _, a := range args {
+		if a == "--json" || a == "-j" {
+			return
+		}
+	}
+	cached := updater.CheckCached(Version, config.CacheDir())
+	if cached != nil && cached.UpdateAvailable {
+		fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'brew upgrade aim')\n", Version, cached.LatestVersion)
+	}
+	updater.MaybeTriggerBackgroundCheck(Version, config.CacheDir())
 }
 
 func main() {
