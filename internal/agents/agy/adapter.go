@@ -60,16 +60,15 @@ func getOAuthCredentials() (string, string) {
 // Compile-time assertion that Adapter implements agents.AgentAdapter.
 var _ agents.AgentAdapter = (*Adapter)(nil)
 
-type Adapter struct{}
-
-func NewAdapter() *Adapter {
-	return &Adapter{}
+type Adapter struct {
+	agents.BaseAdapter
 }
 
-func (a *Adapter) Name() string        { return "agy" }
-func (a *Adapter) DisplayName() string { return "Antigravity CLI" }
-func (a *Adapter) Aliases() []string   { return []string{"antigravity"} }
-func (a *Adapter) BinaryName() string  { return "agy" }
+func NewAdapter() *Adapter {
+	return &Adapter{
+		BaseAdapter: agents.NewBaseAdapter("agy", "Antigravity CLI", "agy", []string{"antigravity"}),
+	}
+}
 
 func (a *Adapter) TokenPath(profileDir string) string {
 	return filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
@@ -278,15 +277,9 @@ func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
 func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) error {
 	clientID, clientSecret := getOAuthCredentials()
 	if clientID == "" || clientSecret == "" {
-		bin, err := exec.LookPath(a.BinaryName())
-		if err != nil {
-			realHome := config.RealHomeDir()
-			fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-			if _, sErr := os.Stat(fallback); sErr == nil {
-				bin = fallback
-			} else {
-				return fmt.Errorf("OAuth client credentials not configured and '%s' binary not found in PATH", a.BinaryName())
-			}
+		bin := a.ResolveBinary()
+		if _, err := exec.LookPath(bin); err != nil {
+			return fmt.Errorf("OAuth client credentials not configured and '%s' binary not found in PATH", a.BinaryName())
 		}
 		realHome := config.RealHomeDir()
 		_ = bridgeSharedState(realHome, profileDir)
@@ -406,21 +399,10 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	// Also copy settings.json from host if not present in profile
 	copyHostSettings(realHome, tokenDir)
 
-	bin, err := exec.LookPath(a.BinaryName())
-	if err != nil {
-		fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-		if _, sErr := os.Stat(fallback); sErr == nil {
-			bin = fallback
-		} else {
-			bin = a.BinaryName()
-		}
-	}
+	bin := a.ResolveBinary()
 	logger.Debug("[agy] Resolved binary: %s", bin)
 
-	envMap := config.StorageEnv()
-	envMap["HOME"] = profileDir
-	envMap["AIM_AGENT"] = a.Name()
-	envMap["AIM_PROFILE"] = profileName
+	envMap := a.BaseLaunchEnv(profileName, profileDir, nil)
 	// Only set SSH_CONNECTION if profile has valid, healthy credentials on disk,
 	// to isolate file-based token reads without suppressing browser auto-open during login or re-auth.
 	if a.IsTokenHealthy(profileName, profileDir) {
@@ -657,15 +639,8 @@ func copyDirectory(src, dst string) error {
 
 func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {
 	var results []agents.DiagnosticResult
-	bin, err := exec.LookPath(a.BinaryName())
-	if err != nil {
-		realHome, _ := os.UserHomeDir()
-		fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-		if _, sErr := os.Stat(fallback); sErr == nil {
-			bin = fallback
-			err = nil
-		}
-	}
+	bin := a.ResolveBinary()
+	path, err := exec.LookPath(bin)
 	if err != nil {
 		results = append(results, agents.DiagnosticResult{
 			Category: "Binary",
@@ -676,7 +651,7 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 		results = append(results, agents.DiagnosticResult{
 			Category: "Binary",
 			Status:   "OK",
-			Message:  fmt.Sprintf("Found %s at %s", a.BinaryName(), bin),
+			Message:  fmt.Sprintf("Found %s at %s", a.BinaryName(), path),
 		})
 	}
 
@@ -866,16 +841,8 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		}, nil
 	}
 
-	bin, err := exec.LookPath(a.BinaryName())
-	if err != nil {
-		realHome, _ := os.UserHomeDir()
-		fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-		if _, sErr := os.Stat(fallback); sErr == nil {
-			bin = fallback
-			err = nil
-		}
-	}
-	if err != nil {
+	bin := a.ResolveBinary()
+	if _, err := exec.LookPath(bin); err != nil {
 		return &usage.Report{
 			Agent:        a.Name(),
 			Profile:      profileName,

@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -143,27 +142,5 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 // (SSH variables, HOME, AIM_* variables, agent-specific ambient tokens) unless explicitly provided in launchEnv,
 // and applying overrides. This prevents host tokens from inadvertently leaking into profile executions.
 func BuildEnv(environ []string, launchEnv map[string]string) []string {
-	env := make([]string, 0, len(environ)+len(launchEnv))
-	for _, e := range environ {
-		idx := strings.IndexByte(e, '=')
-		if idx == -1 {
-			continue
-		}
-		key := e[:idx]
-		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" ||
-			key == "GEMINI_CLI_HOME" || key == "CODEX_HOME" || key == "CLAUDE_CONFIG_DIR" ||
-			key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" ||
-			key == "AIM_SESSION_ID" || key == "CLAUDE_CODE_OAUTH_TOKEN" ||
-			key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
-			continue
-		}
-		if _, overridden := launchEnv[key]; overridden {
-			continue
-		}
-		env = append(env, e)
-	}
-	for k, v := range launchEnv {
-		env = append(env, k+"="+v)
-	}
-	return env
+	return agents.BuildEnv(environ, launchEnv)
 }

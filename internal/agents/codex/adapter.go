@@ -27,16 +27,15 @@ import (
 // Compile-time assertion that Adapter implements agents.AgentAdapter.
 var _ agents.AgentAdapter = (*Adapter)(nil)
 
-type Adapter struct{}
-
-func NewAdapter() *Adapter {
-	return &Adapter{}
+type Adapter struct {
+	agents.BaseAdapter
 }
 
-func (a *Adapter) Name() string        { return "codex" }
-func (a *Adapter) DisplayName() string { return "Codex CLI" }
-func (a *Adapter) Aliases() []string   { return []string{"codex-cli", "openai-codex"} }
-func (a *Adapter) BinaryName() string  { return "codex" }
+func NewAdapter() *Adapter {
+	return &Adapter{
+		BaseAdapter: agents.NewBaseAdapter("codex", "Codex CLI", "codex", []string{"codex-cli", "openai-codex"}),
+	}
+}
 
 func (a *Adapter) TokenPath(profileDir string) string {
 	return filepath.Join(profileDir, ".codex", "auth.json")
@@ -94,20 +93,6 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	}
 	logger.Debug("[codex] Successfully seeded credentials from %s to %s", hostAuthPath, destPath)
 	return true
-}
-
-// ResolveBinary locates the codex executable on the system.
-func (a *Adapter) ResolveBinary() string {
-	bin, err := exec.LookPath(a.BinaryName())
-	if err == nil {
-		return bin
-	}
-	realHome := config.RealHomeDir()
-	fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-	if _, err := os.Stat(fallback); err == nil {
-		return fallback
-	}
-	return a.BinaryName()
 }
 
 func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) error {
@@ -180,11 +165,9 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	bin := a.ResolveBinary()
 	logger.Debug("[codex] Resolved binary: %s", bin)
 
-	envMap := config.StorageEnv()
-	envMap["HOME"] = profileDir
-	envMap["CODEX_HOME"] = codexDir
-	envMap["AIM_AGENT"] = a.Name()
-	envMap["AIM_PROFILE"] = profileName
+	envMap := a.BaseLaunchEnv(profileName, profileDir, map[string]string{
+		"CODEX_HOME": codexDir,
+	})
 
 	logger.Debug("[codex] Launch env: HOME=%s, CODEX_HOME=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, codexDir, a.Name(), profileName)

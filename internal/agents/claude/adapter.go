@@ -26,34 +26,14 @@ import (
 // Compile-time assertion that Adapter implements agents.AgentAdapter.
 var _ agents.AgentAdapter = (*Adapter)(nil)
 
-type Adapter struct{}
-
-func NewAdapter() *Adapter {
-	return &Adapter{}
+type Adapter struct {
+	agents.BaseAdapter
 }
 
-func (a *Adapter) Name() string        { return "claude" }
-func (a *Adapter) DisplayName() string { return "Claude Code" }
-func (a *Adapter) Aliases() []string   { return []string{"cc", "claude-code"} }
-func (a *Adapter) BinaryName() string  { return "claude" }
-
-// ResolveBinary locates the claude executable on the system.
-func (a *Adapter) ResolveBinary() string {
-	bin, err := exec.LookPath(a.BinaryName())
-	if err == nil {
-		return bin
+func NewAdapter() *Adapter {
+	return &Adapter{
+		BaseAdapter: agents.NewBaseAdapter("claude", "Claude Code", "claude", []string{"cc", "claude-code"}),
 	}
-	fallbacks := []string{
-		filepath.Join(config.RealHomeDir(), ".local", "bin", a.BinaryName()),
-		filepath.Join("/opt/homebrew/bin", a.BinaryName()),
-		filepath.Join("/usr/local/bin", a.BinaryName()),
-	}
-	for _, fb := range fallbacks {
-		if _, err := os.Stat(fb); err == nil {
-			return fb
-		}
-	}
-	return a.BinaryName()
 }
 
 // HasCredentials returns true if the profile has valid authentication credentials:
@@ -144,11 +124,9 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
 
 	bin := a.ResolveBinary()
-	envMap := config.StorageEnv()
-	envMap["HOME"] = profileDir
-	envMap["CLAUDE_CONFIG_DIR"] = claudeDir
-	envMap["AIM_AGENT"] = a.Name()
-	envMap["AIM_PROFILE"] = profileName
+	envMap := a.BaseLaunchEnv(profileName, profileDir, map[string]string{
+		"CLAUDE_CONFIG_DIR": claudeDir,
+	})
 
 	logger.Debug("[claude] Launch env: HOME=%s, CLAUDE_CONFIG_DIR=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, claudeDir, a.Name(), profileName)
