@@ -22,6 +22,7 @@ type Spinner struct {
 	text   string
 	done   chan struct{}
 	active bool
+	wg     sync.WaitGroup
 }
 
 // NewSpinner creates a new terminal progress spinner.
@@ -47,23 +48,28 @@ func (s *Spinner) Start() {
 		return
 	}
 	s.active = true
+	s.done = make(chan struct{})
+	s.wg.Add(1)
 	s.mu.Unlock()
 
 	go func() {
+		defer s.wg.Done()
 		frameIdx := 0
 		ticker := time.NewTicker(s.delay)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-s.done:
+				s.mu.Lock()
 				fmt.Fprintf(s.out, "\r\033[K")
+				s.mu.Unlock()
 				return
 			case <-ticker.C:
 				s.mu.Lock()
 				txt := s.text
-				s.mu.Unlock()
 				spin := lipgloss.NewStyle().Foreground(s.color).Render(s.frames[frameIdx%len(s.frames)])
 				fmt.Fprintf(s.out, "\r\033[K%s %s", spin, txt)
+				s.mu.Unlock()
 				frameIdx++
 			}
 		}
@@ -77,13 +83,16 @@ func (s *Spinner) UpdateText(text string) {
 	s.mu.Unlock()
 }
 
-// Stop terminates the spinner and clears its terminal line.
+// Stop terminates the spinner, clears its terminal line, and waits for the background worker to exit.
 func (s *Spinner) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.active {
+		s.mu.Unlock()
 		return
 	}
 	s.active = false
 	close(s.done)
+	s.mu.Unlock()
+
+	s.wg.Wait()
 }
