@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/feedback"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -92,6 +94,9 @@ func newFeedbackCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 			}
 
 			fmt.Println("\r" + tui.GaugeGreenStyle.Render("✓ Thank you! Your feedback has been submitted."))
+			telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
+			telClient.Track(telemetry.EventFeedbackSubmitted, map[string]any{"category": string(cat)})
+			_ = telClient.Close()
 			return nil
 		},
 	}

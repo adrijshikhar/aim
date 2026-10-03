@@ -612,7 +612,67 @@ print("  ✔ Zero false offline verified: [offline] never appeared during active
 print("  ✔ Seamless quota update verified: fresh [85%] rendered after refresh completed")
 PYTEST
 
+# ==============================================================================
+# PHASE 8: Diagnostics & Sanitized Markdown Report (aim doctor --report)
+# ==============================================================================
+echo ""
+echo "=== Phase 8: Diagnostics & Sanitized Markdown Report (aim doctor --report) ==="
+
+DOCTOR_OUT=$("$AIM_BIN" doctor --report)
+
+echo "$DOCTOR_OUT" | grep -q "# AIM Diagnostic Report" || {
+  echo "FAIL: Expected markdown header '# AIM Diagnostic Report' in doctor output"
+  exit 1
+}
+echo "$DOCTOR_OUT" | grep -q "AIM Version:" || {
+  echo "FAIL: Expected 'AIM Version:' in doctor report"
+  exit 1
+}
+echo "$DOCTOR_OUT" | grep -q "Agents & Tooling" || {
+  echo "FAIL: Expected 'Agents & Tooling' table in doctor report"
+  exit 1
+}
+# Verify home path is sanitized
+if echo "$DOCTOR_OUT" | grep -q "/Users/\|/home/"; then
+  echo "FAIL: Raw home directory path leaked in doctor report!"
+  exit 1
+fi
+echo "  ✔ Doctor markdown report generated with sanitized paths and tooling matrix"
+
+# ==============================================================================
+# PHASE 9: Direct Feedback Submission & GitHub Issue Fallback (aim feedback)
+# ==============================================================================
+echo ""
+echo "=== Phase 9: Direct In-Tool Feedback (aim feedback) ==="
+
+FEEDBACK_OUT=$("$AIM_BIN" feedback --type feature --message "Add Fish completions" --include-doctor)
+
+echo "$FEEDBACK_OUT" | grep -q "github.com/adrijshikhar/aim/issues/new" || {
+  echo "FAIL: Expected GitHub issue fallback link in feedback output, got:"
+  echo "$FEEDBACK_OUT"
+  exit 1
+}
+echo "  ✔ Direct feedback command formatted pre-filled issue URL with doctor context"
+
+# ==============================================================================
+# PHASE 10: Anonymous Telemetry Opt-Out & Spool Verification
+# ==============================================================================
+echo ""
+echo "=== Phase 10: Telemetry Opt-Out Verification ==="
+
+DNT_TEST_DIR=$(mktemp -d)
+DO_NOT_TRACK=1 AIM_HOME="$DNT_TEST_DIR" "$AIM_BIN" version > /dev/null
+
+if [ -f "$DNT_TEST_DIR/cache/telemetry_spool.json" ]; then
+  echo "FAIL: Telemetry spool created when DO_NOT_TRACK=1!"
+  rm -rf "$DNT_TEST_DIR"
+  exit 1
+fi
+rm -rf "$DNT_TEST_DIR"
+echo "  ✔ Universal DO_NOT_TRACK=1 strictly enforced (0 telemetry collected)"
+
 echo ""
 echo "========================================================================"
 echo "  ALL E2E LIVE TESTS PASSED! (0 manual checks required)                  "
 echo "========================================================================"
+

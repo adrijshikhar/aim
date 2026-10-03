@@ -83,14 +83,15 @@ type Model struct {
 	sessionsDrawer SessionsDrawer
 	resumeModal    resumeModalState
 	helpModal      helpModalState
-	feedbackModal  feedbackModalState
-	statusMessage  string
 	filter         filterState
 	keys           KeyMap
 	help           help.Model
 
 	selectedSession *session.Session
 	selectedArgs    []string
+
+	feedbackModal feedbackModalState
+	statusMessage string
 }
 
 func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config) Model {
@@ -521,6 +522,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), tickEvery(5*time.Minute))
 
+	case feedbackResultMsg:
+		if msg.err != nil {
+			if msg.fallbackURL != "" {
+				m.statusMessage = "Feedback fallback issue URL: " + msg.fallbackURL
+			} else {
+				m.statusMessage = "Feedback error: " + msg.err.Error()
+			}
+		} else {
+			m.statusMessage = "✓ Thank you! Your feedback helps shape AIM."
+		}
+		return m, nil
+
+	case updateAvailableMsg:
+		m.updateAvailable = msg.latestVersion
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -623,6 +640,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.helpModal.active {
 			return m.updateHelpOverlay(msg)
+		}
+
+		if m.feedbackModal.active {
+			return m.updateFeedbackModal(msg)
 		}
 
 		if m.filter.active {

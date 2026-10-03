@@ -14,6 +14,7 @@ import (
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -33,6 +34,9 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 			}
 			if report {
 				fmt.Print(generateDiagnosticReport(reg, pm, agent))
+				telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
+				telClient.Track(telemetry.EventDoctorReportGenerated, map[string]any{})
+				_ = telClient.Close()
 				return nil
 			}
 			ok := runDoctor(reg, pm, agent)

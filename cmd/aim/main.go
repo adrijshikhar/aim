@@ -13,10 +13,14 @@ import (
 	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/updater"
+	"time"
 )
 
 func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registry, pm *profile.ProfileManager) (exitCode int) {
+	startTime := time.Now()
+	telemetry.MaybeDisplayFirstRunNotice(config.BaseDir())
 	logger.Init(config.BaseDir())
 	defer logger.Close()
 
@@ -71,17 +75,43 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 	}
 	err := rootCmd.ExecuteContext(ctx)
 	notifyUpdate(args)
-	if err == nil {
-		return 0
+
+	code := 0
+	if err != nil {
+		var exitErr *ExitError
+		if errors.As(err, &exitErr) {
+			code = exitErr.Code
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			code = 1
+		}
 	}
 
-	var exitErr *ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.Code
-	}
+	recordCommandTelemetry(args, code, time.Since(startTime), cfg)
+	return code
+}
 
-	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-	return 1
+func recordCommandTelemetry(args []string, code int, duration time.Duration, cfg *config.Config) {
+	if len(args) > 0 && args[0] == "__complete" {
+		return
+	}
+	cmdName := "tui"
+	if len(args) > 0 {
+		if strings.HasPrefix(args[0], "-") {
+			cmdName = "root"
+		} else {
+			cmdName = args[0]
+		}
+	}
+	cleanCmd, cleanAgent := telemetry.SanitizeCommand(cmdName, args)
+	telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, cfg)
+	telClient.Track(telemetry.EventCommandExecuted, map[string]any{
+		"command":         cleanCmd,
+		"agent":           cleanAgent,
+		"exit_code":       code,
+		"duration_bucket": telemetry.DurationBucket(duration),
+	})
+	_ = telClient.Close()
 }
 
 func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) int {
