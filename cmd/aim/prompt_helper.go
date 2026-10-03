@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var isInteractiveFunc = func(r io.Reader) bool {
+func defaultIsInteractive(r io.Reader) bool {
 	if f, ok := r.(*os.File); ok {
 		return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 	}
@@ -30,15 +30,18 @@ func isAutoCreateEnv() bool {
 	return y == "1" || y == "true" || y == "yes"
 }
 
-// confirmProfileExists checks if a profile exists.
-// If it does not exist:
-//   - If autoCreate is true or AIM_AUTO_CREATE=1 / AIM_YES=1 is set, creates without prompting.
-//   - If running interactively, prompts the user:
-//     "Profile \"<name>\" does not exist. Do you want to create it and <actionDesc>? [y/N]: "
-//     If profileName contains "--", prints a warning suggesting the user might have missed a space before a flag.
-//     Returns (true, nil) if the user confirms with "y"/"yes", or (false, nil) if the user cancels.
-//   - If non-interactive, returns an error to prevent silent profile pollution in automated scripts.
-func confirmProfileExists(cmd *cobra.Command, pm *profile.ProfileManager, profileName, actionDesc string, autoCreate bool) (bool, error) {
+// PromptHelper encapsulates interactive confirmation logic with customizable interactivity checks.
+type PromptHelper struct {
+	isInteractive func(io.Reader) bool
+}
+
+// NewPromptHelper creates a new PromptHelper.
+func NewPromptHelper(isInteractive func(io.Reader) bool) *PromptHelper {
+	return &PromptHelper{isInteractive: isInteractive}
+}
+
+// ConfirmProfileExists checks if a profile exists.
+func (p *PromptHelper) ConfirmProfileExists(cmd *cobra.Command, pm *profile.ProfileManager, profileName, actionDesc string, autoCreate bool) (bool, error) {
 	if pm.ProfileExists(profileName) {
 		return true, nil
 	}
@@ -52,7 +55,14 @@ func confirmProfileExists(cmd *cobra.Command, pm *profile.ProfileManager, profil
 		return true, nil
 	}
 
-	if isInteractiveFunc(cmd.InOrStdin()) {
+	interactive := false
+	if p != nil && p.isInteractive != nil {
+		interactive = p.isInteractive(cmd.InOrStdin())
+	} else {
+		interactive = checkInteractive(cmd, cmd.InOrStdin())
+	}
+
+	if interactive {
 		isTTY := false
 		if f, ok := cmd.OutOrStdout().(*os.File); ok {
 			isTTY = isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
@@ -106,4 +116,8 @@ func confirmProfileExists(cmd *cobra.Command, pm *profile.ProfileManager, profil
 	}
 
 	return false, fmt.Errorf("profile %q does not exist; run 'aim login <agent> %s' or run interactively to create it", profileName, profileName)
+}
+
+func confirmProfileExists(cmd *cobra.Command, pm *profile.ProfileManager, profileName, actionDesc string, autoCreate bool) (bool, error) {
+	return NewPromptHelper(nil).ConfirmProfileExists(cmd, pm, profileName, actionDesc, autoCreate)
 }

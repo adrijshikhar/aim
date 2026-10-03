@@ -149,7 +149,10 @@ func TestParameterized_AllAdapters_Doctor(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			results := adapter.Doctor(ctx, "prof-"+tc.agent, profDir)
+			var results []agents.DiagnosticResult
+			if diag, ok := adapter.(agents.Diagnostician); ok {
+				results = diag.Doctor(ctx, "prof-"+tc.agent, profDir)
+			}
 			if len(results) == 0 {
 				t.Errorf("expected doctor diagnostic results for adapter %q", tc.agent)
 			}
@@ -167,9 +170,8 @@ func TestParameterized_NonSessionAdapters_ResumeRejection(t *testing.T) {
 	pm := profile.NewProfileManager(t.TempDir())
 	_, _ = pm.EnsureProfile("office")
 
-	oldMgr := defaultSessionManager
-	defer func() { defaultSessionManager = oldMgr }()
-	defaultSessionManager = setupParameterizedSessionManager
+	mgr := setupParameterizedSessionManager()
+	ctx := WithSessionManager(context.Background(), mgr)
 
 	for _, tc := range allAdapters {
 		if tc.hasSessions {
@@ -177,6 +179,7 @@ func TestParameterized_NonSessionAdapters_ResumeRejection(t *testing.T) {
 		}
 		t.Run(tc.agent, func(t *testing.T) {
 			cmd := newResumeCmd(reg, pm)
+			cmd.SetContext(ctx)
 			var buf bytes.Buffer
 			cmd.SetOut(&buf)
 			cmd.SetErr(&buf)
@@ -203,9 +206,6 @@ func TestParameterized_SessionAdapters_ListingAndHydration(t *testing.T) {
 	_, _ = pm.EnsureProfile("office")
 
 	mgr := setupParameterizedSessionManager()
-	oldMgr := defaultSessionManager
-	defer func() { defaultSessionManager = oldMgr }()
-	defaultSessionManager = func() *session.Manager { return mgr }
 
 	ctx := context.Background()
 

@@ -18,6 +18,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// SubModel represents a modular child component in the TUI (such as drawers or modals)
+// following the Bubbletea Model lifecycle.
+type SubModel interface {
+	Init() tea.Cmd
+	Update(tea.Msg) (SubModel, tea.Cmd)
+	View() string
+}
+
 type ActionOutcome int
 
 const (
@@ -68,8 +76,8 @@ type Model struct {
 	deleteModal    deleteModalState
 	renameModal    renameModalState
 	moveModal      moveModalState
-	doctorDrawer   doctorDrawerState
-	sessionsDrawer sessionsDrawerState
+	doctorDrawer   DoctorDrawer
+	sessionsDrawer SessionsDrawer
 	resumeModal    resumeModalState
 	helpModal      helpModalState
 	filter         filterState
@@ -240,10 +248,16 @@ func (m Model) switchAgent(targetAgent string) (Model, tea.Cmd) {
 	m.cursor = 0
 	m = m.refreshProfiles()
 	m = m.loadCachedReports()
+	var docCmd tea.Cmd
 	if m.doctorDrawer.active {
 		m = m.fetchDoctorDiagnostics()
+		m.doctorDrawer.loading = true
+		docCmd = m.fetchDoctorDiagnosticsCmd()
 	}
 	m.loading = true
+	if docCmd != nil {
+		return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), docCmd)
+	}
 	return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd())
 }
 
@@ -363,11 +377,15 @@ func (m Model) refreshTargets() []usage.TargetProfile {
 				if m.pm != nil {
 					pDir = m.pm.ProfileDir(p)
 				}
+				var usageFn func(context.Context, string, string) (*usage.Report, error)
+				if up, ok := ad.(agents.UsageProvider); ok {
+					usageFn = up.GetUsage
+				}
 				targets = append(targets, usage.TargetProfile{
 					Agent:      ad.Name(),
 					Profile:    p,
 					ProfileDir: pDir,
-					GetUsageFn: ad.GetUsage,
+					GetUsageFn: usageFn,
 				})
 			}
 		}
@@ -489,6 +507,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.help.Width = 100
 		}
+		m.sessionsDrawer.height = msg.Height
+		m.sessionsDrawer.help.Width = m.help.Width
 		return m, nil
 
 	case usageReportMsg:
@@ -517,6 +537,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delete(m.inFlight, k)
 				}
 			}
+		}
+		return m, nil
+
+	case sessionsLoadedMsg:
+		sub, _ := m.sessionsDrawer.Update(msg)
+		if sd, ok := sub.(SessionsDrawer); ok {
+			m.sessionsDrawer = sd
+		}
+		return m, nil
+
+	case doctorDiagnosticsLoadedMsg:
+		sub, _ := m.doctorDrawer.Update(msg)
+		if dd, ok := sub.(DoctorDrawer); ok {
+			m.doctorDrawer = dd
 		}
 		return m, nil
 

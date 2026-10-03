@@ -27,7 +27,7 @@ func (m *mockAdapter) HasCredentials(profileDir string) bool {
 func (m *mockAdapter) Login(ctx context.Context, profileName, profileDir string) error {
 	return nil
 }
-func (m *mockAdapter) PrepareEnv(profileName, profileDir string) (LaunchEnv, error) {
+func (m *mockAdapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (LaunchEnv, error) {
 	return LaunchEnv{}, nil
 }
 func (m *mockAdapter) Doctor(ctx context.Context, profileName, profileDir string) []DiagnosticResult {

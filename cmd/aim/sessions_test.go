@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -179,29 +180,23 @@ func TestSessionsCmd_Filters(t *testing.T) {
 func TestSessionsCmd_InteractiveTerminal_LaunchesTUI(t *testing.T) {
 	_, reg, pm := setupMockSessionEnv(t)
 
-	origIsInteractive := isInteractiveSessionsTerminal
-	origRunner := tuiSessionsRunner
-	t.Cleanup(func() {
-		isInteractiveSessionsTerminal = origIsInteractive
-		tuiSessionsRunner = origRunner
-	})
-
-	isInteractiveSessionsTerminal = func(cmd *cobra.Command) bool {
-		return true
-	}
-
 	calledAgent := ""
 	calledProfile := ""
 	calledActiveOnly := false
-	tuiSessionsRunner = func(r *agents.Registry, p *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+
+	ctx := WithInteractiveTerminal(context.Background(), func(cmd *cobra.Command) bool {
+		return true
+	})
+	ctx = WithTUISessionsRunner(ctx, func(r *agents.Registry, p *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
 		calledAgent = initialAgent
 		calledProfile = profileFilter
 		calledActiveOnly = activeOnly
 		return 0
-	}
+	})
 
 	var buf bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(ctx)
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"sessions", "codex", "-p", "work", "--active"})
@@ -225,25 +220,18 @@ func TestSessionsCmd_InteractiveTerminal_LaunchesTUI(t *testing.T) {
 func TestSessionsCmd_PlainFlag_RendersTableEvenInTerminal(t *testing.T) {
 	_, reg, pm := setupMockSessionEnv(t)
 
-	origIsInteractive := isInteractiveSessionsTerminal
-	origRunner := tuiSessionsRunner
-	t.Cleanup(func() {
-		isInteractiveSessionsTerminal = origIsInteractive
-		tuiSessionsRunner = origRunner
-	})
-
-	isInteractiveSessionsTerminal = func(cmd *cobra.Command) bool {
-		return true
-	}
-
 	tuiCalled := false
-	tuiSessionsRunner = func(r *agents.Registry, p *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+	ctx := WithInteractiveTerminal(context.Background(), func(cmd *cobra.Command) bool {
+		return true
+	})
+	ctx = WithTUISessionsRunner(ctx, func(r *agents.Registry, p *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
 		tuiCalled = true
 		return 0
-	}
+	})
 
 	var buf bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(ctx)
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"sessions", "--plain"})

@@ -111,7 +111,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	return nil
 }
 
-func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	// Configure environment variables (e.g. HOME=profileDir) and binary path
 	return agents.LaunchEnv{
 		BinaryPath: a.BinaryName(),

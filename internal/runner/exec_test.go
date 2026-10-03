@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 )
@@ -116,7 +117,7 @@ func TestSetupSignalForwarding(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep: %v", err)
 	}
-	cleanup := setupSignalForwarding(cmd.Process)
+	cleanup := setupSignalForwarding(cmd.Process, false)
 	if cleanup == nil {
 		_ = cmd.Process.Kill()
 		t.Fatal("expected non-nil cleanup function")
@@ -299,5 +300,42 @@ func TestBuildEnv_ClaudeAuthTokensFiltered(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected profile CLAUDE_CODE_OAUTH_TOKEN to be present in built env, got %v", env2)
+	}
+}
+
+type mockPostLauncher struct {
+	launched chan struct{}
+}
+
+func (m *mockPostLauncher) PostLaunch(ctx context.Context, profileName, profileDir string) {
+	close(m.launched)
+}
+
+func TestRunner_PostLauncher(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not found")
+	}
+
+	mock := &mockPostLauncher{launched: make(chan struct{})}
+	r := NewRunner()
+
+	env := agents.LaunchEnv{
+		BinaryPath:   sh,
+		Args:         []string{"-c"},
+		Env:          map[string]string{"HOME": t.TempDir(), "AIM_PROFILE": "test"},
+		PostLauncher: mock,
+	}
+
+	code, err := r.Run(context.Background(), env, []string{"exit 0"})
+	if err != nil || code != 0 {
+		t.Fatalf("expected clean exit code 0, got %d, err: %v", code, err)
+	}
+
+	select {
+	case <-mock.launched:
+		// success
+	case <-time.After(1 * time.Second):
+		t.Fatal("expected PostLaunch to be called")
 	}
 }

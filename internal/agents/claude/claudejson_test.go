@@ -40,7 +40,7 @@ func TestPrepareEnvAndDoctor_NeverWriteRootClaudeJSON(t *testing.T) {
 	root := filepath.Join(p, ".claude.json")
 	_ = os.WriteFile(root, []byte(`{"machineID":"own"}`), 0o600)
 	a := &Adapter{}
-	if _, err := a.PrepareEnv("x", p); err != nil {
+	if _, err := a.PrepareEnv(t.Context(), "x", p); err != nil {
 		t.Fatal(err)
 	}
 	_ = a.Doctor(context.Background(), "x", p)
@@ -49,7 +49,7 @@ func TestPrepareEnvAndDoctor_NeverWriteRootClaudeJSON(t *testing.T) {
 	}
 	fresh := filepath.Join(home, "profiles", "fresh")
 	_ = os.MkdirAll(fresh, 0o700)
-	if _, err := a.PrepareEnv("fresh", fresh); err != nil {
+	if _, err := a.PrepareEnv(t.Context(), "fresh", fresh); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(fresh, ".claude.json")); !os.IsNotExist(err) {
@@ -77,7 +77,7 @@ func TestPrepareEnv_SeedsProfileClaudeJSON(t *testing.T) {
 	p := filepath.Join(home, "profiles", "dev")
 	_ = os.MkdirAll(p, 0o700)
 	a := &Adapter{}
-	if _, err := a.PrepareEnv("dev", p); err != nil {
+	if _, err := a.PrepareEnv(t.Context(), "dev", p); err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestPrepareEnv_SeedsProfileClaudeJSON(t *testing.T) {
 	// Verify existing .claude/.claude.json is NEVER overwritten
 	customContent := `{"custom":"profile-value"}`
 	_ = os.WriteFile(dest, []byte(customContent), 0o600)
-	if _, err := a.PrepareEnv("dev", p); err != nil {
+	if _, err := a.PrepareEnv(t.Context(), "dev", p); err != nil {
 		t.Fatalf("second PrepareEnv failed: %v", err)
 	}
 	afterData, _ := os.ReadFile(dest)

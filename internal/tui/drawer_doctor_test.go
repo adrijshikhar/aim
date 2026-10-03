@@ -24,7 +24,7 @@ func (d *doctorRecorder) HasCredentials(profileDir string) bool { return false }
 func (d *doctorRecorder) Login(ctx context.Context, profileName, profileDir string) error {
 	return nil
 }
-func (d *doctorRecorder) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (d *doctorRecorder) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	return agents.LaunchEnv{}, nil
 }
 func (d *doctorRecorder) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {

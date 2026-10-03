@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -294,21 +295,17 @@ func TestResumeCmd_InteractivePicker_Select(t *testing.T) {
 	pm := profile.NewProfileManager(tempDir)
 	_, _ = pm.EnsureProfile("work")
 
-	oldMgr := defaultSessionManager
-	defer func() { defaultSessionManager = oldMgr }()
 	mockMgr := session.NewManager()
 	mockMgr.RegisterProvider(&testSessionProvider{
 		agent:    "agy",
 		sessions: sampleTestSessions(),
 	})
-	defaultSessionManager = func() *session.Manager { return mockMgr }
-
-	oldInteractive := isInteractiveFunc
-	defer func() { isInteractiveFunc = oldInteractive }()
-	isInteractiveFunc = func(r io.Reader) bool { return true }
+	ctx := WithSessionManager(context.Background(), mockMgr)
+	ctx = WithInteractiveCheck(ctx, func(r io.Reader) bool { return true })
 
 	var buf bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(ctx)
 	cmd.SetIn(strings.NewReader("\n"))
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -334,21 +331,17 @@ func TestResumeCmd_InteractivePicker_Abort(t *testing.T) {
 	pm := profile.NewProfileManager(tempDir)
 	_, _ = pm.EnsureProfile("work")
 
-	oldMgr := defaultSessionManager
-	defer func() { defaultSessionManager = oldMgr }()
 	mockMgr := session.NewManager()
 	mockMgr.RegisterProvider(&testSessionProvider{
 		agent:    "agy",
 		sessions: sampleTestSessions(),
 	})
-	defaultSessionManager = func() *session.Manager { return mockMgr }
-
-	oldInteractive := isInteractiveFunc
-	defer func() { isInteractiveFunc = oldInteractive }()
-	isInteractiveFunc = func(r io.Reader) bool { return true }
+	ctx := WithSessionManager(context.Background(), mockMgr)
+	ctx = WithInteractiveCheck(ctx, func(r io.Reader) bool { return true })
 
 	var buf bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(ctx)
 	cmd.SetIn(strings.NewReader("q"))
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -374,21 +367,17 @@ func TestResumeCmd_InteractivePicker_NoSessions(t *testing.T) {
 	pm := profile.NewProfileManager(tempDir)
 	_, _ = pm.EnsureProfile("work")
 
-	oldMgr := defaultSessionManager
-	defer func() { defaultSessionManager = oldMgr }()
 	mockMgr := session.NewManager()
 	mockMgr.RegisterProvider(&testSessionProvider{
 		agent:    "agy",
 		sessions: nil,
 	})
-	defaultSessionManager = func() *session.Manager { return mockMgr }
-
-	oldInteractive := isInteractiveFunc
-	defer func() { isInteractiveFunc = oldInteractive }()
-	isInteractiveFunc = func(r io.Reader) bool { return true }
+	ctx := WithSessionManager(context.Background(), mockMgr)
+	ctx = WithInteractiveCheck(ctx, func(r io.Reader) bool { return true })
 
 	var buf bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(ctx)
 	cmd.SetIn(strings.NewReader("\n"))
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -414,12 +403,11 @@ func TestResumeCmd_NonInteractive_MissingSessionIDError(t *testing.T) {
 	pm := profile.NewProfileManager(tempDir)
 	_, _ = pm.EnsureProfile("work")
 
-	oldInteractive := isInteractiveFunc
-	defer func() { isInteractiveFunc = oldInteractive }()
-	isInteractiveFunc = func(r io.Reader) bool { return false }
+	ctx := WithInteractiveCheck(context.Background(), func(r io.Reader) bool { return false })
 
 	var buf bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(ctx)
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"resume", "agy", "work"})

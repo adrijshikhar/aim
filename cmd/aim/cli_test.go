@@ -40,7 +40,7 @@ func (m *mockAdapter) HasCredentials(profileDir string) bool {
 func (m *mockAdapter) Login(ctx context.Context, profileName, profileDir string) error {
 	return m.exitErr
 }
-func (m *mockAdapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (m *mockAdapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	if m.exitErr != nil {
 		return agents.LaunchEnv{}, m.exitErr
 	}
@@ -577,20 +577,17 @@ func TestCLIDispatch(t *testing.T) {
 }
 
 func TestCLIDispatchUI(t *testing.T) {
-	orig := tuiRunner
-	defer func() { tuiRunner = orig }()
-
 	calledCount := 0
-	tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
+	ctx := WithTUIRunner(context.Background(), func(reg *agents.Registry, pm *profile.ProfileManager) int {
 		calledCount++
 		return 0
-	}
+	})
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(t.TempDir())
 
 	// Test dispatch with no args (bare `aim` directly launches TUI)
-	code := dispatch([]string{}, reg, pm)
+	code := dispatchWithContext(ctx, []string{}, reg, pm)
 	if code != 0 {
 		t.Errorf("dispatch([]) expected code 0, got %d", code)
 	}
@@ -599,7 +596,7 @@ func TestCLIDispatchUI(t *testing.T) {
 	}
 
 	// Test that "ui" subcommand has been removed
-	codeUI := dispatch([]string{"ui"}, reg, pm)
+	codeUI := dispatchWithContext(ctx, []string{"ui"}, reg, pm)
 	if codeUI == 0 {
 		t.Errorf("expected dispatch([\"ui\"]) to fail since ui command is removed, got 0")
 	}
@@ -635,19 +632,16 @@ func TestCLIShellCommandRemoved(t *testing.T) {
 
 func TestRunTUINilProfileManager(t *testing.T) {
 	// Verify that runTUI with nil ProfileManager does not panic
-	orig := tuiRunner
-	defer func() { tuiRunner = orig }()
-
 	called := false
-	tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
+	ctx := WithTUIRunner(context.Background(), func(reg *agents.Registry, pm *profile.ProfileManager) int {
 		cfg, _ := config.LoadConfig()
 		_ = tui.NewModel(reg, pm, cfg)
 		called = true
 		return 0
-	}
+	})
 
 	reg := agents.NewRegistry()
-	code := runTUI(reg, nil)
+	code := runTUIWithContext(ctx, reg, nil)
 	if code != 0 || !called {
 		t.Errorf("expected code 0 and called=true, got code %d", code)
 	}

@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -17,11 +17,11 @@ import (
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
-var defaultSessionManager = func() *session.Manager {
+// NewDefaultSessionManager creates and registers all standard session providers.
+func NewDefaultSessionManager() *session.Manager {
 	mgr := session.NewManager()
 	mgr.RegisterProvider(agy.NewProvider())
 	mgr.RegisterProvider(codex.NewProvider())
@@ -29,7 +29,71 @@ var defaultSessionManager = func() *session.Manager {
 	return mgr
 }
 
+// SessionsCmd encapsulates dependencies for executing the sessions command.
+type SessionsCmd struct {
+	reg        *agents.Registry
+	pm         *profile.ProfileManager
+	sessionMgr *session.Manager
+	isTerminal func(cmd *cobra.Command) bool
+	tuiRunner  func(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int
+}
+
+// NewSessionsCmd creates a new SessionsCmd factory with optional dependency overrides.
+func NewSessionsCmd(reg *agents.Registry, pm *profile.ProfileManager) *SessionsCmd {
+	return &SessionsCmd{
+		reg: reg,
+		pm:  pm,
+	}
+}
+
+// WithSessionManager injects an explicit session manager.
+func (sc *SessionsCmd) WithSessionManager(mgr *session.Manager) *SessionsCmd {
+	sc.sessionMgr = mgr
+	return sc
+}
+
+// WithIsTerminal injects a custom terminal interactivity check.
+func (sc *SessionsCmd) WithIsTerminal(fn func(cmd *cobra.Command) bool) *SessionsCmd {
+	sc.isTerminal = fn
+	return sc
+}
+
+// WithTUIRunner injects a custom sessions TUI runner.
+func (sc *SessionsCmd) WithTUIRunner(fn func(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int) *SessionsCmd {
+	sc.tuiRunner = fn
+	return sc
+}
+
+func (sc *SessionsCmd) getSessionManager(ctx context.Context) *session.Manager {
+	if sc.sessionMgr != nil {
+		return sc.sessionMgr
+	}
+	return getSessionManager(ctx)
+}
+
+func (sc *SessionsCmd) checkInteractiveTerminal(cmd *cobra.Command) bool {
+	if sc.isTerminal != nil {
+		return sc.isTerminal(cmd)
+	}
+	if fn := InteractiveTerminalFromContext(cmd.Context()); fn != nil {
+		return fn(cmd)
+	}
+	return defaultIsInteractiveTerminal(cmd)
+}
+
+func (sc *SessionsCmd) runTUI(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, targetAgent, profileFlag string, activeFlag bool) int {
+	if sc.tuiRunner != nil {
+		return sc.tuiRunner(reg, pm, targetAgent, profileFlag, activeFlag)
+	}
+	return runTUISessionsWithContext(ctx, reg, pm, targetAgent, profileFlag, activeFlag)
+}
+
 func newSessionsCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
+	return NewSessionsCmd(reg, pm).Command()
+}
+
+// Command constructs the cobra.Command for sessions.
+func (sc *SessionsCmd) Command() *cobra.Command {
 	var (
 		profileFlag string
 		agentFlag   string
@@ -62,14 +126,14 @@ Flags:
 			if len(args) > 0 {
 				targetAgent = args[0]
 			}
-			if reg != nil && targetAgent != "" {
-				if ad, err := reg.Get(targetAgent); err == nil {
+			if sc.reg != nil && targetAgent != "" {
+				if ad, err := sc.reg.Get(targetAgent); err == nil {
 					targetAgent = ad.Name()
 				}
 			}
 
 			if jsonFlag {
-				mgr := defaultSessionManager()
+				mgr := sc.getSessionManager(cmd.Context())
 				sessions, err := mgr.ListSessions(cmd.Context(), targetAgent, profileFlag, activeFlag)
 				if err != nil {
 					return fmt.Errorf("failed to list sessions: %w", err)
@@ -83,8 +147,8 @@ Flags:
 			}
 
 			// If interactive terminal and not plain mode, launch interactive TUI directly!
-			if isInteractiveSessionsTerminal(cmd) && !plainFlag {
-				code := runTUISessions(reg, pm, targetAgent, profileFlag, activeFlag)
+			if sc.checkInteractiveTerminal(cmd) && !plainFlag {
+				code := sc.runTUI(cmd.Context(), sc.reg, sc.pm, targetAgent, profileFlag, activeFlag)
 				if code != 0 {
 					return &ExitError{Code: code}
 				}
@@ -92,7 +156,7 @@ Flags:
 			}
 
 			// Non-interactive fallback (piped output, test buffer, or --plain)
-			mgr := defaultSessionManager()
+			mgr := sc.getSessionManager(cmd.Context())
 			sessions, err := mgr.ListSessions(cmd.Context(), targetAgent, profileFlag, activeFlag)
 			if err != nil {
 				return fmt.Errorf("failed to list sessions: %w", err)
@@ -112,7 +176,7 @@ Flags:
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) == 0 {
-				return completeAgents(reg, toComplete), cobra.ShellCompDirectiveNoFileComp
+				return completeAgents(sc.reg, toComplete), cobra.ShellCompDirectiveNoFileComp
 			}
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		},
@@ -126,16 +190,6 @@ Flags:
 	cmd.Flags().BoolVar(&plainFlag, "plain", false, "Output static text table instead of interactive TUI")
 
 	return cmd
-}
-
-var isInteractiveSessionsTerminal = func(cmd *cobra.Command) bool {
-	out := cmd.OutOrStdout()
-	f, ok := out.(*os.File)
-	if !ok || f != os.Stdout {
-		return false
-	}
-	return (isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())) &&
-		(isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd()))
 }
 
 func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly bool) {

@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -129,42 +128,7 @@ func (a *Adapter) listMCPServersFromConfig(profileDir string) ([]agents.MCPServe
 	serverMap := make(map[string]agents.MCPServerInfo)
 	if ok {
 		for _, name := range entries.Order {
-			v := entries.Values[name]
-			status := "enabled"
-			if en, ok := v["enabled"].(bool); ok && !en {
-				status = "disabled"
-			}
-			urlStr, _ := v["url"].(string)
-			cmdStr, _ := v["command"].(string)
-			var argsSlice []string
-			if rawArgs, ok := v["args"].([]any); ok {
-				for _, arg := range rawArgs {
-					if as, ok := arg.(string); ok {
-						argsSlice = append(argsSlice, as)
-					}
-				}
-			}
-
-			target := urlStr
-			typ := "stdio"
-			auth := "unsupported"
-			if urlStr != "" {
-				typ = "http"
-				if strings.Contains(strings.ToLower(urlStr), "oauth") || strings.Contains(strings.ToLower(name), "oauth") {
-					auth = "OAuth"
-				}
-			} else {
-				target = agents.CollapseCommand(cmdStr, argsSlice)
-			}
-
-			serverMap[name] = agents.MCPServerInfo{
-				Name:   name,
-				Type:   typ,
-				Status: status,
-				Auth:   auth,
-				Target: target,
-				Origin: "profile",
-			}
+			serverMap[name] = agents.ParseMCPServerMap(name, entries.Values[name], "profile")
 		}
 	}
 
@@ -182,39 +146,7 @@ func (a *Adapter) listMCPServersFromConfig(profileDir string) ([]agents.MCPServe
 					if !ok {
 						continue
 					}
-					status := "enabled"
-					if en, ok := sv["enabled"].(bool); ok && !en {
-						status = "disabled"
-					}
-					urlStr, _ := sv["url"].(string)
-					cmdStr, _ := sv["command"].(string)
-					var argsSlice []string
-					if rawArgs, ok := sv["args"].([]any); ok {
-						for _, arg := range rawArgs {
-							if as, ok := arg.(string); ok {
-								argsSlice = append(argsSlice, as)
-							}
-						}
-					}
-					target := urlStr
-					typ := "stdio"
-					auth := "unsupported"
-					if urlStr != "" {
-						typ = "http"
-						if strings.Contains(strings.ToLower(urlStr), "oauth") || strings.Contains(strings.ToLower(sName), "oauth") {
-							auth = "OAuth"
-						}
-					} else {
-						target = agents.CollapseCommand(cmdStr, argsSlice)
-					}
-					serverMap[sName] = agents.MCPServerInfo{
-						Name:   sName,
-						Type:   typ,
-						Status: status,
-						Auth:   auth,
-						Target: target,
-						Origin: "plugin:" + pluginName,
-					}
+					serverMap[sName] = agents.ParseMCPServerMap(sName, sv, "plugin:"+pluginName)
 				}
 			}
 		}

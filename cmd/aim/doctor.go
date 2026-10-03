@@ -8,6 +8,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
@@ -130,7 +131,10 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 	for _, p := range profiles {
 		fmt.Println()
 		fmt.Printf("Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
-		results := adapter.Doctor(context.Background(), p, pm.ProfileDir(p))
+		var results []agents.DiagnosticResult
+		if diag, ok := adapter.(agents.Diagnostician); ok {
+			results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
+		}
 		if !bridged[p] {
 			bridged[p] = true
 			var extraPaths []string
@@ -159,20 +163,7 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 			if r.Status == "FAIL" {
 				allOK = false
 			}
-			var badgeStyle lipgloss.Style
-			switch r.Status {
-			case "OK":
-				badgeStyle = tui.GaugeGreenStyle
-			case "WARN":
-				badgeStyle = tui.GaugeYellowStyle
-			case "FAIL":
-				badgeStyle = tui.GaugeRedStyle
-			default:
-				badgeStyle = tui.GaugeDimStyle
-			}
-			badge := badgeStyle.Width(8).Render(fmt.Sprintf("[%s]", r.Status))
-			cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render(r.Category + ":")
-			msg := lipgloss.NewStyle().Foreground(tui.TextSecondary).Render(r.Message)
+			badge, cat, msg := presenter.RenderDiagnosticResult(r)
 			fmt.Printf("  %s %s %s\n", badge, cat, msg)
 		}
 	}

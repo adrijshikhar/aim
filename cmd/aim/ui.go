@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -119,7 +120,7 @@ func handleTUIOutcome(res tui.Model, reg *agents.Registry, pm *profile.ProfileMa
 			if targetProfile == "" || targetProfile == "<host>" {
 				targetProfile = "default"
 			}
-			mgr := defaultSessionManager()
+			mgr := getSessionManager(context.Background())
 			pDir, err := pm.EnsureProfile(targetProfile)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error ensuring profile: %v\n", err)
@@ -155,7 +156,7 @@ func handleTUIOutcome(res tui.Model, reg *agents.Registry, pm *profile.ProfileMa
 	return 0
 }
 
-var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
+func defaultTUIRunner(reg *agents.Registry, pm *profile.ProfileManager) int {
 	cfg, _ := config.LoadConfig()
 	m := tui.NewModel(reg, pm, cfg).WithVersion(Version)
 	p := tea.NewProgram(m)
@@ -176,7 +177,7 @@ var tuiRunner = func(reg *agents.Registry, pm *profile.ProfileManager) int {
 	return handleTUIOutcome(res, reg, pm)
 }
 
-var tuiSessionsRunner = func(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+func defaultTUISessionsRunner(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
 	cfg, _ := config.LoadConfig()
 	m := tui.NewModel(reg, pm, cfg).
 		WithVersion(Version).
@@ -197,19 +198,37 @@ var tuiSessionsRunner = func(reg *agents.Registry, pm *profile.ProfileManager, i
 	return handleTUIOutcome(res, reg, pm)
 }
 
-func runTUI(reg *agents.Registry, pm *profile.ProfileManager) int {
+func runTUIWithContext(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager) int {
 	logger.Debug("[tui] Launching interactive TUI dashboard")
-	code := tuiRunner(reg, pm)
+	if ctx != nil {
+		if fn := TUIRunnerFromContext(ctx); fn != nil {
+			return fn(reg, pm)
+		}
+	}
+	code := defaultTUIRunner(reg, pm)
 	logger.Debug("[tui] TUI exited with code %d", code)
 	return code
 }
 
-func runTUISessions(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+func runTUI(reg *agents.Registry, pm *profile.ProfileManager) int {
+	return runTUIWithContext(context.Background(), reg, pm)
+}
+
+func runTUISessionsWithContext(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
 	logger.Debug("[tui] Launching interactive sessions drawer")
 	if pm == nil {
 		pm = profile.NewProfileManager(config.BaseDir())
 	}
-	code := tuiSessionsRunner(reg, pm, initialAgent, profileFilter, activeOnly)
+	if ctx != nil {
+		if fn := TUISessionsRunnerFromContext(ctx); fn != nil {
+			return fn(reg, pm, initialAgent, profileFilter, activeOnly)
+		}
+	}
+	code := defaultTUISessionsRunner(reg, pm, initialAgent, profileFilter, activeOnly)
 	logger.Debug("[tui] Sessions drawer exited with code %d", code)
 	return code
+}
+
+func runTUISessions(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+	return runTUISessionsWithContext(context.Background(), reg, pm, initialAgent, profileFilter, activeOnly)
 }

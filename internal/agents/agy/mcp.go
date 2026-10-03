@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -51,7 +50,7 @@ func (a *Adapter) ListMCPServers(ctx context.Context, profileName, profileDir st
 	hostJSON := filepath.Join(sharedConfigDir(realHome), "mcp_config.json")
 	if hostEntries, ok, err := merge.ReadJSONKey(hostJSON, "mcpServers"); err == nil && ok {
 		for _, name := range hostEntries.Order {
-			serverMap[name] = parseAgyMCPServer(name, hostEntries.Values[name], "host")
+			serverMap[name] = agents.ParseMCPServerMap(name, hostEntries.Values[name], "host")
 		}
 	}
 
@@ -59,7 +58,7 @@ func (a *Adapter) ListMCPServers(ctx context.Context, profileName, profileDir st
 	profJSON := filepath.Join(profileDir, ".gemini", "config", "mcp_config.json")
 	if profEntries, ok, err := merge.ReadJSONKey(profJSON, "mcpServers"); err == nil && ok {
 		for _, name := range profEntries.Order {
-			serverMap[name] = parseAgyMCPServer(name, profEntries.Values[name], "profile")
+			serverMap[name] = agents.ParseMCPServerMap(name, profEntries.Values[name], "profile")
 		}
 	}
 
@@ -71,64 +70,4 @@ func (a *Adapter) ListMCPServers(ctx context.Context, profileName, profileDir st
 		return res[i].Name < res[j].Name
 	})
 	return res, nil
-}
-
-func parseAgyMCPServer(name string, v map[string]any, origin string) agents.MCPServerInfo {
-	status := "enabled"
-	if dis, ok := v["disabled"].(bool); ok && dis {
-		status = "disabled"
-	}
-
-	typ, _ := v["type"].(string)
-	serverURL, _ := v["serverUrl"].(string)
-	urlStr, _ := v["url"].(string)
-	cmdStr, _ := v["command"].(string)
-
-	var argsSlice []string
-	if rawArgs, ok := v["args"].([]any); ok {
-		for _, arg := range rawArgs {
-			if as, ok := arg.(string); ok {
-				argsSlice = append(argsSlice, as)
-			}
-		}
-	}
-
-	target := serverURL
-	if target == "" {
-		target = urlStr
-	}
-
-	auth := "unsupported"
-	if target != "" {
-		if typ == "" {
-			typ = "http"
-		}
-		if strings.Contains(strings.ToLower(target), "oauth") || strings.Contains(strings.ToLower(name), "oauth") {
-			auth = "OAuth"
-		} else if headers, ok := v["headers"].(map[string]any); ok && len(headers) > 0 {
-			auth = "connected"
-		}
-	} else {
-		if typ == "" {
-			typ = "stdio"
-		}
-		target = agents.CollapseCommand(cmdStr, argsSlice)
-		if env, ok := v["env"].(map[string]any); ok {
-			for ek := range env {
-				if strings.Contains(ek, "KEY") || strings.Contains(ek, "TOKEN") {
-					auth = "connected"
-					break
-				}
-			}
-		}
-	}
-
-	return agents.MCPServerInfo{
-		Name:   name,
-		Type:   typ,
-		Status: status,
-		Auth:   auth,
-		Target: target,
-		Origin: origin,
-	}
 }

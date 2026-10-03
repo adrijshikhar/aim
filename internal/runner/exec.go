@@ -4,23 +4,39 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"syscall"
-	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
-	"github.com/aim-cli/aim/internal/profile"
+	"github.com/charmbracelet/x/term"
 )
 
-type Runner struct{}
+type Runner struct {
+	adapter agents.AgentAdapter
+}
 
-func NewRunner() *Runner {
-	return &Runner{}
+func NewRunner(adapter ...agents.AgentAdapter) *Runner {
+	var a agents.AgentAdapter
+	if len(adapter) > 0 {
+		a = adapter[0]
+	}
+	return &Runner{adapter: a}
 }
 
 func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []string) (int, error) {
+	var oldState *term.State
+	isTerm := term.IsTerminal(os.Stdin.Fd())
+	if isTerm {
+		if state, err := term.GetState(os.Stdin.Fd()); err == nil {
+			oldState = state
+			defer func() {
+				if oldState != nil {
+					_ = term.Restore(os.Stdin.Fd(), oldState)
+				}
+			}()
+		}
+	}
+
 	args := append(launch.Args, extraArgs...)
 	logger.Debug("[runner] Executing binary %s with %d args (cwd: %s)", launch.BinaryPath, len(args), launch.WorkingDir)
 	logger.Debug("[runner] Environment: HOME=%s, AIM_PROFILE=%s, AIM_AGENT=%s", launch.Env["HOME"], launch.Env["AIM_PROFILE"], launch.Env["AIM_AGENT"])
@@ -45,60 +61,20 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		defer ResetTerminalTitle(os.Stdout)
 	}
 
-	// Keyring bypass and keychain harvesting for agents with global shared keychains (e.g. agy).
-	// Profiles use file-based credentials and never purge host keychains.
-	if agentName == "agy" {
-		profileDir := launch.Env["HOME"]
-		hasCreds := false
-		if profileDir != "" {
-			if _, hasSSH := launch.Env["SSH_CONNECTION"]; hasSSH {
-				hasCreds = true
-			} else {
-				tokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-				if fi, err := os.Stat(tokenPath); err == nil && fi.Size() > 0 {
-					hasCreds = true
-				} else {
-					adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
-					if fi, err := os.Stat(adcPath); err == nil && fi.Size() > 0 {
-						hasCreds = true
-					}
-				}
-			}
+	// Dispatch optional PostLauncher hook (e.g. background token synchronization or harvesting)
+	var postLauncher agents.PostLauncher
+	if r != nil && r.adapter != nil {
+		if pl, ok := r.adapter.(agents.PostLauncher); ok {
+			postLauncher = pl
 		}
-
-		// Only unauthenticated sessions might need to harvest credentials from the macOS Keychain.
-		// Authenticated profiles run with SSH_CONNECTION (keyring bypass mode) and never touch the Keychain.
-		// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
-		if !hasCreds {
-			// Start background watcher that harvests the token into the profile once
-			// the user completes authentication in the browser.
-			stopWatcher := make(chan struct{})
-			doneWatcher := make(chan struct{})
-			go func() {
-				defer close(doneWatcher)
-				ticker := time.NewTicker(1 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-stopWatcher:
-						return
-					case <-ticker.C:
-						if profile.HarvestKeychainTokenToProfile(agentName, profileDir) {
-							logger.Debug("[runner] Successfully harvested token during active session")
-							return
-						}
-					}
-				}
-			}()
-
-			defer func() {
-				close(stopWatcher)
-				<-doneWatcher
-				if profileDir != "" {
-					_ = profile.HarvestKeychainTokenToProfile(agentName, profileDir)
-				}
-			}()
-		}
+	}
+	if postLauncher == nil && launch.PostLauncher != nil {
+		postLauncher = launch.PostLauncher
+	}
+	if postLauncher != nil {
+		postCtx, postCancel := context.WithCancel(ctx)
+		defer postCancel()
+		go postLauncher.PostLaunch(postCtx, profileName, launch.Env["HOME"])
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -107,7 +83,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	}
 	logger.Debug("[runner] Process started with PID %d", cmd.Process.Pid)
 
-	stopSignals := setupSignalForwarding(cmd.Process)
+	stopSignals := setupSignalForwarding(cmd.Process, isTerm)
 	defer stopSignals()
 
 	err := cmd.Wait()
@@ -129,27 +105,5 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 // (SSH variables, HOME, AIM_* variables, agent-specific ambient tokens) unless explicitly provided in launchEnv,
 // and applying overrides. This prevents host tokens from inadvertently leaking into profile executions.
 func BuildEnv(environ []string, launchEnv map[string]string) []string {
-	env := make([]string, 0, len(environ)+len(launchEnv))
-	for _, e := range environ {
-		idx := strings.IndexByte(e, '=')
-		if idx == -1 {
-			continue
-		}
-		key := e[:idx]
-		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" ||
-			key == "GEMINI_CLI_HOME" || key == "CODEX_HOME" || key == "CLAUDE_CONFIG_DIR" ||
-			key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" ||
-			key == "AIM_SESSION_ID" || key == "CLAUDE_CODE_OAUTH_TOKEN" ||
-			key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
-			continue
-		}
-		if _, overridden := launchEnv[key]; overridden {
-			continue
-		}
-		env = append(env, e)
-	}
-	for k, v := range launchEnv {
-		env = append(env, k+"="+v)
-	}
-	return env
+	return agents.BuildEnv(environ, launchEnv)
 }

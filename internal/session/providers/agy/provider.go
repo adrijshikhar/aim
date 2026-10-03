@@ -60,15 +60,11 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 	}
 
 	query := "SELECT conversation_id, title, preview, last_modified_time, workspace_uris FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
-	cmd := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||")
-	cmd.Stdin = strings.NewReader(query)
-	out, err := cmd.Output()
+	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query, "-separator", "|||")
 	if err != nil {
 		// Fallback for older schemas where workspace_uris might not exist
 		fallback := "SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
-		cmdFallback := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||")
-		cmdFallback.Stdin = strings.NewReader(fallback)
-		out, err = cmdFallback.Output()
+		out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallback, "-separator", "|||")
 		if err != nil {
 			logger.Debug("[session/agy] query error on %s: %v", db, err)
 			return nil, fmt.Errorf("failed to query sqlite db at %s: %w", db, err)
@@ -169,15 +165,11 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 
 	prefixLen := len(idOrPrefix)
 	query := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time, workspace_uris FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
-	cmd := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||")
-	cmd.Stdin = strings.NewReader(query)
-	out, err := cmd.Output()
+	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query, "-separator", "|||")
 	if err != nil {
 		// Fallback for older schemas where workspace_uris might not exist
 		fallback := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
-		cmdFallback := exec.CommandContext(ctx, p.sqliteBin, db, "-separator", "|||")
-		cmdFallback.Stdin = strings.NewReader(fallback)
-		out, err = cmdFallback.Output()
+		out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallback, "-separator", "|||")
 		if err != nil {
 			return nil, fmt.Errorf("failed to query session %s from %s: %w", idOrPrefix, db, err)
 		}
@@ -356,9 +348,7 @@ func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, 
 	db := p.dbPath(profileDir, s.IsHost)
 	if p.sqliteBin != "" {
 		query := fmt.Sprintf("SELECT workspace_uris FROM conversation_summaries WHERE conversation_id = '%s' LIMIT 1;\n", escapeSQL(s.ID))
-		cmd := exec.CommandContext(ctx, p.sqliteBin, db)
-		cmd.Stdin = strings.NewReader(query)
-		if out, err := cmd.Output(); err == nil {
+		if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query); err == nil {
 			if cwd := parseWorkspaceURIs(string(out)); cwd != "" {
 				s.Cwd = cwd
 				return cwd, nil

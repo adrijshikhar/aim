@@ -62,14 +62,11 @@ func TestRunCmd_ProfileDoesNotExist_Interactive_ConfirmYes(t *testing.T) {
 	})
 	pm := profile.NewProfileManager(tempDir)
 
-	oldInteractive := isInteractiveFunc
-	isInteractiveFunc = func(r io.Reader) bool { return true }
-	defer func() { isInteractiveFunc = oldInteractive }()
-
 	var stdout, stderr bytes.Buffer
 	stdin := bytes.NewBufferString("y\n")
 
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(WithInteractiveCheck(context.Background(), func(r io.Reader) bool { return true }))
 	cmd.SetIn(stdin)
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
@@ -105,14 +102,11 @@ func TestRunCmd_ProfileDoesNotExist_Interactive_ConfirmNo(t *testing.T) {
 	})
 	pm := profile.NewProfileManager(tempDir)
 
-	oldInteractive := isInteractiveFunc
-	isInteractiveFunc = func(r io.Reader) bool { return true }
-	defer func() { isInteractiveFunc = oldInteractive }()
-
 	var stdout, stderr bytes.Buffer
 	stdin := bytes.NewBufferString("n\n")
 
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(WithInteractiveCheck(context.Background(), func(r io.Reader) bool { return true }))
 	cmd.SetIn(stdin)
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
@@ -151,14 +145,11 @@ func TestRunCmd_ProfileDoesNotExist_Interactive_TypoDashes(t *testing.T) {
 	})
 	pm := profile.NewProfileManager(tempDir)
 
-	oldInteractive := isInteractiveFunc
-	isInteractiveFunc = func(r io.Reader) bool { return true }
-	defer func() { isInteractiveFunc = oldInteractive }()
-
 	var stdout, stderr bytes.Buffer
 	stdin := bytes.NewBufferString("\n") // user hits Enter to cancel
 
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(WithInteractiveCheck(context.Background(), func(r io.Reader) bool { return true }))
 	cmd.SetIn(stdin)
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
@@ -200,12 +191,9 @@ func TestRunCmd_ProfileDoesNotExist_NonInteractive(t *testing.T) {
 	})
 	pm := profile.NewProfileManager(tempDir)
 
-	oldInteractive := isInteractiveFunc
-	isInteractiveFunc = func(r io.Reader) bool { return false }
-	defer func() { isInteractiveFunc = oldInteractive }()
-
 	var stdout, stderr bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(WithInteractiveCheck(context.Background(), func(r io.Reader) bool { return false }))
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"run", "mock", "nonexistent"})
@@ -235,12 +223,9 @@ func TestRunCmd_ProfileDoesNotExist_FlagYes(t *testing.T) {
 	})
 	pm := profile.NewProfileManager(tempDir)
 
-	oldInteractive := isInteractiveFunc
-	isInteractiveFunc = func(r io.Reader) bool { return false }
-	defer func() { isInteractiveFunc = oldInteractive }()
-
 	var stdout, stderr bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(WithInteractiveCheck(context.Background(), func(r io.Reader) bool { return false }))
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"run", "mock", "newprof", "-y"})
@@ -270,12 +255,9 @@ func TestRunCmd_ProfileDoesNotExist_EnvAutoCreate(t *testing.T) {
 	})
 	pm := profile.NewProfileManager(tempDir)
 
-	oldInteractive := isInteractiveFunc
-	isInteractiveFunc = func(r io.Reader) bool { return false }
-	defer func() { isInteractiveFunc = oldInteractive }()
-
 	var stdout, stderr bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(WithInteractiveCheck(context.Background(), func(r io.Reader) bool { return false }))
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"run", "mock", "envprof"})
@@ -624,14 +606,6 @@ func TestRunCmd_ExpandsShortPrefixToFullUUID(t *testing.T) {
 		agent:   "codex",
 		session: sess,
 	})
-	oldMgrFunc := defaultSessionManager
-	defaultSessionManager = func() *session.Manager {
-		return mockMgr
-	}
-	t.Cleanup(func() {
-		defaultSessionManager = oldMgrFunc
-	})
-
 	dumpFile := filepath.Join(tempDir, "args_dump.txt")
 	fakeBinDir := filepath.Join(tempDir, "bin")
 	_ = os.MkdirAll(fakeBinDir, 0755)
@@ -642,6 +616,7 @@ func TestRunCmd_ExpandsShortPrefixToFullUUID(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	cmd := newRootCmd(reg, pm)
+	cmd.SetContext(WithSessionManager(context.Background(), mockMgr))
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"run", "codex", "work", "resume", shortID})

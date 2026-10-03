@@ -4,11 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aim-cli/aim/internal/logger"
@@ -132,4 +136,86 @@ func ParseProcessOutput(r io.Reader) map[string]ActiveProcessInfo {
 	}
 
 	return result
+}
+
+// GracefulTerminate terminates a process gracefully using SIGTERM, falling back
+// to SIGKILL on its process group and process if it fails to exit within timeout.
+func GracefulTerminate(pid int, timeout time.Duration) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid PID: %d", pid)
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+
+	// Check if already dead
+	if err := syscall.Kill(pid, 0); err != nil && errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+
+	// Try graceful SIGTERM first
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		// If sending SIGTERM fails, attempt SIGKILL fallback
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		if killErr := proc.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) && !errors.Is(killErr, syscall.ESRCH) {
+			return killErr
+		}
+		return nil
+	}
+
+	done := make(chan struct{}, 1)
+	stop := make(chan struct{})
+	defer close(stop)
+
+	go func() {
+		_, waitErr := proc.Wait()
+		if waitErr == nil || !errors.Is(waitErr, syscall.ECHILD) {
+			// Child process exited (or wait succeeded)
+			select {
+			case done <- struct{}{}:
+			default:
+			}
+			return
+		}
+
+		// Non-child process (proc.Wait returned syscall.ECHILD):
+		// Monitor exit using syscall.Kill(pid, 0) until it returns ESRCH.
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			if err := syscall.Kill(pid, 0); err != nil {
+				if errors.Is(err, syscall.ESRCH) {
+					select {
+					case done <- struct{}{}:
+					default:
+					}
+					return
+				}
+			}
+
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		// Force SIGKILL on process group if timeout expires
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		if killErr := proc.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) && !errors.Is(killErr, syscall.ESRCH) {
+			return killErr
+		}
+		return nil
+	}
 }

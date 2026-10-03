@@ -57,19 +57,31 @@ func getOAuthCredentials() (string, string) {
 	return clientID, clientSecret
 }
 
-// Compile-time assertion that Adapter implements agents.AgentAdapter.
-var _ agents.AgentAdapter = (*Adapter)(nil)
+// Compile-time assertions that Adapter implements the segregated agent interfaces.
+var (
+	_ agents.AgentAdapter        = (*Adapter)(nil)
+	_ agents.Authenticator       = (*Adapter)(nil)
+	_ agents.Diagnostician       = (*Adapter)(nil)
+	_ agents.UsageProvider       = (*Adapter)(nil)
+	_ agents.AccountInfoProvider = (*Adapter)(nil)
+	_ agents.FullAdapter         = (*Adapter)(nil)
+	_ agents.PostLauncher        = (*Adapter)(nil)
+)
 
-type Adapter struct{}
-
-func NewAdapter() *Adapter {
-	return &Adapter{}
+type Adapter struct {
+	agents.BaseAdapter
 }
 
-func (a *Adapter) Name() string        { return "agy" }
-func (a *Adapter) DisplayName() string { return "Antigravity CLI" }
-func (a *Adapter) Aliases() []string   { return []string{"antigravity"} }
-func (a *Adapter) BinaryName() string  { return "agy" }
+func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {
+	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
+	return acc.Email, acc.AuthMethod, acc.ProjectID
+}
+
+func NewAdapter() *Adapter {
+	return &Adapter{
+		BaseAdapter: agents.NewBaseAdapter("agy", "Antigravity CLI", "agy", []string{"antigravity"}),
+	}
+}
 
 func (a *Adapter) TokenPath(profileDir string) string {
 	return filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
@@ -278,15 +290,9 @@ func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
 func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) error {
 	clientID, clientSecret := getOAuthCredentials()
 	if clientID == "" || clientSecret == "" {
-		bin, err := exec.LookPath(a.BinaryName())
-		if err != nil {
-			realHome := config.RealHomeDir()
-			fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-			if _, sErr := os.Stat(fallback); sErr == nil {
-				bin = fallback
-			} else {
-				return fmt.Errorf("OAuth client credentials not configured and '%s' binary not found in PATH", a.BinaryName())
-			}
+		bin := a.ResolveBinary()
+		if _, err := exec.LookPath(bin); err != nil {
+			return fmt.Errorf("OAuth client credentials not configured and '%s' binary not found in PATH", a.BinaryName())
 		}
 		realHome := config.RealHomeDir()
 		_ = bridgeSharedState(realHome, profileDir)
@@ -391,7 +397,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	return nil
 }
 
-func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	tokenDir := filepath.Join(profileDir, ".gemini", "antigravity-cli")
 	if err := os.MkdirAll(tokenDir, 0700); err != nil {
 		return agents.LaunchEnv{}, err
@@ -406,21 +412,10 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	// Also copy settings.json from host if not present in profile
 	copyHostSettings(realHome, tokenDir)
 
-	bin, err := exec.LookPath(a.BinaryName())
-	if err != nil {
-		fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-		if _, sErr := os.Stat(fallback); sErr == nil {
-			bin = fallback
-		} else {
-			bin = a.BinaryName()
-		}
-	}
+	bin := a.ResolveBinary()
 	logger.Debug("[agy] Resolved binary: %s", bin)
 
-	envMap := config.StorageEnv()
-	envMap["HOME"] = profileDir
-	envMap["AIM_AGENT"] = a.Name()
-	envMap["AIM_PROFILE"] = profileName
+	envMap := a.BaseLaunchEnv(profileName, profileDir, nil)
 	// Only set SSH_CONNECTION if profile has valid, healthy credentials on disk,
 	// to isolate file-based token reads without suppressing browser auto-open during login or re-auth.
 	if a.IsTokenHealthy(profileName, profileDir) {
@@ -431,10 +426,44 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 
 	cwd, _ := os.Getwd()
 	return agents.LaunchEnv{
-		BinaryPath: bin,
-		Env:        envMap,
-		WorkingDir: cwd,
+		BinaryPath:   bin,
+		Env:          envMap,
+		WorkingDir:   cwd,
+		PostLauncher: a,
 	}, nil
+}
+
+// PostLaunch monitors and harvests OAuth tokens from macOS Keychain for unauthenticated profiles.
+// Authenticated profiles run with SSH_CONNECTION (keyring bypass mode) and never touch the Keychain.
+func (a *Adapter) PostLaunch(ctx context.Context, profileName, profileDir string) {
+	if profileDir == "" {
+		return
+	}
+
+	tokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	if fi, err := os.Stat(tokenPath); err == nil && fi.Size() > 0 {
+		return
+	}
+	adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
+	if fi, err := os.Stat(adcPath); err == nil && fi.Size() > 0 {
+		return
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
+			return
+		case <-ticker.C:
+			if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
+				logger.Debug("[agy] Successfully harvested token during active session")
+				return
+			}
+		}
+	}
 }
 
 // sharedConfigDir is the host layer for agy: the real ~/.gemini/config when it
@@ -657,15 +686,8 @@ func copyDirectory(src, dst string) error {
 
 func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {
 	var results []agents.DiagnosticResult
-	bin, err := exec.LookPath(a.BinaryName())
-	if err != nil {
-		realHome, _ := os.UserHomeDir()
-		fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-		if _, sErr := os.Stat(fallback); sErr == nil {
-			bin = fallback
-			err = nil
-		}
-	}
+	bin := a.ResolveBinary()
+	path, err := exec.LookPath(bin)
 	if err != nil {
 		results = append(results, agents.DiagnosticResult{
 			Category: "Binary",
@@ -676,7 +698,7 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 		results = append(results, agents.DiagnosticResult{
 			Category: "Binary",
 			Status:   "OK",
-			Message:  fmt.Sprintf("Found %s at %s", a.BinaryName(), bin),
+			Message:  fmt.Sprintf("Found %s at %s", a.BinaryName(), path),
 		})
 	}
 
@@ -866,16 +888,8 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		}, nil
 	}
 
-	bin, err := exec.LookPath(a.BinaryName())
-	if err != nil {
-		realHome, _ := os.UserHomeDir()
-		fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-		if _, sErr := os.Stat(fallback); sErr == nil {
-			bin = fallback
-			err = nil
-		}
-	}
-	if err != nil {
+	bin := a.ResolveBinary()
+	if _, err := exec.LookPath(bin); err != nil {
 		return &usage.Report{
 			Agent:        a.Name(),
 			Profile:      profileName,

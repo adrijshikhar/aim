@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -42,16 +43,18 @@ func cloneDirectory(srcDir, dstDir string) error {
 
 		info, err := entry.Info()
 		if err != nil {
-			continue
+			return fmt.Errorf("reading file info for %s: %w", srcPath, err)
 		}
 
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, err := os.Readlink(srcPath)
 			if err != nil {
-				continue
+				return fmt.Errorf("reading symlink %s: %w", srcPath, err)
 			}
 			_ = os.Remove(dstPath)
-			_ = os.Symlink(target, dstPath)
+			if err := os.Symlink(target, dstPath); err != nil {
+				return fmt.Errorf("creating symlink %s: %w", dstPath, err)
+			}
 			continue
 		}
 
@@ -69,7 +72,7 @@ func cloneDirectory(srcDir, dstDir string) error {
 		// Regular file
 		_ = os.Remove(dstPath)
 		if err := cloneOrCopyFile(srcPath, dstPath); err != nil {
-			continue
+			return fmt.Errorf("copying file from %s to %s: %w", srcPath, dstPath, err)
 		}
 		_ = os.Chmod(dstPath, info.Mode().Perm())
 		_ = os.Chtimes(dstPath, info.ModTime(), info.ModTime())

@@ -56,7 +56,7 @@ func TestCodexAdapter_PrepareEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	profileDir := filepath.Join(tmpDir, "profiles", "work")
 
-	launchEnv, err := a.PrepareEnv("work", profileDir)
+	launchEnv, err := a.PrepareEnv(t.Context(), "work", profileDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestCodexAdapter_EnsureSidecarDaemons(t *testing.T) {
 		_ = os.WriteFile(cfgPath, []byte("model = \"gpt-4\"\n"), 0644)
 
 		// Should not error or panic
-		ensureSidecarDaemons(mockHome, profileCodexDir)
+		ensureSidecarDaemons(t.Context(), mockHome, profileCodexDir)
 	})
 
 	t.Run("handles missing binary gracefully when caveman is configured", func(t *testing.T) {
@@ -430,7 +430,7 @@ func TestCodexAdapter_EnsureSidecarDaemons(t *testing.T) {
 		_ = os.WriteFile(cfgPath, []byte("model_provider = \"caveman\"\nbase_url = \"http://127.0.0.1:8787/chatgpt\"\n"), 0644)
 
 		// mockHome has no caveman-proxy binary; should log debug and not panic
-		ensureSidecarDaemons(mockHome, profileCodexDir)
+		ensureSidecarDaemons(t.Context(), mockHome, profileCodexDir)
 	})
 }
 

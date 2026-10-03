@@ -220,7 +220,7 @@ Investigate the agent's files on the host:
 - `Name()`: `"claude"`
 - `DisplayName()`: `"Claude Code"`
 - `BinaryName()`: `"claude"`
-- `PrepareEnv()`:
+- `PrepareEnv(ctx context.Context, profileName, profileDir string)`:
   - Create isolated `~/.aim/profiles/<profile>/.claude`
   - Bridge `~/.claude/plugins` $\rightarrow$ `$profileDir/.claude/plugins`
   - Copy and rewrite paths in `~/.claude.json`

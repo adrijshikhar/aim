@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -77,7 +76,7 @@ Flags:
 				}
 			}
 
-			mgr := defaultSessionManager()
+			mgr := getSessionManager(cmd.Context())
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
@@ -129,7 +128,7 @@ Flags:
 
 			var sess *session.Session
 			if sessionID == "" {
-				if isInteractive(cmd.InOrStdin()) {
+				if checkInteractive(cmd, cmd.InOrStdin()) {
 					sessions, err := mgr.ListSessions(ctx, agentName, "", false)
 					if err != nil {
 						return fmt.Errorf("failed to list sessions: %w", err)
@@ -161,7 +160,7 @@ Flags:
 
 			// Active process check
 			if sess.Status == session.StatusActive && !forceFlag {
-				if isInteractive(cmd.InOrStdin()) {
+				if checkInteractive(cmd, cmd.InOrStdin()) {
 					fmt.Fprintf(cmd.OutOrStdout(), "Session %s (%q) is currently ACTIVE in PID %d.\nResume anyway? [y/N]: ", sess.ShortID, sess.Title, sess.PID)
 					reader := bufio.NewReader(cmd.InOrStdin())
 					ans, _ := reader.ReadString('\n')
@@ -195,7 +194,7 @@ Flags:
 			return executeExactResume(cmd, reg, pm, mgr, agentName, profileName, pDir, sess, forkFlag, extraArgs)
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return completeAgentProfileAndSession(reg, pm, args, toComplete)
+			return completeAgentProfileAndSession(cmd.Context(), reg, pm, args, toComplete)
 		},
 	}
 
@@ -231,7 +230,11 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 	}
 	// Launch agent primed with Catalyst handoff resume
 	launchArgs := append([]string{"handoff resume"}, extraArgs...)
-	code := executeRunWithSession(reg, pm, agent, profile, sessID, launchArgs)
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	code := executeRunWithSession(ctx, reg, pm, agent, profile, sessID, launchArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -240,7 +243,7 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 
 func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, mgr *session.Manager, agent, profile, pDir string, sess *session.Session, fork bool, extraArgs []string) error {
 	if mgr == nil {
-		mgr = defaultSessionManager()
+		mgr = getSessionManager(cmd.Context())
 	}
 
 	resumeID := sess.ID
@@ -331,7 +334,7 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	)
 
 	sessID := displayID
-	code := executeRunWithSession(reg, pm, agent, profile, sessID, resumeArgs)
+	code := executeRunWithSession(ctx, reg, pm, agent, profile, sessID, resumeArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -360,10 +363,6 @@ func getGitBranch(repoRoot string) string {
 		return strings.TrimSpace(string(out))
 	}
 	return "main"
-}
-
-func isInteractive(r io.Reader) bool {
-	return isInteractiveFunc(r)
 }
 
 func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, agent, sessionID string) (*session.Session, error) {

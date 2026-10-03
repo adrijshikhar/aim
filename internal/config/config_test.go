@@ -2,9 +2,11 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -520,5 +522,95 @@ func TestGroupEnabled(t *testing.T) {
 	var nilCfg *Config
 	if !nilCfg.GroupEnabled("a", "mcp") || !nilCfg.GroupEnabled("a", "plugins") {
 		t.Fatal("a nil config enables every group")
+	}
+}
+
+func TestSaveConfig_Permissions(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "aim-sub")
+	t.Setenv("AIM_HOME", configDir)
+
+	cfg := NewDefaultConfig()
+	cfg.DefaultProfile = "test"
+
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	// Check directory permissions (0700)
+	dirInfo, err := os.Stat(configDir)
+	if err != nil {
+		t.Fatalf("failed to stat config dir: %v", err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0700 {
+		t.Errorf("expected config dir perm 0700, got %04o", perm)
+	}
+
+	// Check file permissions (0600)
+	fileInfo, err := os.Stat(ConfigFilePath())
+	if err != nil {
+		t.Fatalf("failed to stat config file: %v", err)
+	}
+	if perm := fileInfo.Mode().Perm(); perm != 0600 {
+		t.Errorf("expected config file perm 0600, got %04o", perm)
+	}
+}
+
+func TestSaveConfig_Concurrent(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+
+	const goroutines = 10
+	const iterations = 20
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, goroutines*iterations)
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				cfg := NewDefaultConfig()
+				cfg.DefaultProfile = fmt.Sprintf("profile-%d-%d", id, j)
+				cfg.Profiles[cfg.DefaultProfile] = ProfileConfig{
+					Agents: []string{"agy", "claude"},
+				}
+				if err := SaveConfig(cfg); err != nil {
+					errCh <- fmt.Errorf("goroutine %d iter %d save failed: %w", id, j, err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent save error: %v", err)
+	}
+
+	// Verify that the final config file is valid and readable without corruption
+	finalCfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("failed to load config after concurrent writes: %v", err)
+	}
+	if finalCfg == nil {
+		t.Fatalf("expected non-nil config after concurrent writes")
+	}
+	if !strings.HasPrefix(finalCfg.DefaultProfile, "profile-") {
+		t.Errorf("unexpected default profile in final config: %s", finalCfg.DefaultProfile)
+	}
+
+	// Verify no stray .tmp files were left behind in the directory
+	entries, err := os.ReadDir(ConfigDir())
+	if err != nil {
+		t.Fatalf("failed to read config dir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp") {
+			t.Errorf("found leftover temporary file: %s", entry.Name())
+		}
 	}
 }

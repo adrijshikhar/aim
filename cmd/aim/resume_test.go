@@ -216,7 +216,7 @@ VALUES ('%s', '/tmp/fake-b.jsonl', 1700000000, 1800000000, 'Updated Title Profil
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
 
-	mgr := defaultSessionManager()
+	mgr := NewDefaultSessionManager()
 
 	// Initial stale session pointing to profile-a
 	sessStale := &session.Session{

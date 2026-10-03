@@ -27,7 +27,7 @@ func (m *mockAdapter) HasCredentials(p string) bool {
 }
 func (m *mockAdapter) TokenPath(p string) string        { return filepath.Join(p, m.tokenPath) }
 func (m *mockAdapter) Login(ctx any, p, d string) error { return nil }
-func (m *mockAdapter) PrepareEnv(p, d string) (agents.LaunchEnv, error) {
+func (m *mockAdapter) PrepareEnv(ctx any, p, d string) (agents.LaunchEnv, error) {
 	return agents.LaunchEnv{}, nil
 }
 func (m *mockAdapter) Doctor(ctx any, p, d string) []agents.DiagnosticResult { return nil }
@@ -191,5 +191,179 @@ func TestMoveAgent_SingleAgentSourceCleanup(t *testing.T) {
 	// dest-prof should have codex
 	if !cfg.HasAgent("dest-prof", "codex") {
 		t.Error("expected dest-prof to have codex")
+	}
+}
+
+func TestMoveAgent_Claude(t *testing.T) {
+	tempDir := t.TempDir()
+	pm := NewProfileManager(tempDir)
+	cfg := config.NewDefaultConfig()
+
+	srcDir, err := pm.EnsureProfile("claude-src")
+	if err != nil {
+		t.Fatalf("EnsureProfile claude-src failed: %v", err)
+	}
+	cfg.AddProfileAgent("claude-src", "claude")
+
+	// Create .claude.json, claude.json, and .claude directory with nested files
+	claudeDotJSON := filepath.Join(srcDir, ".claude.json")
+	if err := os.WriteFile(claudeDotJSON, []byte(`{"oauthAccount":{"email":"test@example.com"}}`), 0600); err != nil {
+		t.Fatalf("write .claude.json failed: %v", err)
+	}
+
+	claudeJSON := filepath.Join(srcDir, "claude.json")
+	if err := os.WriteFile(claudeJSON, []byte(`{"token":"claude-standalone-token"}`), 0600); err != nil {
+		t.Fatalf("write claude.json failed: %v", err)
+	}
+
+	claudeDir := filepath.Join(srcDir, ".claude")
+	nestedProjectsDir := filepath.Join(claudeDir, "projects", "proj1")
+	if err := os.MkdirAll(nestedProjectsDir, 0700); err != nil {
+		t.Fatalf("mkdir .claude projects failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"env":"test"}`), 0600); err != nil {
+		t.Fatalf("write settings.json failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedProjectsDir, "session.jsonl"), []byte(`{"sessionId":"s123"}`), 0600); err != nil {
+		t.Fatalf("write session.jsonl failed: %v", err)
+	}
+
+	// Move claude from claude-src to claude-dst
+	if err := pm.MoveAgent("claude", "claude-src", "claude-dst", false, cfg, nil); err != nil {
+		t.Fatalf("MoveAgent failed: %v", err)
+	}
+
+	// Verify claude-dst has moved files
+	dstDir := pm.ProfileDir("claude-dst")
+	dstDotJSON, err := os.ReadFile(filepath.Join(dstDir, ".claude.json"))
+	if err != nil {
+		t.Errorf("expected .claude.json in target: %v", err)
+	} else if string(dstDotJSON) != `{"oauthAccount":{"email":"test@example.com"}}` {
+		t.Errorf("unexpected .claude.json content: %s", string(dstDotJSON))
+	}
+
+	dstJSON, err := os.ReadFile(filepath.Join(dstDir, "claude.json"))
+	if err != nil {
+		t.Errorf("expected claude.json in target: %v", err)
+	} else if string(dstJSON) != `{"token":"claude-standalone-token"}` {
+		t.Errorf("unexpected claude.json content: %s", string(dstJSON))
+	}
+
+	dstSettings, err := os.ReadFile(filepath.Join(dstDir, ".claude", "settings.json"))
+	if err != nil {
+		t.Errorf("expected .claude/settings.json in target: %v", err)
+	} else if string(dstSettings) != `{"env":"test"}` {
+		t.Errorf("unexpected settings.json content: %s", string(dstSettings))
+	}
+
+	dstSession, err := os.ReadFile(filepath.Join(dstDir, ".claude", "projects", "proj1", "session.jsonl"))
+	if err != nil {
+		t.Errorf("expected .claude/projects/proj1/session.jsonl in target: %v", err)
+	} else if string(dstSession) != `{"sessionId":"s123"}` {
+		t.Errorf("unexpected session.jsonl content: %s", string(dstSession))
+	}
+
+	// Verify claude-src was cleaned up
+	if cfg.HasAgent("claude-src", "claude") {
+		t.Error("expected claude-src to no longer have claude in config")
+	}
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Error("expected claude-src profile dir to be deleted")
+	}
+
+	// Verify claude-dst is in config
+	if !cfg.HasAgent("claude-dst", "claude") {
+		t.Error("expected claude-dst to have claude in config")
+	}
+}
+
+func TestMoveAgent_Claude_CollisionAndForce(t *testing.T) {
+	tempDir := t.TempDir()
+	pm := NewProfileManager(tempDir)
+	cfg := config.NewDefaultConfig()
+
+	srcDir, _ := pm.EnsureProfile("claude-src")
+	cfg.AddProfileAgent("claude-src", "claude")
+	_ = os.WriteFile(filepath.Join(srcDir, ".claude.json"), []byte("src-dot-json"), 0600)
+	_ = os.WriteFile(filepath.Join(srcDir, "claude.json"), []byte("src-plain-json"), 0600)
+	_ = os.MkdirAll(filepath.Join(srcDir, ".claude"), 0700)
+	_ = os.WriteFile(filepath.Join(srcDir, ".claude", "settings.json"), []byte("src-settings"), 0600)
+
+	dstDir, _ := pm.EnsureProfile("claude-dst")
+	cfg.AddProfileAgent("claude-dst", "claude")
+	_ = os.WriteFile(filepath.Join(dstDir, ".claude.json"), []byte("dst-dot-json"), 0600)
+	_ = os.WriteFile(filepath.Join(dstDir, "claude.json"), []byte("dst-plain-json"), 0600)
+	_ = os.MkdirAll(filepath.Join(dstDir, ".claude"), 0700)
+	_ = os.WriteFile(filepath.Join(dstDir, ".claude", "settings.json"), []byte("dst-settings"), 0600)
+
+	// Move without force must fail collision check
+	err := pm.MoveAgent("claude", "claude-src", "claude-dst", false, cfg, nil)
+	if err == nil {
+		t.Fatal("expected collision error without force, got nil")
+	}
+
+	// Move with force must overwrite
+	err = pm.MoveAgent("claude", "claude-src", "claude-dst", true, cfg, nil)
+	if err != nil {
+		t.Fatalf("expected move with force to succeed, got %v", err)
+	}
+
+	gotDotJSON, _ := os.ReadFile(filepath.Join(dstDir, ".claude.json"))
+	if string(gotDotJSON) != "src-dot-json" {
+		t.Errorf("expected 'src-dot-json', got %s", string(gotDotJSON))
+	}
+	gotPlainJSON, _ := os.ReadFile(filepath.Join(dstDir, "claude.json"))
+	if string(gotPlainJSON) != "src-plain-json" {
+		t.Errorf("expected 'src-plain-json', got %s", string(gotPlainJSON))
+	}
+	gotSettings, _ := os.ReadFile(filepath.Join(dstDir, ".claude", "settings.json"))
+	if string(gotSettings) != "src-settings" {
+		t.Errorf("expected 'src-settings', got %s", string(gotSettings))
+	}
+}
+
+func TestHasAgentCredentialsOnDisk_Claude(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Empty dir should return false
+	if hasAgentCredentialsOnDisk("claude", tempDir) {
+		t.Error("expected false for empty directory")
+	}
+
+	// Empty file should return false
+	dotJSON := filepath.Join(tempDir, ".claude.json")
+	if err := os.WriteFile(dotJSON, []byte(""), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if hasAgentCredentialsOnDisk("claude", tempDir) {
+		t.Error("expected false for 0-byte .claude.json")
+	}
+
+	// Non-empty .claude.json should return true
+	if err := os.WriteFile(dotJSON, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !hasAgentCredentialsOnDisk("claude", tempDir) {
+		t.Error("expected true for valid .claude.json")
+	}
+	_ = os.Remove(dotJSON)
+
+	// claude.json
+	plainJSON := filepath.Join(tempDir, "claude.json")
+	if err := os.WriteFile(plainJSON, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !hasAgentCredentialsOnDisk("claude", tempDir) {
+		t.Error("expected true for valid claude.json")
+	}
+	_ = os.Remove(plainJSON)
+
+	// .claude directory
+	dotClaudeDir := filepath.Join(tempDir, ".claude")
+	if err := os.MkdirAll(dotClaudeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if !hasAgentCredentialsOnDisk("claude", tempDir) {
+		t.Error("expected true for .claude directory")
 	}
 }

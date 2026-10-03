@@ -24,19 +24,30 @@ import (
 	"github.com/aim-cli/aim/internal/usage"
 )
 
-// Compile-time assertion that Adapter implements agents.AgentAdapter.
-var _ agents.AgentAdapter = (*Adapter)(nil)
+// Compile-time assertions that Adapter implements the segregated agent interfaces.
+var (
+	_ agents.AgentAdapter        = (*Adapter)(nil)
+	_ agents.Authenticator       = (*Adapter)(nil)
+	_ agents.Diagnostician       = (*Adapter)(nil)
+	_ agents.UsageProvider       = (*Adapter)(nil)
+	_ agents.AccountInfoProvider = (*Adapter)(nil)
+	_ agents.FullAdapter         = (*Adapter)(nil)
+)
 
-type Adapter struct{}
-
-func NewAdapter() *Adapter {
-	return &Adapter{}
+type Adapter struct {
+	agents.BaseAdapter
 }
 
-func (a *Adapter) Name() string        { return "codex" }
-func (a *Adapter) DisplayName() string { return "Codex CLI" }
-func (a *Adapter) Aliases() []string   { return []string{"codex-cli", "openai-codex"} }
-func (a *Adapter) BinaryName() string  { return "codex" }
+func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {
+	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
+	return acc.Email, acc.AuthMethod, acc.ProjectID
+}
+
+func NewAdapter() *Adapter {
+	return &Adapter{
+		BaseAdapter: agents.NewBaseAdapter("codex", "Codex CLI", "codex", []string{"codex-cli", "openai-codex"}),
+	}
+}
 
 func (a *Adapter) TokenPath(profileDir string) string {
 	return filepath.Join(profileDir, ".codex", "auth.json")
@@ -96,20 +107,6 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	return true
 }
 
-// ResolveBinary locates the codex executable on the system.
-func (a *Adapter) ResolveBinary() string {
-	bin, err := exec.LookPath(a.BinaryName())
-	if err == nil {
-		return bin
-	}
-	realHome := config.RealHomeDir()
-	fallback := filepath.Join(realHome, ".local", "bin", a.BinaryName())
-	if _, err := os.Stat(fallback); err == nil {
-		return fallback
-	}
-	return a.BinaryName()
-}
-
 func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) error {
 	codexDir := filepath.Join(profileDir, ".codex")
 	if err := os.MkdirAll(codexDir, 0700); err != nil {
@@ -155,7 +152,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	return nil
 }
 
-func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	codexDir := filepath.Join(profileDir, ".codex")
 	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		return agents.LaunchEnv{}, err
@@ -169,7 +166,7 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	copyHostConfig(realHome, codexDir)
 
 	// Probe and auto-start local sidecar proxy daemons (e.g. Caveman) if configured
-	ensureSidecarDaemons(realHome, codexDir)
+	ensureSidecarDaemons(ctx, realHome, codexDir)
 
 	// Bridge host plugins and hooks (e.g. Catalyst) into profile
 	bridgePluginsAndHooks(realHome, codexDir)
@@ -180,11 +177,9 @@ func (a *Adapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, 
 	bin := a.ResolveBinary()
 	logger.Debug("[codex] Resolved binary: %s", bin)
 
-	envMap := config.StorageEnv()
-	envMap["HOME"] = profileDir
-	envMap["CODEX_HOME"] = codexDir
-	envMap["AIM_AGENT"] = a.Name()
-	envMap["AIM_PROFILE"] = profileName
+	envMap := a.BaseLaunchEnv(profileName, profileDir, map[string]string{
+		"CODEX_HOME": codexDir,
+	})
 
 	logger.Debug("[codex] Launch env: HOME=%s, CODEX_HOME=%s, AIM_AGENT=%s, AIM_PROFILE=%s",
 		profileDir, codexDir, a.Name(), profileName)
@@ -306,7 +301,7 @@ func stripTables(dir string, data []byte, keys ...string) []byte {
 	return out
 }
 
-func ensureSidecarDaemons(realHome, profileCodexDir string) {
+func ensureSidecarDaemons(ctx context.Context, realHome, profileCodexDir string) {
 	cfgPath := filepath.Join(profileCodexDir, "config.toml")
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
@@ -318,7 +313,9 @@ func ensureSidecarDaemons(realHome, profileCodexDir string) {
 	}
 
 	// 1. Probe port 8787
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 250*time.Millisecond)
+	var dialer net.Dialer
+	dialer.Timeout = 250 * time.Millisecond
+	conn, err := dialer.DialContext(ctx, "tcp", "127.0.0.1:8787")
 	if err == nil {
 		conn.Close()
 		return
@@ -349,8 +346,14 @@ func ensureSidecarDaemons(realHome, profileCodexDir string) {
 	// Wait up to 1.5s for the proxy to start listening
 	deadline := time.Now().Add(1500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
-		conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 150*time.Millisecond)
+		select {
+		case <-ctx.Done():
+			logger.Debug("[codex] context cancelled while waiting for caveman-proxy: %v", ctx.Err())
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+		dialer.Timeout = 150 * time.Millisecond
+		conn, err := dialer.DialContext(ctx, "tcp", "127.0.0.1:8787")
 		if err == nil {
 			conn.Close()
 			logger.Debug("[codex] caveman-proxy auto-started and listening on 127.0.0.1:8787")

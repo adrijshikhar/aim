@@ -665,7 +665,7 @@ func (m *mockAgentAdapter) HasCredentials(profileDir string) bool {
 func (m *mockAgentAdapter) Login(ctx context.Context, profileName, profileDir string) error {
 	return nil
 }
-func (m *mockAgentAdapter) PrepareEnv(profileName, profileDir string) (agents.LaunchEnv, error) {
+func (m *mockAgentAdapter) PrepareEnv(ctx context.Context, profileName, profileDir string) (agents.LaunchEnv, error) {
 	return agents.LaunchEnv{}, nil
 }
 func (m *mockAgentAdapter) Doctor(ctx context.Context, profileName, profileDir string) []agents.DiagnosticResult {
@@ -712,5 +712,42 @@ func TestMergeStateStore_DefaultsUnderStateDir(t *testing.T) {
 	t.Setenv("AIM_HOME", base)
 	if got := NewProfileManager(base).MergeStateStore().Dir; got != filepath.Join(base, "profile-merge") {
 		t.Fatalf("default store = %s", got)
+	}
+}
+
+type stubSessionChecker struct {
+	active bool
+	agents []string
+	err    error
+}
+
+func (s *stubSessionChecker) ActiveSessions(profileName string) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.agents, nil
+}
+
+func TestProfileManager_SessionCheckerMock(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("AIM_HOME", base)
+	cfg := config.NewDefaultConfig()
+
+	checker := &stubSessionChecker{agents: nil}
+	pm := NewProfileManager(base, checker)
+	_, err := pm.EnsureProfile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should succeed when no active sessions
+	if err := pm.refuseIfRunning("work"); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	// When active sessions exist, should refuse with agent name
+	checker.agents = []string{"codex"}
+	if err := pm.DeleteProfile("work", cfg); err == nil || !strings.Contains(err.Error(), "running codex session") {
+		t.Fatalf("expected refusal with codex session, got %v", err)
 	}
 }
