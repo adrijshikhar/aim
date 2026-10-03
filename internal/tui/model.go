@@ -18,6 +18,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// SubModel represents a modular child component in the TUI (such as drawers or modals)
+// following the Bubbletea Model lifecycle.
+type SubModel interface {
+	Init() tea.Cmd
+	Update(tea.Msg) (SubModel, tea.Cmd)
+	View() string
+}
+
 type ActionOutcome int
 
 const (
@@ -68,8 +76,8 @@ type Model struct {
 	deleteModal    deleteModalState
 	renameModal    renameModalState
 	moveModal      moveModalState
-	doctorDrawer   doctorDrawerState
-	sessionsDrawer sessionsDrawerState
+	doctorDrawer   DoctorDrawer
+	sessionsDrawer SessionsDrawer
 	resumeModal    resumeModalState
 	helpModal      helpModalState
 	filter         filterState
@@ -495,6 +503,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.help.Width = 100
 		}
+		m.sessionsDrawer.height = msg.Height
+		m.sessionsDrawer.help.Width = m.help.Width
 		return m, nil
 
 	case usageReportMsg:
@@ -527,16 +537,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sessionsLoadedMsg:
-		m.sessionsDrawer.loading = false
-		if msg.err == nil {
-			m.setSessions(msg.sessions)
+		sub, _ := m.sessionsDrawer.Update(msg)
+		if sd, ok := sub.(SessionsDrawer); ok {
+			m.sessionsDrawer = sd
 		}
 		return m, nil
 
 	case doctorDiagnosticsLoadedMsg:
-		m.doctorDrawer.loading = false
-		if msg.targetAgent == m.agent && (msg.targetProfile == m.doctorDrawer.targetProfile || m.doctorDrawer.targetProfile == "") {
-			m.doctorDrawer.results = msg.results
+		sub, _ := m.doctorDrawer.Update(msg)
+		if dd, ok := sub.(DoctorDrawer); ok {
+			m.doctorDrawer = dd
 		}
 		return m, nil
 

@@ -9,23 +9,141 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-type doctorDrawerState struct {
+type DoctorDrawer struct {
 	active        bool
 	loading       bool
 	targetProfile string
 	targetAgent   string
 	results       []agents.DiagnosticResult
+
+	keys          DoctorDrawerKeyMap
+	help          help.Model
+	pendingAction tea.Msg
+}
+
+type doctorDrawerState = DoctorDrawer
+
+var _ SubModel = DoctorDrawer{}
+
+type DoctorCloseMsg struct{}
+type DoctorQuitMsg struct{}
+type DoctorNavigateProfileMsg struct {
+	Delta int
+}
+type DoctorSelectAgentMsg struct {
+	Index int
+}
+type DoctorCycleAgentMsg struct {
+	Forward bool
 }
 
 type doctorDiagnosticsLoadedMsg struct {
 	targetAgent   string
 	targetProfile string
 	results       []agents.DiagnosticResult
+}
+
+func (d DoctorDrawer) Init() tea.Cmd {
+	return nil
+}
+
+func (d DoctorDrawer) Update(msg tea.Msg) (SubModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case doctorDiagnosticsLoadedMsg:
+		d.loading = false
+		if msg.targetAgent == d.targetAgent && (msg.targetProfile == d.targetProfile || d.targetProfile == "") {
+			d.results = msg.results
+		}
+		return d, nil
+
+	case tea.KeyMsg:
+		km := d.keys
+		if len(km.Quit.Keys()) == 0 {
+			km = DefaultDoctorDrawerKeyMap()
+		}
+
+		switch {
+		case key.Matches(msg, km.Quit):
+			d.pendingAction = DoctorQuitMsg{}
+			return d, func() tea.Msg { return DoctorQuitMsg{} }
+		case key.Matches(msg, km.Close):
+			d.pendingAction = DoctorCloseMsg{}
+			return d, func() tea.Msg { return DoctorCloseMsg{} }
+		case key.Matches(msg, km.Up):
+			d.pendingAction = DoctorNavigateProfileMsg{Delta: -1}
+			return d, func() tea.Msg { return DoctorNavigateProfileMsg{Delta: -1} }
+		case key.Matches(msg, km.Down):
+			d.pendingAction = DoctorNavigateProfileMsg{Delta: 1}
+			return d, func() tea.Msg { return DoctorNavigateProfileMsg{Delta: 1} }
+		case key.Matches(msg, km.Agent1):
+			d.pendingAction = DoctorSelectAgentMsg{Index: 0}
+			return d, func() tea.Msg { return DoctorSelectAgentMsg{Index: 0} }
+		case key.Matches(msg, km.Agent2):
+			d.pendingAction = DoctorSelectAgentMsg{Index: 1}
+			return d, func() tea.Msg { return DoctorSelectAgentMsg{Index: 1} }
+		case key.Matches(msg, km.Agent3):
+			d.pendingAction = DoctorSelectAgentMsg{Index: 2}
+			return d, func() tea.Msg { return DoctorSelectAgentMsg{Index: 2} }
+		case key.Matches(msg, km.NextAgent):
+			d.pendingAction = DoctorCycleAgentMsg{Forward: true}
+			return d, func() tea.Msg { return DoctorCycleAgentMsg{Forward: true} }
+		case key.Matches(msg, km.PrevAgent):
+			d.pendingAction = DoctorCycleAgentMsg{Forward: false}
+			return d, func() tea.Msg { return DoctorCycleAgentMsg{Forward: false} }
+		}
+	}
+	return d, nil
+}
+
+func (d DoctorDrawer) View() string {
+	var b strings.Builder
+	target := d.targetProfile
+	if target == "" {
+		target = "(none)"
+	}
+	title := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Render(
+		fmt.Sprintf("🩺  Diagnostics: %s / %s", d.targetAgent, target),
+	)
+	b.WriteString(title + "\n\n")
+
+	for _, r := range d.results {
+		var badgeStyle lipgloss.Style
+		switch r.Status {
+		case "OK":
+			badgeStyle = GaugeGreenStyle
+		case "WARN":
+			badgeStyle = GaugeYellowStyle
+		case "FAIL":
+			badgeStyle = GaugeRedStyle
+		default:
+			badgeStyle = GaugeDimStyle
+		}
+
+		badge := badgeStyle.Width(8).Render(fmt.Sprintf("[%s]", r.Status))
+		cat := lipgloss.NewStyle().Bold(true).Foreground(TextPrimary).Width(14).Render(r.Category + ":")
+		msg := lipgloss.NewStyle().Foreground(TextSecondary).Render(r.Message)
+
+		b.WriteString(fmt.Sprintf("  %s %s %s\n", badge, cat, msg))
+	}
+
+	km := d.keys
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultDoctorDrawerKeyMap()
+	}
+	h := d.help
+	if h.Width == 0 {
+		h = NewThemedHelp()
+	}
+	b.WriteString("\n  " + h.ShortHelpView(km.ShortHelp()))
+
+	box := DoctorDrawerStyle.Render(b.String())
+	return "\n" + box + "\n"
 }
 
 func (m Model) IsDoctorDrawerActive() bool {
@@ -107,6 +225,8 @@ func (m Model) fetchDoctorDiagnosticsCmd() tea.Cmd {
 func (m Model) openDoctorDrawer() (Model, tea.Cmd) {
 	m = m.fetchDoctorDiagnostics()
 	m.doctorDrawer.loading = true
+	m.doctorDrawer.keys = m.keys.DoctorDrawer
+	m.doctorDrawer.help = m.help
 	return m, m.fetchDoctorDiagnosticsCmd()
 }
 
@@ -122,11 +242,13 @@ func (m Model) fetchDoctorDiagnostics() Model {
 		})
 		// No profile: do not run Doctor with an empty profile dir — adapters
 		// resolve files relative to it and would write into the working dir.
-		m.doctorDrawer = doctorDrawerState{
+		m.doctorDrawer = DoctorDrawer{
 			active:        true,
 			targetAgent:   m.agent,
 			targetProfile: "(none)",
 			results:       results,
+			keys:          m.keys.DoctorDrawer,
+			help:          m.help,
 		}
 		return m
 	}
@@ -172,89 +294,59 @@ func (m Model) fetchDoctorDiagnostics() Model {
 		}
 	}
 
-	m.doctorDrawer = doctorDrawerState{
+	m.doctorDrawer = DoctorDrawer{
 		active:        true,
 		targetProfile: p,
 		targetAgent:   m.agent,
 		results:       results,
+		keys:          m.keys.DoctorDrawer,
+		help:          m.help,
 	}
 	return m
 }
 
 func (m Model) updateDoctorDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
-	km := m.keys.DoctorDrawer
+	m.doctorDrawer.keys = m.keys.DoctorDrawer
+	m.doctorDrawer.help = m.help
+	sub, cmd := m.doctorDrawer.Update(msg)
+	d := sub.(DoctorDrawer)
+	action := d.pendingAction
+	d.pendingAction = nil
+	m.doctorDrawer = d
 
-	switch {
-	case key.Matches(msg, km.Quit):
-		m.cancelStream()
-		return m, tea.Quit
-	case key.Matches(msg, km.Close):
-		m.doctorDrawer = doctorDrawerState{}
-		return m, nil
-	case key.Matches(msg, km.Up):
-		if m.cursor > 0 {
-			m.cursor--
-			m = m.fetchDoctorDiagnostics()
-			m.doctorDrawer.loading = true
-			return m, m.fetchDoctorDiagnosticsCmd()
+	if action != nil {
+		switch act := action.(type) {
+		case DoctorQuitMsg:
+			m.cancelStream()
+			return m, tea.Quit
+		case DoctorCloseMsg:
+			m.doctorDrawer = DoctorDrawer{}
+			return m, nil
+		case DoctorNavigateProfileMsg:
+			if act.Delta < 0 && m.cursor > 0 {
+				m.cursor--
+				m = m.fetchDoctorDiagnostics()
+				m.doctorDrawer.loading = true
+				return m, m.fetchDoctorDiagnosticsCmd()
+			} else if act.Delta > 0 && m.cursor < len(m.profiles)-1 {
+				m.cursor++
+				m = m.fetchDoctorDiagnostics()
+				m.doctorDrawer.loading = true
+				return m, m.fetchDoctorDiagnosticsCmd()
+			}
+			return m, nil
+		case DoctorSelectAgentMsg:
+			return m.selectAgentByIndex(act.Index)
+		case DoctorCycleAgentMsg:
+			return m.cycleAgent(act.Forward)
 		}
-		return m, nil
-	case key.Matches(msg, km.Down):
-		if m.cursor < len(m.profiles)-1 {
-			m.cursor++
-			m = m.fetchDoctorDiagnostics()
-			m.doctorDrawer.loading = true
-			return m, m.fetchDoctorDiagnosticsCmd()
-		}
-		return m, nil
-	case key.Matches(msg, km.Agent1):
-		return m.selectAgentByIndex(0)
-	case key.Matches(msg, km.Agent2):
-		return m.selectAgentByIndex(1)
-	case key.Matches(msg, km.Agent3):
-		return m.selectAgentByIndex(2)
-	case key.Matches(msg, km.NextAgent):
-		return m.cycleAgent(true)
-	case key.Matches(msg, km.PrevAgent):
-		return m.cycleAgent(false)
 	}
-	return m, nil
+	return m, cmd
 }
 
 func (m Model) renderDoctorDrawer() string {
-	var b strings.Builder
-	target := m.doctorDrawer.targetProfile
-	if target == "" {
-		target = "(none)"
-	}
-	title := lipgloss.NewStyle().Bold(true).Foreground(AccentBlue).Render(
-		fmt.Sprintf("🩺  Diagnostics: %s / %s", m.doctorDrawer.targetAgent, target),
-	)
-	b.WriteString(title + "\n\n")
-
-	for _, r := range m.doctorDrawer.results {
-		var badgeStyle lipgloss.Style
-		switch r.Status {
-		case "OK":
-			badgeStyle = GaugeGreenStyle
-		case "WARN":
-			badgeStyle = GaugeYellowStyle
-		case "FAIL":
-			badgeStyle = GaugeRedStyle
-		default:
-			badgeStyle = GaugeDimStyle
-		}
-
-		badge := badgeStyle.Width(8).Render(fmt.Sprintf("[%s]", r.Status))
-		cat := lipgloss.NewStyle().Bold(true).Foreground(TextPrimary).Width(14).Render(r.Category + ":")
-		msg := lipgloss.NewStyle().Foreground(TextSecondary).Render(r.Message)
-
-		b.WriteString(fmt.Sprintf("  %s %s %s\n", badge, cat, msg))
-	}
-
-	km := m.keys.DoctorDrawer
-	b.WriteString("\n  " + m.help.ShortHelpView(km.ShortHelp()))
-
-	box := DoctorDrawerStyle.Render(b.String())
-	return "\n" + box + "\n"
+	d := m.doctorDrawer
+	d.keys = m.keys.DoctorDrawer
+	d.help = m.help
+	return d.View()
 }

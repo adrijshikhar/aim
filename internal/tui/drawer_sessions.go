@@ -13,6 +13,7 @@ import (
 	"github.com/aim-cli/aim/internal/session/providers/agy"
 	claudesess "github.com/aim-cli/aim/internal/session/providers/claude"
 	"github.com/aim-cli/aim/internal/session/providers/codex"
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -68,7 +69,7 @@ func openDirectory(dir string) error {
 	return cmd.Start()
 }
 
-type sessionsDrawerState struct {
+type SessionsDrawer struct {
 	active         bool
 	loading        bool
 	standalone     bool
@@ -84,6 +85,25 @@ type sessionsDrawerState struct {
 	statusMessage  string
 	killConfirmPID int
 	fork           bool
+
+	keys          SessionsDrawerKeyMap
+	help          help.Model
+	height        int
+	profilesCount int
+	pendingAction tea.Msg
+}
+
+type sessionsDrawerState = SessionsDrawer
+
+var _ SubModel = SessionsDrawer{}
+
+type SessionsCloseMsg struct{}
+type SessionsQuitMsg struct{}
+type SessionsResumeMsg struct {
+	Session   *session.Session
+	Action    ActionOutcome
+	Fork      bool
+	WithFlags bool
 }
 
 type sessionsLoadedMsg struct {
@@ -91,41 +111,50 @@ type sessionsLoadedMsg struct {
 	err      error
 }
 
-func (m Model) IsSessionsDrawerActive() bool {
-	return m.sessionsDrawer.active
+func (d SessionsDrawer) Init() tea.Cmd {
+	if d.loading {
+		return d.fetchSessionsCmd()
+	}
+	return nil
 }
 
-func (m Model) IsSessionsLoading() bool {
-	return m.sessionsDrawer.loading
-}
-
-func (m Model) SessionsDrawerList() []session.Session {
-	return m.sessionsDrawer.sessions
-}
-
-func (m *Model) setSessions(sessions []session.Session) {
-	m.sessionsDrawer.sessions = sessions
-	m.sessionsDrawer.index = NewSessionsIndex(sessions)
-	if m.sessionsDrawer.cursor >= len(sessions) {
+func (d *SessionsDrawer) setSessions(sessions []session.Session) {
+	d.sessions = sessions
+	d.index = NewSessionsIndex(sessions)
+	if d.cursor >= len(sessions) {
 		if len(sessions) > 0 {
-			m.sessionsDrawer.cursor = len(sessions) - 1
+			d.cursor = len(sessions) - 1
 		} else {
-			m.sessionsDrawer.cursor = 0
+			d.cursor = 0
 		}
 	}
 }
 
-func (m *Model) SetSessionsForTest(sessions []session.Session) {
-	m.setSessions(sessions)
+func (d SessionsDrawer) filteredSessions() []session.Session {
+	idx := d.index
+	if idx == nil {
+		idx = NewSessionsIndex(d.sessions)
+	}
+	term := d.filterInput.Value()
+	return idx.SearchWithProfile(term, d.activeOnly, d.profileFilter)
 }
 
-func (m Model) IsForkResume() bool {
-	return m.sessionsDrawer.fork
+func (d *SessionsDrawer) fetchSessions() {
+	mgr := session.NewManager()
+	mgr.RegisterProvider(agy.NewProvider())
+	mgr.RegisterProvider(codex.NewProvider())
+	mgr.RegisterProvider(claudesess.NewProvider())
+
+	sessions, err := mgr.ListSessions(context.Background(), d.agentFilter, d.profileFilter, false)
+	if err != nil {
+		sessions = []session.Session{}
+	}
+	d.setSessions(sessions)
 }
 
-func (m Model) fetchSessionsCmd() tea.Cmd {
-	agentFilter := m.sessionsDrawer.agentFilter
-	profileFilter := m.sessionsDrawer.profileFilter
+func (d SessionsDrawer) fetchSessionsCmd() tea.Cmd {
+	agentFilter := d.agentFilter
+	profileFilter := d.profileFilter
 	return func() tea.Msg {
 		mgr := session.NewManager()
 		mgr.RegisterProvider(agy.NewProvider())
@@ -140,346 +169,321 @@ func (m Model) fetchSessionsCmd() tea.Cmd {
 	}
 }
 
-func (m Model) openSessionsDrawer() (Model, tea.Cmd) {
-	m = m.openSessionsDrawerConfig(m.agent, "", false, false)
-	m.sessionsDrawer.loading = true
-	return m, m.fetchSessionsCmd()
-}
-
-func (m Model) openSessionsDrawerConfig(initialAgent, profileFilter string, activeOnly, standalone bool) Model {
-	ti := textinput.New()
-	ti.Placeholder = "Filter sessions by title, id, profile, or workspace..."
-	ti.CharLimit = 64
-	ti.Prompt = "Filter: "
-	ti.PromptStyle = lipgloss.NewStyle().Bold(true).Foreground(AccentCyan)
-
-	m.sessionsDrawer = sessionsDrawerState{
-		active:        true,
-		standalone:    standalone,
-		filterInput:   ti,
-		agentFilter:   initialAgent,
-		profileFilter: profileFilter,
-		activeOnly:    activeOnly,
-		cursor:        0,
-	}
-	m = m.fetchSessions()
-	return m
-}
-
-func (m Model) fetchSessions() Model {
-	mgr := session.NewManager()
-	mgr.RegisterProvider(agy.NewProvider())
-	mgr.RegisterProvider(codex.NewProvider())
-	mgr.RegisterProvider(claudesess.NewProvider())
-
-	sessions, err := mgr.ListSessions(context.Background(), m.sessionsDrawer.agentFilter, m.sessionsDrawer.profileFilter, false)
-	if err != nil {
-		sessions = []session.Session{}
-	}
-	m.setSessions(sessions)
-	return m
-}
-
-func (m Model) filteredSessions() []session.Session {
-	idx := m.sessionsDrawer.index
-	if idx == nil {
-		idx = NewSessionsIndex(m.sessionsDrawer.sessions)
-	}
-	term := m.sessionsDrawer.filterInput.Value()
-	return idx.SearchWithProfile(term, m.sessionsDrawer.activeOnly, m.sessionsDrawer.profileFilter)
-}
-
-func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
-	km := m.keys.SessionsDrawer
-
-	if m.sessionsDrawer.filterActive {
-		filterKm := km.ForFilterMode()
-		switch {
-		case key.Matches(msg, filterKm.Quit):
-			m.cancelStream()
-			return m, tea.Quit
-		case key.Matches(msg, filterKm.TabFocus):
-			m.sessionsDrawer.filterActive = false
-			m.sessionsDrawer.filterInput.Blur()
-			return m, nil
-		case key.Matches(msg, filterKm.Up):
-			if m.sessionsDrawer.cursor > 0 {
-				m.sessionsDrawer.cursor--
-			}
-			m.sessionsDrawer.statusMessage = ""
-			m.sessionsDrawer.killConfirmPID = 0
-			return m, nil
-		case key.Matches(msg, filterKm.Down):
-			filtered := m.filteredSessions()
-			if m.sessionsDrawer.cursor < len(filtered)-1 {
-				m.sessionsDrawer.cursor++
-			}
-			m.sessionsDrawer.statusMessage = ""
-			m.sessionsDrawer.killConfirmPID = 0
-			return m, nil
-		case key.Matches(msg, filterKm.PageUp):
-			step := 8
-			if m.sessionsDrawer.cursor >= step {
-				m.sessionsDrawer.cursor -= step
-			} else {
-				m.sessionsDrawer.cursor = 0
-			}
-			m.sessionsDrawer.statusMessage = ""
-			m.sessionsDrawer.killConfirmPID = 0
-			return m, nil
-		case key.Matches(msg, filterKm.PageDown):
-			filtered := m.filteredSessions()
-			step := 8
-			if m.sessionsDrawer.cursor+step < len(filtered) {
-				m.sessionsDrawer.cursor += step
-			} else if len(filtered) > 0 {
-				m.sessionsDrawer.cursor = len(filtered) - 1
-			}
-			m.sessionsDrawer.statusMessage = ""
-			m.sessionsDrawer.killConfirmPID = 0
-			return m, nil
-		case key.Matches(msg, filterKm.Flags):
-			filtered := m.filteredSessions()
-			if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-				m.sessionsDrawer.filterActive = false
-				m.sessionsDrawer.filterInput.Blur()
-				target := filtered[m.sessionsDrawer.cursor]
-				return m.openResumeModalWithFlags(&target, ActionResumeExact, false, true)
-			}
-			return m, nil
-		case key.Matches(msg, filterKm.Enter):
-			filtered := m.filteredSessions()
-			if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-				m.sessionsDrawer.filterActive = false
-				m.sessionsDrawer.filterInput.Blur()
-				target := filtered[m.sessionsDrawer.cursor]
-				return m.openResumeModal(&target, ActionResumeExact, false)
-			}
-			m.sessionsDrawer.filterActive = false
-			m.sessionsDrawer.filterInput.Blur()
-			return m, nil
-		default:
-			oldVal := m.sessionsDrawer.filterInput.Value()
-			var cmd tea.Cmd
-			m.sessionsDrawer.filterInput, cmd = m.sessionsDrawer.filterInput.Update(msg)
-			if m.sessionsDrawer.filterInput.Value() != oldVal {
-				m.sessionsDrawer.cursor = 0
-			}
-			return m, cmd
+func (d SessionsDrawer) Update(msg tea.Msg) (SubModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case sessionsLoadedMsg:
+		d.loading = false
+		if msg.err == nil {
+			d.setSessions(msg.sessions)
 		}
-	}
+		return d, nil
 
-	switch {
-	case key.Matches(msg, km.Quit):
-		m.cancelStream()
-		return m, tea.Quit
-	case key.Matches(msg, km.Close):
-		if key.Matches(msg, km.ClearFilter) && m.sessionsDrawer.filterInput.Value() != "" {
-			m.sessionsDrawer.filterInput.SetValue("")
-			m.sessionsDrawer.cursor = 0
-			m.sessionsDrawer.statusMessage = ""
-			m.sessionsDrawer.killConfirmPID = 0
-			return m, nil
-		}
-		if m.sessionsDrawer.standalone {
-			m.cancelStream()
-			return m, tea.Quit
-		}
-		m.sessionsDrawer = sessionsDrawerState{}
-		return m, nil
-	case key.Matches(msg, km.Filter):
-		m.sessionsDrawer.filterActive = true
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		cmd := m.sessionsDrawer.filterInput.Focus()
-		return m, cmd
-	case key.Matches(msg, km.TabFocus):
-		if m.sessionsDrawer.filterInput.Value() != "" {
-			m.sessionsDrawer.filterActive = true
-			cmd := m.sessionsDrawer.filterInput.Focus()
-			return m, cmd
-		}
-		switch m.sessionsDrawer.agentFilter {
-		case "agy":
-			m.sessionsDrawer.agentFilter = "codex"
-		case "codex":
-			m.sessionsDrawer.agentFilter = "claude"
-		case "claude":
-			m.sessionsDrawer.agentFilter = ""
-		default:
-			m.sessionsDrawer.agentFilter = "agy"
-		}
-		m.sessionsDrawer.cursor = 0
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		m.sessionsDrawer.loading = true
-		m = m.fetchSessions()
-		return m, m.fetchSessionsCmd()
-	case key.Matches(msg, km.Up):
-		if m.sessionsDrawer.cursor > 0 {
-			m.sessionsDrawer.cursor--
-		}
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		return m, nil
-	case key.Matches(msg, km.Down):
-		filtered := m.filteredSessions()
-		if m.sessionsDrawer.cursor < len(filtered)-1 {
-			m.sessionsDrawer.cursor++
-		}
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		return m, nil
-	case key.Matches(msg, km.PageUp):
-		step := 8
-		if m.sessionsDrawer.cursor >= step {
-			m.sessionsDrawer.cursor -= step
+	case tea.WindowSizeMsg:
+		d.height = msg.Height
+		if msg.Width > 8 {
+			d.help.Width = msg.Width - 8
 		} else {
-			m.sessionsDrawer.cursor = 0
+			d.help.Width = 100
 		}
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		return m, nil
-	case key.Matches(msg, km.PageDown):
-		filtered := m.filteredSessions()
-		step := 8
-		if m.sessionsDrawer.cursor+step < len(filtered) {
-			m.sessionsDrawer.cursor += step
-		} else if len(filtered) > 0 {
-			m.sessionsDrawer.cursor = len(filtered) - 1
+		return d, nil
+
+	case tea.KeyMsg:
+		km := d.keys
+		if len(km.Quit.Keys()) == 0 {
+			km = DefaultSessionsDrawerKeyMap()
 		}
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		return m, nil
-	case key.Matches(msg, km.Enter):
-		filtered := m.filteredSessions()
-		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-			target := filtered[m.sessionsDrawer.cursor]
-			return m.openResumeModal(&target, ActionResumeExact, false)
-		}
-	case key.Matches(msg, km.Flags):
-		filtered := m.filteredSessions()
-		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-			target := filtered[m.sessionsDrawer.cursor]
-			return m.openResumeModalWithFlags(&target, ActionResumeExact, false, true)
-		}
-	case key.Matches(msg, km.Catalyst):
-		filtered := m.filteredSessions()
-		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-			target := filtered[m.sessionsDrawer.cursor]
-			return m.openResumeModal(&target, ActionResumeCatalyst, false)
-		}
-	case key.Matches(msg, km.Fork):
-		filtered := m.filteredSessions()
-		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-			target := filtered[m.sessionsDrawer.cursor]
-			return m.openResumeModal(&target, ActionResumeExact, true)
-		}
-	case key.Matches(msg, km.AgentAll):
-		m.sessionsDrawer.agentFilter = ""
-		m.sessionsDrawer.cursor = 0
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		m.sessionsDrawer.loading = true
-		m = m.fetchSessions()
-		return m, m.fetchSessionsCmd()
-	case key.Matches(msg, km.AgentAgy):
-		m.sessionsDrawer.agentFilter = "agy"
-		m.sessionsDrawer.cursor = 0
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		m.sessionsDrawer.loading = true
-		m = m.fetchSessions()
-		return m, m.fetchSessionsCmd()
-	case key.Matches(msg, km.AgentCodex):
-		m.sessionsDrawer.agentFilter = "codex"
-		m.sessionsDrawer.cursor = 0
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		m.sessionsDrawer.loading = true
-		m = m.fetchSessions()
-		return m, m.fetchSessionsCmd()
-	case key.Matches(msg, km.AgentClaude):
-		m.sessionsDrawer.agentFilter = "claude"
-		m.sessionsDrawer.cursor = 0
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		m.sessionsDrawer.loading = true
-		m = m.fetchSessions()
-		return m, m.fetchSessionsCmd()
-	case key.Matches(msg, km.ToggleActive):
-		m.sessionsDrawer.activeOnly = !m.sessionsDrawer.activeOnly
-		m.sessionsDrawer.cursor = 0
-		m.sessionsDrawer.statusMessage = ""
-		m.sessionsDrawer.killConfirmPID = 0
-		return m, nil
-	case key.Matches(msg, km.TogglePreview):
-		m.sessionsDrawer.hidePreview = !m.sessionsDrawer.hidePreview
-		return m, nil
-	case key.Matches(msg, km.Kill):
-		filtered := m.filteredSessions()
-		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-			target := filtered[m.sessionsDrawer.cursor]
-			if target.Status != session.StatusActive || target.PID <= 0 {
-				m.sessionsDrawer.statusMessage = fmt.Sprintf("Session %s is idle (no active process to terminate)", target.ShortID)
-				m.sessionsDrawer.killConfirmPID = 0
-				return m, nil
+
+		if d.filterActive {
+			filterKm := km.ForFilterMode()
+			switch {
+			case key.Matches(msg, filterKm.Quit):
+				d.pendingAction = SessionsQuitMsg{}
+				return d, func() tea.Msg { return SessionsQuitMsg{} }
+			case key.Matches(msg, filterKm.TabFocus):
+				d.filterActive = false
+				d.filterInput.Blur()
+				return d, nil
+			case key.Matches(msg, filterKm.Up):
+				if d.cursor > 0 {
+					d.cursor--
+				}
+				d.statusMessage = ""
+				d.killConfirmPID = 0
+				return d, nil
+			case key.Matches(msg, filterKm.Down):
+				filtered := d.filteredSessions()
+				if d.cursor < len(filtered)-1 {
+					d.cursor++
+				}
+				d.statusMessage = ""
+				d.killConfirmPID = 0
+				return d, nil
+			case key.Matches(msg, filterKm.PageUp):
+				step := 8
+				if d.cursor >= step {
+					d.cursor -= step
+				} else {
+					d.cursor = 0
+				}
+				d.statusMessage = ""
+				d.killConfirmPID = 0
+				return d, nil
+			case key.Matches(msg, filterKm.PageDown):
+				filtered := d.filteredSessions()
+				step := 8
+				if d.cursor+step < len(filtered) {
+					d.cursor += step
+				} else if len(filtered) > 0 {
+					d.cursor = len(filtered) - 1
+				}
+				d.statusMessage = ""
+				d.killConfirmPID = 0
+				return d, nil
+			case key.Matches(msg, filterKm.Flags):
+				filtered := d.filteredSessions()
+				if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+					d.filterActive = false
+					d.filterInput.Blur()
+					target := filtered[d.cursor]
+					d.pendingAction = SessionsResumeMsg{Session: &target, Action: ActionResumeExact, WithFlags: true}
+					return d, func() tea.Msg { return d.pendingAction }
+				}
+				return d, nil
+			case key.Matches(msg, filterKm.Enter):
+				filtered := d.filteredSessions()
+				if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+					d.filterActive = false
+					d.filterInput.Blur()
+					target := filtered[d.cursor]
+					d.pendingAction = SessionsResumeMsg{Session: &target, Action: ActionResumeExact}
+					return d, func() tea.Msg { return d.pendingAction }
+				}
+				d.filterActive = false
+				d.filterInput.Blur()
+				return d, nil
+			default:
+				oldVal := d.filterInput.Value()
+				var cmd tea.Cmd
+				d.filterInput, cmd = d.filterInput.Update(msg)
+				if d.filterInput.Value() != oldVal {
+					d.cursor = 0
+				}
+				return d, cmd
 			}
-			if m.sessionsDrawer.killConfirmPID != target.PID {
-				m.sessionsDrawer.killConfirmPID = target.PID
-				m.sessionsDrawer.statusMessage = fmt.Sprintf("Press 'x' again to terminate PID %d (%s)", target.PID, target.ShortID)
-				return m, nil
+		}
+
+		switch {
+		case key.Matches(msg, km.Quit):
+			d.pendingAction = SessionsQuitMsg{}
+			return d, func() tea.Msg { return SessionsQuitMsg{} }
+		case key.Matches(msg, km.Close):
+			if key.Matches(msg, km.ClearFilter) && d.filterInput.Value() != "" {
+				d.filterInput.SetValue("")
+				d.cursor = 0
+				d.statusMessage = ""
+				d.killConfirmPID = 0
+				return d, nil
 			}
-			// Confirmed kill
-			err := terminateProcessFunc(target.PID)
-			if err != nil {
-				m.sessionsDrawer.statusMessage = fmt.Sprintf("Failed to terminate PID %d: %v", target.PID, err)
+			d.pendingAction = SessionsCloseMsg{}
+			return d, func() tea.Msg { return SessionsCloseMsg{} }
+		case key.Matches(msg, km.Filter):
+			d.filterActive = true
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			cmd := d.filterInput.Focus()
+			return d, cmd
+		case key.Matches(msg, km.TabFocus):
+			if d.filterInput.Value() != "" {
+				d.filterActive = true
+				cmd := d.filterInput.Focus()
+				return d, cmd
+			}
+			switch d.agentFilter {
+			case "agy":
+				d.agentFilter = "codex"
+			case "codex":
+				d.agentFilter = "claude"
+			case "claude":
+				d.agentFilter = ""
+			default:
+				d.agentFilter = "agy"
+			}
+			d.cursor = 0
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			d.loading = true
+			d.fetchSessions()
+			return d, d.fetchSessionsCmd()
+		case key.Matches(msg, km.Up):
+			if d.cursor > 0 {
+				d.cursor--
+			}
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			return d, nil
+		case key.Matches(msg, km.Down):
+			filtered := d.filteredSessions()
+			if d.cursor < len(filtered)-1 {
+				d.cursor++
+			}
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			return d, nil
+		case key.Matches(msg, km.PageUp):
+			step := 8
+			if d.cursor >= step {
+				d.cursor -= step
 			} else {
-				m.sessionsDrawer.statusMessage = fmt.Sprintf("Terminated PID %d (%s)", target.PID, target.ShortID)
+				d.cursor = 0
 			}
-			m.sessionsDrawer.killConfirmPID = 0
-			m.sessionsDrawer.loading = true
-			m = m.fetchSessions()
-			return m, m.fetchSessionsCmd()
-		}
-	case key.Matches(msg, km.Copy):
-		filtered := m.filteredSessions()
-		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-			target := filtered[m.sessionsDrawer.cursor]
-			toCopy := target.Cwd
-			if toCopy == "" {
-				toCopy = target.ID
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			return d, nil
+		case key.Matches(msg, km.PageDown):
+			filtered := d.filteredSessions()
+			step := 8
+			if d.cursor+step < len(filtered) {
+				d.cursor += step
+			} else if len(filtered) > 0 {
+				d.cursor = len(filtered) - 1
 			}
-			err := copyToClipboardFunc(toCopy)
-			if err == nil {
-				m.sessionsDrawer.statusMessage = fmt.Sprintf("Copied to clipboard: %s", toCopy)
-			} else {
-				m.sessionsDrawer.statusMessage = fmt.Sprintf("Copy failed: %v", err)
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			return d, nil
+		case key.Matches(msg, km.Enter):
+			filtered := d.filteredSessions()
+			if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+				target := filtered[d.cursor]
+				d.pendingAction = SessionsResumeMsg{Session: &target, Action: ActionResumeExact}
+				return d, func() tea.Msg { return d.pendingAction }
 			}
-			return m, nil
-		}
-	case key.Matches(msg, km.OpenDir):
-		filtered := m.filteredSessions()
-		if len(filtered) > 0 && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-			target := filtered[m.sessionsDrawer.cursor]
-			if target.Cwd == "" {
-				m.sessionsDrawer.statusMessage = "No workspace directory recorded for this session"
-				return m, nil
+		case key.Matches(msg, km.Flags):
+			filtered := d.filteredSessions()
+			if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+				target := filtered[d.cursor]
+				d.pendingAction = SessionsResumeMsg{Session: &target, Action: ActionResumeExact, WithFlags: true}
+				return d, func() tea.Msg { return d.pendingAction }
 			}
-			err := openDirectoryFunc(target.Cwd)
-			if err == nil {
-				m.sessionsDrawer.statusMessage = fmt.Sprintf("Opened workspace: %s", target.Cwd)
-			} else {
-				m.sessionsDrawer.statusMessage = fmt.Sprintf("Failed to open directory: %v", err)
+		case key.Matches(msg, km.Catalyst):
+			filtered := d.filteredSessions()
+			if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+				target := filtered[d.cursor]
+				d.pendingAction = SessionsResumeMsg{Session: &target, Action: ActionResumeCatalyst}
+				return d, func() tea.Msg { return d.pendingAction }
 			}
-			return m, nil
+		case key.Matches(msg, km.Fork):
+			filtered := d.filteredSessions()
+			if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+				target := filtered[d.cursor]
+				d.pendingAction = SessionsResumeMsg{Session: &target, Action: ActionResumeExact, Fork: true}
+				return d, func() tea.Msg { return d.pendingAction }
+			}
+		case key.Matches(msg, km.AgentAll):
+			d.agentFilter = ""
+			d.cursor = 0
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			d.loading = true
+			d.fetchSessions()
+			return d, d.fetchSessionsCmd()
+		case key.Matches(msg, km.AgentAgy):
+			d.agentFilter = "agy"
+			d.cursor = 0
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			d.loading = true
+			d.fetchSessions()
+			return d, d.fetchSessionsCmd()
+		case key.Matches(msg, km.AgentCodex):
+			d.agentFilter = "codex"
+			d.cursor = 0
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			d.loading = true
+			d.fetchSessions()
+			return d, d.fetchSessionsCmd()
+		case key.Matches(msg, km.AgentClaude):
+			d.agentFilter = "claude"
+			d.cursor = 0
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			d.loading = true
+			d.fetchSessions()
+			return d, d.fetchSessionsCmd()
+		case key.Matches(msg, km.ToggleActive):
+			d.activeOnly = !d.activeOnly
+			d.cursor = 0
+			d.statusMessage = ""
+			d.killConfirmPID = 0
+			return d, nil
+		case key.Matches(msg, km.TogglePreview):
+			d.hidePreview = !d.hidePreview
+			return d, nil
+		case key.Matches(msg, km.Kill):
+			filtered := d.filteredSessions()
+			if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+				target := filtered[d.cursor]
+				if target.Status != session.StatusActive || target.PID <= 0 {
+					d.statusMessage = fmt.Sprintf("Session %s is idle (no active process to terminate)", target.ShortID)
+					d.killConfirmPID = 0
+					return d, nil
+				}
+				if d.killConfirmPID != target.PID {
+					d.killConfirmPID = target.PID
+					d.statusMessage = fmt.Sprintf("Press 'x' again to terminate PID %d (%s)", target.PID, target.ShortID)
+					return d, nil
+				}
+				// Confirmed kill
+				err := terminateProcessFunc(target.PID)
+				if err != nil {
+					d.statusMessage = fmt.Sprintf("Failed to terminate PID %d: %v", target.PID, err)
+				} else {
+					d.statusMessage = fmt.Sprintf("Terminated PID %d (%s)", target.PID, target.ShortID)
+				}
+				d.killConfirmPID = 0
+				d.loading = true
+				d.fetchSessions()
+				return d, d.fetchSessionsCmd()
+			}
+		case key.Matches(msg, km.Copy):
+			filtered := d.filteredSessions()
+			if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+				target := filtered[d.cursor]
+				toCopy := target.Cwd
+				if toCopy == "" {
+					toCopy = target.ID
+				}
+				err := copyToClipboardFunc(toCopy)
+				if err == nil {
+					d.statusMessage = fmt.Sprintf("Copied to clipboard: %s", toCopy)
+				} else {
+					d.statusMessage = fmt.Sprintf("Copy failed: %v", err)
+				}
+				return d, nil
+			}
+		case key.Matches(msg, km.OpenDir):
+			filtered := d.filteredSessions()
+			if len(filtered) > 0 && d.cursor >= 0 && d.cursor < len(filtered) {
+				target := filtered[d.cursor]
+				if target.Cwd == "" {
+					d.statusMessage = "No workspace directory recorded for this session"
+					return d, nil
+				}
+				err := openDirectoryFunc(target.Cwd)
+				if err == nil {
+					d.statusMessage = fmt.Sprintf("Opened workspace: %s", target.Cwd)
+				} else {
+					d.statusMessage = fmt.Sprintf("Failed to open directory: %v", err)
+				}
+				return d, nil
+			}
 		}
 	}
 
-	return m, nil
+	return d, nil
 }
 
-func (m Model) renderSessionsDrawer() string {
+func (d SessionsDrawer) View() string {
 	var b strings.Builder
 
 	// Top Bar
@@ -491,18 +495,18 @@ func (m Model) renderSessionsDrawer() string {
 		return lipgloss.NewStyle().Foreground(TextMuted).Padding(0, 1)
 	}
 
-	allActive := m.sessionsDrawer.agentFilter == ""
-	agyActive := m.sessionsDrawer.agentFilter == "agy"
-	codexActive := m.sessionsDrawer.agentFilter == "codex"
-	claudeActive := m.sessionsDrawer.agentFilter == "claude"
+	allActive := d.agentFilter == ""
+	agyActive := d.agentFilter == "agy"
+	codexActive := d.agentFilter == "codex"
+	claudeActive := d.agentFilter == "claude"
 
 	activeOnlyBadge := ""
-	if m.sessionsDrawer.activeOnly {
+	if d.activeOnly {
 		activeOnlyBadge = " " + lipgloss.NewStyle().Bold(true).Foreground(StatusGreen).Background(BgTabActive).Padding(0, 1).Render("[a] Active: ON")
 	}
 
 	previewBadge := ""
-	if m.sessionsDrawer.hidePreview {
+	if d.hidePreview {
 		previewBadge = " " + lipgloss.NewStyle().Foreground(TextMuted).Padding(0, 1).Render("[p] Preview: OFF")
 	}
 
@@ -522,18 +526,18 @@ func (m Model) renderSessionsDrawer() string {
 	b.WriteString(cmdBar + "\n\n")
 
 	// Status Message Notification Banner
-	if m.sessionsDrawer.statusMessage != "" {
+	if d.statusMessage != "" {
 		msgStyle := lipgloss.NewStyle().Bold(true).Foreground(StatusYellow)
-		if strings.HasPrefix(m.sessionsDrawer.statusMessage, "Terminated") ||
-			strings.HasPrefix(m.sessionsDrawer.statusMessage, "Copied") ||
-			strings.HasPrefix(m.sessionsDrawer.statusMessage, "Opened") {
+		if strings.HasPrefix(d.statusMessage, "Terminated") ||
+			strings.HasPrefix(d.statusMessage, "Copied") ||
+			strings.HasPrefix(d.statusMessage, "Opened") {
 			msgStyle = lipgloss.NewStyle().Bold(true).Foreground(StatusGreen)
 		}
-		b.WriteString("  " + msgStyle.Render("▶ "+m.sessionsDrawer.statusMessage) + "\n\n")
+		b.WriteString("  " + msgStyle.Render("▶ "+d.statusMessage) + "\n\n")
 	}
 
-	if m.sessionsDrawer.filterActive || m.sessionsDrawer.filterInput.Value() != "" {
-		b.WriteString(m.sessionsDrawer.filterInput.View() + "\n\n")
+	if d.filterActive || d.filterInput.Value() != "" {
+		b.WriteString(d.filterInput.View() + "\n\n")
 	}
 
 	// Columns header
@@ -546,22 +550,19 @@ func (m Model) renderSessionsDrawer() string {
 
 	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s\n", colProfile, colAgent, colID, colDir, colTitle, colActive))
 
-	filtered := m.filteredSessions()
+	filtered := d.filteredSessions()
 	if len(filtered) == 0 {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(TextMuted).Render("(no conversation sessions found matching filter)") + "\n\n")
 	} else {
-		// Available vertical space for the sessions table.
-		// Keep the table compact (default 8 rows) and account for the profiles list above
-		// so that the PROFILES section remains fully visible on screen without scrolling off.
 		overhead := 18
-		if len(m.profiles) > 0 {
-			overhead += len(m.filteredProfiles())
+		if d.profilesCount > 0 {
+			overhead += d.profilesCount
 		}
 		maxVisible := 8
-		if m.sessionsDrawer.hidePreview {
+		if d.hidePreview {
 			maxVisible = 14
-			if m.height > 0 && m.height-overhead < maxVisible {
-				maxVisible = m.height - overhead
+			if d.height > 0 && d.height-overhead < maxVisible {
+				maxVisible = d.height - overhead
 			}
 			if maxVisible < 5 {
 				maxVisible = 5
@@ -570,8 +571,8 @@ func (m Model) renderSessionsDrawer() string {
 				maxVisible = 16
 			}
 		} else {
-			if m.height > 0 && m.height-overhead < maxVisible {
-				maxVisible = m.height - overhead
+			if d.height > 0 && d.height-overhead < maxVisible {
+				maxVisible = d.height - overhead
 			}
 			if maxVisible < 4 {
 				maxVisible = 4
@@ -582,8 +583,8 @@ func (m Model) renderSessionsDrawer() string {
 		}
 
 		start := 0
-		if m.sessionsDrawer.cursor >= maxVisible {
-			start = m.sessionsDrawer.cursor - maxVisible + 1
+		if d.cursor >= maxVisible {
+			start = d.cursor - maxVisible + 1
 		}
 		end := start + maxVisible
 		if end > len(filtered) {
@@ -598,7 +599,7 @@ func (m Model) renderSessionsDrawer() string {
 			s := filtered[i]
 			cursorStr := "  "
 			rowStyle := NormalRowStyle
-			if i == m.sessionsDrawer.cursor {
+			if i == d.cursor {
 				cursorStr = "> "
 				rowStyle = SelectedRowStyle
 			}
@@ -637,8 +638,8 @@ func (m Model) renderSessionsDrawer() string {
 		}
 
 		// Dedicated Live Preview Box for the currently highlighted session (when preview not toggled off)
-		if !m.sessionsDrawer.hidePreview && m.sessionsDrawer.cursor >= 0 && m.sessionsDrawer.cursor < len(filtered) {
-			sel := filtered[m.sessionsDrawer.cursor]
+		if !d.hidePreview && d.cursor >= 0 && d.cursor < len(filtered) {
+			sel := filtered[d.cursor]
 			previewText := sel.Summary
 			if previewText == "" {
 				previewText = sel.Title
@@ -748,19 +749,136 @@ func (m Model) renderSessionsDrawer() string {
 		}
 	}
 
-	km := m.keys.SessionsDrawer
+	km := d.keys
+	if len(km.Quit.Keys()) == 0 {
+		km = DefaultSessionsDrawerKeyMap()
+	}
+	h := d.help
+	if h.Width == 0 {
+		h = NewThemedHelp()
+	}
 	var footerHelp string
-	if m.sessionsDrawer.filterActive {
-		footerHelp = m.help.ShortHelpView(km.ShortHelpFilter())
-	} else if m.sessionsDrawer.filterInput.Value() != "" {
-		footerHelp = m.help.ShortHelpView(km.ShortHelpQuery())
+	if d.filterActive {
+		footerHelp = h.ShortHelpView(km.ShortHelpFilter())
+	} else if d.filterInput.Value() != "" {
+		footerHelp = h.ShortHelpView(km.ShortHelpQuery())
 	} else {
-		footerHelp = m.help.ShortHelpView(km.ShortHelp())
+		footerHelp = h.ShortHelpView(km.ShortHelp())
 	}
 	b.WriteString("\n  " + footerHelp)
 
 	box := SessionsDrawerStyle.Render(b.String())
 	return "\n" + box + "\n"
+}
+
+func (m Model) IsSessionsDrawerActive() bool {
+	return m.sessionsDrawer.active
+}
+
+func (m Model) IsSessionsLoading() bool {
+	return m.sessionsDrawer.loading
+}
+
+func (m Model) SessionsDrawerList() []session.Session {
+	return m.sessionsDrawer.sessions
+}
+
+func (m *Model) setSessions(sessions []session.Session) {
+	m.sessionsDrawer.setSessions(sessions)
+}
+
+func (m *Model) SetSessionsForTest(sessions []session.Session) {
+	m.setSessions(sessions)
+}
+
+func (m Model) IsForkResume() bool {
+	return m.sessionsDrawer.fork
+}
+
+func (m Model) fetchSessionsCmd() tea.Cmd {
+	return m.sessionsDrawer.fetchSessionsCmd()
+}
+
+func (m Model) openSessionsDrawer() (Model, tea.Cmd) {
+	m = m.openSessionsDrawerConfig(m.agent, "", false, false)
+	m.sessionsDrawer.loading = true
+	return m, m.fetchSessionsCmd()
+}
+
+func (m Model) openSessionsDrawerConfig(initialAgent, profileFilter string, activeOnly, standalone bool) Model {
+	ti := textinput.New()
+	ti.Placeholder = "Filter sessions by title, id, profile, or workspace..."
+	ti.CharLimit = 64
+	ti.Prompt = "Filter: "
+	ti.PromptStyle = lipgloss.NewStyle().Bold(true).Foreground(AccentCyan)
+
+	m.sessionsDrawer = SessionsDrawer{
+		active:        true,
+		standalone:    standalone,
+		filterInput:   ti,
+		agentFilter:   initialAgent,
+		profileFilter: profileFilter,
+		activeOnly:    activeOnly,
+		cursor:        0,
+		keys:          m.keys.SessionsDrawer,
+		help:          m.help,
+		height:        m.height,
+		profilesCount: len(m.filteredProfiles()),
+	}
+	m.sessionsDrawer.fetchSessions()
+	return m
+}
+
+func (m Model) fetchSessions() Model {
+	m.sessionsDrawer.fetchSessions()
+	return m
+}
+
+func (m Model) filteredSessions() []session.Session {
+	return m.sessionsDrawer.filteredSessions()
+}
+
+func (m Model) updateSessionsDrawer(msg tea.KeyMsg) (Model, tea.Cmd) {
+	m.sessionsDrawer.keys = m.keys.SessionsDrawer
+	m.sessionsDrawer.help = m.help
+	m.sessionsDrawer.height = m.height
+	m.sessionsDrawer.profilesCount = len(m.filteredProfiles())
+	sub, cmd := m.sessionsDrawer.Update(msg)
+	d := sub.(SessionsDrawer)
+	action := d.pendingAction
+	d.pendingAction = nil
+	m.sessionsDrawer = d
+
+	if action != nil {
+		switch act := action.(type) {
+		case SessionsQuitMsg:
+			m.cancelStream()
+			return m, tea.Quit
+		case SessionsCloseMsg:
+			if m.sessionsDrawer.standalone {
+				m.cancelStream()
+				return m, tea.Quit
+			}
+			m.sessionsDrawer = SessionsDrawer{}
+			return m, nil
+		case SessionsResumeMsg:
+			if act.WithFlags {
+				return m.openResumeModalWithFlags(act.Session, act.Action, act.Fork, true)
+			}
+			return m.openResumeModal(act.Session, act.Action, act.Fork)
+		}
+	}
+
+	return m, cmd
+}
+
+func (m Model) renderSessionsDrawer() string {
+	d := m.sessionsDrawer
+	d.height = m.height
+	d.keys = m.keys.SessionsDrawer
+	d.help = m.help
+	d.profilesCount = len(m.filteredProfiles())
+	return d.View()
 }
 
 func truncateString(s string, maxLen int) string {
