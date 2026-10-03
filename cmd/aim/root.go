@@ -167,6 +167,7 @@ Flags:
 		newMvCmd(reg, pm),
 		newWhoamiCmd(reg, pm),
 		newPrewarmCmd(reg, pm),
+		newFeedbackCmd(reg, pm),
 		newCompletionCmd(rootCmd),
 		newVersionCmd(),
 	)

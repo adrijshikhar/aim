@@ -139,6 +139,16 @@ var (
 				Padding(1, 2).
 				MarginLeft(2).
 				Width(104)
+
+	FeedbackModalBoxStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(AccentBlue).
+				Padding(1, 2).
+				MarginLeft(2)
+
+	FeedbackModalTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(AccentBlue)
 )
 
 func GaugeStyleForStatus(st usage.Status) lipgloss.Style {

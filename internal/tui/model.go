@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // SubModel represents a modular child component in the TUI (such as drawers or modals)
@@ -80,6 +81,8 @@ type Model struct {
 	sessionsDrawer SessionsDrawer
 	resumeModal    resumeModalState
 	helpModal      helpModalState
+	feedbackModal  feedbackModalState
+	statusMessage  string
 	filter         filterState
 	keys           KeyMap
 	help           help.Model
@@ -554,7 +557,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case feedbackResultMsg:
+		if msg.err != nil {
+			if msg.fallbackURL != "" {
+				m.statusMessage = "Feedback fallback issue URL: " + msg.fallbackURL
+			} else {
+				m.statusMessage = "Feedback error: " + msg.err.Error()
+			}
+		} else {
+			m.statusMessage = "✓ Thank you! Your feedback helps shape AIM."
+		}
+		return m, nil
+
 	case tea.KeyMsg:
+		if m.feedbackModal.active {
+			return m.updateFeedbackModal(msg)
+		}
+
 		if m.deleteModal.active {
 			return m.updateDeleteModal(msg)
 		}
@@ -660,6 +679,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, keys.Doctor):
 			return m.openDoctorDrawer()
+		case key.Matches(msg, keys.Feedback):
+			return m.openFeedbackModal()
 		case key.Matches(msg, keys.Rename):
 			return m.openRenameModal()
 		case key.Matches(msg, keys.Move):
@@ -673,6 +694,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	default:
+		if m.feedbackModal.active {
+			return m.updateFeedbackModal(msg)
+		}
 		if m.renameModal.active {
 			return m.updateRenameModal(msg)
 		}
@@ -777,10 +801,19 @@ func (m Model) View() string {
 		return s.String()
 	}
 
+	if m.feedbackModal.active {
+		s.WriteString(m.renderFeedbackModal())
+		return s.String()
+	}
+
 	// Bottom inspector section when a profile is highlighted
 	if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
 		curProfile := filtered[m.cursor]
 		s.WriteString(m.renderInspector(curProfile))
+	}
+
+	if m.statusMessage != "" {
+		s.WriteString("\n  " + lipgloss.NewStyle().Foreground(StatusGreen).Bold(true).Render(m.statusMessage) + "\n")
 	}
 
 	refreshHint := HintKeyStyle.Render("[r]") + " " + HintLabelStyle.Render("Refresh Quota  ")
@@ -795,6 +828,7 @@ func (m Model) View() string {
 		HintKeyStyle.Render("[l]") + " " + HintLabelStyle.Render("Login  ") +
 		HintKeyStyle.Render("[Tab]") + " " + HintLabelStyle.Render("Switch Agent  ") +
 		HintKeyStyle.Render("[d]") + " " + HintLabelStyle.Render("Doctor  ") +
+		HintKeyStyle.Render("[f]") + " " + HintLabelStyle.Render("Feedback  ") +
 		HintKeyStyle.Render("[m]") + " " + HintLabelStyle.Render("Rename  ") +
 		HintKeyStyle.Render("[x]") + " " + HintLabelStyle.Render("Delete  ") +
 		HintKeyStyle.Render("[/]") + " " + HintLabelStyle.Render("Filter  ") +
