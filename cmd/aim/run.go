@@ -3,18 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 )
 
@@ -145,7 +144,7 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 			if listProv, ok := adapter.(agents.MCPListProvider); ok {
 				servers, listErr := listProv.ListMCPServers(ctx, profileName, pDir)
 				if listErr == nil {
-					renderMCPListTable(os.Stdout, adapter.Name(), profileName, servers)
+					presenter.RenderMCPListTable(os.Stdout, adapter.Name(), profileName, servers)
 					return 0
 				}
 			}
@@ -270,69 +269,3 @@ func isMCPListInvocation(extraArgs []string) bool {
 	return false
 }
 
-func renderMCPListTable(w io.Writer, agentName, profileName string, servers []agents.MCPServerInfo) {
-	banner := fmt.Sprintf("=== Configured MCP Servers (%s: %s) ===", agentName, profileName)
-	fmt.Fprintf(w, "\n%s\n\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render(banner))
-
-	if len(servers) == 0 {
-		fmt.Fprintf(w, "  %s\n\n", lipgloss.NewStyle().Foreground(tui.TextMuted).Render("(no MCP servers configured)"))
-		return
-	}
-
-	t := table.New().
-		Border(lipgloss.HiddenBorder()).
-		Headers("#", "NAME", "STATUS", "AUTH", "TYPE", "TARGET / COMMAND")
-
-	enabledCount := 0
-	disabledCount := 0
-
-	for i, s := range servers {
-		numStr := fmt.Sprintf("%d", i+1)
-
-		statusStyled := lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("enabled")
-		if s.Status == "disabled" {
-			statusStyled = lipgloss.NewStyle().Foreground(tui.StatusRed).Render("disabled")
-			disabledCount++
-		} else {
-			enabledCount++
-		}
-
-		authStyled := lipgloss.NewStyle().Foreground(tui.TextMuted).Render(s.Auth)
-		if s.Auth == "OAuth" || s.Auth == "connected" {
-			authStyled = lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(s.Auth)
-		} else if s.Auth == "auth required" {
-			authStyled = lipgloss.NewStyle().Foreground(tui.StatusYellow).Render(s.Auth)
-		}
-
-		typeStyled := lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(s.Type)
-
-		t.Row(
-			numStr,
-			s.Name,
-			statusStyled,
-			authStyled,
-			typeStyled,
-			s.Target,
-		)
-	}
-
-	t.StyleFunc(func(row, col int) lipgloss.Style {
-		if row == table.HeaderRow {
-			return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
-		}
-		switch col {
-		case 0:
-			return lipgloss.NewStyle().Foreground(tui.TextDim)
-		case 1:
-			return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
-		case 5:
-			return lipgloss.NewStyle().Foreground(tui.TextPrimary)
-		default:
-			return lipgloss.NewStyle()
-		}
-	})
-
-	fmt.Fprintln(w, t.Render())
-	summary := fmt.Sprintf("Total: %d server(s) configured (%d enabled, %d disabled)", len(servers), enabledCount, disabledCount)
-	fmt.Fprintf(w, "\n%s\n\n", lipgloss.NewStyle().Foreground(tui.TextMuted).Render(summary))
-}

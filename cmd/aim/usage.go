@@ -7,17 +7,14 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
-	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
@@ -151,42 +148,16 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 
 	// Show an interactive live spinner on stderr when querying live in an interactive terminal
 	if useColor && !opts.jsonOutput {
-		doneSpinner := make(chan struct{})
-		spinnerFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-		var statusText string
-		var mu sync.Mutex
-
-		statusText = fmt.Sprintf("Querying usage quotas for %d profile(s)...", len(targets))
-
-		go func() {
-			frameIdx := 0
-			ticker := time.NewTicker(80 * time.Millisecond)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-doneSpinner:
-					fmt.Fprintf(os.Stderr, "\r\033[K")
-					return
-				case <-ticker.C:
-					mu.Lock()
-					txt := statusText
-					mu.Unlock()
-					spinner := lipgloss.NewStyle().Foreground(tui.AccentPurple).Render(spinnerFrames[frameIdx%len(spinnerFrames)])
-					fmt.Fprintf(os.Stderr, "\r\033[K%s %s", spinner, txt)
-					frameIdx++
-				}
-			}
-		}()
+		spin := presenter.NewSpinner(os.Stderr, fmt.Sprintf("Querying usage quotas for %d profile(s)...", len(targets)))
+		spin.Start()
 
 		count := 0
 		for r := range reportsChan {
 			reports = append(reports, r)
 			count++
-			mu.Lock()
-			statusText = fmt.Sprintf("Querying usage quotas... [%d/%d] %s:%s", count, len(targets), r.Agent, r.Profile)
-			mu.Unlock()
+			spin.UpdateText(fmt.Sprintf("Querying usage quotas... [%d/%d] %s:%s", count, len(targets), r.Agent, r.Profile))
 		}
-		close(doneSpinner)
+		spin.Stop()
 	} else {
 		for r := range reportsChan {
 			reports = append(reports, r)
@@ -257,7 +228,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		}
 
 		if len(r.Windows) == 0 {
-			rows = append(rows, columns.row(usageRowValues{agent: r.Agent, profile: r.Profile, account: accStr, category: "—", status: renderCLIStatus(r.Status, useColor), primary: "—", primaryReset: "—", weekly: "—", weeklyReset: "—", checked: checked}))
+			rows = append(rows, columns.row(usageRowValues{agent: r.Agent, profile: r.Profile, account: accStr, category: "—", status: presenter.RenderCLIStatus(r.Status, useColor), primary: "—", primaryReset: "—", weekly: "—", weeklyReset: "—", checked: checked}))
 			continue
 		}
 
@@ -287,7 +258,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			pStr := "—"
 			pReset := "—"
 			if primary != nil {
-				pStr = renderCLIBar(primary.RemainingPct, 10, catStatus, useColor)
+				pStr = presenter.RenderCLIBar(primary.RemainingPct, 10, catStatus, useColor)
 				if primary.RemainingPct < 100 && primary.ResetsIn > 0 {
 					pReset = usage.FormatDuration(primary.ResetsIn)
 				}
@@ -296,18 +267,18 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			wStr := "—"
 			wReset := "—"
 			if weekly != nil {
-				wStr = renderCLIBar(weekly.RemainingPct, 10, catStatus, useColor)
+				wStr = presenter.RenderCLIBar(weekly.RemainingPct, 10, catStatus, useColor)
 				if weekly.RemainingPct < 100 && weekly.ResetsIn > 0 {
 					wReset = usage.FormatDuration(weekly.ResetsIn)
 				}
 			}
 
-			statusStr := renderCLIStatus(catStatus, useColor)
+			statusStr := presenter.RenderCLIStatus(catStatus, useColor)
 			rows = append(rows, columns.row(usageRowValues{agent: r.Agent, profile: r.Profile, account: accStr, category: catName, status: statusStr, primary: pStr, primaryReset: pReset, weekly: wStr, weeklyReset: wReset, checked: checked}))
 		}
 	}
 
-	printTable(headers, rows, useColor)
+	presenter.PrintTable(os.Stdout, headers, rows, useColor)
 	return nil
 }
 
@@ -374,65 +345,3 @@ func findCategoryWindows(windows []usage.LimitWindow) (*usage.LimitWindow, *usag
 	return primary, weekly
 }
 
-func renderCLIBar(pct int, width int, st usage.Status, useColor bool) string {
-	if !useColor {
-		return fmt.Sprintf("%s %d%%", usage.RenderBar(pct, width), pct)
-	}
-
-	if width <= 0 {
-		return fmt.Sprintf("%d%%", pct)
-	}
-
-	clamped := pct
-	if clamped < 0 {
-		clamped = 0
-	} else if clamped > 100 {
-		clamped = 100
-	}
-
-	filled := (clamped * width) / 100
-	empty := width - filled
-
-	fillColor := tui.StatusGreen
-	if clamped <= 15 {
-		fillColor = tui.StatusRed
-	} else if clamped <= 50 {
-		fillColor = tui.StatusYellow
-	}
-
-	fillStyle := lipgloss.NewStyle().Foreground(fillColor)
-	emptyStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
-	bracketStyle := lipgloss.NewStyle().Foreground(tui.TextDim)
-
-	bar := bracketStyle.Render("[") +
-		fillStyle.Render(strings.Repeat("█", filled)) +
-		emptyStyle.Render(strings.Repeat("░", empty)) +
-		bracketStyle.Render("]")
-
-	return fmt.Sprintf("%s %s", bar, fillStyle.Render(fmt.Sprintf("%d%%", pct)))
-}
-
-func renderCLIStatus(st usage.Status, useColor bool) string {
-	str := string(st)
-	if !useColor {
-		return str
-	}
-	return tui.GaugeStyleForStatus(st).Render(str)
-}
-
-func printTable(headers []string, rows [][]string, useColor bool) {
-	t := table.New().
-		Border(lipgloss.HiddenBorder()).
-		Headers(headers...).
-		Rows(rows...)
-
-	if useColor {
-		t.StyleFunc(func(row, col int) lipgloss.Style {
-			if row == table.HeaderRow {
-				return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan)
-			}
-			return lipgloss.NewStyle().Foreground(tui.TextPrimary)
-		})
-	}
-	fmt.Println(t.Render())
-}
