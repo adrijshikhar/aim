@@ -32,6 +32,10 @@ func newFeedbackCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cat := parseCategory(categoryStr)
 
+			if strings.TrimSpace(message) == "" && len(args) > 0 {
+				message = strings.Join(args, " ")
+			}
+
 			if strings.TrimSpace(message) == "" {
 				if isTerminal() {
 					var err error
