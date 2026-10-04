@@ -24,6 +24,7 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 - **Four agents** — Antigravity (`agy`), Gemini (`gemini`), Claude Code (`claude`), and Codex (`codex`).
 - **Interactive TUI** — profile list, agent tabs, fuzzy filter, live quota gauges, in-tool feedback (`F`), one-key launch.
 - **Quota telemetry** — 5h and weekly limits, reset countdowns, and credits across every account.
+- **Background daemon** — native OS service integration (`launchd` on macOS, `systemd` on Linux) to keep quota caches continuously refreshed every 15 minutes without memory overhead.
 - **Diagnostics & crash recovery** — `aim doctor` diagnoses environment health; `aim doctor --report` generates an anonymized Markdown bundle for issue filing; panic boundaries prevent unhandled crashes.
 - **In-tool feedback** — `aim feedback` or `F` in the TUI submits friction, bug reports, and suggestions directly to maintainers.
 - **Sessions & handoffs** — browse history across profiles, resume verbatim, or hand off context with [Catalyst](https://github.com/adrijshikhar/catalyst).
@@ -66,6 +67,7 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim resume <agent> <profile> [id] [-- args...]` | Resume verbatim (`--exact`) or via Catalyst (`--catalyst`) |
 | `aim whoami` | Active profile, agent, session, and quota |
 | `aim doctor [agent] [--report]` | Check binaries, tokens, ADC status, and keychain (`--report` for sanitized Markdown bundle) |
+| `aim daemon [install\|status\|uninstall]` | Manage background service for automatic 15-minute quota pre-warming |
 | `aim feedback [message]` | Submit feedback, bug reports, or feature requests directly |
 | `aim mv` | Move an agent account and credentials to another profile |
 | `aim remove [agent] <profile>` | Delete profile credentials and state |
@@ -85,6 +87,14 @@ Add `--debug` to any command for verbose tracing.
 <p align="center">
   <img src="assets/cli-usage.png" alt="aim usage Telemetry Table" width="850" />
 </p>
+
+### Background Daemon
+Keep quota caches continuously refreshed so the TUI, `aim whoami`, `aim list`, and statusline scripts always display fresh quota instantly (<1ms):
+```bash
+aim daemon install      # install and start the background service (launchd on macOS, systemd on Linux)
+aim daemon status       # view operational status, service label, and last run timestamp
+aim daemon uninstall    # stop and remove the background service
+```
 
 ### TUI
 

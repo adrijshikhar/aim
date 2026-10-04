@@ -8,6 +8,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/daemon"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -214,6 +215,28 @@ func (m Model) fetchDoctorDiagnosticsCmd() tea.Cmd {
 			}
 		}
 
+		if info, err := daemon.Status(config.BaseDir()); err == nil && info != nil {
+			if info.Active {
+				results = append(results, agents.DiagnosticResult{
+					Category: "Daemon",
+					Status:   "OK",
+					Message:  "Active (15m interval)",
+				})
+			} else if info.Installed {
+				results = append(results, agents.DiagnosticResult{
+					Category: "Daemon",
+					Status:   "WARN",
+					Message:  "Installed but inactive",
+				})
+			} else {
+				results = append(results, agents.DiagnosticResult{
+					Category: "Daemon",
+					Status:   "INFO",
+					Message:  "Not installed (run 'aim daemon install')",
+				})
+			}
+		}
+
 		return doctorDiagnosticsLoadedMsg{
 			targetAgent:   targetAgent,
 			targetProfile: targetProfile,
@@ -292,6 +315,28 @@ func (m Model) fetchDoctorDiagnostics() Model {
 				Category: "Config",
 				Status:   "OK",
 				Message:  fmt.Sprintf("%d custom launch arg(s) configured", len(args)),
+			})
+		}
+	}
+
+	if info, err := daemon.Status(config.BaseDir()); err == nil && info != nil {
+		if info.Active {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Daemon",
+				Status:   "OK",
+				Message:  "Active (15m interval)",
+			})
+		} else if info.Installed {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Daemon",
+				Status:   "WARN",
+				Message:  "Installed but inactive",
+			})
+		} else {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Daemon",
+				Status:   "INFO",
+				Message:  "Not installed (run 'aim daemon install')",
 			})
 		}
 	}

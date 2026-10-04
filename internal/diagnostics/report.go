@@ -11,6 +11,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/daemon"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -41,6 +42,15 @@ func GenerateReport(reg *agents.Registry, pm *profile.ProfileManager, cfg *confi
 	if pm != nil {
 		b.WriteString(fmt.Sprintf("- AIM Base Directory: %s\n", sanitize(pm.BaseDir)))
 	}
+	daemonStatus := "Not installed"
+	if info, err := daemon.Status(config.BaseDir()); err == nil && info != nil && info.Installed {
+		if info.Active {
+			daemonStatus = "Active (15m interval)"
+		} else {
+			daemonStatus = "Installed (inactive)"
+		}
+	}
+	b.WriteString(fmt.Sprintf("- Background Daemon: %s\n", daemonStatus))
 	b.WriteString("\n")
 
 	b.WriteString("## Agents & Tooling\n")
