@@ -431,15 +431,13 @@ export function ProfilesView({
   };
 
   const getQuotaProgressColor = (pct: number) => {
-    if (pct <= 15) return 'bg-[#ee0000]';
-    if (pct <= 35) return 'bg-[#f5a623]';
-    return 'bg-[#0070f3]';
+    if (pct <= 0) return 'bg-rose-500';
+    return 'bg-[#ededed]';
   };
 
   const getQuotaTextColor = (pct: number) => {
-    if (pct <= 15) return 'text-[#ee0000]';
-    if (pct <= 35) return 'text-[#f5a623]';
-    return 'text-[#0070f3]';
+    if (pct <= 0) return 'text-rose-400';
+    return 'text-[#ededed]';
   };
 
   const currentProfile = React.useMemo(() => {
@@ -877,9 +875,9 @@ export function ProfilesView({
                               onClick={() => handleResumeSession(s)}
                             >
                               {resumingId === s.id ? (
-                                <RefreshCw className="h-3 w-3 animate-spin text-[#0070f3]" />
+                                <RefreshCw className="h-3 w-3 animate-spin text-[#ededed]" />
                               ) : (
-                                <Terminal className="h-3 w-3 text-[#0070f3]" />
+                                <Terminal className="h-3 w-3 text-[#ededed]" />
                               )}
                               Resume
                             </button>

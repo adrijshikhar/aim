@@ -145,7 +145,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
         <DialogHeader className="space-y-1.5 pb-2 border-b border-[#1f1f1f]">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
-              <Terminal className="h-4 w-4 text-[#0070f3]" />
+              <Terminal className="h-4 w-4 text-[#ededed]" />
               Resume Session with Flags
             </DialogTitle>
             <Badge
@@ -198,18 +198,18 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                     onClick={() => toggleFlag(f.key)}
                     className={`flex flex-col text-left p-2.5 rounded-md border transition-all cursor-pointer select-none ${
                       active
-                        ? 'bg-[#0070f3]/10 border-[#0070f3]/40 text-[#ededed]'
+                        ? 'bg-[#1a1a1a] border-[#ededed] text-[#ededed]'
                         : 'bg-[#121212] border-[#222222] hover:border-[#333333] text-[#888888]'
                     }`}
                   >
                     <div className="flex items-center justify-between w-full mb-1">
-                      <span className={`font-mono text-xs font-semibold ${active ? 'text-[#0070f3]' : 'text-[#ededed]'}`}>
+                      <span className="font-mono text-xs font-semibold text-[#ededed]">
                         {f.flag}
                       </span>
                       <div
                         className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${
                           active
-                            ? 'bg-[#0070f3] border-[#0070f3] text-white'
+                            ? 'bg-[#ededed] border-[#ededed] text-[#0a0a0a]'
                             : 'border-[#3a3a3a] bg-[#1a1a1a]'
                         }`}
                       >
@@ -233,7 +233,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               value={customFlags}
               onChange={(e) => setCustomFlags(e.target.value)}
               placeholder="e.g. --dangerously-skip-permissions --verbose"
-              className="bg-[#121212] border-[#262626] font-mono text-xs text-[#ededed] placeholder:text-[#555555] focus-visible:ring-[#0070f3]"
+              className="bg-[#121212] border-[#262626] font-mono text-xs text-[#ededed] placeholder:text-[#555555] focus-visible:ring-1 focus-visible:ring-[#ededed] focus-visible:border-[#ededed]"
             />
           </div>
 
@@ -248,11 +248,11 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                 onClick={handleCopyCommand}
                 className="inline-flex items-center gap-1 text-[10.5px] font-mono text-[#888888] hover:text-[#ededed] transition-colors cursor-pointer"
               >
-                {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                {copied ? <Check className="h-3 w-3 text-[#ededed]" /> : <Copy className="h-3 w-3" />}
                 {copied ? 'Copied' : 'Copy'}
               </button>
             </div>
-            <div className="p-2.5 rounded-md bg-[#000000] border border-[#222222] font-mono text-[11.5px] text-[#00e599] overflow-x-auto select-all whitespace-pre">
+            <div className="p-2.5 rounded-md bg-[#000000] border border-[#222222] font-mono text-[11.5px] text-[#ededed] overflow-x-auto select-all whitespace-pre">
               {buildCommandString()}
             </div>
           </div>
@@ -271,7 +271,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               type="submit"
               size="sm"
               disabled={isResuming}
-              className="bg-[#0070f3] hover:bg-[#0060df] text-white text-xs font-mono font-medium shadow-sm transition-all cursor-pointer"
+              className="bg-[#ededed] hover:bg-white text-[#0a0a0a] text-xs font-mono font-medium shadow-sm transition-all cursor-pointer"
             >
               {isResuming ? (
                 <>
