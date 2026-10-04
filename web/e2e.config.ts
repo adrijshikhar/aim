@@ -3,8 +3,8 @@ import { web } from '@e2e-dev/web';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 const tinkerApiKey = process.env.TINKER_API_KEY || process.env.OPENAI_API_KEY || 'tinker-key';
-const tinkerBaseUrl = process.env.TINKER_API_BASE_URL || 'https://api.tinker.thinkingmachines.ai/v1';
-const tinkerModel = process.env.TINKER_MODEL || 'gpt-4o';
+const tinkerBaseUrl = process.env.TINKER_API_BASE_URL || 'https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1';
+const tinkerModel = process.env.TINKER_MODEL || 'thinkingmachines/Inkling';
 
 const tinker = createOpenAICompatible({
   name: 'tinker',
