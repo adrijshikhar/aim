@@ -49,8 +49,9 @@ Examples:
 			launcherSvc := service.NewLauncherService()
 			profileSvc := service.NewProfileService(pm, reg)
 			sessionSvc := service.NewSessionService(sm, launcherSvc)
+			mcpSvc := service.NewMCPService(pm)
 
-			srv := web.NewServer(profileSvc, sessionSvc, launcherSvc, port, devMode)
+			srv := web.NewServer(profileSvc, sessionSvc, launcherSvc, port, devMode, mcpSvc)
 			srv.SetVersion(Version)
 
 			if err := srv.Listen(); err != nil {

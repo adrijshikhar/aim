@@ -632,3 +632,69 @@ func TestNilServicesHandling(t *testing.T) {
 	}
 }
 
+type mockMCPService struct {
+	listServersFn func(ctx context.Context, profileName string) ([]service.MCPServerDTO, error)
+}
+
+func (m *mockMCPService) ListServers(ctx context.Context, profileName string) ([]service.MCPServerDTO, error) {
+	if m.listServersFn != nil {
+		return m.listServersFn(ctx, profileName)
+	}
+	return nil, nil
+}
+
+func TestGetMcpServers(t *testing.T) {
+	mcp := &mockMCPService{
+		listServersFn: func(ctx context.Context, profileName string) ([]service.MCPServerDTO, error) {
+			if profileName == "isolated" {
+				return []service.MCPServerDTO{
+					{Name: "local-tool", Command: "node", Args: []string{"server.js"}, Scope: "profile"},
+				}, nil
+			}
+			return []service.MCPServerDTO{
+				{Name: "claude-mem", Command: "node", Args: []string{"mem.js"}, Scope: "global"},
+				{Name: "playwright", Command: "npx", Args: []string{"playwright"}, Scope: "global"},
+			}, nil
+		},
+	}
+
+	srv := web.NewServer(nil, nil, nil, 0, false, mcp)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// GET /api/mcp
+	resp, err := http.Get(ts.URL + "/api/mcp")
+	if err != nil {
+		t.Fatalf("GET /api/mcp failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var servers []service.MCPServerDTO
+	if err := json.NewDecoder(resp.Body).Decode(&servers); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers, got %d", len(servers))
+	}
+
+	// GET /api/mcp?profile=isolated
+	respIso, err := http.Get(ts.URL + "/api/mcp?profile=isolated")
+	if err != nil {
+		t.Fatalf("GET /api/mcp?profile=isolated failed: %v", err)
+	}
+	defer respIso.Body.Close()
+
+	var isoServers []service.MCPServerDTO
+	if err := json.NewDecoder(respIso.Body).Decode(&isoServers); err != nil {
+		t.Fatalf("failed to decode iso response: %v", err)
+	}
+	if len(isoServers) != 1 || isoServers[0].Name != "local-tool" {
+		t.Fatalf("expected 1 local-tool server, got %v", isoServers)
+	}
+}
+
+
