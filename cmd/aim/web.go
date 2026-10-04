@@ -50,8 +50,10 @@ Examples:
 			profileSvc := service.NewProfileService(pm, reg)
 			sessionSvc := service.NewSessionService(sm, launcherSvc)
 			mcpSvc := service.NewMCPService(pm)
+			daemonSvc := service.NewDaemonService(reg, pm, config.BaseDir())
 
 			srv := web.NewServer(profileSvc, sessionSvc, launcherSvc, port, devMode, mcpSvc)
+			srv.SetDaemonService(daemonSvc)
 			srv.SetVersion(Version)
 
 			if err := srv.Listen(); err != nil {
