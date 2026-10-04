@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { getStatus, StatusDTO } from '@/lib/api';
+import { getStatus, StatusDTO, ProfileDTO } from '@/lib/api';
 import { ProfilesView } from '@/views/ProfilesView';
 import { SessionsView } from '@/views/SessionsView';
 import { McpView } from '@/views/McpView';
@@ -15,7 +15,8 @@ import {
 
 export function App() {
   const [activeTab, setActiveTab] = React.useState('profiles');
-  const [selectedAgent, setSelectedAgent] = React.useState('all');
+  const [selectedProfile, setSelectedProfile] = React.useState('all');
+  const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
   const [status, setStatus] = React.useState<StatusDTO>({
     version: 'v0.12.0',
     status: 'healthy',
@@ -40,6 +41,12 @@ export function App() {
     const interval = setInterval(checkStatus, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Compute unique profile names for top header filter
+  const profileNames = React.useMemo(() => {
+    const names = Array.from(new Set(profiles.map((p) => p.name)));
+    return names.sort();
+  }, [profiles]);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
@@ -67,26 +74,30 @@ export function App() {
             </div>
           </div>
 
-          {/* Center Adapter Filter (Pills) */}
+          {/* Center Profile Filter (Pills) as Primary Controller */}
           <div className="hidden md:flex items-center gap-1 bg-[#111111] p-1 rounded-full border border-border">
-            <span className="text-[11px] font-medium text-[#888888] px-2 font-mono">adapter:</span>
-            {[
-              { id: 'all', label: 'All' },
-              { id: 'claude', label: 'Claude' },
-              { id: 'codex', label: 'Codex' },
-              { id: 'gemini', label: 'Gemini' },
-              { id: 'agy', label: 'Antigravity' },
-            ].map((ag) => (
+            <span className="text-[11px] font-medium text-[#888888] px-2 font-mono">profile:</span>
+            <button
+              onClick={() => setSelectedProfile('all')}
+              className={`text-xs px-2.5 py-0.5 rounded-full font-medium transition-all duration-150 cursor-pointer ${
+                selectedProfile === 'all'
+                  ? 'bg-[#222222] text-[#ededed] border border-[#333333] shadow-sm'
+                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#161616] border border-transparent'
+              }`}
+            >
+              All
+            </button>
+            {profileNames.map((name) => (
               <button
-                key={ag.id}
-                onClick={() => setSelectedAgent(ag.id)}
+                key={name}
+                onClick={() => setSelectedProfile(name)}
                 className={`text-xs px-2.5 py-0.5 rounded-full font-medium transition-all duration-150 cursor-pointer ${
-                  selectedAgent === ag.id
+                  selectedProfile === name
                     ? 'bg-[#222222] text-[#ededed] border border-[#333333] shadow-sm'
                     : 'text-[#888888] hover:text-[#ededed] hover:bg-[#161616] border border-transparent'
                 }`}
               >
-                {ag.label}
+                {name}
               </button>
             ))}
           </div>
@@ -134,34 +145,45 @@ export function App() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Mobile Agent Selector */}
+            {/* Mobile Profile Selector */}
             <div className="md:hidden flex items-center gap-2">
-              <span className="text-xs text-[#888888] font-mono">Agent:</span>
+              <span className="text-xs text-[#888888] font-mono">Profile:</span>
               <select
-                value={selectedAgent}
-                onChange={(e) => setSelectedAgent(e.target.value)}
+                value={selectedProfile}
+                onChange={(e) => setSelectedProfile(e.target.value)}
                 className="text-xs bg-[#111111] border border-border rounded-geist px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-[#0070f3]"
               >
-                <option value="all">All Agents</option>
-                <option value="claude">Claude</option>
-                <option value="codex">Codex</option>
-                <option value="gemini">Gemini</option>
-                <option value="agy">Antigravity</option>
+                <option value="all">All Profiles</option>
+                {profileNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
           {/* View Panels */}
           <TabsContent value="profiles" className="m-0 focus-visible:outline-none">
-            <ProfilesView selectedAgent={selectedAgent} />
+            <ProfilesView
+              selectedProfile={selectedProfile}
+              onSelectProfile={setSelectedProfile}
+              onProfilesLoaded={setProfiles}
+            />
           </TabsContent>
 
           <TabsContent value="sessions" className="m-0 focus-visible:outline-none">
-            <SessionsView selectedAgent={selectedAgent} />
+            <SessionsView
+              selectedProfile={selectedProfile}
+              onSelectProfile={setSelectedProfile}
+            />
           </TabsContent>
 
           <TabsContent value="mcp" className="m-0 focus-visible:outline-none">
-            <McpView />
+            <McpView
+              selectedProfile={selectedProfile}
+              onSelectProfile={setSelectedProfile}
+            />
           </TabsContent>
         </Tabs>
       </main>
@@ -177,12 +199,13 @@ export function App() {
             <span>Geist Tokens</span>
           </div>
           <div className="flex items-center gap-4">
-            <span>Daemon Proxy: <code className="text-[#ededed] bg-[#141414] px-1.5 py-0.5 rounded border border-[#262626]">/api &rarr; :8080</code></span>
+            <span>
+              Daemon Proxy: <code className="text-[#ededed] bg-[#141414] px-1.5 py-0.5 rounded border border-[#262626]">/api → :8080</code>
+            </span>
           </div>
         </div>
       </footer>
 
-      {/* Global Toast Provider Notifications */}
       <Toaster />
     </div>
   );

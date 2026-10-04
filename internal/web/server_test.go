@@ -51,6 +51,10 @@ func (m *mockProfileService) RenameProfile(ctx context.Context, agent, oldName, 
 	return nil
 }
 
+func (m *mockProfileService) UpdateProfileConfig(ctx context.Context, name string, mcpGlobal, pluginsGlobal *bool) error {
+	return nil
+}
+
 // mockSessionService is a mock implementation of service.SessionService.
 type mockSessionService struct {
 	listSessionsFn            func(ctx context.Context, filter service.SessionFilter) ([]service.SessionDTO, error)

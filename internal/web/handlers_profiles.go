@@ -83,3 +83,43 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+type UpdateProfileConfigRequest struct {
+	MCPGlobal     *bool `json:"mcp_global,omitempty"`
+	PluginsGlobal *bool `json:"plugins_global,omitempty"`
+}
+
+// handleUpdateProfileConfig handles PATCH /api/profiles/{name}/config
+func (s *Server) handleUpdateProfileConfig(w http.ResponseWriter, r *http.Request) {
+	if s.profiles == nil {
+		writeJSONError(w, http.StatusInternalServerError, "profile service unavailable")
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/profiles/"), "/")
+		if len(parts) >= 1 {
+			name = parts[0]
+		}
+	}
+
+	if strings.TrimSpace(name) == "" {
+		writeJSONError(w, http.StatusBadRequest, "profile name is required")
+		return
+	}
+
+	var req UpdateProfileConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	if err := s.profiles.UpdateProfileConfig(r.Context(), name, req.MCPGlobal, req.PluginsGlobal); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+

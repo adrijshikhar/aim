@@ -18,6 +18,8 @@ export interface ProfileDTO {
   has_credentials: boolean;
   account?: AccountInfo;
   quota?: QuotaDTO;
+  mcp_global?: boolean;
+  plugins_global?: boolean;
 }
 
 export interface CreateProfileRequest {
@@ -161,4 +163,18 @@ export async function getMcpServers(profile?: string): Promise<MCPServerDTO[]> {
   const url = profile ? `${BASE_URL}/mcp?profile=${encodeURIComponent(profile)}` : `${BASE_URL}/mcp`;
   const res = await fetch(url);
   return handleResponse<MCPServerDTO[]>(res);
+}
+
+export async function updateProfileConfig(
+  name: string,
+  config: { mcp_global?: boolean; plugins_global?: boolean }
+): Promise<void> {
+  const res = await fetch(`${BASE_URL}/profiles/${encodeURIComponent(name)}/config`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(config),
+  });
+  return handleResponse<void>(res);
 }
