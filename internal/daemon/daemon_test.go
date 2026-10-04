@@ -218,5 +218,3 @@ func TestRunOnce_Success(t *testing.T) {
 		t.Errorf("cached report does not match expected: %+v", rep)
 	}
 }
-
-
