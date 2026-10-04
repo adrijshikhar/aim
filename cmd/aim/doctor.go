@@ -184,4 +184,3 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 func generateDiagnosticReport(reg *agents.Registry, pm *profile.ProfileManager, agentName string) string {
 	return diagnostics.GenerateReport(reg, pm, nil, agentName, Version, Commit)
 }
-

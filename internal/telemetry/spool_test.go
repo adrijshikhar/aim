@@ -213,4 +213,3 @@ func TestSpooler_AppendBatch(t *testing.T) {
 		t.Fatalf("expected 3 events, got %d", len(events))
 	}
 }
-

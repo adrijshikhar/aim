@@ -201,10 +201,10 @@ func TestAnonymity_AccountDistinctID_NoPIILeak(t *testing.T) {
 // zero events are spooled to disk across all opt-out mechanisms.
 func TestAnonymity_OptOut_StrictZeroSpooling(t *testing.T) {
 	testCases := []struct {
-		name      string
-		setup     func()
-		teardown  func()
-		cfg       *config.Config
+		name     string
+		setup    func()
+		teardown func()
+		cfg      *config.Config
 	}{
 		{
 			name: "DO_NOT_TRACK=1",

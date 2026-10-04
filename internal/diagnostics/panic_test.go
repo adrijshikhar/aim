@@ -114,4 +114,3 @@ func TestHandlePanic_SanitizesPanicMessageWithSecrets(t *testing.T) {
 		t.Errorf("expected ~/secrets.json in sanitized report, got: %s", report)
 	}
 }
-
