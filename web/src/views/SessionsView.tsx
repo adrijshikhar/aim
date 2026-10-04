@@ -167,16 +167,36 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
   const getAgentBadge = (agent: string) => {
     switch (agent.toLowerCase()) {
       case 'claude':
-        return <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/30">Claude</Badge>;
+        return (
+          <Badge className="bg-[#241a12] text-[#f5a623] border-[#3d2716] font-mono text-[11px] tracking-wide">
+            claude
+          </Badge>
+        );
       case 'codex':
-        return <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30">Codex</Badge>;
+        return (
+          <Badge className="bg-[#0e2118] text-[#50e3c2] border-[#19402e] font-mono text-[11px] tracking-wide">
+            codex
+          </Badge>
+        );
       case 'gemini':
-        return <Badge className="bg-blue-500/15 text-blue-300 border-blue-500/30">Gemini</Badge>;
+        return (
+          <Badge className="bg-[#0d1f36] text-[#0070f3] border-[#15345a] font-mono text-[11px] tracking-wide">
+            gemini
+          </Badge>
+        );
       case 'agy':
       case 'antigravity':
-        return <Badge className="bg-purple-500/15 text-purple-300 border-purple-500/30">Antigravity</Badge>;
+        return (
+          <Badge className="bg-[#1c122c] text-[#b388ff] border-[#331c52] font-mono text-[11px] tracking-wide">
+            antigravity
+          </Badge>
+        );
       default:
-        return <Badge variant="outline">{agent}</Badge>;
+        return (
+          <Badge variant="outline" className="font-mono text-[11px]">
+            {agent}
+          </Badge>
+        );
     }
   };
 
@@ -185,17 +205,22 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
       {/* Top Filter & Search Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-96">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-[#666666]" />
           <Input
             placeholder="Search sessions by goal, cwd, title, or profile..."
-            className="pl-9 h-9 text-xs"
+            className="pl-9 pr-8 h-8 text-xs rounded-geist border-[#262626] bg-[#0e0e0e]"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+          <div className="absolute right-2.5 top-1.5 pointer-events-none">
+            <kbd className="text-[10px] font-mono px-1.5 py-0.5 border border-[#2e2e2e] bg-[#171717] text-[#888888] rounded">
+              /
+            </kbd>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto">
-          <Button variant="outline" size="sm" onClick={fetchSessions} disabled={loading}>
+          <Button variant="outline" size="sm" onClick={fetchSessions} disabled={loading} className="rounded-geist h-8">
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
@@ -203,36 +228,36 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
       </div>
 
       {/* Sessions Table */}
-      <div className="rounded-xl border border-border bg-card/60 overflow-hidden shadow-sm">
+      <div className="rounded-geist border border-[#262626] bg-[#111111] overflow-hidden">
         <Table>
-          <TableHeader className="bg-muted/40">
-            <TableRow>
-              <TableHead className="w-[120px]">Agent</TableHead>
-              <TableHead className="w-[110px]">Profile</TableHead>
-              <TableHead className="min-w-[200px]">Directory (CWD)</TableHead>
-              <TableHead className="min-w-[280px]">Goal / Title</TableHead>
-              <TableHead className="w-[90px] text-center">Turns</TableHead>
-              <TableHead className="w-[110px]">Updated</TableHead>
-              <TableHead className="w-[140px] text-right">Action</TableHead>
+          <TableHeader className="bg-[#141414] border-b border-[#262626]">
+            <TableRow className="border-b border-[#262626] hover:bg-transparent">
+              <TableHead className="w-[120px] font-mono text-[11px] uppercase tracking-wider text-[#888888]">Agent</TableHead>
+              <TableHead className="w-[110px] font-mono text-[11px] uppercase tracking-wider text-[#888888]">Profile</TableHead>
+              <TableHead className="min-w-[200px] font-mono text-[11px] uppercase tracking-wider text-[#888888]">Directory (CWD)</TableHead>
+              <TableHead className="min-w-[280px] font-mono text-[11px] uppercase tracking-wider text-[#888888]">Goal / Title</TableHead>
+              <TableHead className="w-[90px] text-center font-mono text-[11px] uppercase tracking-wider text-[#888888]">Turns</TableHead>
+              <TableHead className="w-[110px] font-mono text-[11px] uppercase tracking-wider text-[#888888]">Updated</TableHead>
+              <TableHead className="w-[130px] text-right font-mono text-[11px] uppercase tracking-wider text-[#888888]">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && sessions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-40 text-center text-muted-foreground">
-                  <div className="flex items-center justify-center gap-2">
-                    <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                <TableCell colSpan={7} className="h-40 text-center text-[#888888]">
+                  <div className="flex items-center justify-center gap-2 font-mono text-xs">
+                    <RefreshCw className="h-4 w-4 animate-spin text-[#ededed]" />
                     <span>Loading sessions...</span>
                   </div>
                 </TableCell>
               </TableRow>
             ) : filteredSessions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-40 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-40 text-center text-[#888888]">
                   <div className="flex flex-col items-center justify-center gap-1.5 py-4">
-                    <Activity className="h-8 w-8 text-muted-foreground/50 mb-1" />
-                    <span className="font-medium text-foreground">No sessions found</span>
-                    <span className="text-xs">
+                    <Activity className="h-7 w-7 text-[#555555] mb-1" />
+                    <span className="font-medium text-[#ededed] text-xs">No sessions found</span>
+                    <span className="text-[11px]">
                       {searchQuery
                         ? 'Try modifying your search criteria.'
                         : 'No active or archived agent sessions detected.'}
@@ -242,7 +267,7 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
               </TableRow>
             ) : (
               filteredSessions.map((s) => (
-                <TableRow key={s.id} className="group hover:bg-muted/30 transition-colors">
+                <TableRow key={s.id} className="group hover:bg-[#161616] transition-colors border-b border-[#1f1f1f]">
                   <TableCell>
                     <div className="flex items-center gap-2">
                       {getAgentBadge(s.agent)}
@@ -256,14 +281,14 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
                   </TableCell>
 
                   <TableCell>
-                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-muted text-foreground border border-border">
+                    <span className="font-mono text-xs px-2 py-0.5 rounded border border-[#2e2e2e] bg-[#171717] text-[#ededed]">
                       {s.profile}
                     </span>
                   </TableCell>
 
                   <TableCell>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground max-w-[240px]">
-                      <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+                    <div className="flex items-center gap-1.5 text-xs text-[#888888] max-w-[240px]">
+                      <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
                       <span className="font-mono truncate" title={s.cwd}>
                         {s.cwd}
                       </span>
@@ -272,25 +297,25 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
 
                   <TableCell>
                     <div className="space-y-0.5 max-w-[340px]">
-                      <div className="font-medium text-xs text-foreground truncate" title={s.title}>
+                      <div className="font-medium text-xs text-[#ededed] truncate" title={s.title}>
                         {s.title}
                       </div>
-                      <div className="text-[11px] text-muted-foreground truncate" title={s.goal}>
+                      <div className="text-[11px] text-[#777777] truncate" title={s.goal}>
                         {s.goal}
                       </div>
                     </div>
                   </TableCell>
 
                   <TableCell className="text-center">
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground font-mono">
-                      <MessageSquare className="h-3 w-3" />
+                    <span className="inline-flex items-center gap-1 text-xs text-[#888888] font-mono tabular-nums">
+                      <MessageSquare className="h-3 w-3 text-[#555555]" />
                       {s.turns}
                     </span>
                   </TableCell>
 
                   <TableCell>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
+                    <div className="flex items-center gap-1 text-xs text-[#888888] font-mono tabular-nums">
+                      <Clock className="h-3 w-3 text-[#555555]" />
                       <span>{formatRelativeTime(s.updated_at)}</span>
                     </div>
                   </TableCell>
@@ -299,14 +324,14 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-8 text-xs font-medium border-primary/30 text-primary hover:bg-primary/10 hover:text-primary transition-all cursor-pointer shadow-sm"
+                      className="h-7 px-2.5 text-xs font-mono font-medium rounded-geist border border-[#333333] bg-[#171717] hover:bg-[#222222] hover:border-[#555555] text-[#ededed] transition-all cursor-pointer"
                       disabled={resumingId === s.id}
                       onClick={() => handleResume(s)}
                     >
                       {resumingId === s.id ? (
-                        <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
                       ) : (
-                        <Terminal className="h-3.5 w-3.5 mr-1.5" />
+                        <Terminal className="h-3 w-3 mr-1 text-[#ededed]" />
                       )}
                       Resume
                     </Button>
@@ -318,12 +343,12 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
         </Table>
       </div>
 
-      <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-        <span>
+      <div className="flex items-center justify-between text-xs text-[#888888] px-1 font-mono">
+        <span className="tabular-nums">
           Showing {filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}
         </span>
-        <span className="flex items-center gap-1">
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+        <span className="flex items-center gap-1 text-[#50e3c2]">
+          <CheckCircle2 className="h-3.5 w-3.5" />
           Terminal launcher ready
         </span>
       </div>
