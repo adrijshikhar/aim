@@ -4,65 +4,35 @@
 
 @layer base {
   :root {
-    --background: 224 25% 6%;
-    --foreground: 210 20% 98%;
+    --background: 220 13% 18%; /* #282c34 Atom One Dark base */
+    --foreground: 219 14% 71%; /* #abb2bf TextPrimary */
 
-    --card: 224 25% 9%;
-    --card-foreground: 210 20% 98%;
+    --card: 220 13% 15%; /* #21252b Card surface */
+    --card-foreground: 219 14% 71%;
 
-    --popover: 224 25% 9%;
-    --popover-foreground: 210 20% 98%;
+    --popover: 220 13% 15%;
+    --popover-foreground: 219 14% 71%;
 
-    --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 11%;
+    --primary: 207 82% 66%; /* #61afef AccentBlue */
+    --primary-foreground: 220 13% 18%;
 
-    --secondary: 215 25% 15%;
-    --secondary-foreground: 210 20% 98%;
+    --secondary: 220 14% 20%; /* #2c313a Selected Row */
+    --secondary-foreground: 0 0% 90%; /* #e5e5e5 TextBright */
 
-    --muted: 215 25% 15%;
-    --muted-foreground: 217 19% 65%;
+    --muted: 220 14% 20%;
+    --muted-foreground: 219 10% 40%; /* #5c6370 TextMuted */
 
-    --accent: 215 25% 18%;
-    --accent-foreground: 210 20% 98%;
+    --accent: 220 13% 28%; /* #3e4451 TabActive */
+    --accent-foreground: 0 0% 90%;
 
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 210 20% 98%;
+    --destructive: 355 65% 65%; /* #e06c75 StatusRed */
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 215 25% 16%;
-    --input: 215 25% 16%;
-    --ring: 217 91% 60%;
+    --border: 218 13% 24%; /* #353b45 Border */
+    --input: 218 13% 24%;
+    --ring: 207 82% 66%;
 
-    --radius: 0.625rem;
-  }
-
-  .light {
-    --background: 0 0% 100%;
-    --foreground: 224 25% 6%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 224 25% 6%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 224 25% 6%;
-
-    --primary: 217 91% 60%;
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 217 91% 60%;
+    --radius: 0.5rem;
   }
 }
 
@@ -72,5 +42,28 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Impeccable Craft Floor: themed selection & scrollbars */
+  ::selection {
+    background-color: hsl(207 82% 66% / 0.25);
+    color: #ffffff;
+  }
+
+  /* Custom subtle dark scrollbars matching Atom One Dark */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #21252b;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #3e4451;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4b5263;
   }
 }
