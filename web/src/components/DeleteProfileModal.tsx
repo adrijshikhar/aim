@@ -31,15 +31,15 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
   return (
     <Dialog open={open} onOpenChange={(val) => !isDeleting && onOpenChange(val)}>
       <DialogContent className="max-w-md bg-[#0c0c0c] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
-        <DialogHeader className="space-y-1.5 pb-2 border-b border-[#1f1f1f]">
-          <div className="flex items-center justify-between">
+        <DialogHeader className="space-y-1.5 pb-2 border-b border-[#1f1f1f] pr-8">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-rose-500" />
-              Delete Profile
+              <span>Delete Profile</span>
             </DialogTitle>
             <Badge
               variant="outline"
-              className="text-[11px] font-mono bg-[#161616] text-[#ededed] border-[#2e2e2e]"
+              className="text-[10px] font-mono bg-[#141414] text-[#888888] border-[#262626] px-2 py-0.5"
             >
               {target.agent}
             </Badge>
