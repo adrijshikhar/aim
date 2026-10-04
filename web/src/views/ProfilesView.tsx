@@ -57,6 +57,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { ResumeModal } from '@/components/ResumeModal';
+import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AgentBadge } from '@/components/AgentBadge';
 
 interface ProfilesViewProps {
@@ -309,11 +310,18 @@ export function ProfilesView({
     }
   };
 
-  const handleDelete = async (agent: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete profile "${name}"? This removes its configuration and identity.`)) {
-      return;
-    }
+  // Delete confirmation modal state
+  const [deleteTarget, setDeleteTarget] = React.useState<{ agent: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
 
+  const openDeleteDialog = (agent: string, name: string) => {
+    setDeleteTarget({ agent, name });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    const { agent, name } = deleteTarget;
+    setIsDeleting(true);
     try {
       await deleteProfile(agent, name);
       toast({
@@ -321,6 +329,7 @@ export function ProfilesView({
         description: `Removed profile "${name}".`,
         variant: 'success',
       });
+      setDeleteTarget(null);
       if (selectedProfile === name) {
         onSelectProfile('all');
       }
@@ -332,6 +341,8 @@ export function ProfilesView({
         description: msg,
         variant: 'destructive',
       });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -531,7 +542,7 @@ export function ProfilesView({
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => handleDelete(currentProfile.agent, currentProfile.name)}
+                onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
                 title="Delete profile"
                 aria-label="Delete profile"
                 className="h-8 w-8 rounded-geist border-[#2a2a2a] text-[#888888] hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/30"
@@ -1061,6 +1072,14 @@ export function ProfilesView({
             }
           }}
         />
+
+        <DeleteProfileModal
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+          target={deleteTarget}
+          isDeleting={isDeleting}
+          onConfirm={handleConfirmDelete}
+        />
       </div>
     );
   }
@@ -1307,7 +1326,7 @@ export function ProfilesView({
                           className="h-7 w-7 text-[#666666] hover:text-red-400 rounded-geist transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDelete(p.agent, p.name);
+                            openDeleteDialog(p.agent, p.name);
                           }}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -1448,6 +1467,14 @@ export function ProfilesView({
             await handleResumeSession(flagModalSession, req.flags, req.custom_flags);
           }
         }}
+      />
+
+      <DeleteProfileModal
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        target={deleteTarget}
+        isDeleting={isDeleting}
+        onConfirm={handleConfirmDelete}
       />
     </div>
   );
