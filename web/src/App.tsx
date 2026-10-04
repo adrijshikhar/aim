@@ -67,9 +67,9 @@ export function App() {
             </div>
           </div>
 
-          {/* Center Agent Selector Filter (Pills) */}
+          {/* Center Adapter Filter (Pills) */}
           <div className="hidden md:flex items-center gap-1 bg-[#111111] p-1 rounded-full border border-border">
-            <span className="text-[11px] font-medium text-[#666666] px-2 font-mono">filter:</span>
+            <span className="text-[11px] font-medium text-[#888888] px-2 font-mono">adapter:</span>
             {[
               { id: 'all', label: 'All' },
               { id: 'claude', label: 'Claude' },
@@ -153,10 +153,7 @@ export function App() {
 
           {/* View Panels */}
           <TabsContent value="profiles" className="m-0 focus-visible:outline-none">
-            <ProfilesView
-              selectedAgent={selectedAgent}
-              onSelectAgent={(agent) => setSelectedAgent(agent)}
-            />
+            <ProfilesView selectedAgent={selectedAgent} />
           </TabsContent>
 
           <TabsContent value="sessions" className="m-0 focus-visible:outline-none">
