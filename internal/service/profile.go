@@ -63,7 +63,7 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 
 		result := make([]ProfileDTO, 0, len(profs))
 		for _, p := range profs {
-			dto := s.buildProfileDTO(canonicalAgent, p, adapter)
+			dto := s.buildProfileDTO(canonicalAgent, p, adapter, cfg)
 			result = append(result, dto)
 		}
 		return result, nil
@@ -85,7 +85,7 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 				if s.reg != nil {
 					adapter, _ = s.reg.Get(ag)
 				}
-				result = append(result, s.buildProfileDTO(ag, p, adapter))
+				result = append(result, s.buildProfileDTO(ag, p, adapter, cfg))
 			}
 		} else {
 			var matchedAdapters []agents.AgentAdapter
@@ -98,17 +98,17 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 			}
 			if len(matchedAdapters) > 0 {
 				for _, ad := range matchedAdapters {
-					result = append(result, s.buildProfileDTO(ad.Name(), p, ad))
+					result = append(result, s.buildProfileDTO(ad.Name(), p, ad, cfg))
 				}
 			} else {
-				result = append(result, s.buildProfileDTO("", p, nil))
+				result = append(result, s.buildProfileDTO("", p, nil, cfg))
 			}
 		}
 	}
 	return result, nil
 }
 
-func (s *profileService) buildProfileDTO(agentName, profileName string, adapter agents.AgentAdapter) ProfileDTO {
+func (s *profileService) buildProfileDTO(agentName, profileName string, adapter agents.AgentAdapter, cfg *config.Config) ProfileDTO {
 	pDir := s.pm.ProfileDir(profileName)
 	hasCreds := false
 	if adapter != nil {
@@ -134,6 +134,14 @@ func (s *profileService) buildProfileDTO(agentName, profileName string, adapter 
 		}
 	}
 
+	var mcpGlobal, pluginsGlobal *bool
+	if cfg != nil && cfg.Profiles != nil {
+		if p, ok := cfg.Profiles[profileName]; ok {
+			mcpGlobal = p.MCPGlobal
+			pluginsGlobal = p.PluginsGlobal
+		}
+	}
+
 	return ProfileDTO{
 		Agent:          agentName,
 		Name:           profileName,
@@ -141,6 +149,8 @@ func (s *profileService) buildProfileDTO(agentName, profileName string, adapter 
 		HasCredentials: hasCreds,
 		Account:        accountPtr,
 		Quota:          quotaPtr,
+		MCPGlobal:      mcpGlobal,
+		PluginsGlobal:  pluginsGlobal,
 	}
 }
 
@@ -218,7 +228,7 @@ func (s *profileService) CreateProfile(ctx context.Context, req CreateProfileReq
 		}
 	}
 
-	dto := s.buildProfileDTO(canonicalAgent, name, adapter)
+	dto := s.buildProfileDTO(canonicalAgent, name, adapter, cfg)
 	if dto.Account == nil && req.Email != "" {
 		dto.Account = &profile.AccountInfo{Email: req.Email}
 	}
@@ -337,3 +347,34 @@ func (s *profileService) RenameProfile(ctx context.Context, agent, oldName, newN
 	}
 	return nil
 }
+
+// UpdateProfileConfig updates mcp_global and plugins_global configuration for a profile.
+func (s *profileService) UpdateProfileConfig(ctx context.Context, name string, mcpGlobal, pluginsGlobal *bool) error {
+	if s.pm == nil {
+		return errors.New("profile manager is not configured")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("profile name cannot be empty")
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg == nil {
+		cfg = config.NewDefaultConfig()
+	}
+	if cfg.Profiles == nil {
+		cfg.Profiles = make(map[string]config.ProfileConfig)
+	}
+
+	p := cfg.Profiles[name]
+	if mcpGlobal != nil {
+		p.MCPGlobal = mcpGlobal
+	}
+	if pluginsGlobal != nil {
+		p.PluginsGlobal = pluginsGlobal
+	}
+	cfg.Profiles[name] = p
+
+	return config.SaveConfig(cfg)
+}
+

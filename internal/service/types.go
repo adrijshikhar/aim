@@ -22,6 +22,8 @@ type ProfileDTO struct {
 	HasCredentials bool                 `json:"has_credentials"`
 	Account        *profile.AccountInfo `json:"account,omitempty"`
 	Quota          *QuotaDTO            `json:"quota,omitempty"`
+	MCPGlobal      *bool                `json:"mcp_global,omitempty"`
+	PluginsGlobal  *bool                `json:"plugins_global,omitempty"`
 }
 
 // CreateProfileRequest represents a request to create or scaffold a new profile.
@@ -72,6 +74,7 @@ type ProfileService interface {
 	CreateProfile(ctx context.Context, req CreateProfileRequest) (*ProfileDTO, error)
 	RemoveProfile(ctx context.Context, agent, name string) error
 	RenameProfile(ctx context.Context, agent, oldName, newName string) error
+	UpdateProfileConfig(ctx context.Context, name string, mcpGlobal, pluginsGlobal *bool) error
 }
 
 // SessionService encapsulates session discovery and resumption.

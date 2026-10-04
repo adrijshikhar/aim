@@ -28,10 +28,11 @@ import {
 } from 'lucide-react';
 
 interface SessionsViewProps {
-  selectedAgent: string;
+  selectedProfile?: string;
+  onSelectProfile?: (profile: string) => void;
 }
 
-export function SessionsView({ selectedAgent }: SessionsViewProps) {
+export function SessionsView({ selectedProfile = 'all', onSelectProfile }: SessionsViewProps) {
   const [sessions, setSessions] = React.useState<SessionDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState('');
@@ -43,7 +44,7 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
     setLoading(true);
     try {
       const data = await getSessions({
-        agent: selectedAgent === 'all' ? undefined : selectedAgent,
+        profile: selectedProfile === 'all' ? undefined : selectedProfile,
         query: searchQuery ? searchQuery : undefined,
       });
       setSessions(data);
@@ -98,7 +99,7 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [selectedAgent, searchQuery]);
+  }, [selectedProfile, searchQuery]);
 
   React.useEffect(() => {
     fetchSessions();
@@ -132,21 +133,22 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
 
   const filteredSessions = React.useMemo(() => {
     return sessions.filter((s) => {
-      const matchAgent =
-        selectedAgent === 'all' || s.agent.toLowerCase() === selectedAgent.toLowerCase();
-      if (!matchAgent) return false;
+      const matchProfile =
+        !selectedProfile || selectedProfile === 'all' || s.profile.toLowerCase() === selectedProfile.toLowerCase();
+      if (!matchProfile) return false;
 
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
       return (
         s.id.toLowerCase().includes(q) ||
         s.profile.toLowerCase().includes(q) ||
+        s.agent.toLowerCase().includes(q) ||
         s.title.toLowerCase().includes(q) ||
         s.goal.toLowerCase().includes(q) ||
         s.cwd.toLowerCase().includes(q)
       );
     });
-  }, [sessions, selectedAgent, searchQuery]);
+  }, [sessions, selectedProfile, searchQuery]);
 
   const formatRelativeTime = (isoString: string) => {
     try {
@@ -220,6 +222,21 @@ export function SessionsView({ selectedAgent }: SessionsViewProps) {
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto">
+          {selectedProfile && selectedProfile !== 'all' && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-geist border border-[#2a2a2a] bg-[#141414] text-xs font-mono text-[#888888]">
+              <span>Profile: <strong className="text-[#ededed]">{selectedProfile}</strong></span>
+              {onSelectProfile && (
+                <button
+                  type="button"
+                  onClick={() => onSelectProfile('all')}
+                  className="hover:text-[#ededed] ml-1 text-[10px] text-[#666666] cursor-pointer"
+                  title="Clear profile filter"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
           <Button variant="outline" size="sm" onClick={fetchSessions} disabled={loading} className="rounded-geist h-8">
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh

@@ -16,7 +16,12 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
-export function McpView() {
+interface McpViewProps {
+  selectedProfile?: string;
+  onSelectProfile?: (profile: string) => void;
+}
+
+export function McpView({ selectedProfile = 'all', onSelectProfile }: McpViewProps) {
   const [servers, setServers] = React.useState<MCPServerDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [copiedName, setCopiedName] = React.useState<string | null>(null);
@@ -26,7 +31,7 @@ export function McpView() {
   const fetchServers = React.useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getMcpServers();
+      const data = await getMcpServers(selectedProfile === 'all' ? undefined : selectedProfile);
       setServers(data);
     } catch {
       // Dev fallback data
@@ -102,10 +107,27 @@ export function McpView() {
             Global servers are shared across all profiles, while scoped servers attach only to their designated profile.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchServers} disabled={loading} className="rounded-geist h-8 font-mono text-xs">
-          <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+          {selectedProfile && selectedProfile !== 'all' && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-geist border border-[#2a2a2a] bg-[#141414] text-xs font-mono text-[#888888]">
+              <span>Scoped to: <strong className="text-[#ededed]">{selectedProfile}</strong></span>
+              {onSelectProfile && (
+                <button
+                  type="button"
+                  onClick={() => onSelectProfile('all')}
+                  className="hover:text-[#ededed] ml-1 text-[10px] text-[#666666] cursor-pointer"
+                  title="Show all MCP servers"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
+          <Button variant="outline" size="sm" onClick={fetchServers} disabled={loading} className="rounded-geist h-8 font-mono text-xs">
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Grid of Servers */}
