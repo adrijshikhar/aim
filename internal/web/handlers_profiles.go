@@ -122,4 +122,3 @@ func (s *Server) handleUpdateProfileConfig(w http.ResponseWriter, r *http.Reques
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
-
