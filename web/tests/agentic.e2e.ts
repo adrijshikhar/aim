@@ -2,9 +2,9 @@ import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 
 test('agent explores dashboard and switches views via natural language', async ({ app, agent, screen }) => {
-  const isLiveConfigured = Boolean(process.env.TINKER_API_BASE_URL);
+  const isLiveConfigured = Boolean(process.env.TINKER_API_KEY || process.env.OPENAI_API_KEY);
   if (!isLiveConfigured) {
-    test.skip('Set TINKER_API_BASE_URL and TINKER_API_KEY to run live Tinker API Labs agent steps');
+    test.skip('Set TINKER_API_KEY to run live Tinker API Labs agent steps');
   }
 
   await app.open('/');
