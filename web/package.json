@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "e2e run"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",
@@ -21,11 +22,15 @@
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.62",
+    "@e2e-dev/web": "^0.11.2",
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
+    "ai": "^7.0.127",
     "autoprefixer": "^10.4.20",
+    "e2e": "^0.16.0",
     "postcss": "^8.5.2",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",

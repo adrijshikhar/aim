@@ -2,6 +2,7 @@
 /aim
 /dist/
 web/dist/
+.e2e/
 node_modules/
 *.tsbuildinfo
 *.tmp

@@ -460,7 +460,7 @@ func TestSPAAndFallback(t *testing.T) {
 		t.Fatalf("expected 200 OK for /, got %d", respRoot.StatusCode)
 	}
 	rootBody, _ := io.ReadAll(respRoot.Body)
-	if !bytes.Contains(rootBody, []byte("AIM Web Dashboard")) {
+	if !bytes.Contains(rootBody, []byte("<div id=\"root\">")) || !bytes.Contains(rootBody, []byte("AIM")) {
 		t.Fatalf("expected index.html content, got: %s", string(rootBody))
 	}
 
@@ -474,7 +474,7 @@ func TestSPAAndFallback(t *testing.T) {
 		t.Fatalf("expected 200 OK for /sessions, got %d", respSessions.StatusCode)
 	}
 	sessionsBody, _ := io.ReadAll(respSessions.Body)
-	if !bytes.Contains(sessionsBody, []byte("AIM Web Dashboard")) {
+	if !bytes.Contains(sessionsBody, []byte("<div id=\"root\">")) || !bytes.Contains(sessionsBody, []byte("AIM")) {
 		t.Fatalf("expected index.html fallback for client-side route, got: %s", string(sessionsBody))
 	}
 
