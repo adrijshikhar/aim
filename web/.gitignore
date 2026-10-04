@@ -3,4 +3,5 @@ dist
 dist-ssr
 *.local
 *.tsbuildinfo
+.e2e
 .DS_Store
