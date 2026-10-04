@@ -15,6 +15,7 @@ import (
 	"github.com/aim-cli/aim/internal/daemon"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/spf13/cobra"
 )
 
 func captureStdout(fn func() error) (string, error) {
@@ -32,6 +33,15 @@ func captureStdout(fn func() error) (string, error) {
 	return buf.String(), err
 }
 
+func executeCmd(cmd *cobra.Command, args ...string) (string, error) {
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return buf.String(), err
+}
+
 func TestDaemonCmd_Help(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
@@ -39,11 +49,8 @@ func TestDaemonCmd_Help(t *testing.T) {
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
 
-	output, err := captureStdout(func() error {
-		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"daemon", "--help"})
-		return cmd.Execute()
-	})
+	cmd := newRootCmd(reg, pm)
+	output, err := executeCmd(cmd, "daemon", "--help")
 
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
@@ -63,11 +70,8 @@ func TestDaemonCmd_Status_Plain(t *testing.T) {
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
 
-	output, err := captureStdout(func() error {
-		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"daemon", "status"})
-		return cmd.Execute()
-	})
+	cmd := newRootCmd(reg, pm)
+	output, err := executeCmd(cmd, "daemon", "status")
 
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
@@ -91,11 +95,8 @@ func TestDaemonCmd_Status_JSON(t *testing.T) {
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
 
-	output, err := captureStdout(func() error {
-		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"daemon", "status", "--json"})
-		return cmd.Execute()
-	})
+	cmd := newRootCmd(reg, pm)
+	output, err := executeCmd(cmd, "daemon", "status", "--json")
 
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
@@ -149,16 +150,11 @@ func TestDaemonCmd_Run(t *testing.T) {
 		t.Fatalf("EnsureProfile failed: %v", err)
 	}
 
-	output, err := captureStdout(func() error {
-		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"daemon", "run"})
-		return cmd.Execute()
-	})
-
+	cmd := newRootCmd(reg, pm)
+	_, err := executeCmd(cmd, "daemon", "run")
 	if err != nil {
 		t.Fatalf("daemon run failed: %v", err)
 	}
-	_ = output
 
 	// Verify daemon.log was populated
 	logPath := filepath.Join(tempDir, "daemon.log")

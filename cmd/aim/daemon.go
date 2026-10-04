@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -51,14 +50,15 @@ func newDaemonInstallCmd() *cobra.Command {
 				return fmt.Errorf("failed to install daemon service: %w", err)
 			}
 
-			fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.StatusGreen).Render("Background daemon service installed successfully!"))
-			fmt.Printf("  Service:  %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(info.Label))
-			fmt.Printf("  Interval: %s\n", info.Interval)
+			out := cmd.OutOrStdout()
+			fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.StatusGreen).Render("Background daemon service installed successfully!"))
+			fmt.Fprintf(out, "  Service:  %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(info.Label))
+			fmt.Fprintf(out, "  Interval: %s\n", info.Interval)
 			if info.ConfigPath != "" {
-				fmt.Printf("  Config:   %s\n", info.ConfigPath)
+				fmt.Fprintf(out, "  Config:   %s\n", info.ConfigPath)
 			}
 			if info.LogPath != "" {
-				fmt.Printf("  Log:      %s\n", info.LogPath)
+				fmt.Fprintf(out, "  Log:      %s\n", info.LogPath)
 			}
 			return nil
 		},
@@ -76,7 +76,7 @@ func newDaemonUninstallCmd() *cobra.Command {
 			if err := daemon.Uninstall(baseDir); err != nil {
 				return fmt.Errorf("failed to uninstall daemon service: %w", err)
 			}
-			fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.StatusGreen).Render("Background daemon service uninstalled successfully."))
+			fmt.Fprintln(cmd.OutOrStdout(), lipgloss.NewStyle().Bold(true).Foreground(tui.StatusGreen).Render("Background daemon service uninstalled successfully."))
 			return nil
 		},
 	}
@@ -95,41 +95,42 @@ func newDaemonStatusCmd() *cobra.Command {
 				return fmt.Errorf("failed to check daemon status: %w", err)
 			}
 
+			out := cmd.OutOrStdout()
 			if jsonOutput {
-				enc := json.NewEncoder(os.Stdout)
+				enc := json.NewEncoder(out)
 				enc.SetIndent("", "  ")
 				return enc.Encode(info)
 			}
 
-			fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Background Daemon Status ==="))
+			fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Background Daemon Status ==="))
 
 			installedStr := "No"
 			if info.Installed {
 				installedStr = "Yes"
 			}
-			fmt.Printf("  Installed:    %s\n", installedStr)
+			fmt.Fprintf(out, "  Installed:    %s\n", installedStr)
 
 			activeStr := lipgloss.NewStyle().Foreground(tui.TextMuted).Render("Inactive (Not running)")
 			if info.Active {
 				activeStr = lipgloss.NewStyle().Bold(true).Foreground(tui.StatusGreen).Render("Active (Running)")
 			}
-			fmt.Printf("  Active:       %s\n", activeStr)
-			fmt.Printf("  Service:      %s\n", info.Label)
-			fmt.Printf("  Interval:     %s\n", info.Interval)
+			fmt.Fprintf(out, "  Active:       %s\n", activeStr)
+			fmt.Fprintf(out, "  Service:      %s\n", info.Label)
+			fmt.Fprintf(out, "  Interval:     %s\n", info.Interval)
 			if info.ConfigPath != "" {
-				fmt.Printf("  Config File:  %s\n", info.ConfigPath)
+				fmt.Fprintf(out, "  Config File:  %s\n", info.ConfigPath)
 			}
 			if info.LogPath != "" {
-				fmt.Printf("  Log File:     %s\n", info.LogPath)
+				fmt.Fprintf(out, "  Log File:     %s\n", info.LogPath)
 			}
 
 			lastRunStr := "Never"
 			if !info.LastRun.IsZero() {
 				lastRunStr = fmt.Sprintf("%s (%s)", info.LastRun.Format(time.RFC3339), formatDaemonTimeAgo(info.LastRun))
 			}
-			fmt.Printf("  Last Run:     %s\n", lastRunStr)
+			fmt.Fprintf(out, "  Last Run:     %s\n", lastRunStr)
 			if info.LastRunMessage != "" {
-				fmt.Printf("  Last Message: %s\n", lipgloss.NewStyle().Foreground(tui.TextMuted).Render(info.LastRunMessage))
+				fmt.Fprintf(out, "  Last Message: %s\n", lipgloss.NewStyle().Foreground(tui.TextMuted).Render(info.LastRunMessage))
 			}
 
 			return nil
