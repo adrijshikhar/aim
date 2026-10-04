@@ -16,6 +16,7 @@ trap 'rm -rf "$TEST_DIR" "$MOCK_BIN"' EXIT
 export AIM_HOME="$TEST_DIR/aim_home"
 export AIM_REAL_HOME="$TEST_DIR/real_home"
 export AIM_AUTO_CREATE=1
+export AIM_TELEMETRY_DISABLED=1
 export PATH="$MOCK_BIN:$PATH"
 
 mkdir -p "$AIM_HOME/profiles/work/.codex/sessions/2026/09/22"

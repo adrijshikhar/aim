@@ -13,6 +13,7 @@ trap "rm -rf '$TEST_AIM_HOME' '$MOCK_BIN'" EXIT
 export AIM_HOME="$TEST_AIM_HOME"
 export AIM_REAL_HOME="$TEST_AIM_HOME/fake_home"
 export AIM_AUTO_CREATE=1
+export AIM_TELEMETRY_DISABLED=1
 mkdir -p "$TEST_AIM_HOME/fake_home/.gemini/antigravity-cli/conversations"
 mkdir -p "$TEST_AIM_HOME/fake_home/.gemini/antigravity-cli/brain"
 

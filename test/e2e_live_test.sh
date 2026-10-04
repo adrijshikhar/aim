@@ -14,6 +14,7 @@ export TERM="${TERM:-xterm-256color}"
 if [ "$TERM" = "dumb" ] || [ -z "$TERM" ]; then
   export TERM="xterm-256color"
 fi
+export AIM_TELEMETRY_DISABLED=1
 
 echo "========================================================================"
 echo "  AIM LIVE E2E TEST SUITE                                               "
@@ -679,7 +680,7 @@ echo ""
 echo "=== Phase 10: Telemetry Opt-Out Verification ==="
 
 DNT_TEST_DIR=$(mktemp -d)
-DO_NOT_TRACK=1 AIM_HOME="$DNT_TEST_DIR" "$AIM_BIN" version > /dev/null
+AIM_TELEMETRY_DISABLED="" DO_NOT_TRACK=1 AIM_HOME="$DNT_TEST_DIR" "$AIM_BIN" version > /dev/null
 
 if [ -f "$DNT_TEST_DIR/cache/telemetry_spool.json" ]; then
   echo "FAIL: Telemetry spool created when DO_NOT_TRACK=1!"
@@ -688,6 +689,17 @@ if [ -f "$DNT_TEST_DIR/cache/telemetry_spool.json" ]; then
 fi
 rm -rf "$DNT_TEST_DIR"
 echo "  ✔ Universal DO_NOT_TRACK=1 strictly enforced (0 telemetry collected)"
+
+AIM_DIS_TEST_DIR=$(mktemp -d)
+DO_NOT_TRACK="" AIM_TELEMETRY_DISABLED=1 AIM_HOME="$AIM_DIS_TEST_DIR" "$AIM_BIN" version > /dev/null
+
+if [ -f "$AIM_DIS_TEST_DIR/cache/telemetry_spool.json" ]; then
+  echo "FAIL: Telemetry spool created when AIM_TELEMETRY_DISABLED=1!"
+  rm -rf "$AIM_DIS_TEST_DIR"
+  exit 1
+fi
+rm -rf "$AIM_DIS_TEST_DIR"
+echo "  ✔ CLI AIM_TELEMETRY_DISABLED=1 strictly enforced (0 telemetry collected)"
 
 echo ""
 echo "========================================================================"
