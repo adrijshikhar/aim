@@ -102,7 +102,7 @@ export function App() {
             ))}
           </div>
 
-          {/* Daemon Status Pill */}
+          {/* Server Connection Status Pill */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#262626] bg-[#111111] text-xs">
               <span className="relative flex h-2 w-2">
@@ -118,7 +118,7 @@ export function App() {
                 />
               </span>
               <span className="font-mono text-[11px] text-[#ededed]">
-                {isOnline ? 'Daemon Connected' : 'Connecting...'}
+                {isOnline ? 'Server Connected' : 'Connecting...'}
               </span>
             </div>
           </div>
@@ -200,7 +200,7 @@ export function App() {
           </div>
           <div className="flex items-center gap-4">
             <span>
-              Daemon Proxy: <code className="text-[#ededed] bg-[#141414] px-1.5 py-0.5 rounded border border-[#262626]">/api → :8080</code>
+              API Server: <code className="text-[#ededed] bg-[#141414] px-1.5 py-0.5 rounded border border-[#262626]">/api → :8080</code>
             </span>
           </div>
         </div>

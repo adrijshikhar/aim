@@ -314,9 +314,9 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
                         onClick={() => handleResume(s)}
                       >
                         {resumingId === s.id ? (
-                          <RefreshCw className="h-3 w-3 animate-spin text-[#0070f3]" />
+                          <RefreshCw className="h-3 w-3 animate-spin text-[#ededed]" />
                         ) : (
-                          <Terminal className="h-3 w-3 text-[#0070f3]" />
+                          <Terminal className="h-3 w-3 text-[#ededed]" />
                         )}
                         Resume
                       </button>

@@ -165,20 +165,16 @@ export function McpView({ selectedProfile = 'all', onSelectProfile }: McpViewPro
 
                     <Badge
                       variant="outline"
-                      className={`text-[11px] font-mono flex items-center gap-1 rounded-md px-2 py-0.5 ${
-                        isGlobal
-                          ? 'border-[#0070f3]/30 bg-[#0070f3]/10 text-[#60a5fa]'
-                          : 'border-[#7928ca]/30 bg-[#7928ca]/10 text-[#c084fc]'
-                      }`}
+                      className="text-[11px] font-mono flex items-center gap-1 rounded-md px-2 py-0.5 border-[#2e2e2e] bg-[#161616] text-[#888888]"
                     >
                       {isGlobal ? (
                         <>
-                          <Globe className="h-3 w-3 text-[#0070f3]" />
+                          <Globe className="h-3 w-3 text-[#666666]" />
                           Global
                         </>
                       ) : (
                         <>
-                          <Lock className="h-3 w-3 text-[#7928ca]" />
+                          <Lock className="h-3 w-3 text-[#666666]" />
                           Profile: {srv.scope}
                         </>
                       )}
