@@ -4,35 +4,35 @@
 
 @layer base {
   :root {
-    --background: 220 13% 18%; /* #282c34 Atom One Dark base */
-    --foreground: 219 14% 71%; /* #abb2bf TextPrimary */
+    --background: 0 0% 4%; /* #0a0a0a Vercel canvas */
+    --foreground: 0 0% 93%; /* #ededed Vercel ink */
 
-    --card: 220 13% 15%; /* #21252b Card surface */
-    --card-foreground: 219 14% 71%;
+    --card: 0 0% 7%; /* #111111 Elevated card */
+    --card-foreground: 0 0% 93%;
 
-    --popover: 220 13% 15%;
-    --popover-foreground: 219 14% 71%;
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 93%;
 
-    --primary: 207 82% 66%; /* #61afef AccentBlue */
-    --primary-foreground: 220 13% 18%;
+    --primary: 0 0% 93%; /* #ededed Vercel Primary Button */
+    --primary-foreground: 0 0% 4%; /* #0a0a0a */
 
-    --secondary: 220 14% 20%; /* #2c313a Selected Row */
-    --secondary-foreground: 0 0% 90%; /* #e5e5e5 TextBright */
+    --secondary: 0 0% 10%; /* #1a1a1a */
+    --secondary-foreground: 0 0% 93%;
 
-    --muted: 220 14% 20%;
-    --muted-foreground: 219 10% 40%; /* #5c6370 TextMuted */
+    --muted: 0 0% 10%; /* #1a1a1a */
+    --muted-foreground: 0 0% 55%; /* #8c8c8c Vercel mute */
 
-    --accent: 220 13% 28%; /* #3e4451 TabActive */
-    --accent-foreground: 0 0% 90%;
+    --accent: 0 0% 13%; /* #222222 Vercel tab active */
+    --accent-foreground: 0 0% 98%;
 
-    --destructive: 355 65% 65%; /* #e06c75 StatusRed */
+    --destructive: 0 100% 47%; /* #ee0000 Vercel error */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 218 13% 24%; /* #353b45 Border */
-    --input: 218 13% 24%;
-    --ring: 207 82% 66%;
+    --border: 0 0% 15%; /* #262626 Vercel hairline */
+    --input: 0 0% 15%;
+    --ring: 212 100% 48%; /* #0070f3 Vercel blue */
 
-    --radius: 0.5rem;
+    --radius: 0.375rem; /* 6px Vercel standard */
   }
 }
 
@@ -41,29 +41,34 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Minimalist UI <kbd> styling */
+  kbd {
+    @apply inline-flex items-center justify-center font-mono text-[10px] font-medium px-1.5 py-0.5 rounded border border-[#2e2e2e] bg-[#171717] text-[#888888] shadow-sm;
   }
 
   /* Impeccable Craft Floor: themed selection & scrollbars */
   ::selection {
-    background-color: hsl(207 82% 66% / 0.25);
+    background-color: hsl(212 100% 48% / 0.3);
     color: #ffffff;
   }
 
-  /* Custom subtle dark scrollbars matching Atom One Dark */
+  /* Custom subtle dark scrollbars matching Vercel dark */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
   ::-webkit-scrollbar-track {
-    background: #21252b;
+    background: #0a0a0a;
   }
   ::-webkit-scrollbar-thumb {
-    background: #3e4451;
-    border-radius: 3px;
+    background: #262626;
+    border-radius: 2.5px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #4b5263;
+    background: #333333;
   }
 }
