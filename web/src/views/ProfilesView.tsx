@@ -10,6 +10,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -30,31 +31,21 @@ import {
   Folder,
   RefreshCw,
   Gauge,
-  Sparkles,
   Bot,
-  Zap,
 } from 'lucide-react';
 
 interface ProfilesViewProps {
   selectedAgent: string;
-  onSelectAgent?: (agent: string) => void;
 }
 
-const AGENTS = [
-  { id: 'all', label: 'All Agents' },
-  { id: 'claude', label: 'Claude', color: 'text-amber-400 border-amber-500/30 bg-amber-500/10' },
-  { id: 'codex', label: 'Codex', color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
-  { id: 'gemini', label: 'Gemini', color: 'text-blue-400 border-blue-500/30 bg-blue-500/10' },
-  { id: 'agy', label: 'Antigravity', color: 'text-purple-400 border-purple-500/30 bg-purple-500/10' },
-];
-
-export function ProfilesView({ selectedAgent, onSelectAgent }: ProfilesViewProps) {
+export function ProfilesView({ selectedAgent }: ProfilesViewProps) {
   const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
   // Dialog State
   const [isAddOpen, setIsAddOpen] = React.useState(false);
+  const [enableClone, setEnableClone] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [formData, setFormData] = React.useState<CreateProfileRequest>({
     agent: 'claude',
@@ -149,13 +140,17 @@ export function ProfilesView({ selectedAgent, onSelectAgent }: ProfilesViewProps
 
     setSubmitting(true);
     try {
-      await createProfile(formData);
+      await createProfile({
+        ...formData,
+        clone_from: enableClone ? formData.clone_from : '',
+      });
       toast({
         title: 'Profile Created',
         description: `Successfully added ${formData.agent} profile "${formData.name}".`,
         variant: 'success',
       });
       setIsAddOpen(false);
+      setEnableClone(false);
       setFormData({
         agent: 'claude',
         name: '',
@@ -254,23 +249,15 @@ export function ProfilesView({ selectedAgent, onSelectAgent }: ProfilesViewProps
       )}
       {/* Top action row */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {AGENTS.map((item) => (
-            <Button
-              key={item.id}
-              variant={selectedAgent === item.id ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => onSelectAgent?.(item.id)}
-              className="text-xs transition-all h-8 rounded-full px-3"
-            >
-              {item.id === 'all' && <Sparkles className="h-3 w-3 mr-1" />}
-              {item.id === 'claude' && <Bot className="h-3 w-3 mr-1 text-[#f5a623]" />}
-              {item.id === 'codex' && <Zap className="h-3 w-3 mr-1 text-[#50e3c2]" />}
-              {item.id === 'gemini' && <Sparkles className="h-3 w-3 mr-1 text-[#0070f3]" />}
-              {item.id === 'agy' && <Bot className="h-3 w-3 mr-1 text-[#b388ff]" />}
-              {item.label}
-            </Button>
-          ))}
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-sm font-semibold tracking-tight text-[#ededed]">
+            {selectedAgent === 'all'
+              ? 'All Profiles'
+              : `${selectedAgent.charAt(0).toUpperCase() + selectedAgent.slice(1)} Profiles`}
+          </h2>
+          <span className="font-mono text-[11px] px-2 py-0.5 rounded-full border border-[#262626] bg-[#141414] text-[#888888] tabular-nums">
+            {filteredProfiles.length} active
+          </span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -279,7 +266,13 @@ export function ProfilesView({ selectedAgent, onSelectAgent }: ProfilesViewProps
             Refresh
           </Button>
 
-          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <Dialog
+            open={isAddOpen}
+            onOpenChange={(open) => {
+              setIsAddOpen(open);
+              if (!open) setEnableClone(false);
+            }}
+          >
             <DialogTrigger asChild>
               <Button size="sm" className="bg-[#ededed] text-[#0a0a0a] hover:bg-white rounded-geist h-8 font-medium">
                 <Plus className="h-3.5 w-3.5 mr-1" />
@@ -345,23 +338,53 @@ export function ProfilesView({ selectedAgent, onSelectAgent }: ProfilesViewProps
                     />
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-mono font-medium uppercase tracking-wider text-[#888888]">
-                      Clone From Existing Profile (Optional)
-                    </label>
-                    <Input
-                      placeholder="e.g. default"
-                      value={formData.clone_from}
-                      onChange={(e) => setFormData({ ...formData, clone_from: e.target.value })}
-                      className="rounded-geist border-[#262626] bg-[#0e0e0e] text-xs h-9"
-                    />
+                  {/* Clone from existing profile rendered with toggle switch */}
+                  <div className="space-y-2 pt-2 border-t border-[#1f1f1f]">
+                    <div className="flex items-center justify-between py-0.5">
+                      <div className="space-y-0.5">
+                        <label htmlFor="clone-toggle" className="text-xs font-medium text-[#ededed] cursor-pointer">
+                          Clone from existing profile
+                        </label>
+                        <p className="text-[11px] text-[#888888]">
+                          Copy authentication, credentials, and settings
+                        </p>
+                      </div>
+                      <Switch
+                        id="clone-toggle"
+                        checked={enableClone}
+                        onCheckedChange={(checked) => {
+                          setEnableClone(checked);
+                          if (!checked) {
+                            setFormData((prev) => ({ ...prev, clone_from: '' }));
+                          }
+                        }}
+                      />
+                    </div>
+
+                    {enableClone && (
+                      <div className="space-y-1.5 pt-1">
+                        <label className="text-[11px] font-mono font-medium uppercase tracking-wider text-[#888888]">
+                          Source Profile to Clone
+                        </label>
+                        <Input
+                          placeholder="e.g. default"
+                          value={formData.clone_from}
+                          onChange={(e) => setFormData({ ...formData, clone_from: e.target.value })}
+                          className="rounded-geist border-[#262626] bg-[#0e0e0e] text-xs h-9"
+                          autoFocus
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <DialogFooter className="pt-3 border-t border-[#1f1f1f] flex gap-2 justify-end">
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setIsAddOpen(false)}
+                      onClick={() => {
+                        setIsAddOpen(false);
+                        setEnableClone(false);
+                      }}
                       disabled={submitting}
                       className="rounded-geist text-xs h-8"
                     >
