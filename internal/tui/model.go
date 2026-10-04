@@ -70,8 +70,8 @@ type Model struct {
 	height      int
 	usageStream *usageStream
 
-	loading  bool
-	inFlight map[string]bool
+	loading         bool
+	inFlight        map[string]bool
 	spinner         spinner.Model
 	version         string
 	updateAvailable string
@@ -482,7 +482,7 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 		return ""
 	}
 
-// Always report the bottleneck / most constrained limit percentage so the
+	// Always report the bottleneck / most constrained limit percentage so the
 	// displayed percentage is strictly consistent with the badge color/status.
 	return fmt.Sprintf("[%d%%]", rep.BottleneckPct())
 }

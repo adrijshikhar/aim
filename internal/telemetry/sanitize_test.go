@@ -31,10 +31,10 @@ func TestDurationBucket(t *testing.T) {
 
 func TestSanitizeCommand_NoProfileNamesOrPathsOrFlags(t *testing.T) {
 	tests := []struct {
-		rawCmd     string
-		rawArgs    []string
-		wantCmd    string
-		wantAgent  string
+		rawCmd    string
+		rawArgs   []string
+		wantCmd   string
+		wantAgent string
 	}{
 		{"run", []string{"agy", "work-client-corp", "--prompt", "my secret prompt"}, "run", "agy"},
 		{"login", []string{"claude", "personal@gmail.com"}, "login", "claude"},

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // DefaultEndpoint can be set at build time or via environment variable.
@@ -81,13 +82,13 @@ func (d *HTTPDispatcher) FallbackURL(sub Submission) string {
 		firstLine = firstLine[:idx]
 	}
 	firstLine = strings.TrimSpace(firstLine)
-	if len(firstLine) > 60 {
-		firstLine = firstLine[:60] + "..."
+	if runes := []rune(firstLine); len(runes) > 60 {
+		firstLine = string(runes[:60]) + "..."
 	}
 
-	title := fmt.Sprintf("[%s] %s", strings.Title(string(sub.Category)), firstLine)
+	title := fmt.Sprintf("[%s] %s", titleCase(string(sub.Category)), firstLine)
 	if firstLine == "" {
-		title = fmt.Sprintf("[%s] Feedback", strings.Title(string(sub.Category)))
+		title = fmt.Sprintf("[%s] Feedback", titleCase(string(sub.Category)))
 	}
 
 	var body strings.Builder
@@ -107,8 +108,8 @@ func (d *HTTPDispatcher) FallbackURL(sub Submission) string {
 	}
 
 	bodyStr := body.String()
-	if len(bodyStr) > 4000 {
-		bodyStr = bodyStr[:4000] + "\n\n... (truncated for URL length)"
+	if runes := []rune(bodyStr); len(runes) > 4000 {
+		bodyStr = string(runes[:4000]) + "\n\n... (truncated for URL length)"
 	}
 
 	params := url.Values{}
@@ -117,4 +118,13 @@ func (d *HTTPDispatcher) FallbackURL(sub Submission) string {
 	params.Set("labels", "feedback,"+string(sub.Category))
 
 	return fmt.Sprintf("%s?%s", baseURL, params.Encode())
+}
+
+func titleCase(s string) string {
+	if s == "" {
+		return ""
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }

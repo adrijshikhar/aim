@@ -290,4 +290,3 @@ func generateDiagnosticReport(reg *agents.Registry, pm *profile.ProfileManager, 
 
 	return b.String()
 }
-

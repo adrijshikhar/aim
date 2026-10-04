@@ -91,8 +91,9 @@ func HandlePanic(recovered any, stack []byte, homeDir string, version, commit st
 func truncate(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
+	runes := []rune(s)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen]) + "..."
 	}
 	return s
 }
