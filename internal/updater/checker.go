@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -127,17 +128,36 @@ func CheckCached(currentVersion, cacheDir string) *UpdateInfo {
 	}
 }
 
+var (
+	bgCheckWg sync.WaitGroup
+)
+
 // MaybeTriggerBackgroundCheck runs an asynchronous release check if cache is older than 24h.
 func MaybeTriggerBackgroundCheck(currentVersion, cacheDir string) {
 	cached, err := readCache(cacheDir)
 	if err == nil && cached != nil && time.Since(cached.CheckedAt) < 24*time.Hour {
 		return
 	}
+	bgCheckWg.Add(1)
 	go func() {
+		defer bgCheckWg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_, _ = CheckForUpdate(ctx, currentVersion, cacheDir, true)
 	}()
+}
+
+// AwaitBackgroundCheck waits up to timeout for any in-flight background check to finish.
+func AwaitBackgroundCheck(timeout time.Duration) {
+	done := make(chan struct{}, 1)
+	go func() {
+		bgCheckWg.Wait()
+		done <- struct{}{}
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
 }
 
 // IsNewerVersion returns true if latest is strictly higher than current according to semver.

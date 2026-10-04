@@ -156,3 +156,61 @@ func TestTelemetryClient_ZeroLatencyOnTimeout(t *testing.T) {
 		t.Errorf("flush took %v, expected <= 300ms", duration)
 	}
 }
+
+func TestSpooler_CorruptSpoolRecovery(t *testing.T) {
+	tempDir := t.TempDir()
+	spoolFile := filepath.Join(tempDir, "telemetry_spool.json")
+	spooler := NewSpooler(spoolFile, "", "", nil)
+
+	// Write valid event, corrupt line, another valid event
+	ev1 := Event{EventName: "valid_1", DistinctID: "id1", Timestamp: time.Now().UTC()}
+	ev2 := Event{EventName: "valid_2", DistinctID: "id2", Timestamp: time.Now().UTC()}
+	_ = spooler.Append(ev1)
+
+	// Inject corrupt line directly
+	f, err := os.OpenFile(spoolFile, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("failed to open spool: %v", err)
+	}
+	_, _ = f.WriteString("{invalid json content broken here\n")
+	_, _ = f.WriteString("\n") // empty line
+	_ = f.Close()
+
+	_ = spooler.Append(ev2)
+
+	events, err := spooler.Read()
+	if err != nil {
+		t.Fatalf("expected Read to recover from corrupt lines without error, got: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 valid events recovered, got %d", len(events))
+	}
+	if events[0].EventName != "valid_1" || events[1].EventName != "valid_2" {
+		t.Errorf("unexpected recovered event names: %+v", events)
+	}
+}
+
+func TestSpooler_AppendBatch(t *testing.T) {
+	tempDir := t.TempDir()
+	spoolFile := filepath.Join(tempDir, "telemetry_spool.json")
+	spooler := NewSpooler(spoolFile, "", "", nil)
+
+	batch := []Event{
+		{EventName: "batch_1", DistinctID: "id1", Timestamp: time.Now().UTC()},
+		{EventName: "batch_2", DistinctID: "id2", Timestamp: time.Now().UTC()},
+		{EventName: "batch_3", DistinctID: "id3", Timestamp: time.Now().UTC()},
+	}
+
+	if err := spooler.AppendBatch(batch); err != nil {
+		t.Fatalf("AppendBatch failed: %v", err)
+	}
+
+	events, err := spooler.Read()
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+}
+

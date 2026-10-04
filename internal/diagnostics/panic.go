@@ -50,8 +50,9 @@ func BuildGitHubIssueURL(title, body string) string {
 	baseURL := "https://github.com/adrijshikhar/aim/issues/new"
 
 	// URLs exceeding ~6,000 chars risk 414 Request-URI Too Large in browsers
-	if len(body) > 4000 {
-		body = body[:4000] + "\n\n... (stack trace truncated, see full trace in ~/.aim/logs/aim-debug.log)"
+	bodyRunes := []rune(body)
+	if len(bodyRunes) > 4000 {
+		body = string(bodyRunes[:4000]) + "\n\n... (stack trace truncated, see full trace in ~/.aim/logs/aim-debug.log)"
 	}
 
 	params := url.Values{}

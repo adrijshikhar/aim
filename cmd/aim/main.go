@@ -29,6 +29,7 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 	defer logger.Close()
 
 	cfg, _ := config.LoadConfig()
+	updater.MaybeTriggerBackgroundCheck(Version, config.CacheDir())
 	if cfg != nil && cfg.Debug {
 		env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))
 		if env != "0" && env != "false" && env != "no" && env != "off" {
@@ -162,11 +163,11 @@ func notifyUpdate(args []string) {
 			return
 		}
 	}
+	updater.AwaitBackgroundCheck(300 * time.Millisecond)
 	cached := updater.CheckCached(Version, config.CacheDir())
 	if cached != nil && cached.UpdateAvailable {
 		fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'brew upgrade aim')\n", Version, cached.LatestVersion)
 	}
-	updater.MaybeTriggerBackgroundCheck(Version, config.CacheDir())
 }
 
 func main() {

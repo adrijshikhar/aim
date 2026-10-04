@@ -42,6 +42,14 @@ func NewSpooler(spoolPath, endpoint, apiKey string, httpClient *http.Client) *Sp
 
 // Append writes an event as a line in the spool file.
 func (s *Spooler) Append(ev Event) error {
+	return s.AppendBatch([]Event{ev})
+}
+
+// AppendBatch writes multiple telemetry events to the spool file in a single file transaction.
+func (s *Spooler) AppendBatch(events []Event) error {
+	if len(events) == 0 {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -52,13 +60,17 @@ func (s *Spooler) Append(ev Event) error {
 	}
 	defer f.Close()
 
-	data, err := json.Marshal(ev)
-	if err != nil {
-		return err
+	for _, ev := range events {
+		data, err := json.Marshal(ev)
+		if err != nil {
+			continue
+		}
+		data = append(data, '\n')
+		if _, err := f.Write(data); err != nil {
+			return err
+		}
 	}
-	data = append(data, '\n')
-	_, err = f.Write(data)
-	return err
+	return nil
 }
 
 // Read loads all un-flushed events from the spool file.
@@ -155,10 +167,8 @@ func (s *Spooler) Flush(ctx context.Context) error {
 
 	resp, err := s.Client.Do(req)
 	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Re-append events back to spool on failure so data is preserved for retry
-		for _, ev := range events {
-			_ = s.Append(ev)
-		}
+		// Re-append events back to spool in a single atomic batch on failure so data is preserved for retry
+		_ = s.AppendBatch(events)
 		if err != nil {
 			return err
 		}

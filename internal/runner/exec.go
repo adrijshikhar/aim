@@ -78,7 +78,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		postCtx, postCancel := context.WithCancel(ctx)
 		defer func() {
 			postCancel()
-			done := make(chan struct{})
+			done := make(chan struct{}, 1)
 			go func() {
 				postWg.Wait()
 				close(done)
