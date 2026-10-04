@@ -127,6 +127,7 @@ Primary Commands:
   remove [agent] <profile>   Delete profile credentials and state
   mv <agent> <src> <dst>     Move agent account and credentials between profiles
   whoami                     Show active profile, agent, session, and quota
+  web                        Start the AIM web dashboard
   completion <shell>         Generate shell completion script (zsh, bash, fish)
 
 Flags:
@@ -172,6 +173,7 @@ Flags:
 		newFeedbackCmd(reg, pm),
 		newCompletionCmd(rootCmd),
 		newVersionCmd(),
+		newWebCmd(reg, pm),
 	)
 
 	return rootCmd
