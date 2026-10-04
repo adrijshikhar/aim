@@ -397,6 +397,13 @@ export function ProfilesView({
   };
 
   const handleResumeSession = async (s: SessionDTO, flags?: string[], customFlags?: string) => {
+    // If the session is currently active and no explicit flags were provided,
+    // open the ResumeModal so the user can choose --force or --fork instead of hanging on CLI stdin
+    if (s.is_active && (!flags || flags.length === 0) && !customFlags) {
+      setFlagModalSession(s);
+      return;
+    }
+
     setResumingId(s.id);
     try {
       const res = await resumeSession({
