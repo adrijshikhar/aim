@@ -13,8 +13,10 @@ import (
 )
 
 const (
+	// DefaultPostHogHost is the default production PostHog host URL for AIM.
+	DefaultPostHogHost = "https://us.i.posthog.com"
 	// DefaultPostHogEndpoint is the default production PostHog batch ingest endpoint.
-	DefaultPostHogEndpoint = "https://us.i.posthog.com/batch/"
+	DefaultPostHogEndpoint = DefaultPostHogHost + "/batch/"
 	// DefaultPostHogAPIKey is the default production PostHog project API key for AIM.
 	DefaultPostHogAPIKey = "phc_tTNz7hfe9r6HMVMR5fjrJVEBoaGvZ4V9onEhZrF74Ggs"
 )

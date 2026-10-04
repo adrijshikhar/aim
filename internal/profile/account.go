@@ -11,6 +11,7 @@ import (
 
 // AccountInfo contains identity and authentication metadata for a profile.
 type AccountInfo struct {
+	UserID     string `json:"user_id,omitempty"`
 	Email      string `json:"email,omitempty"`
 	Name       string `json:"name,omitempty"`
 	AuthMethod string `json:"auth_method,omitempty"`
@@ -176,7 +177,7 @@ func ParseTokenAccountInfo(data []byte) AccountInfo {
 		return AccountInfo{}
 	}
 
-	var email, name string
+	var userID, email, name string
 	if root.IDToken != "" {
 		parts := strings.Split(root.IDToken, ".")
 		if len(parts) >= 2 {
@@ -187,10 +188,12 @@ func ParseTokenAccountInfo(data []byte) AccountInfo {
 			}
 			if err == nil {
 				var claims struct {
-					Email string `json:"email"`
-					Name  string `json:"name"`
+					Subject string `json:"sub"`
+					Email   string `json:"email"`
+					Name    string `json:"name"`
 				}
 				if err := json.Unmarshal(decoded, &claims); err == nil {
+					userID = claims.Subject
 					email = claims.Email
 					name = claims.Name
 				}
@@ -223,6 +226,7 @@ func ParseTokenAccountInfo(data []byte) AccountInfo {
 	}
 
 	return AccountInfo{
+		UserID:     userID,
 		Email:      email,
 		Name:       name,
 		AuthMethod: authMethod,
@@ -285,7 +289,7 @@ func ParseCodexAuthAccountInfo(data []byte) AccountInfo {
 		return AccountInfo{}
 	}
 
-	var email, name, planType string
+	var userID, email, name, planType string
 	if root.Tokens.IDToken != "" {
 		parts := strings.Split(root.Tokens.IDToken, ".")
 		if len(parts) >= 2 {
@@ -304,12 +308,17 @@ func ParseCodexAuthAccountInfo(data []byte) AccountInfo {
 					} `json:"https://api.openai.com/auth"`
 				}
 				if err := json.Unmarshal(decoded, &claims); err == nil {
+					userID = claims.OpenAIAuth.UserID
 					email = claims.Email
 					name = claims.Name
 					planType = claims.OpenAIAuth.ChatGPTPlanType
 				}
 			}
 		}
+	}
+
+	if userID == "" {
+		userID = root.Tokens.AccountID
 	}
 
 	if email == "" {
@@ -341,6 +350,7 @@ func ParseCodexAuthAccountInfo(data []byte) AccountInfo {
 	}
 
 	return AccountInfo{
+		UserID:     userID,
 		Email:      email,
 		Name:       name,
 		AuthMethod: authMethod,

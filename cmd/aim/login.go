@@ -9,6 +9,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -48,10 +49,14 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		cfg = config.NewDefaultConfig()
 	}
 
+	loginSucceeded := false
 	// Harvest any agent credentials into the profile directory after login completes.
 	// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
 	defer func() {
 		_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
+		if loginSucceeded {
+			telemetry.IdentifyAccount(adapter.Name(), profile.GetProfileAccountInfoForAgent(pDir, adapter.Name()))
+		}
 	}()
 
 	auth, ok := adapter.(agents.Authenticator)
@@ -63,6 +68,7 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		return 1
 	}
+	loginSucceeded = true
 
 	cfg.AddProfileAgent(profileName, adapter.Name())
 	_ = config.SaveConfig(cfg)

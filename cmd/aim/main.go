@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -15,17 +17,53 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/updater"
-	"time"
+	"github.com/posthog/posthog-go"
 )
 
 func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registry, pm *profile.ProfileManager) (exitCode int) {
 	startTime := time.Now()
-	telemetry.MaybeDisplayFirstRunNotice(config.BaseDir())
+	if len(args) > 0 && args[0] != "__complete" {
+		telemetry.MaybeDisplayFirstRunNotice(config.BaseDir())
+	}
 	logger.Init(config.BaseDir())
 	defer logger.Close()
 
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && cfg.Debug {
+		env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))
+		if env != "0" && env != "false" && env != "no" && env != "off" {
+			logger.SetDebug(true)
+		}
+	}
+
+	telemetry.InitPostHog(cfg)
+	defer func() {
+		if err := telemetry.ClosePostHog(); err != nil {
+			log.Printf("error closing PostHog client: %v", err)
+		}
+	}()
+
+	telemetry.InitPostHogLogs(cfg)
+	defer func() {
+		if err := telemetry.ClosePostHogLogs(); err != nil {
+			log.Printf("error closing PostHog log exporter: %v", err)
+		}
+	}()
+	if len(args) == 0 || args[0] != "__complete" {
+		telemetry.LogPostHogInfo(ctx, "command_dispatch_started", nil)
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
+			if client := telemetry.PostHogClient(); client != nil {
+				client.Enqueue(posthog.NewDefaultException(
+					time.Now(),
+					telemetry.AnonymousMachineID(config.BaseDir()),
+					"UnhandledPanic",
+					"AIM encountered an unexpected panic",
+				))
+			}
+
 			stack := debug.Stack()
 			home, _ := os.UserHomeDir()
 			issueURL, report := diagnostics.HandlePanic(r, stack, home, Version, Commit)
@@ -36,14 +74,6 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 			exitCode = 1
 		}
 	}()
-
-	cfg, _ := config.LoadConfig()
-	if cfg != nil && cfg.Debug {
-		env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))
-		if env != "0" && env != "false" && env != "no" && env != "off" {
-			logger.SetDebug(true)
-		}
-	}
 
 	rootCmd := newRootCmd(reg, pm)
 
@@ -87,6 +117,11 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 		}
 	}
 
+	if len(args) == 0 || args[0] != "__complete" {
+		telemetry.LogPostHogInfo(ctx, "command_dispatch_completed", map[string]any{
+			"exit_code": code,
+		})
+	}
 	recordCommandTelemetry(args, code, time.Since(startTime), cfg)
 	return code
 }

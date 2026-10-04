@@ -7,6 +7,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -59,6 +60,12 @@ func executeMv(reg *agents.Registry, pm *profile.ProfileManager, agentName, sour
 		cfg = config.NewDefaultConfig()
 	}
 
+	if reg != nil {
+		if adapter, err := reg.Get(agentName); err == nil {
+			agentName = adapter.Name()
+		}
+	}
+	account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(sourceProfile), agentName)
 	err := pm.MoveAgent(agentName, sourceProfile, targetProfile, force, cfg, reg)
 	if err != nil {
 		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
@@ -69,6 +76,10 @@ func executeMv(reg *agents.Registry, pm *profile.ProfileManager, agentName, sour
 	okBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
 	cyan := lipgloss.NewStyle().Foreground(tui.AccentCyan)
 	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+
+	telemetry.CaptureAccountEvent(agentName, account, "account_moved", map[string]any{
+		"overwrote_target": force,
+	})
 
 	fmt.Printf("%s Moved agent %s from profile %s to %s.\n",
 		okBadge,

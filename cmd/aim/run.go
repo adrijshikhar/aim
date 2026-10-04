@@ -12,6 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
 	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -159,6 +160,10 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 		return 1
 	}
 	logger.Debug("[run] Process finished with exit code %d", code)
+	telemetry.CaptureAccountEvent(adapter.Name(), profile.GetProfileAccountInfoForAgent(pDir, adapter.Name()), "agent_run_completed", map[string]any{
+		"exit_code":      code,
+		"session_attached": sessionID != "",
+	})
 
 	// Trigger asynchronous cache pre-warming upon session exit so quotas reflect recent usage
 	triggerPrewarmAsync(config.BaseDir(), adapter.Name())
