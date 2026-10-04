@@ -13,8 +13,13 @@ import (
 func TestTelemetry_DispatchesCommandEvent(t *testing.T) {
 	tempBase := t.TempDir()
 	origHome := os.Getenv("AIM_HOME")
-	defer func() { _ = os.Setenv("AIM_HOME", origHome) }()
+	origTestTelemetry := os.Getenv("AIM_ENABLE_TEST_TELEMETRY")
+	defer func() {
+		_ = os.Setenv("AIM_HOME", origHome)
+		_ = os.Setenv("AIM_ENABLE_TEST_TELEMETRY", origTestTelemetry)
+	}()
 	_ = os.Setenv("AIM_HOME", tempBase)
+	_ = os.Setenv("AIM_ENABLE_TEST_TELEMETRY", "1")
 
 	pm := profile.NewProfileManager(tempBase)
 	reg := agents.NewRegistry()

@@ -131,7 +131,7 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 			if sanitizable, ok := prov.(interface {
 				SanitizeSession(context.Context, string, string) error
 			}); ok {
-				_ = sanitizable.SanitizeSession(context.Background(), sessionID, pDir)
+				_ = sanitizable.SanitizeSession(ctx, sessionID, pDir)
 			}
 		}
 	}
@@ -161,7 +161,7 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 	}
 	logger.Debug("[run] Process finished with exit code %d", code)
 	telemetry.CaptureAccountEvent(adapter.Name(), profile.GetProfileAccountInfoForAgent(pDir, adapter.Name()), "agent_run_completed", map[string]any{
-		"exit_code":      code,
+		"exit_code":        code,
 		"session_attached": sessionID != "",
 	})
 

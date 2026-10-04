@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -71,10 +72,18 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	if postLauncher == nil && launch.PostLauncher != nil {
 		postLauncher = launch.PostLauncher
 	}
+	var postWg sync.WaitGroup
 	if postLauncher != nil {
 		postCtx, postCancel := context.WithCancel(ctx)
-		defer postCancel()
-		go postLauncher.PostLaunch(postCtx, profileName, launch.Env["HOME"])
+		defer func() {
+			postCancel()
+			postWg.Wait()
+		}()
+		postWg.Add(1)
+		go func() {
+			defer postWg.Done()
+			postLauncher.PostLaunch(postCtx, profileName, launch.Env["HOME"])
+		}()
 	}
 
 	if err := cmd.Start(); err != nil {
