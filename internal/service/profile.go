@@ -401,4 +401,3 @@ func (s *profileService) UpdateProfileConfig(ctx context.Context, name string, m
 
 	return config.SaveConfig(cfg)
 }
-

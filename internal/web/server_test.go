@@ -696,5 +696,3 @@ func TestGetMcpServers(t *testing.T) {
 		t.Fatalf("expected 1 local-tool server, got %v", isoServers)
 	}
 }
-
-

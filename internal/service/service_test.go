@@ -624,4 +624,3 @@ func TestMCPService_ListServers(t *testing.T) {
 		t.Errorf("expected to find custom-tool in isolated profile servers")
 	}
 }
-
