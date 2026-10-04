@@ -1,11 +1,12 @@
 import * as React from 'react';
-import { getStatus, StatusDTO, ProfileDTO } from '@/lib/api';
+import { getStatus, getDaemonStatus, StatusDTO, ProfileDTO, DaemonDTO } from '@/lib/api';
 import { ProfilesView } from '@/views/ProfilesView';
 import { SessionsView } from '@/views/SessionsView';
 import { McpView } from '@/views/McpView';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Toaster } from '@/components/ui/toaster';
+import { DaemonModal } from '@/components/DaemonModal';
 import {
   Layers,
   Terminal,
@@ -25,6 +26,17 @@ export function App() {
     terminals_available: ['tmux', 'wezterm', 'iterm2', 'terminal'],
   });
   const [isOnline, setIsOnline] = React.useState(true);
+  const [daemonInfo, setDaemonInfo] = React.useState<DaemonDTO | null>(null);
+  const [isDaemonOpen, setIsDaemonOpen] = React.useState(false);
+
+  const fetchDaemonStatus = React.useCallback(async () => {
+    try {
+      const d = await getDaemonStatus();
+      setDaemonInfo(d);
+    } catch {
+      // Daemon status fetch failed or server down
+    }
+  }, []);
 
   React.useEffect(() => {
     async function checkStatus() {
@@ -38,9 +50,13 @@ export function App() {
       }
     }
     checkStatus();
-    const interval = setInterval(checkStatus, 30000);
+    fetchDaemonStatus();
+    const interval = setInterval(() => {
+      checkStatus();
+      fetchDaemonStatus();
+    }, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchDaemonStatus]);
 
   // Compute unique profile names for top header filter
   const profileNames = React.useMemo(() => {
@@ -102,9 +118,33 @@ export function App() {
             ))}
           </div>
 
-          {/* Server Connection Status Pill */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#262626] bg-[#111111] text-xs">
+          {/* Status Pills: Daemon Modal Trigger & Server Connection */}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsDaemonOpen(true)}
+              title="Manage OS Background Daemon (15m Quota Pre-Warm)"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#262626] bg-[#111111] hover:bg-[#161616] hover:border-[#383838] transition-colors cursor-pointer text-xs group"
+            >
+              <span className="flex h-2 w-2 relative items-center justify-center">
+                {daemonInfo?.active ? (
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]" />
+                ) : daemonInfo?.installed ? (
+                  <span className="h-2 w-2 rounded-full bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]" />
+                ) : (
+                  <span className="h-2 w-2 rounded-full bg-[#555555]" />
+                )}
+              </span>
+              <span className="font-mono text-[11px] text-[#a1a1a1] group-hover:text-[#ededed] transition-colors">
+                {daemonInfo?.active
+                  ? 'Daemon: Active'
+                  : daemonInfo?.installed
+                  ? 'Daemon: Inactive'
+                  : 'Daemon: Off'}
+              </span>
+            </button>
+
+            <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#262626] bg-[#111111] text-xs">
               <span className="relative flex h-2 w-2">
                 <span
                   className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
@@ -206,6 +246,12 @@ export function App() {
         </div>
       </footer>
 
+      <DaemonModal
+        open={isDaemonOpen}
+        onOpenChange={setIsDaemonOpen}
+        daemonInfo={daemonInfo}
+        onRefreshDaemon={fetchDaemonStatus}
+      />
       <Toaster />
     </div>
   );

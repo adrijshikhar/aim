@@ -189,3 +189,53 @@ export async function updateProfileConfig(
   });
   return handleResponse<void>(res);
 }
+
+export interface DaemonDTO {
+  installed: boolean;
+  active: boolean;
+  label: string;
+  config_path: string;
+  interval_sec: number;
+  binary_path: string;
+  log_path: string;
+  last_run?: string;
+  last_run_message?: string;
+}
+
+export async function getDaemonStatus(): Promise<DaemonDTO> {
+  const res = await fetch(`${BASE_URL}/daemon`);
+  return handleResponse<DaemonDTO>(res);
+}
+
+export async function installDaemon(binaryPath?: string): Promise<DaemonDTO> {
+  const res = await fetch(`${BASE_URL}/daemon/install`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ binary_path: binaryPath }),
+  });
+  return handleResponse<DaemonDTO>(res);
+}
+
+export async function uninstallDaemon(): Promise<{ status: string }> {
+  const res = await fetch(`${BASE_URL}/daemon/uninstall`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+  return handleResponse<{ status: string }>(res);
+}
+
+export async function runDaemonOnce(): Promise<{ status: string; message: string; info?: DaemonDTO }> {
+  const res = await fetch(`${BASE_URL}/daemon/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+  return handleResponse<{ status: string; message: string; info?: DaemonDTO }>(res);
+}

@@ -776,3 +776,123 @@ func TestServer_MCPService_ThreadSafe(t *testing.T) {
 		}
 	}
 }
+
+type mockDaemonService struct {
+	getStatusFn func(ctx context.Context) (*service.DaemonDTO, error)
+	installFn   func(ctx context.Context, binaryPath string) (*service.DaemonDTO, error)
+	uninstallFn func(ctx context.Context) error
+	runOnceFn   func(ctx context.Context) error
+}
+
+func (m *mockDaemonService) GetStatus(ctx context.Context) (*service.DaemonDTO, error) {
+	if m.getStatusFn != nil {
+		return m.getStatusFn(ctx)
+	}
+	return &service.DaemonDTO{Installed: true, Active: true, Label: "dev.aim-cli.daemon", IntervalSec: 900}, nil
+}
+
+func (m *mockDaemonService) Install(ctx context.Context, binaryPath string) (*service.DaemonDTO, error) {
+	if m.installFn != nil {
+		return m.installFn(ctx, binaryPath)
+	}
+	return &service.DaemonDTO{Installed: true, Active: true, Label: "dev.aim-cli.daemon", IntervalSec: 900}, nil
+}
+
+func (m *mockDaemonService) Uninstall(ctx context.Context) error {
+	if m.uninstallFn != nil {
+		return m.uninstallFn(ctx)
+	}
+	return nil
+}
+
+func (m *mockDaemonService) RunOnce(ctx context.Context) error {
+	if m.runOnceFn != nil {
+		return m.runOnceFn(ctx)
+	}
+	return nil
+}
+
+func TestGetDaemon(t *testing.T) {
+	ts, srv := setupTestServer(t, nil, nil, nil, false)
+	srv.SetDaemonService(&mockDaemonService{
+		getStatusFn: func(ctx context.Context) (*service.DaemonDTO, error) {
+			return &service.DaemonDTO{
+				Installed:   true,
+				Active:      true,
+				Label:       "dev.aim-cli.daemon",
+				IntervalSec: 900,
+			}, nil
+		},
+	})
+
+	resp, err := http.Get(ts.URL + "/api/daemon")
+	if err != nil {
+		t.Fatalf("GET /api/daemon failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var dto service.DaemonDTO
+	if err := json.NewDecoder(resp.Body).Decode(&dto); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if !dto.Installed || !dto.Active || dto.IntervalSec != 900 {
+		t.Errorf("unexpected daemon DTO: %+v", dto)
+	}
+}
+
+func TestDaemonInstall(t *testing.T) {
+	ts, srv := setupTestServer(t, nil, nil, nil, false)
+	srv.SetDaemonService(&mockDaemonService{})
+
+	resp, err := http.Post(ts.URL+"/api/daemon/install", "application/json", bytes.NewBufferString(`{}`))
+	if err != nil {
+		t.Fatalf("POST /api/daemon/install failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var dto service.DaemonDTO
+	if err := json.NewDecoder(resp.Body).Decode(&dto); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if !dto.Installed || !dto.Active {
+		t.Errorf("expected installed and active daemon, got %+v", dto)
+	}
+}
+
+func TestDaemonUninstall(t *testing.T) {
+	ts, srv := setupTestServer(t, nil, nil, nil, false)
+	srv.SetDaemonService(&mockDaemonService{})
+
+	resp, err := http.Post(ts.URL+"/api/daemon/uninstall", "application/json", bytes.NewBufferString(`{}`))
+	if err != nil {
+		t.Fatalf("POST /api/daemon/uninstall failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestDaemonRun(t *testing.T) {
+	ts, srv := setupTestServer(t, nil, nil, nil, false)
+	srv.SetDaemonService(&mockDaemonService{})
+
+	resp, err := http.Post(ts.URL+"/api/daemon/run", "application/json", bytes.NewBufferString(`{}`))
+	if err != nil {
+		t.Fatalf("POST /api/daemon/run failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}

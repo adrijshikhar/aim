@@ -29,6 +29,7 @@ type Server struct {
 	sessions  service.SessionService
 	launcher  service.LauncherService
 	mcp       service.MCPService
+	daemon    service.DaemonService
 	port      int
 	devMode   bool
 	version   string
@@ -100,6 +101,20 @@ func (s *Server) MCPService() service.MCPService {
 	return s.mcp
 }
 
+// SetDaemonService sets or updates the DaemonService instance on Server.
+func (s *Server) SetDaemonService(d service.DaemonService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.daemon = d
+}
+
+// DaemonService returns the configured DaemonService instance safely under mutex lock.
+func (s *Server) DaemonService() service.DaemonService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.daemon
+}
+
 // SetVersion sets the AIM version string reported by /api/status.
 func (s *Server) SetVersion(v string) {
 	if v != "" {
@@ -120,6 +135,10 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("POST /api/sessions/resume", s.handleResumeSession)
 	mux.HandleFunc("GET /api/status", s.handleGetStatus)
 	mux.HandleFunc("GET /api/mcp", s.handleGetMcpServers)
+	mux.HandleFunc("GET /api/daemon", s.handleGetDaemon)
+	mux.HandleFunc("POST /api/daemon/install", s.handleDaemonInstall)
+	mux.HandleFunc("POST /api/daemon/uninstall", s.handleDaemonUninstall)
+	mux.HandleFunc("POST /api/daemon/run", s.handleDaemonRun)
 
 	// Catch-all for undefined /api/ routes -> JSON 404
 	mux.HandleFunc("/api/", s.handleAPINotFound)

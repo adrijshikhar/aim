@@ -108,3 +108,24 @@ type MCPServerDTO struct {
 type MCPService interface {
 	ListServers(ctx context.Context, profileName string) ([]MCPServerDTO, error)
 }
+
+// DaemonDTO describes the background daemon operational state.
+type DaemonDTO struct {
+	Installed      bool      `json:"installed"`
+	Active         bool      `json:"active"`
+	Label          string    `json:"label"`
+	ConfigPath     string    `json:"config_path"`
+	IntervalSec    int       `json:"interval_sec"`
+	BinaryPath     string    `json:"binary_path"`
+	LogPath        string    `json:"log_path"`
+	LastRun        time.Time `json:"last_run,omitempty"`
+	LastRunMessage string    `json:"last_run_message,omitempty"`
+}
+
+// DaemonService provides management of the host OS background daemon service.
+type DaemonService interface {
+	GetStatus(ctx context.Context) (*DaemonDTO, error)
+	Install(ctx context.Context, binaryPath string) (*DaemonDTO, error)
+	Uninstall(ctx context.Context) error
+	RunOnce(ctx context.Context) error
+}
