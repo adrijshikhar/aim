@@ -142,15 +142,15 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl bg-[#0c0c0c] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
-        <DialogHeader className="space-y-1.5 pb-2 border-b border-[#1f1f1f]">
-          <div className="flex items-center justify-between">
+        <DialogHeader className="space-y-1.5 pb-2 border-b border-[#1f1f1f] pr-8">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
               <Terminal className="h-4 w-4 text-[#ededed]" />
-              Resume Session with Flags
+              <span>Resume Session with Flags</span>
             </DialogTitle>
             <Badge
               variant="outline"
-              className="text-[11px] font-mono bg-[#161616] text-[#ededed] border-[#2e2e2e]"
+              className="text-[10px] font-mono bg-[#141414] text-[#888888] border-[#262626] px-2 py-0.5"
             >
               {session.agent} / {session.profile || 'default'}
             </Badge>

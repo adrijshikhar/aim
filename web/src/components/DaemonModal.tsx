@@ -137,20 +137,20 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl bg-[#0c0c0c] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
-        <DialogHeader className="space-y-1.5 pb-2 border-b border-[#1f1f1f]">
-          <div className="flex items-center justify-between">
+        <DialogHeader className="space-y-1.5 pb-3 border-b border-[#1f1f1f] pr-8">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
               <Activity className="h-4 w-4 text-[#ededed]" />
-              OS Background Daemon
+              <span>OS Background Daemon</span>
             </DialogTitle>
             <Badge
               variant="outline"
-              className="text-[11px] font-mono bg-[#161616] text-[#ededed] border-[#2e2e2e]"
+              className="text-[10px] font-mono bg-[#141414] text-[#888888] border-[#262626] px-2 py-0.5"
             >
               15m Quota Pre-Warm
             </Badge>
           </div>
-          <DialogDescription className="text-xs text-[#888888]">
+          <DialogDescription className="text-xs text-[#888888] leading-relaxed">
             Native scheduled background service (launchd on macOS / systemd on Linux) for pre-warming quota and rate-limit caches without resident memory overhead.
           </DialogDescription>
         </DialogHeader>
@@ -205,7 +205,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         </div>
 
         {/* Execution & Telemetry Recap */}
-        <div className="rounded-md border border-[#222222] bg-[#121212] p-3 text-xs space-y-2 font-mono">
+        <div className="rounded-md border border-[#222222] bg-[#121212] p-3 text-xs space-y-2.5 font-mono">
           <div className="flex items-center justify-between text-[#888888]">
             <span className="flex items-center gap-1.5 text-[11px]">
               <Clock className="h-3.5 w-3.5 text-[#666666]" /> Last Sync
@@ -216,40 +216,40 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
           </div>
 
           {daemonInfo?.last_run_message && (
-            <div className="p-2 rounded bg-[#0e0e0e] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] truncate" title={daemonInfo.last_run_message}>
+            <div className="p-2.5 rounded bg-[#0e0e0e] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] leading-relaxed break-words" title={daemonInfo.last_run_message}>
               {daemonInfo.last_run_message}
             </div>
           )}
 
           {daemonInfo?.config_path && (
-            <div className="flex items-center justify-between text-[#888888] pt-1 border-t border-[#1c1c1c]">
-              <span className="flex items-center gap-1 text-[10.5px] truncate max-w-[340px]" title={daemonInfo.config_path}>
+            <div className="flex items-center justify-between gap-3 text-[#888888] pt-1.5 border-t border-[#1c1c1c]">
+              <span className="flex items-center gap-1.5 text-[11px] truncate flex-1 min-w-0" title={daemonInfo.config_path}>
                 <FileText className="h-3 w-3 shrink-0 text-[#666666]" />
                 <span className="truncate">{daemonInfo.config_path}</span>
               </span>
               <button
                 type="button"
                 onClick={() => handleCopy('config', daemonInfo.config_path)}
-                className="text-[10px] text-[#888888] hover:text-[#ededed] inline-flex items-center gap-1 cursor-pointer"
+                className="text-[10px] text-[#888888] hover:text-[#ededed] px-2 py-1 rounded bg-[#161616] hover:bg-[#202020] border border-[#262626] inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
               >
-                {copiedKey === 'config' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {copiedKey === 'config' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                 {copiedKey === 'config' ? 'Copied' : 'Copy'}
               </button>
             </div>
           )}
 
           {daemonInfo?.log_path && (
-            <div className="flex items-center justify-between text-[#888888]">
-              <span className="flex items-center gap-1 text-[10.5px] truncate max-w-[340px]" title={daemonInfo.log_path}>
+            <div className="flex items-center justify-between gap-3 text-[#888888]">
+              <span className="flex items-center gap-1.5 text-[11px] truncate flex-1 min-w-0" title={daemonInfo.log_path}>
                 <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
                 <span className="truncate">{daemonInfo.log_path}</span>
               </span>
               <button
                 type="button"
                 onClick={() => handleCopy('log', daemonInfo.log_path)}
-                className="text-[10px] text-[#888888] hover:text-[#ededed] inline-flex items-center gap-1 cursor-pointer"
+                className="text-[10px] text-[#888888] hover:text-[#ededed] px-2 py-1 rounded bg-[#161616] hover:bg-[#202020] border border-[#262626] inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
               >
-                {copiedKey === 'log' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {copiedKey === 'log' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                 {copiedKey === 'log' ? 'Copied' : 'Copy'}
               </button>
             </div>

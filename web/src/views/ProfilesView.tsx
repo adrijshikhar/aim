@@ -1330,6 +1330,8 @@ export function ProfilesView({
                         <Button
                           variant="ghost"
                           size="icon"
+                          title={`Delete profile ${p.name}`}
+                          aria-label={`Delete profile ${p.name}`}
                           className="h-7 w-7 text-[#666666] hover:text-red-400 rounded-geist transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
