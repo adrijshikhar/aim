@@ -87,6 +87,7 @@ export function ProfilesView({
   const [profileSessions, setProfileSessions] = React.useState<SessionDTO[]>([]);
   const [sessionsLoading, setSessionsLoading] = React.useState(false);
   const [sessionSearch, setSessionSearch] = React.useState('');
+  const [sessionEngineFilter, setSessionEngineFilter] = React.useState<string>('all');
   const [resumingId, setResumingId] = React.useState<string | null>(null);
 
   // Profile MCP Servers
@@ -436,16 +437,20 @@ export function ProfilesView({
   }, [profiles, selectedProfile]);
 
   const filteredSessions = React.useMemo(() => {
-    if (!sessionSearch.trim()) return profileSessions;
+    let list = profileSessions;
+    if (sessionEngineFilter !== 'all') {
+      list = list.filter((s) => s.agent.toLowerCase() === sessionEngineFilter.toLowerCase());
+    }
+    if (!sessionSearch.trim()) return list;
     const q = sessionSearch.toLowerCase();
-    return profileSessions.filter(
+    return list.filter(
       (s) =>
         s.id.toLowerCase().includes(q) ||
         s.title.toLowerCase().includes(q) ||
         s.goal.toLowerCase().includes(q) ||
         s.cwd.toLowerCase().includes(q)
     );
-  }, [profileSessions, sessionSearch]);
+  }, [profileSessions, sessionSearch, sessionEngineFilter]);
 
   // ==========================================
   // VIEW A: SPECIFIC PROFILE HUB VIEW
@@ -469,11 +474,19 @@ export function ProfilesView({
                 <ArrowLeft className="h-3.5 w-3.5 mr-1" />
                 All Profiles
               </Button>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-lg font-semibold tracking-tight text-[#ededed]">
                   {currentProfile.name}
                 </h1>
-                {getAgentBadge(currentProfile.agent)}
+                {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
+                  currentProfile.adapters.map((ad) => (
+                    <React.Fragment key={ad.agent}>
+                      {getAgentBadge(ad.agent)}
+                    </React.Fragment>
+                  ))
+                ) : (
+                  getAgentBadge(currentProfile.agent)
+                )}
                 {currentProfile.has_credentials ? (
                   <Badge
                     variant="outline"
@@ -494,25 +507,27 @@ export function ProfilesView({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto">
+            <div className="flex items-center gap-1.5 self-end sm:self-auto">
               <Button
                 variant="outline"
-                size="sm"
+                size="icon"
                 onClick={fetchProfiles}
                 disabled={loading}
-                className="rounded-geist h-8 font-mono text-xs"
+                title="Refresh profile"
+                aria-label="Refresh profile"
+                className="h-8 w-8 rounded-geist border-[#2a2a2a] text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
               >
-                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
               </Button>
               <Button
                 variant="outline"
-                size="sm"
+                size="icon"
                 onClick={() => handleDelete(currentProfile.agent, currentProfile.name)}
-                className="rounded-geist h-8 text-xs font-mono border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 hover:text-red-300"
+                title="Delete profile"
+                aria-label="Delete profile"
+                className="h-8 w-8 rounded-geist border-[#2a2a2a] text-[#888888] hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/30"
               >
-                <Trash2 className="h-3.5 w-3.5 mr-1" />
-                Delete Profile
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
@@ -577,117 +592,208 @@ export function ProfilesView({
 
         {/* SUB-PANEL 1: OVERVIEW */}
         {profileSubTab === 'overview' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Identity & Account Card */}
+          <div className="space-y-4">
+            {/* Storage & Shared Sandbox Card */}
             <Card className="border border-[#262626] bg-[#111111] rounded-geist">
               <CardHeader className="pb-3 p-5">
                 <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                  <User className="h-4 w-4 text-[#888888]" />
-                  Identity & Credentials
+                  <Folder className="h-4 w-4 text-[#888888]" />
+                  Profile Environment & Storage Sandbox
                 </CardTitle>
                 <CardDescription className="text-xs text-[#888888]">
-                  Account credentials isolated to this profile's sandbox.
+                  Filesystem sandbox and isolated configuration home directory.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 p-5 pt-0 text-xs font-mono">
-                <div className="flex justify-between py-1.5 border-b border-[#1f1f1f]">
-                  <span className="text-[#888888]">Account Name:</span>
-                  <span className="text-[#ededed] font-medium">{currentProfile.account?.name || currentProfile.name}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-[#1f1f1f]">
-                  <span className="text-[#888888]">Email:</span>
-                  <span className="text-[#ededed]">{currentProfile.account?.email || 'dev@example.com'}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-[#1f1f1f]">
-                  <span className="text-[#888888]">Auth Provider:</span>
-                  <span className="text-[#ededed] truncate max-w-[220px]">
-                    {currentProfile.account?.auth_method || 'Standard Token'}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-[#1f1f1f]">
+              <CardContent className="p-5 pt-0 text-xs font-mono space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 py-1.5 border-b border-[#1f1f1f]">
                   <span className="text-[#888888]">Storage Sandbox:</span>
-                  <span className="text-[#ededed] truncate max-w-[220px]" title={currentProfile.path}>
+                  <span className="text-[#ededed] truncate max-w-md" title={currentProfile.path}>
                     {currentProfile.path}
                   </span>
                 </div>
-                <div className="flex justify-between py-1.5">
-                  <span className="text-[#888888]">Assigned Adapter:</span>
-                  <span>{getAgentBadge(currentProfile.agent)}</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Quota Telemetry Card */}
-            <Card className="border border-[#262626] bg-[#111111] rounded-geist">
-              <CardHeader className="pb-3 p-5">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                    <Gauge className="h-4 w-4 text-[#888888]" />
-                    Live Quota Telemetry
-                  </CardTitle>
-                  <span
-                    className={`font-mono text-xs font-medium tabular-nums ${
-                      (currentProfile.quota?.bottleneck_pct ?? 100) <= 10
-                        ? 'text-red-400'
-                        : 'text-[#ededed]'
-                    }`}
-                  >
-                    {currentProfile.quota ? `${currentProfile.quota.bottleneck_pct}% remaining` : '100% remaining'}
-                  </span>
-                </div>
-                <CardDescription className="text-xs text-[#888888]">
-                  Token allowances, sliding windows, and rate limit telemetry.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 p-5 pt-0">
-                {/* Progress bar */}
-                <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
-                  <div
-                    className={`h-full transition-all duration-300 ${
-                      (currentProfile.quota?.bottleneck_pct ?? 100) <= 10
-                        ? 'bg-red-500'
-                        : 'bg-[#ededed]'
-                    }`}
-                    style={{ width: `${currentProfile.quota?.bottleneck_pct ?? 100}%` }}
-                  />
-                </div>
-
-                <div className="p-3 rounded-geist bg-[#0e0e0e] border border-[#262626] space-y-1.5 font-mono text-xs">
-                  <div className="text-[#888888] text-[11px] uppercase tracking-wider">Quota Summary</div>
-                  <div className="text-[#ededed] text-xs">
-                    {currentProfile.quota?.summary || 'No active quota bottleneck detected.'}
+                <div className="flex items-center justify-between py-1.5 border-b border-[#1f1f1f]">
+                  <span className="text-[#888888]">Connected Engines:</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
+                      currentProfile.adapters.map((ad) => (
+                        <React.Fragment key={ad.agent}>
+                          {getAgentBadge(ad.agent)}
+                        </React.Fragment>
+                      ))
+                    ) : (
+                      getAgentBadge(currentProfile.agent)
+                    )}
                   </div>
                 </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-1">
-                  <div className="p-2.5 rounded-geist bg-[#141414] border border-[#222222]">
-                    <div className="text-[10px] text-[#888888] uppercase">Status</div>
-                    <div className="text-[#ededed] font-medium mt-0.5">
-                      {currentProfile.quota?.is_exhausted ? 'Exhausted' : 'Healthy'}
-                    </div>
-                  </div>
-                  <div className="p-2.5 rounded-geist bg-[#141414] border border-[#222222]">
-                    <div className="text-[10px] text-[#888888] uppercase">Reset Policy</div>
-                    <div className="text-[#ededed] font-medium mt-0.5">Sliding Window</div>
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="text-[#888888]">Sandbox Tool Inheritance:</span>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-[10px] font-mono bg-[#141414] border-[#262626] text-[#888888]">
+                      MCP: {isMcpGlobalOn ? 'Global Shared' : 'Strict Isolated'}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px] font-mono bg-[#141414] border-[#262626] text-[#888888]">
+                      Plugins: {isPluginsGlobalOn ? 'Global Shared' : 'Strict Isolated'}
+                    </Badge>
                   </div>
                 </div>
               </CardContent>
             </Card>
+
+            {/* Individual Engine Cards Grid */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-mono font-medium uppercase tracking-wider text-[#888888] pt-1">
+                Connected Agent Adapters ({currentProfile.adapters?.length || 1})
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(currentProfile.adapters && currentProfile.adapters.length > 0
+                  ? currentProfile.adapters
+                  : [
+                      {
+                        agent: currentProfile.agent,
+                        has_credentials: currentProfile.has_credentials,
+                        account: currentProfile.account,
+                        quota: currentProfile.quota,
+                      },
+                    ]
+                ).map((ad) => (
+                  <Card key={ad.agent} className="border border-[#262626] bg-[#111111] rounded-geist flex flex-col justify-between">
+                    <CardHeader className="pb-3 p-5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {getAgentBadge(ad.agent)}
+                          <span className="text-xs font-mono text-[#888888]">Engine</span>
+                        </div>
+                        {ad.has_credentials ? (
+                          <Badge
+                            variant="outline"
+                            className="bg-[#141414] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-md"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            <span>Authenticated</span>
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="bg-[#141414] text-[#888888] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-md"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                            <span>Needs Auth</span>
+                          </Badge>
+                        )}
+                      </div>
+                      <CardDescription className="text-xs text-[#888888] pt-1">
+                        {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials detected' : 'No credentials detected')}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4 p-5 pt-0 text-xs font-mono">
+                      <div className="p-3 rounded-geist bg-[#0e0e0e] border border-[#1f1f1f] space-y-1.5">
+                        <div className="flex justify-between items-center text-[#888888]">
+                          <span>Account:</span>
+                          <span className="text-[#ededed] font-medium truncate max-w-[180px]">
+                            {ad.account?.name || currentProfile.name}
+                          </span>
+                        </div>
+                        {ad.account?.auth_method && (
+                          <div className="flex justify-between items-center text-[#888888]">
+                            <span>Auth Method:</span>
+                            <span className="text-[#ededed] truncate max-w-[180px]">{ad.account.auth_method}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quota Telemetry for this Engine */}
+                      <div className="space-y-2 pt-2 border-t border-[#1f1f1f]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] uppercase tracking-wider text-[#888888] flex items-center gap-1">
+                            <Gauge className="h-3 w-3" /> Live Quota Telemetry
+                          </span>
+                          <span
+                            className={`font-mono text-xs font-medium tabular-nums ${
+                              (ad.quota?.bottleneck_pct ?? 100) <= 10 ? 'text-red-400' : 'text-[#ededed]'
+                            }`}
+                          >
+                            {ad.quota ? `${ad.quota.bottleneck_pct}% remaining` : '100% remaining'}
+                          </span>
+                        </div>
+                        <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              (ad.quota?.bottleneck_pct ?? 100) <= 10 ? 'bg-red-500' : 'bg-[#ededed]'
+                            }`}
+                            style={{ width: `${ad.quota?.bottleneck_pct ?? 100}%` }}
+                          />
+                        </div>
+                        <div className="p-2.5 rounded-geist bg-[#0e0e0e] border border-[#262626] text-xs">
+                          <div className="text-[#888888] text-[10px] uppercase tracking-wider">Summary</div>
+                          <div className="text-[#ededed] text-xs mt-0.5 truncate" title={ad.quota?.summary}>
+                            {ad.quota?.summary || 'No active quota bottleneck detected.'}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-1">
+                          <div className="p-2 rounded-geist bg-[#141414] border border-[#222222]">
+                            <div className="text-[10px] text-[#888888] uppercase">Status</div>
+                            <div className="text-[#ededed] font-medium mt-0.5">
+                              {ad.quota?.is_exhausted ? 'Exhausted' : 'Healthy'}
+                            </div>
+                          </div>
+                          <div className="p-2 rounded-geist bg-[#141414] border border-[#222222]">
+                            <div className="text-[10px] text-[#888888] uppercase">Reset Policy</div>
+                            <div className="text-[#ededed] font-medium mt-0.5">Sliding Window</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
         {/* SUB-PANEL 2: SESSIONS */}
         {profileSubTab === 'sessions' && (
           <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="relative w-full sm:w-96">
-                <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-[#666666]" />
-                <Input
-                  placeholder="Search sessions in this profile..."
-                  className="pl-9 h-8 text-xs rounded-geist border-[#262626] bg-[#0e0e0e]"
-                  value={sessionSearch}
-                  onChange={(e) => setSessionSearch(e.target.value)}
-                />
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+                <div className="relative w-full sm:w-72">
+                  <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-[#666666]" />
+                  <Input
+                    placeholder="Search sessions in this profile..."
+                    className="pl-9 h-8 text-xs rounded-geist border-[#262626] bg-[#0e0e0e]"
+                    value={sessionSearch}
+                    onChange={(e) => setSessionSearch(e.target.value)}
+                  />
+                </div>
+                {currentProfile.adapters && currentProfile.adapters.length > 1 && (
+                  <div className="flex items-center gap-1 bg-[#141414] p-0.5 rounded-geist border border-[#262626]">
+                    <button
+                      onClick={() => setSessionEngineFilter('all')}
+                      className={`text-[11px] font-mono px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        sessionEngineFilter === 'all'
+                          ? 'bg-[#222222] text-[#ededed] font-medium'
+                          : 'text-[#888888] hover:text-[#ededed]'
+                      }`}
+                    >
+                      All ({profileSessions.length})
+                    </button>
+                    {currentProfile.adapters.map((ad) => {
+                      const count = profileSessions.filter((s) => s.agent.toLowerCase() === ad.agent.toLowerCase()).length;
+                      return (
+                        <button
+                          key={ad.agent}
+                          onClick={() => setSessionEngineFilter(ad.agent)}
+                          className={`text-[11px] font-mono px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                            sessionEngineFilter.toLowerCase() === ad.agent.toLowerCase()
+                              ? 'bg-[#222222] text-[#ededed] font-medium'
+                              : 'text-[#888888] hover:text-[#ededed]'
+                          }`}
+                        >
+                          {ad.agent} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <span className="text-xs text-[#888888] font-mono">
                 {filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''} in {currentProfile.name}
@@ -778,6 +884,14 @@ export function ProfilesView({
         {/* SUB-PANEL 3: MCP & PLUGINS CONFIGURATION */}
         {profileSubTab === 'mcp' && (
           <div className="space-y-6">
+            {currentProfile.adapters && currentProfile.adapters.length > 1 && (
+              <div className="flex items-center gap-2.5 px-4 py-3 rounded-geist bg-[#141414] border border-[#262626] text-xs font-mono text-[#888888]">
+                <Cpu className="h-4 w-4 text-[#ededed] shrink-0" />
+                <span>
+                  <strong className="text-[#ededed] font-medium">Multi-Engine Shared Sandbox:</strong> Tools and plugins configured below are mounted across all connected engines ({currentProfile.adapters.map((a) => a.agent).join(', ')}) operating inside the <code className="text-[#ededed]">{currentProfile.name}</code> sandbox.
+                </span>
+              </div>
+            )}
             {/* Toggles Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* MCP Configuration Card */}
@@ -1114,14 +1228,24 @@ export function ProfilesView({
             const isPluginsOn = p.plugins_global !== false;
             return (
               <Card
-                key={`${p.agent}-${p.name}`}
+                key={p.name}
                 className="group relative overflow-hidden transition-all duration-150 border border-[#262626] bg-[#111111] hover:border-[#383838] rounded-geist flex flex-col justify-between cursor-pointer"
                 onClick={() => onSelectProfile(p.name)}
               >
                 <div>
                   <CardHeader className="pb-3 p-5">
-                    <div className="flex items-center justify-between">
-                      {getAgentBadge(p.agent)}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {p.adapters && p.adapters.length > 0 ? (
+                          p.adapters.map((ad) => (
+                            <React.Fragment key={ad.agent}>
+                              {getAgentBadge(ad.agent)}
+                            </React.Fragment>
+                          ))
+                        ) : (
+                          getAgentBadge(p.agent)
+                        )}
+                      </div>
                       {p.has_credentials ? (
                         <Badge
                           variant="outline"
@@ -1199,37 +1323,70 @@ export function ProfilesView({
                     </div>
 
                     {/* Quota Telemetry */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[#888888] flex items-center gap-1">
-                          <Gauge className="h-3 w-3" /> Quota Telemetry
-                        </span>
-                        <span
-                          className={`font-mono text-xs font-medium tabular-nums ${
-                            (p.quota?.bottleneck_pct ?? 100) <= 10
-                              ? 'text-red-400'
-                              : 'text-[#ededed]'
-                          }`}
-                        >
-                          {p.quota ? `${p.quota.bottleneck_pct}% remaining` : '100% remaining'}
-                        </span>
+                    {p.adapters && p.adapters.length > 1 ? (
+                      <div className="space-y-2 pt-1 border-t border-[#1f1f1f]">
+                        <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-[#888888]">
+                          <span className="flex items-center gap-1">
+                            <Gauge className="h-3 w-3" /> Engine Quotas
+                          </span>
+                          <span>{p.adapters.length} Engines</span>
+                        </div>
+                        {p.adapters.map((ad) => (
+                          <div key={ad.agent} className="space-y-1">
+                            <div className="flex items-center justify-between text-[11px] font-mono">
+                              <span className="text-[#888888]">{ad.agent}</span>
+                              <span
+                                className={`tabular-nums ${
+                                  (ad.quota?.bottleneck_pct ?? 100) <= 10 ? 'text-red-400' : 'text-[#ededed]'
+                                }`}
+                              >
+                                {ad.quota ? `${ad.quota.bottleneck_pct}%` : '100%'}
+                              </span>
+                            </div>
+                            <div className="w-full bg-[#1c1c1c] h-1 rounded-full overflow-hidden border border-[#262626]">
+                              <div
+                                className={`h-full transition-all duration-300 ${
+                                  (ad.quota?.bottleneck_pct ?? 100) <= 10 ? 'bg-red-500' : 'bg-[#ededed]'
+                                }`}
+                                style={{ width: `${ad.quota?.bottleneck_pct ?? 100}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
-                        <div
-                          className={`h-full transition-all duration-300 ${
-                            (p.quota?.bottleneck_pct ?? 100) <= 10
-                              ? 'bg-red-500'
-                              : 'bg-[#ededed]'
-                          }`}
-                          style={{ width: `${p.quota?.bottleneck_pct ?? 100}%` }}
-                        />
+                    ) : (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[11px] font-mono uppercase tracking-wider text-[#888888] flex items-center gap-1">
+                            <Gauge className="h-3 w-3" /> Quota Telemetry
+                          </span>
+                          <span
+                            className={`font-mono text-xs font-medium tabular-nums ${
+                              (p.quota?.bottleneck_pct ?? 100) <= 10
+                                ? 'text-red-400'
+                                : 'text-[#ededed]'
+                            }`}
+                          >
+                            {p.quota ? `${p.quota.bottleneck_pct}% remaining` : '100% remaining'}
+                          </span>
+                        </div>
+                        <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              (p.quota?.bottleneck_pct ?? 100) <= 10
+                                ? 'bg-red-500'
+                                : 'bg-[#ededed]'
+                            }`}
+                            style={{ width: `${p.quota?.bottleneck_pct ?? 100}%` }}
+                          />
+                        </div>
+                        {p.quota?.summary && (
+                          <p className="text-[11px] text-[#666666] font-mono truncate" title={p.quota.summary}>
+                            {p.quota.summary}
+                          </p>
+                        )}
                       </div>
-                      {p.quota?.summary && (
-                        <p className="text-[11px] text-[#666666] font-mono truncate" title={p.quota.summary}>
-                          {p.quota.summary}
-                        </p>
-                      )}
-                    </div>
+                    )}
                   </CardContent>
                 </div>
 

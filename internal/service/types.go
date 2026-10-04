@@ -14,7 +14,15 @@ type QuotaDTO struct {
 	IsExhausted   bool   `json:"is_exhausted"`
 }
 
-// ProfileDTO represents an agent profile.
+// AdapterInfo represents adapter-specific identity, credentials, and quota within a profile.
+type AdapterInfo struct {
+	Agent          string               `json:"agent"`
+	HasCredentials bool                 `json:"has_credentials"`
+	Account        *profile.AccountInfo `json:"account,omitempty"`
+	Quota          *QuotaDTO            `json:"quota,omitempty"`
+}
+
+// ProfileDTO represents an agent profile, which may host one or more agent adapters.
 type ProfileDTO struct {
 	Agent          string               `json:"agent"`
 	Name           string               `json:"name"`
@@ -24,6 +32,7 @@ type ProfileDTO struct {
 	Quota          *QuotaDTO            `json:"quota,omitempty"`
 	MCPGlobal      *bool                `json:"mcp_global,omitempty"`
 	PluginsGlobal  *bool                `json:"plugins_global,omitempty"`
+	Adapters       []AdapterInfo        `json:"adapters,omitempty"`
 }
 
 // CreateProfileRequest represents a request to create or scaffold a new profile.

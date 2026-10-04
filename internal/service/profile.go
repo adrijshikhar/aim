@@ -48,11 +48,9 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 	agent = strings.TrimSpace(agent)
 	if agent != "" && agent != "all" {
 		canonicalAgent := agent
-		var adapter agents.AgentAdapter
 		if s.reg != nil {
 			if ad, err := s.reg.Get(agent); err == nil {
 				canonicalAgent = ad.Name()
-				adapter = ad
 			}
 		}
 
@@ -63,13 +61,13 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 
 		result := make([]ProfileDTO, 0, len(profs))
 		for _, p := range profs {
-			dto := s.buildProfileDTO(canonicalAgent, p, adapter, cfg)
+			dto := s.buildProfileDTO(p, []string{canonicalAgent}, cfg)
 			result = append(result, dto)
 		}
 		return result, nil
 	}
 
-	// Listing all profiles across all agents
+	// Listing all profiles across all agents (unique profile per entry)
 	allProfs, err := s.pm.ListProfiles()
 	if err != nil {
 		return nil, err
@@ -79,36 +77,25 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 	for _, p := range allProfs {
 		pDir := s.pm.ProfileDir(p)
 		agentsList := cfg.GetProfileAgents(p)
-		if len(agentsList) > 0 {
-			for _, ag := range agentsList {
-				var adapter agents.AgentAdapter
-				if s.reg != nil {
-					adapter, _ = s.reg.Get(ag)
+		detectedSet := make(map[string]bool)
+		for _, ag := range agentsList {
+			detectedSet[ag] = true
+		}
+		if s.reg != nil {
+			for _, ad := range s.reg.All() {
+				if ad.HasCredentials(pDir) && !detectedSet[ad.Name()] {
+					agentsList = append(agentsList, ad.Name())
+					detectedSet[ad.Name()] = true
 				}
-				result = append(result, s.buildProfileDTO(ag, p, adapter, cfg))
-			}
-		} else {
-			var matchedAdapters []agents.AgentAdapter
-			if s.reg != nil {
-				for _, ad := range s.reg.All() {
-					if ad.HasCredentials(pDir) {
-						matchedAdapters = append(matchedAdapters, ad)
-					}
-				}
-			}
-			if len(matchedAdapters) > 0 {
-				for _, ad := range matchedAdapters {
-					result = append(result, s.buildProfileDTO(ad.Name(), p, ad, cfg))
-				}
-			} else {
-				result = append(result, s.buildProfileDTO("", p, nil, cfg))
 			}
 		}
+
+		result = append(result, s.buildProfileDTO(p, agentsList, cfg))
 	}
 	return result, nil
 }
 
-func (s *profileService) buildProfileDTO(agentName, profileName string, adapter agents.AgentAdapter, cfg *config.Config) ProfileDTO {
+func (s *profileService) buildAdapterInfo(agentName, profileName string, adapter agents.AgentAdapter) AdapterInfo {
 	pDir := s.pm.ProfileDir(profileName)
 	hasCreds := false
 	if adapter != nil {
@@ -134,6 +121,44 @@ func (s *profileService) buildProfileDTO(agentName, profileName string, adapter 
 		}
 	}
 
+	return AdapterInfo{
+		Agent:          agentName,
+		HasCredentials: hasCreds,
+		Account:        accountPtr,
+		Quota:          quotaPtr,
+	}
+}
+
+func (s *profileService) buildProfileDTO(profileName string, agentNames []string, cfg *config.Config) ProfileDTO {
+	pDir := s.pm.ProfileDir(profileName)
+	adapters := make([]AdapterInfo, 0, len(agentNames))
+	hasAnyCreds := false
+	var primaryAccount *profile.AccountInfo
+	var primaryQuota *QuotaDTO
+
+	for _, ag := range agentNames {
+		var adapter agents.AgentAdapter
+		if s.reg != nil {
+			adapter, _ = s.reg.Get(ag)
+		}
+		adInfo := s.buildAdapterInfo(ag, profileName, adapter)
+		if adInfo.HasCredentials {
+			hasAnyCreds = true
+		}
+		if primaryAccount == nil && adInfo.Account != nil {
+			primaryAccount = adInfo.Account
+		}
+		if primaryQuota == nil && adInfo.Quota != nil {
+			primaryQuota = adInfo.Quota
+		}
+		adapters = append(adapters, adInfo)
+	}
+
+	primaryAgent := ""
+	if len(agentNames) > 0 {
+		primaryAgent = agentNames[0]
+	}
+
 	var mcpGlobal, pluginsGlobal *bool
 	if cfg != nil && cfg.Profiles != nil {
 		if p, ok := cfg.Profiles[profileName]; ok {
@@ -143,14 +168,15 @@ func (s *profileService) buildProfileDTO(agentName, profileName string, adapter 
 	}
 
 	return ProfileDTO{
-		Agent:          agentName,
+		Agent:          primaryAgent,
 		Name:           profileName,
 		Path:           pDir,
-		HasCredentials: hasCreds,
-		Account:        accountPtr,
-		Quota:          quotaPtr,
+		HasCredentials: hasAnyCreds,
+		Account:        primaryAccount,
+		Quota:          primaryQuota,
 		MCPGlobal:      mcpGlobal,
 		PluginsGlobal:  pluginsGlobal,
+		Adapters:       adapters,
 	}
 }
 
@@ -195,11 +221,9 @@ func (s *profileService) CreateProfile(ctx context.Context, req CreateProfileReq
 	}
 
 	canonicalAgent := strings.TrimSpace(req.Agent)
-	var adapter agents.AgentAdapter
 	if s.reg != nil && canonicalAgent != "" {
 		if ad, err := s.reg.Get(canonicalAgent); err == nil {
 			canonicalAgent = ad.Name()
-			adapter = ad
 		}
 	}
 
@@ -228,7 +252,7 @@ func (s *profileService) CreateProfile(ctx context.Context, req CreateProfileReq
 		}
 	}
 
-	dto := s.buildProfileDTO(canonicalAgent, name, adapter, cfg)
+	dto := s.buildProfileDTO(name, []string{canonicalAgent}, cfg)
 	if dto.Account == nil && req.Email != "" {
 		dto.Account = &profile.AccountInfo{Email: req.Email}
 	}

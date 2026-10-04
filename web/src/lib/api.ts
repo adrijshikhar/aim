@@ -11,6 +11,13 @@ export interface AccountInfo {
   project_id?: string;
 }
 
+export interface AdapterInfo {
+  agent: string;
+  has_credentials: boolean;
+  account?: AccountInfo;
+  quota?: QuotaDTO;
+}
+
 export interface ProfileDTO {
   agent: string;
   name: string;
@@ -20,6 +27,7 @@ export interface ProfileDTO {
   quota?: QuotaDTO;
   mcp_global?: boolean;
   plugins_global?: boolean;
+  adapters?: AdapterInfo[];
 }
 
 export interface CreateProfileRequest {
