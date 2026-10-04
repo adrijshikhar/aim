@@ -33,7 +33,7 @@ func TestTelemetry_DispatchesCommandEvent(t *testing.T) {
 	// Check that spool file was written with command_executed event
 	cacheDir := filepath.Join(tempBase, "cache")
 	spoolFile := filepath.Join(cacheDir, "telemetry_spool.json")
-	spooler := telemetry.NewSpooler(spoolFile, "", nil)
+	spooler := telemetry.NewSpooler(spoolFile, "", "", nil)
 
 	events, err := spooler.Read()
 	if err != nil {

@@ -31,7 +31,7 @@ func TestSpooler_AppendAndFlush(t *testing.T) {
 	}))
 	defer server.Close()
 
-	spooler := NewSpooler(spoolFile, server.URL, server.Client())
+	spooler := NewSpooler(spoolFile, server.URL, "", server.Client())
 
 	ev1 := Event{EventName: "cmd1", DistinctID: "machine-1"}
 	ev2 := Event{EventName: "cmd2", DistinctID: "machine-1"}
@@ -70,6 +70,48 @@ func TestSpooler_AppendAndFlush(t *testing.T) {
 	defer mu.Unlock()
 	if len(received) != 2 {
 		t.Errorf("expected server to receive 2 events, got %d", len(received))
+	}
+}
+
+func TestSpooler_AppendAndFlush_WithPostHogBatchFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	spoolFile := filepath.Join(tempDir, "telemetry_spool.json")
+
+	var mu sync.Mutex
+	var receivedBatch BatchPayload
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload BatchPayload
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		receivedBatch = payload
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	testAPIKey := "phc_test_key_123"
+	spooler := NewSpooler(spoolFile, server.URL, testAPIKey, server.Client())
+
+	ev1 := Event{EventName: "posthog_test_cmd", DistinctID: "machine-ph"}
+	if err := spooler.Append(ev1); err != nil {
+		t.Fatalf("failed to append ev1: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := spooler.Flush(ctx); err != nil {
+		t.Fatalf("expected successful flush, got: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if receivedBatch.APIKey != testAPIKey {
+		t.Errorf("expected API key %q, got %q", testAPIKey, receivedBatch.APIKey)
+	}
+	if len(receivedBatch.Batch) != 1 || receivedBatch.Batch[0].EventName != "posthog_test_cmd" {
+		t.Errorf("expected 1 event in batch, got %+v", receivedBatch.Batch)
 	}
 }
 

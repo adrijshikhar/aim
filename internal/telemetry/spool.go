@@ -12,22 +12,30 @@ import (
 	"time"
 )
 
+// BatchPayload represents the envelope sent to batch analytics ingest APIs like PostHog.
+type BatchPayload struct {
+	APIKey string  `json:"api_key,omitempty"`
+	Batch  []Event `json:"batch"`
+}
+
 // Spooler manages appending events to a local JSONL file and batch flushing over HTTPS.
 type Spooler struct {
 	mu        sync.Mutex
 	SpoolPath string
 	Endpoint  string
+	APIKey    string
 	Client    *http.Client
 }
 
 // NewSpooler constructs a Spooler.
-func NewSpooler(spoolPath, endpoint string, httpClient *http.Client) *Spooler {
+func NewSpooler(spoolPath, endpoint, apiKey string, httpClient *http.Client) *Spooler {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 2 * time.Second}
 	}
 	return &Spooler{
 		SpoolPath: spoolPath,
 		Endpoint:  endpoint,
+		APIKey:    apiKey,
 		Client:    httpClient,
 	}
 }
@@ -106,7 +114,15 @@ func (s *Spooler) Flush(ctx context.Context) error {
 		return nil
 	}
 
-	payload, err := json.Marshal(events)
+	var payload []byte
+	if s.APIKey != "" {
+		payload, err = json.Marshal(BatchPayload{
+			APIKey: s.APIKey,
+			Batch:  events,
+		})
+	} else {
+		payload, err = json.Marshal(events)
+	}
 	if err != nil {
 		return err
 	}
