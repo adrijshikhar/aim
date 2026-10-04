@@ -7,6 +7,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/daemon"
 	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/presenter"
@@ -76,6 +77,7 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 		}
 		ok := diagnoseAdapter(adapter, pm, cfg, reg, map[string]bool{})
 		diagnosePlatform(agentName, cfg)
+		diagnoseDaemon()
 		return ok
 	}
 
@@ -87,7 +89,38 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 		}
 	}
 	diagnosePlatform("", cfg)
+	diagnoseDaemon()
 	return allOK
+}
+
+func diagnoseDaemon() {
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Background Daemon]"))
+	info, err := daemon.Status(config.BaseDir())
+	if err != nil || info == nil || !info.Installed {
+		infoBadge := lipgloss.NewStyle().Bold(true).Foreground(tui.TextMuted).Width(8).Render("[INFO]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Daemon:")
+		fmt.Printf("  %s %s Not installed (run 'aim daemon install' to enable background tasks)\n", infoBadge, cat)
+		return
+	}
+
+	if info.Active {
+		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Daemon:")
+		lastRunStr := "never"
+		if !info.LastRun.IsZero() {
+			lastRunStr = formatDaemonTimeAgo(info.LastRun)
+		}
+		serviceManager := "launchd"
+		if runtime.GOOS == "linux" {
+			serviceManager = "systemd"
+		}
+		fmt.Printf("  %s %s Active (%s, interval: 15m, last run: %s)\n", okBadge, cat, serviceManager, lastRunStr)
+	} else {
+		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Daemon:")
+		fmt.Printf("  %s %s Installed but inactive (%s)\n", warnBadge, cat, info.ConfigPath)
+	}
 }
 
 func diagnosePlatform(agentName string, cfg *config.Config) {

@@ -126,6 +126,7 @@ Primary Commands:
   doctor [agent]             Diagnose environment, tokens, and binaries
   remove [agent] <profile>   Delete profile credentials and state
   mv <agent> <src> <dst>     Move agent account and credentials between profiles
+  daemon [cmd]               Manage periodic background daemon tasks
   whoami                     Show active profile, agent, session, and quota
   completion <shell>         Generate shell completion script (zsh, bash, fish)
 
@@ -168,6 +169,7 @@ Flags:
 		newRemoveCmd(reg, pm),
 		newMvCmd(reg, pm),
 		newWhoamiCmd(reg, pm),
+		newDaemonCmd(reg, pm),
 		newPrewarmCmd(reg, pm),
 		newFeedbackCmd(reg, pm),
 		newCompletionCmd(rootCmd),
