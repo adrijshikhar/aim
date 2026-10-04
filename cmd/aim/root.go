@@ -128,6 +128,7 @@ Primary Commands:
   mv <agent> <src> <dst>     Move agent account and credentials between profiles
   daemon [cmd]               Manage periodic background daemon tasks
   whoami                     Show active profile, agent, session, and quota
+  web                        Start the AIM web dashboard
   mcp [serve|install]        Read-only stdio MCP server for agent self-inspection
   completion <shell>         Generate shell completion script (zsh, bash, fish)
 
@@ -176,6 +177,7 @@ Flags:
 		newMCPCmd(reg, pm),
 		newCompletionCmd(rootCmd),
 		newVersionCmd(),
+		newWebCmd(reg, pm),
 	)
 
 	return rootCmd
