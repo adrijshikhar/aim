@@ -1,6 +1,9 @@
 # Binaries & build artifacts
 /aim
 /dist/
+web/dist/
+node_modules/
+*.tsbuildinfo
 *.tmp
 *.log
 *.test
