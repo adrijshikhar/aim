@@ -54,6 +54,7 @@ type SessionDTO struct {
 	Turns     int       `json:"turns"`
 	UpdatedAt time.Time `json:"updated_at"`
 	IsActive  bool      `json:"is_active"`
+	PID       int       `json:"pid,omitempty"`
 }
 
 // SessionFilter provides query parameters for listing sessions.

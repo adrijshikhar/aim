@@ -47,6 +47,7 @@ export interface SessionDTO {
   turns: number;
   updated_at: string;
   is_active: boolean;
+  pid?: number;
 }
 
 export interface SessionFilter {

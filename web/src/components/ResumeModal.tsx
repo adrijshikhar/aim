@@ -77,7 +77,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
         exact: false,
         catalyst: false,
         fork: false,
-        force: false,
+        force: !!session?.is_active,
       });
       setCustomFlags('');
       setCopied(false);
@@ -181,6 +181,24 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Active Process Warning */}
+        {session.is_active && (
+          <div className="rounded-md border border-amber-500/30 bg-[#141414] p-3 text-xs space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              <span className="text-[#ededed] font-medium font-mono text-xs">
+                Active Session Running {session.pid ? `(PID ${session.pid})` : ''}
+              </span>
+            </div>
+            <p className="text-[11px] text-[#888888] pl-4 leading-relaxed">
+              This session is running in another process. <strong className="text-[#ededed] font-mono">--force</strong> is pre-selected to resume directly without CLI prompt interruptions. Or select <strong className="text-[#ededed] font-mono">--fork</strong> to branch safely into a new conversation.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-1">
           {/* Quick Flags Toggles */}

@@ -92,6 +92,7 @@ func (s *sessionService) ListSessions(ctx context.Context, filter SessionFilter)
 			Turns:     sess.MessageCount,
 			UpdatedAt: sess.LastActiveAt,
 			IsActive:  sess.Status == session.StatusActive,
+			PID:       sess.PID,
 		}
 		results = append(results, dto)
 
