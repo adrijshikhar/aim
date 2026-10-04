@@ -24,7 +24,6 @@ import {
   Clock,
   MessageSquare,
   Activity,
-  CheckCircle2,
 } from 'lucide-react';
 
 interface SessionsViewProps {
@@ -167,39 +166,15 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
   };
 
   const getAgentBadge = (agent: string) => {
-    switch (agent.toLowerCase()) {
-      case 'claude':
-        return (
-          <Badge className="bg-[#241a12] text-[#f5a623] border-[#3d2716] font-mono text-[11px] tracking-wide">
-            claude
-          </Badge>
-        );
-      case 'codex':
-        return (
-          <Badge className="bg-[#0e2118] text-[#50e3c2] border-[#19402e] font-mono text-[11px] tracking-wide">
-            codex
-          </Badge>
-        );
-      case 'gemini':
-        return (
-          <Badge className="bg-[#0d1f36] text-[#0070f3] border-[#15345a] font-mono text-[11px] tracking-wide">
-            gemini
-          </Badge>
-        );
-      case 'agy':
-      case 'antigravity':
-        return (
-          <Badge className="bg-[#1c122c] text-[#b388ff] border-[#331c52] font-mono text-[11px] tracking-wide">
-            antigravity
-          </Badge>
-        );
-      default:
-        return (
-          <Badge variant="outline" className="font-mono text-[11px]">
-            {agent}
-          </Badge>
-        );
-    }
+    const name = agent?.toLowerCase() || 'agent';
+    return (
+      <Badge
+        variant="outline"
+        className="bg-[#161616] text-[#ededed] border-[#2e2e2e] font-mono text-[11px] font-medium tracking-tight px-2 py-0.5 rounded-md"
+      >
+        {name}
+      </Badge>
+    );
   };
 
   return (
@@ -289,10 +264,7 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
                     <div className="flex items-center gap-2">
                       {getAgentBadge(s.agent)}
                       {s.is_active && (
-                        <span className="relative flex h-2 w-2" title="Active session">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                        </span>
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" title="Active session" />
                       )}
                     </div>
                   </TableCell>
@@ -364,8 +336,8 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
         <span className="tabular-nums">
           Showing {filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}
         </span>
-        <span className="flex items-center gap-1 text-[#50e3c2]">
-          <CheckCircle2 className="h-3.5 w-3.5" />
+        <span className="flex items-center gap-1.5 text-[#888888]">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
           Terminal launcher ready
         </span>
       </div>

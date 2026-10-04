@@ -165,20 +165,16 @@ export function McpView({ selectedProfile = 'all', onSelectProfile }: McpViewPro
 
                     <Badge
                       variant="outline"
-                      className={`text-[11px] font-mono flex items-center gap-1 rounded-full px-2 py-0.5 ${
-                        isGlobal
-                          ? 'bg-[#0d1f36] text-[#0070f3] border-[#15345a]'
-                          : 'bg-[#1c122c] text-[#b388ff] border-[#331c52]'
-                      }`}
+                      className="text-[11px] font-mono flex items-center gap-1 rounded-md px-2 py-0.5 border-[#2e2e2e] bg-[#161616] text-[#888888]"
                     >
                       {isGlobal ? (
                         <>
-                          <Globe className="h-3 w-3" />
+                          <Globe className="h-3 w-3 text-[#666666]" />
                           Global
                         </>
                       ) : (
                         <>
-                          <Lock className="h-3 w-3" />
+                          <Lock className="h-3 w-3 text-[#666666]" />
                           Profile: {srv.scope}
                         </>
                       )}
@@ -193,7 +189,7 @@ export function McpView({ selectedProfile = 'all', onSelectProfile }: McpViewPro
                       <Terminal className="h-3 w-3" /> Command
                     </span>
                     <div className="font-mono text-xs p-2 rounded-geist bg-[#0e0e0e] border border-[#262626] text-[#ededed] overflow-x-auto whitespace-pre">
-                      <span className="text-[#50e3c2] font-semibold">{srv.command}</span>{' '}
+                      <span className="text-[#ededed] font-medium">{srv.command}</span>{' '}
                       <span className="text-[#888888]">{srv.args.join(' ')}</span>
                     </div>
                   </div>
@@ -224,7 +220,7 @@ export function McpView({ selectedProfile = 'all', onSelectProfile }: McpViewPro
                       onClick={() => copyConfig(srv)}
                     >
                       {copiedName === srv.name ? (
-                        <Check className="h-3.5 w-3.5 mr-1 text-[#50e3c2]" />
+                        <Check className="h-3.5 w-3.5 mr-1 text-[#ededed]" />
                       ) : (
                         <Copy className="h-3.5 w-3.5 mr-1" />
                       )}

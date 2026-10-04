@@ -105,18 +105,7 @@ export function App() {
           {/* Daemon Status Pill */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-[#111111] text-xs">
-              <span className="relative flex h-2 w-2">
-                <span
-                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                    isOnline ? 'bg-emerald-400' : 'bg-amber-400'
-                  }`}
-                />
-                <span
-                  className={`relative inline-flex rounded-full h-2 w-2 ${
-                    isOnline ? 'bg-emerald-500' : 'bg-amber-500'
-                  }`}
-                />
-              </span>
+              <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
               <span className="font-mono text-[11px] text-[#888888]">
                 {isOnline ? 'Daemon Connected' : 'Connecting...'}
               </span>

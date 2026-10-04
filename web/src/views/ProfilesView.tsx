@@ -40,7 +40,6 @@ import {
   Trash2,
   Key,
   Mail,
-  ShieldCheck,
   User,
   Folder,
   RefreshCw,
@@ -420,39 +419,15 @@ export function ProfilesView({
   };
 
   const getAgentBadge = (agent: string) => {
-    switch (agent.toLowerCase()) {
-      case 'claude':
-        return (
-          <Badge className="bg-[#241a12] text-[#f5a623] border-[#3d2716] font-mono text-[11px] tracking-wide">
-            claude
-          </Badge>
-        );
-      case 'codex':
-        return (
-          <Badge className="bg-[#0e2118] text-[#50e3c2] border-[#19402e] font-mono text-[11px] tracking-wide">
-            codex
-          </Badge>
-        );
-      case 'gemini':
-        return (
-          <Badge className="bg-[#0d1f36] text-[#0070f3] border-[#15345a] font-mono text-[11px] tracking-wide">
-            gemini
-          </Badge>
-        );
-      case 'agy':
-      case 'antigravity':
-        return (
-          <Badge className="bg-[#1c122c] text-[#b388ff] border-[#331c52] font-mono text-[11px] tracking-wide">
-            antigravity
-          </Badge>
-        );
-      default:
-        return (
-          <Badge variant="outline" className="font-mono text-[11px]">
-            {agent || 'agent'}
-          </Badge>
-        );
-    }
+    const name = agent?.toLowerCase() || 'agent';
+    return (
+      <Badge
+        variant="outline"
+        className="bg-[#161616] text-[#ededed] border-[#2e2e2e] font-mono text-[11px] font-medium tracking-tight px-2 py-0.5 rounded-md"
+      >
+        {name}
+      </Badge>
+    );
   };
 
   const currentProfile = React.useMemo(() => {
@@ -500,12 +475,20 @@ export function ProfilesView({
                 </h1>
                 {getAgentBadge(currentProfile.agent)}
                 {currentProfile.has_credentials ? (
-                  <Badge variant="outline" className="bg-[#0e2118] text-[#50e3c2] border-[#19402e] text-[11px] font-mono">
-                    <ShieldCheck className="h-3 w-3 mr-1" /> Authenticated
+                  <Badge
+                    variant="outline"
+                    className="bg-[#141414] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-md"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    <span>Authenticated</span>
                   </Badge>
                 ) : (
-                  <Badge variant="outline" className="bg-[#2b1010] text-[#ff6b6b] border-[#4a1c1c] text-[11px] font-mono">
-                    Needs Auth
+                  <Badge
+                    variant="outline"
+                    className="bg-[#141414] text-[#888888] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-md"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    <span>Needs Auth</span>
                   </Badge>
                 )}
               </div>
@@ -523,10 +506,10 @@ export function ProfilesView({
                 Refresh
               </Button>
               <Button
-                variant="destructive"
+                variant="outline"
                 size="sm"
                 onClick={() => handleDelete(currentProfile.agent, currentProfile.name)}
-                className="rounded-geist h-8 text-xs font-mono"
+                className="rounded-geist h-8 text-xs font-mono border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 hover:text-red-300"
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1" />
                 Delete Profile
@@ -643,12 +626,10 @@ export function ProfilesView({
                     Live Quota Telemetry
                   </CardTitle>
                   <span
-                    className={`font-mono text-xs font-semibold tabular-nums ${
+                    className={`font-mono text-xs font-medium tabular-nums ${
                       (currentProfile.quota?.bottleneck_pct ?? 100) <= 10
-                        ? 'text-[#e00]'
-                        : (currentProfile.quota?.bottleneck_pct ?? 100) <= 30
-                        ? 'text-[#f5a623]'
-                        : 'text-[#50e3c2]'
+                        ? 'text-red-400'
+                        : 'text-[#ededed]'
                     }`}
                   >
                     {currentProfile.quota ? `${currentProfile.quota.bottleneck_pct}% remaining` : '100% remaining'}
@@ -660,14 +641,12 @@ export function ProfilesView({
               </CardHeader>
               <CardContent className="space-y-4 p-5 pt-0">
                 {/* Progress bar */}
-                <div className="w-full bg-[#1c1c1c] h-2 rounded-full overflow-hidden border border-[#2a2a2a]">
+                <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
                   <div
                     className={`h-full transition-all duration-300 ${
                       (currentProfile.quota?.bottleneck_pct ?? 100) <= 10
-                        ? 'bg-[#e00]'
-                        : (currentProfile.quota?.bottleneck_pct ?? 100) <= 30
-                        ? 'bg-[#f5a623]'
-                        : 'bg-[#50e3c2]'
+                        ? 'bg-red-500'
+                        : 'bg-[#ededed]'
                     }`}
                     style={{ width: `${currentProfile.quota?.bottleneck_pct ?? 100}%` }}
                   />
@@ -828,12 +807,9 @@ export function ProfilesView({
                     <span className="text-[#888888]">Status:</span>
                     <Badge
                       variant="outline"
-                      className={`text-[11px] font-mono ${
-                        isMcpGlobalOn
-                          ? 'bg-[#0d1f36] text-[#0070f3] border-[#15345a]'
-                          : 'bg-[#2b1010] text-[#ff6b6b] border-[#4a1c1c]'
-                      }`}
+                      className="text-[11px] font-mono bg-[#141414] border-[#262626] text-[#a1a1a1] flex items-center gap-1.5 px-2 py-0.5"
                     >
+                      <span className={`h-1.5 w-1.5 rounded-full ${isMcpGlobalOn ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
                       {isMcpGlobalOn ? 'Global Inheritance Active' : 'Isolated Mode'}
                     </Badge>
                   </div>
@@ -867,12 +843,9 @@ export function ProfilesView({
                     <span className="text-[#888888]">Status:</span>
                     <Badge
                       variant="outline"
-                      className={`text-[11px] font-mono ${
-                        isPluginsGlobalOn
-                          ? 'bg-[#0e2118] text-[#50e3c2] border-[#19402e]'
-                          : 'bg-[#2b1010] text-[#ff6b6b] border-[#4a1c1c]'
-                      }`}
+                      className="text-[11px] font-mono bg-[#141414] border-[#262626] text-[#a1a1a1] flex items-center gap-1.5 px-2 py-0.5"
                     >
+                      <span className={`h-1.5 w-1.5 rounded-full ${isPluginsGlobalOn ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
                       {isPluginsGlobalOn ? 'Plugins Active' : 'Plugins Disabled'}
                     </Badge>
                   </div>
@@ -908,11 +881,7 @@ export function ProfilesView({
                             </CardTitle>
                             <Badge
                               variant="outline"
-                              className={`text-[10px] font-mono rounded-full px-1.5 py-0 ${
-                                isGlobal
-                                  ? 'bg-[#0d1f36] text-[#0070f3] border-[#15345a]'
-                                  : 'bg-[#1c122c] text-[#b388ff] border-[#331c52]'
-                              }`}
+                              className="text-[10px] font-mono rounded border-[#2e2e2e] bg-[#161616] text-[#888888] px-1.5 py-0"
                             >
                               {isGlobal ? 'Global' : 'Profile'}
                             </Badge>
@@ -920,7 +889,8 @@ export function ProfilesView({
                         </CardHeader>
                         <CardContent className="p-4 pt-0 space-y-2">
                           <div className="font-mono text-[11px] p-1.5 rounded-geist bg-[#0e0e0e] border border-[#262626] text-[#ededed] truncate">
-                            <span className="text-[#50e3c2]">{srv.command}</span> {srv.args.join(' ')}
+                            <span className="text-[#ededed] font-medium">{srv.command}</span>{' '}
+                            <span className="text-[#888888]">{srv.args.join(' ')}</span>
                           </div>
                           <div className="flex justify-end pt-1">
                             <Button
@@ -930,7 +900,7 @@ export function ProfilesView({
                               onClick={() => copyMcpConfig(srv)}
                             >
                               {copiedMcpName === srv.name ? (
-                                <Check className="h-3 w-3 mr-1 text-[#50e3c2]" />
+                                <Check className="h-3 w-3 mr-1 text-[#ededed]" />
                               ) : (
                                 <Copy className="h-3 w-3 mr-1" />
                               )}
@@ -1155,16 +1125,18 @@ export function ProfilesView({
                       {p.has_credentials ? (
                         <Badge
                           variant="outline"
-                          className="bg-[#0e2118] text-[#50e3c2] border-[#19402e] text-[11px] font-mono tracking-tight"
+                          className="bg-[#141414] text-[#a1a1a1] border-[#262626] text-[11px] font-mono tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-md"
                         >
-                          <ShieldCheck className="h-3 w-3 mr-1" /> Authenticated
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          <span>Authenticated</span>
                         </Badge>
                       ) : (
                         <Badge
                           variant="outline"
-                          className="bg-[#2b1010] text-[#ff6b6b] border-[#4a1c1c] text-[11px] font-mono tracking-tight"
+                          className="bg-[#141414] text-[#888888] border-[#262626] text-[11px] font-mono tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-md"
                         >
-                          Needs Auth
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                          <span>Needs Auth</span>
                         </Badge>
                       )}
                     </div>
@@ -1177,7 +1149,7 @@ export function ProfilesView({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-[#666666] hover:text-[#ff6b6b] rounded-geist transition-colors"
+                          className="h-7 w-7 text-[#666666] hover:text-red-400 rounded-geist transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDelete(p.agent, p.name);
@@ -1233,25 +1205,21 @@ export function ProfilesView({
                           <Gauge className="h-3 w-3" /> Quota Telemetry
                         </span>
                         <span
-                          className={`font-mono text-xs font-semibold tabular-nums ${
+                          className={`font-mono text-xs font-medium tabular-nums ${
                             (p.quota?.bottleneck_pct ?? 100) <= 10
-                              ? 'text-[#e00]'
-                              : (p.quota?.bottleneck_pct ?? 100) <= 30
-                              ? 'text-[#f5a623]'
-                              : 'text-[#50e3c2]'
+                              ? 'text-red-400'
+                              : 'text-[#ededed]'
                           }`}
                         >
                           {p.quota ? `${p.quota.bottleneck_pct}% remaining` : '100% remaining'}
                         </span>
                       </div>
-                      <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#2a2a2a]">
+                      <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
                         <div
                           className={`h-full transition-all duration-300 ${
                             (p.quota?.bottleneck_pct ?? 100) <= 10
-                              ? 'bg-[#e00]'
-                              : (p.quota?.bottleneck_pct ?? 100) <= 30
-                              ? 'bg-[#f5a623]'
-                              : 'bg-[#50e3c2]'
+                              ? 'bg-red-500'
+                              : 'bg-[#ededed]'
                           }`}
                           style={{ width: `${p.quota?.bottleneck_pct ?? 100}%` }}
                         />
@@ -1268,23 +1236,11 @@ export function ProfilesView({
                 {/* Card Footer: MCP & Plugin configuration chips + Inspect Action */}
                 <CardFooter className="pt-2 pb-4 px-5 border-t border-[#1f1f1f] flex items-center justify-between text-[11px] font-mono text-[#888888]">
                   <div className="flex items-center gap-1.5">
-                    <span
-                      className={`px-1.5 py-0.5 rounded border text-[10px] ${
-                        isMcpOn
-                          ? 'border-[#15345a] bg-[#0d1f36]/70 text-[#0070f3]'
-                          : 'border-[#333333] bg-[#1a1a1a] text-[#888888]'
-                      }`}
-                    >
-                      MCP: {isMcpOn ? 'ON' : 'OFF'}
+                    <span className="px-1.5 py-0.5 rounded border border-[#262626] bg-[#141414] text-[#888888] text-[10px] font-mono">
+                      mcp: {isMcpOn ? 'on' : 'off'}
                     </span>
-                    <span
-                      className={`px-1.5 py-0.5 rounded border text-[10px] ${
-                        isPluginsOn
-                          ? 'border-[#19402e] bg-[#0e2118]/70 text-[#50e3c2]'
-                          : 'border-[#333333] bg-[#1a1a1a] text-[#888888]'
-                      }`}
-                    >
-                      Plugins: {isPluginsOn ? 'ON' : 'OFF'}
+                    <span className="px-1.5 py-0.5 rounded border border-[#262626] bg-[#141414] text-[#888888] text-[10px] font-mono">
+                      plugins: {isPluginsOn ? 'on' : 'off'}
                     </span>
                   </div>
 
