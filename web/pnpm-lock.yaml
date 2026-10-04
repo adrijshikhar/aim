@@ -66,6 +66,9 @@ importers:
       e2e:
         specifier: ^0.16.0
         version: 0.16.0(@ai-sdk/openai-compatible@3.0.62(zod@4.6.1))(ai@7.0.127(zod@4.6.1))
+      playwright:
+        specifier: ^1.63.0
+        version: 1.63.0
       postcss:
         specifier: ^8.5.2
         version: 8.5.28
