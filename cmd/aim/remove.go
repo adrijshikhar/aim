@@ -8,6 +8,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -69,6 +70,7 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 
 	if agentName != "" {
+		account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agentName)
 		cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg)
 		if err != nil {
 			errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
@@ -79,6 +81,9 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 			}
 			return 1
 		}
+		telemetry.CaptureAccountEvent(agentName, account, "agent_removed", map[string]any{
+			"profile_cleaned_up": cleanedUp,
+		})
 		if cleanedUp {
 			fmt.Printf("%s Removed agent %s and cleaned up profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
 		} else {

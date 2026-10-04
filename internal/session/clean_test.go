@@ -62,6 +62,11 @@ func TestCleanPromptText(t *testing.T) {
 			expected: strings.Repeat("a", 500) + "...",
 		},
 		{
+			name:     "caps long prompt with multi-byte unicode characters without splitting runes",
+			input:    strings.Repeat("🚀", 600),
+			expected: strings.Repeat("🚀", 500) + "...",
+		},
+		{
 			name:     "desktop screenshot with escaped spaces and unicode space",
 			input:    "/Users/nemesis/Desktop/Screenshot\\ 2026-09-30\\ at\\ 2.54.59\u202fPM.png check this in codex session",
 			expected: "check this in codex session",

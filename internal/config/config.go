@@ -41,6 +41,7 @@ type Config struct {
 	CustomBridgedPaths     []string                 `json:"custom_bridged_paths,omitempty"`
 	CustomIgnoredKeychains []string                 `json:"custom_ignored_keychains,omitempty"`
 	Debug                  bool                     `json:"debug,omitempty"`
+	TelemetryDisabled      bool                     `json:"telemetry_disabled,omitempty"`
 	Profiles               map[string]ProfileConfig `json:"profiles"`
 }
 

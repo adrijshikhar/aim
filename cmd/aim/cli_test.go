@@ -363,6 +363,14 @@ func TestCLICorruptedConfigRecovery(t *testing.T) {
 		t.Fatalf("expected profile1 to have agent 'mock' in config")
 	}
 
+	// 5. Cancelled context propagation
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reg.Register(&mockAdapter{name: "ctx_mock", exitErr: cancelCtx.Err()})
+	if code := executeLoginWithContext(cancelCtx, reg, pm, "ctx_mock", "cancel_prof"); code != 1 {
+		t.Fatalf("expected login code 1 for cancelled context, got %d", code)
+	}
+
 	// Corrupt config.json again
 	if err := os.WriteFile(configPath, []byte("CORRUPTED_AGAIN{{{"), 0644); err != nil {
 		t.Fatalf("failed to write corrupted config: %v", err)

@@ -13,6 +13,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/session/catalyst"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -207,7 +208,7 @@ Flags:
 	return cmd
 }
 
-func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, agent, profile string, sess *session.Session, extraArgs []string) error {
+func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, agent, profileName string, sess *session.Session, extraArgs []string) error {
 	repoRoot := getGitRepoRoot()
 	branch := getGitBranch(repoRoot)
 
@@ -234,14 +235,18 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	code := executeRunWithSession(ctx, reg, pm, agent, profile, sessID, launchArgs)
+	code := executeRunWithSession(ctx, reg, pm, agent, profileName, sessID, launchArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
+	telemetry.CaptureAccountEvent(agent, profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agent), "session_resumed", map[string]any{
+		"resume_mode": "catalyst",
+		"forked":      false,
+	})
 	return nil
 }
 
-func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, mgr *session.Manager, agent, profile, pDir string, sess *session.Session, fork bool, extraArgs []string) error {
+func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, mgr *session.Manager, agent, profileName, pDir string, sess *session.Session, fork bool, extraArgs []string) error {
 	if mgr == nil {
 		mgr = getSessionManager(cmd.Context())
 	}
@@ -264,12 +269,12 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 				}
 			}
 		}
-		if (isNewer || isLarger || latest.Profile != profile) && latest.Profile != profile {
+		if (isNewer || isLarger || latest.Profile != profileName) && latest.Profile != profileName {
 			if !latest.IsHost {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s Syncing newer session updates from profile %q into %q...\n",
 					lipgloss.NewStyle().Foreground(tui.AccentCyan).Render("⚡"),
 					latest.Profile,
-					profile,
+					profileName,
 				)
 			}
 			sess = latest
@@ -277,12 +282,12 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	}
 
 	// If session belongs to host or a different profile, or fork requested, hydrate into dest profile
-	if sess.IsHost || sess.Profile != profile || fork {
+	if sess.IsHost || sess.Profile != profileName || fork {
 		prov := mgr.Provider(agent)
 		if prov != nil {
 			hydratedID, err := prov.Hydrate(ctx, sess, pDir, fork)
 			if err != nil {
-				return fmt.Errorf("failed to hydrate session into profile %q: %w", profile, err)
+				return fmt.Errorf("failed to hydrate session into profile %q: %w", profileName, err)
 			}
 			resumeID = hydratedID
 		}
@@ -330,14 +335,18 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		boldStyle.Render(agent),
 		cyanStyle.Render(displayID),
 		forkInfo,
-		profile,
+		profileName,
 	)
 
 	sessID := displayID
-	code := executeRunWithSession(ctx, reg, pm, agent, profile, sessID, resumeArgs)
+	code := executeRunWithSession(ctx, reg, pm, agent, profileName, sessID, resumeArgs)
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
+	telemetry.CaptureAccountEvent(agent, profile.GetProfileAccountInfoForAgent(pDir, agent), "session_resumed", map[string]any{
+		"resume_mode": "exact",
+		"forked":      fork,
+	})
 	return nil
 }
 

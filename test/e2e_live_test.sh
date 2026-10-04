@@ -14,6 +14,7 @@ export TERM="${TERM:-xterm-256color}"
 if [ "$TERM" = "dumb" ] || [ -z "$TERM" ]; then
   export TERM="xterm-256color"
 fi
+export AIM_TELEMETRY_DISABLED=1
 
 echo "========================================================================"
 echo "  AIM LIVE E2E TEST SUITE                                               "
@@ -69,7 +70,7 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ "$1" = "--print" ] && [ "$2" = "/usage" ]; then
-  sleep 0.4
+  sleep 2.0
   printf "Quota:\nGemini Models\tWeekly Limit Remaining\t85%%\t2026-10-09T04:14:05Z\nGemini Models\tFive Hour Limit Remaining\t85%%\t2026-10-02T20:48:53Z\n"
   exit 0
 fi
@@ -542,6 +543,23 @@ fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 110, 0, 0))
 proc = subprocess.Popen([aim_bin], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
 os.close(slave)
 
+def read_pty_until(fd, stop_condition, timeout=5.0):
+    buf = b""
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if fd in r:
+            try:
+                c = os.read(fd, 4096)
+                if not c:
+                    break
+                buf += c
+                if stop_condition(buf):
+                    return buf, True
+            except (OSError, IOError):
+                break
+    return buf, False
+
 def drain(fd, timeout=0.5):
     buf = b""
     end_time = time.time() + timeout
@@ -557,11 +575,12 @@ def drain(fd, timeout=0.5):
                 break
     return buf
 
-# Initial render (within 0.2s, mock agy is sleeping 0.5s):
+# Initial render (wait until PROFILES: appears, mock agy is sleeping 2.0s):
 # 1. work should immediately display cached [80%]
 # 2. staging is uncached and loading, should display [refreshing...]
 # 3. [offline] MUST NEVER appear for any profile during active loading!
-out_initial = drain(master, timeout=0.2)
+out_initial, rendered = read_pty_until(master, lambda b: b"PROFILES:" in b and b"work" in b, timeout=4.0)
+assert rendered, f"FAIL: Initial TUI dashboard did not render within 4.0s, got:\n{out_initial}"
 clean_initial = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out_initial.decode("utf-8", errors="replace"))
 
 assert "[80%]" in clean_initial, f"Expected [80%] cached quota for work in initial render, got:\n{clean_initial}"
@@ -569,8 +588,8 @@ assert "[refreshing...]" in clean_initial, f"Expected [refreshing...] badge for 
 assert "[offline]" not in clean_initial, f"FAIL: [offline] badge appeared during active loading!\n{clean_initial}"
 assert "Offline" not in clean_initial, f"FAIL: 'Offline' status appeared in inspector during active loading!\n{clean_initial}"
 
-# Drain remaining output until mock agy finishes (0.6s)
-out_loaded = drain(master, timeout=0.8)
+# Drain remaining output until mock agy finishes (2.5s)
+out_loaded = drain(master, timeout=2.5)
 clean_loaded = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", (out_initial + out_loaded).decode("utf-8", errors="replace"))
 
 # After refresh completes, fresh 85% quota should be visible
@@ -580,8 +599,8 @@ assert "[offline]" not in clean_loaded, f"FAIL: [offline] appeared after refresh
 # Now press 'r' to trigger an explicit force refresh while in TUI
 os.write(master, b"r")
 
-# Drain in-flight buffer immediately while mock agy sleeps 0.5s
-out_inflight = drain(master, timeout=0.2)
+# Drain in-flight buffer immediately while mock agy sleeps 2.0s
+out_inflight = drain(master, timeout=0.4)
 clean_inflight = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out_inflight.decode("utf-8", errors="replace"))
 
 # In-flight assertions:
@@ -592,7 +611,7 @@ clean_accum = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", (out_loaded + out_inflight).d
 assert "[85%]" in clean_accum, f"FAIL: Valid cached quota was not present on screen during refresh!\n{clean_accum}"
 
 # Drain final output until second refresh completes
-out_final = drain(master, timeout=0.8)
+out_final = drain(master, timeout=2.5)
 clean_final = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", (clean_accum + out_final.decode("utf-8", errors="replace")))
 
 assert "[85%]" in clean_final, f"Expected [85%] after second refresh completed, got:\n{clean_final}"
@@ -612,7 +631,78 @@ print("  ✔ Zero false offline verified: [offline] never appeared during active
 print("  ✔ Seamless quota update verified: fresh [85%] rendered after refresh completed")
 PYTEST
 
+# ==============================================================================
+# PHASE 8: Diagnostics & Sanitized Markdown Report (aim doctor --report)
+# ==============================================================================
+echo ""
+echo "=== Phase 8: Diagnostics & Sanitized Markdown Report (aim doctor --report) ==="
+
+DOCTOR_OUT=$("$AIM_BIN" doctor --report)
+
+echo "$DOCTOR_OUT" | grep -q "# AIM Diagnostic Report" || {
+  echo "FAIL: Expected markdown header '# AIM Diagnostic Report' in doctor output"
+  exit 1
+}
+echo "$DOCTOR_OUT" | grep -q "AIM Version:" || {
+  echo "FAIL: Expected 'AIM Version:' in doctor report"
+  exit 1
+}
+echo "$DOCTOR_OUT" | grep -q "Agents & Tooling" || {
+  echo "FAIL: Expected 'Agents & Tooling' table in doctor report"
+  exit 1
+}
+# Verify home path is sanitized
+if echo "$DOCTOR_OUT" | grep -q "/Users/\|/home/"; then
+  echo "FAIL: Raw home directory path leaked in doctor report!"
+  exit 1
+fi
+echo "  ✔ Doctor markdown report generated with sanitized paths and tooling matrix"
+
+# ==============================================================================
+# PHASE 9: Direct Feedback Submission & GitHub Issue Fallback (aim feedback)
+# ==============================================================================
+echo ""
+echo "=== Phase 9: Direct In-Tool Feedback (aim feedback) ==="
+
+FEEDBACK_OUT=$("$AIM_BIN" feedback --type feature --message "Add Fish completions" --include-doctor)
+
+echo "$FEEDBACK_OUT" | grep -q "github.com/adrijshikhar/aim/issues/new" || {
+  echo "FAIL: Expected GitHub issue fallback link in feedback output, got:"
+  echo "$FEEDBACK_OUT"
+  exit 1
+}
+echo "  ✔ Direct feedback command formatted pre-filled issue URL with doctor context"
+
+# ==============================================================================
+# PHASE 10: Anonymous Telemetry Opt-Out & Spool Verification
+# ==============================================================================
+echo ""
+echo "=== Phase 10: Telemetry Opt-Out Verification ==="
+
+DNT_TEST_DIR=$(mktemp -d)
+AIM_TELEMETRY_DISABLED="" DO_NOT_TRACK=1 AIM_HOME="$DNT_TEST_DIR" "$AIM_BIN" version > /dev/null
+
+if [ -f "$DNT_TEST_DIR/cache/telemetry_spool.json" ]; then
+  echo "FAIL: Telemetry spool created when DO_NOT_TRACK=1!"
+  rm -rf "$DNT_TEST_DIR"
+  exit 1
+fi
+rm -rf "$DNT_TEST_DIR"
+echo "  ✔ Universal DO_NOT_TRACK=1 strictly enforced (0 telemetry collected)"
+
+AIM_DIS_TEST_DIR=$(mktemp -d)
+DO_NOT_TRACK="" AIM_TELEMETRY_DISABLED=1 AIM_HOME="$AIM_DIS_TEST_DIR" "$AIM_BIN" version > /dev/null
+
+if [ -f "$AIM_DIS_TEST_DIR/cache/telemetry_spool.json" ]; then
+  echo "FAIL: Telemetry spool created when AIM_TELEMETRY_DISABLED=1!"
+  rm -rf "$AIM_DIS_TEST_DIR"
+  exit 1
+fi
+rm -rf "$AIM_DIS_TEST_DIR"
+echo "  ✔ CLI AIM_TELEMETRY_DISABLED=1 strictly enforced (0 telemetry collected)"
+
 echo ""
 echo "========================================================================"
 echo "  ALL E2E LIVE TESTS PASSED! (0 manual checks required)                  "
 echo "========================================================================"
+

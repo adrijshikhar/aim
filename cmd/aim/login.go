@@ -9,6 +9,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +19,11 @@ func newLoginCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 		Short: "Authenticate new account via OAuth PKCE",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			exitCode := executeLogin(reg, pm, args[0], args[1])
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			exitCode := executeLoginWithContext(ctx, reg, pm, args[0], args[1])
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
 			}
@@ -31,6 +36,10 @@ func newLoginCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 }
 
 func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string) int {
+	return executeLoginWithContext(context.Background(), reg, pm, agentName, profileName)
+}
+
+func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string) int {
 	logger.Debug("[login] Starting login for agent=%q, profile=%q", agentName, profileName)
 	adapter, err := reg.Get(agentName)
 	if err != nil {
@@ -48,10 +57,14 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		cfg = config.NewDefaultConfig()
 	}
 
+	loginSucceeded := false
 	// Harvest any agent credentials into the profile directory after login completes.
 	// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
 	defer func() {
 		_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
+		if loginSucceeded {
+			telemetry.IdentifyAccount(adapter.Name(), profile.GetProfileAccountInfoForAgent(pDir, adapter.Name()))
+		}
 	}()
 
 	auth, ok := adapter.(agents.Authenticator)
@@ -59,10 +72,11 @@ func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, p
 		fmt.Fprintf(os.Stderr, "Agent %s does not support login\n", adapter.Name())
 		return 1
 	}
-	if err := auth.Login(context.Background(), profileName, pDir); err != nil {
+	if err := auth.Login(ctx, profileName, pDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		return 1
 	}
+	loginSucceeded = true
 
 	cfg.AddProfileAgent(profileName, adapter.Name())
 	_ = config.SaveConfig(cfg)

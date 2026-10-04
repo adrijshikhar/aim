@@ -1,0 +1,36 @@
+name: Feature Request
+description: Suggest an enhancement, new agent integration, or workflow idea for AIM
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to make AIM better? Let us know what you want to achieve!
+  - type: input
+    id: feature-title
+    attributes:
+      label: Feature Title
+      placeholder: "e.g. Support Cursor or OpenCode agent adapter"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem & Motivation
+      description: Is your feature request related to a problem or limitation? Please describe.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution you'd like, including CLI syntax or TUI behavior if applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you've explored.
+    validations:
+      required: false

@@ -11,6 +11,7 @@ type KeyMap struct {
 	Login    key.Binding
 	Tab      key.Binding
 	Doctor   key.Binding
+	Feedback key.Binding
 	Rename   key.Binding
 	Move     key.Binding
 	Delete   key.Binding
@@ -25,6 +26,7 @@ type KeyMap struct {
 	DeleteModal    DeleteModalKeyMap
 	MoveModal      MoveModalKeyMap
 	RenameModal    RenameModalKeyMap
+	FeedbackModal  FeedbackModalKeyMap
 }
 
 // DefaultKeyMap returns the default set of keybindings for the root dashboard and all child components.
@@ -57,6 +59,10 @@ func DefaultKeyMap() KeyMap {
 		Doctor: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", "doctor"),
+		),
+		Feedback: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", "feedback"),
 		),
 		Rename: key.NewBinding(
 			key.WithKeys("m", "R"),
@@ -93,19 +99,20 @@ func DefaultKeyMap() KeyMap {
 		DeleteModal:    DefaultDeleteModalKeyMap(),
 		MoveModal:      DefaultMoveModalKeyMap(),
 		RenameModal:    DefaultRenameModalKeyMap(),
+		FeedbackModal:  DefaultFeedbackModalKeyMap(),
 	}
 }
 
 // ShortHelp returns keybindings to be shown in the mini help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Run, k.Sessions, k.Login, k.Tab, k.Doctor, k.Rename, k.Move, k.Delete, k.Quit}
+	return []key.Binding{k.Run, k.Sessions, k.Login, k.Tab, k.Doctor, k.Feedback, k.Rename, k.Move, k.Delete, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Run, k.Sessions},
-		{k.Login, k.Tab, k.Doctor},
+		{k.Login, k.Tab, k.Doctor, k.Feedback},
 		{k.Rename, k.Move, k.Delete, k.Refresh, k.Filter, k.Help, k.Quit},
 	}
 }
@@ -555,5 +562,50 @@ func (k RenameModalKeyMap) ShortHelp() []key.Binding {
 func (k RenameModalKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Submit, k.Cancel},
+	}
+}
+
+// FeedbackModalKeyMap manages keys for the feedback modal.
+type FeedbackModalKeyMap struct {
+	Submit       key.Binding
+	Cancel       key.Binding
+	Category     key.Binding
+	ToggleDoctor key.Binding
+	Quit         key.Binding
+}
+
+// DefaultFeedbackModalKeyMap returns default bindings for feedback modal.
+func DefaultFeedbackModalKeyMap() FeedbackModalKeyMap {
+	return FeedbackModalKeyMap{
+		Submit: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("[Enter]", "Submit"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("[Esc]", "Cancel"),
+		),
+		Category: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("[Tab]", "Category"),
+		),
+		ToggleDoctor: key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("[Ctrl+D]", "Doctor Report"),
+		),
+		Quit: key.NewBinding(
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "quit"),
+		),
+	}
+}
+
+func (k FeedbackModalKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Submit, k.Category, k.ToggleDoctor, k.Cancel}
+}
+
+func (k FeedbackModalKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Submit, k.Category, k.ToggleDoctor, k.Cancel},
 	}
 }

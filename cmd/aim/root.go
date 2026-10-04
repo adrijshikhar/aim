@@ -27,14 +27,16 @@ var (
 
 	debugFlag bool
 
-	gitDescribeSuffixRegex = regexp.MustCompile(`(-\d+)?-g[0-9a-fA-F]+(-dirty)?$`)
-	dirtySuffixRegex       = regexp.MustCompile(`-dirty$`)
+	gitDescribeSuffixRegex = regexp.MustCompile(`(-\d+)?-g[0-9a-fA-F]+([-+]dirty)?$`)
+	dirtySuffixRegex       = regexp.MustCompile(`[-+]dirty$`)
 	commitHashOnlyRegex    = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+	goPseudoVersionRegex   = regexp.MustCompile(`-(0\.)?\d{14}-[0-9a-fA-F]+([-+]dirty)?$`)
 )
 
 // sanitizeVersion normalizes the version string to clean semantic versioning,
 // stripping any git describe commit distance/hash suffixes (-g<commit>),
-// dirty indicators, and ensuring raw commit hashes are not used as version numbers.
+// dirty indicators, and ensuring raw commit hashes or Go module pseudo-versions
+// are normalized to "dev".
 func sanitizeVersion(v string) string {
 	v = strings.TrimSpace(v)
 	v = strings.TrimPrefix(v, "v")
@@ -45,13 +47,13 @@ func sanitizeVersion(v string) string {
 	if commitHashOnlyRegex.MatchString(v) {
 		return "dev"
 	}
-	// Go module VCS pseudo-version: v0.0.0-yyyymmddhhmmss-abcdef123456
-	if strings.HasPrefix(v, "0.0.0-") {
+	// Go module VCS pseudo-version: e.g. v0.0.0-yyyymmddhhmmss-abcdef123456 or v0.12.1-0.yyyymmddhhmmss-abcdef123456+dirty
+	if strings.HasPrefix(v, "0.0.0-") || goPseudoVersionRegex.MatchString(v) {
 		return "dev"
 	}
 	// Strip any git describe distance/hash suffix (e.g., "-5-g97df544" or "-g97df544" or "-1-g97df544-dirty")
 	v = gitDescribeSuffixRegex.ReplaceAllString(v, "")
-	// Strip any standalone -dirty suffix
+	// Strip any standalone -dirty or +dirty suffix
 	v = dirtySuffixRegex.ReplaceAllString(v, "")
 
 	if v == "" {
@@ -167,6 +169,7 @@ Flags:
 		newMvCmd(reg, pm),
 		newWhoamiCmd(reg, pm),
 		newPrewarmCmd(reg, pm),
+		newFeedbackCmd(reg, pm),
 		newCompletionCmd(rootCmd),
 		newVersionCmd(),
 	)

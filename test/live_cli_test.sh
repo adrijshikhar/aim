@@ -12,6 +12,7 @@ export AIM_TEST_BINARY="$TEST_ROOT/aim"
 (cd "$REPO_ROOT" && go build -o "$AIM_TEST_BINARY" ./cmd/aim)
 
 export AIM_AUTO_CREATE=1
+export AIM_TELEMETRY_DISABLED=1
 export SHELL=/bin/sh
 export AIM_TEST_INHERITED=benign-value
 mkdir -p "$TEST_ROOT/bin"

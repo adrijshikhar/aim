@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
@@ -71,10 +73,27 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	if postLauncher == nil && launch.PostLauncher != nil {
 		postLauncher = launch.PostLauncher
 	}
+	var postWg sync.WaitGroup
 	if postLauncher != nil {
 		postCtx, postCancel := context.WithCancel(ctx)
-		defer postCancel()
-		go postLauncher.PostLaunch(postCtx, profileName, launch.Env["HOME"])
+		defer func() {
+			postCancel()
+			done := make(chan struct{}, 1)
+			go func() {
+				postWg.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(500 * time.Millisecond):
+				logger.Debug("[runner] PostLaunch shutdown timed out after 500ms")
+			}
+		}()
+		postWg.Add(1)
+		go func() {
+			defer postWg.Done()
+			postLauncher.PostLaunch(postCtx, profileName, launch.Env["HOME"])
+		}()
 	}
 
 	if err := cmd.Start(); err != nil {

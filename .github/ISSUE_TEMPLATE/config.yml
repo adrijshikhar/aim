@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/adrijshikhar/aim/discussions
+    about: Ask questions, share workflows, and discuss ideas with the community.
+  - name: In-Tool Feedback (`aim feedback`)
+    url: https://github.com/adrijshikhar/aim#feedback
+    about: Submit feedback directly from your terminal using `aim feedback` or press 'f' in the TUI.

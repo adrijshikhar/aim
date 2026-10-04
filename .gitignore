@@ -19,3 +19,5 @@ docs/
 
 # IDE files
 .idea/
+.env
+.posthog/

@@ -7,9 +7,11 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -17,6 +19,7 @@ import (
 
 func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var check bool
+	var report bool
 	cmd := &cobra.Command{
 		Use:   "doctor [agent]",
 		Short: "Diagnose environment, tokens, and binaries",
@@ -25,6 +28,13 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 			agent := ""
 			if len(args) > 0 {
 				agent = args[0]
+			}
+			if report {
+				fmt.Print(generateDiagnosticReport(reg, pm, agent))
+				telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
+				telClient.Track(telemetry.EventDoctorReportGenerated, map[string]any{})
+				_ = telClient.Close()
+				return nil
 			}
 			ok := runDoctor(reg, pm, agent)
 			if check && !ok {
@@ -40,6 +50,7 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 		},
 	}
 	cmd.Flags().BoolVar(&check, "check", false, "Exit with non-zero status if any diagnostic check fails")
+	cmd.Flags().BoolVar(&report, "report", false, "Generate an anonymized Markdown diagnostic report for issue submission")
 	return cmd
 }
 
@@ -168,4 +179,8 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 		}
 	}
 	return allOK
+}
+
+func generateDiagnosticReport(reg *agents.Registry, pm *profile.ProfileManager, agentName string) string {
+	return diagnostics.GenerateReport(reg, pm, nil, agentName, Version, Commit)
 }

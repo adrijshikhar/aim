@@ -339,3 +339,49 @@ func TestRunner_PostLauncher(t *testing.T) {
 		t.Fatal("expected PostLaunch to be called")
 	}
 }
+
+type mockSlowPostLauncher struct {
+	started   chan struct{}
+	completed chan struct{}
+}
+
+func (m *mockSlowPostLauncher) PostLaunch(ctx context.Context, profileName, profileDir string) {
+	close(m.started)
+	<-ctx.Done()
+	// Simulate cleanup work (such as keychain token harvesting)
+	time.Sleep(30 * time.Millisecond)
+	close(m.completed)
+}
+
+func TestRunner_PostLauncher_WaitsForCompletionOnExit(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not found")
+	}
+
+	mock := &mockSlowPostLauncher{
+		started:   make(chan struct{}),
+		completed: make(chan struct{}),
+	}
+	r := NewRunner()
+
+	env := agents.LaunchEnv{
+		BinaryPath:   sh,
+		Args:         []string{"-c"},
+		Env:          map[string]string{"HOME": t.TempDir(), "AIM_PROFILE": "test"},
+		PostLauncher: mock,
+	}
+
+	code, err := r.Run(context.Background(), env, []string{"exit 0"})
+	if err != nil || code != 0 {
+		t.Fatalf("expected clean exit code 0, got %d, err: %v", code, err)
+	}
+
+	// By the time Run() returns, mock.completed must have been closed because postWg was waited on!
+	select {
+	case <-mock.completed:
+		// success
+	default:
+		t.Fatal("expected PostLaunch to complete before Run() returned")
+	}
+}

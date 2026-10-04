@@ -164,6 +164,14 @@ func Warn(format string, args ...any) {
 	}
 }
 
+// Error records an error-level message unconditionally in the debug log file.
+func Error(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	mu.Lock()
+	defer mu.Unlock()
+	writeLogLocked(time.Now(), "ERROR", msg)
+}
+
 // writeLogLocked appends one line to aim-debug.log; mu must be held.
 func writeLogLocked(now time.Time, level, msg string) {
 	if logFile == nil {

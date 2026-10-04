@@ -11,11 +11,13 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/updater"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // SubModel represents a modular child component in the TUI (such as drawers or modals)
@@ -68,10 +70,11 @@ type Model struct {
 	height      int
 	usageStream *usageStream
 
-	loading  bool
-	inFlight map[string]bool
-	spinner  spinner.Model
-	version  string
+	loading         bool
+	inFlight        map[string]bool
+	spinner         spinner.Model
+	version         string
+	updateAvailable string
 
 	deleteModal    deleteModalState
 	renameModal    renameModalState
@@ -86,6 +89,9 @@ type Model struct {
 
 	selectedSession *session.Session
 	selectedArgs    []string
+
+	feedbackModal feedbackModalState
+	statusMessage string
 }
 
 func NewModel(reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config) Model {
@@ -481,8 +487,25 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 	return fmt.Sprintf("[%d%%]", rep.BottleneckPct())
 }
 
+type updateAvailableMsg struct {
+	latestVersion string
+}
+
+func (m Model) checkForUpdateCmd() tea.Cmd {
+	v := m.Version()
+	cacheDir := config.CacheDir()
+	return func() tea.Msg {
+		cached := updater.CheckCached(v, cacheDir)
+		if cached != nil && cached.UpdateAvailable {
+			return updateAvailableMsg{latestVersion: cached.LatestVersion}
+		}
+		updater.MaybeTriggerBackgroundCheck(v, cacheDir)
+		return nil
+	}
+}
+
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), tickEvery(5*time.Minute))
+	return tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), m.checkForUpdateCmd(), tickEvery(5*time.Minute))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -498,6 +521,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.loading = true
 		return m, tea.Batch(m.triggerRefreshCmd(), m.spinTickCmd(), tickEvery(5*time.Minute))
+
+	case feedbackResultMsg:
+		if msg.err != nil {
+			if msg.fallbackURL != "" {
+				m.statusMessage = "Feedback fallback issue URL: " + msg.fallbackURL
+			} else {
+				m.statusMessage = "Feedback error: " + msg.err.Error()
+			}
+		} else {
+			m.statusMessage = "✓ Thank you! Your feedback helps shape AIM."
+		}
+		return m, nil
+
+	case updateAvailableMsg:
+		m.updateAvailable = msg.latestVersion
+		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -555,6 +594,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.feedbackModal.active {
+			return m.updateFeedbackModal(msg)
+		}
+
 		if m.deleteModal.active {
 			return m.updateDeleteModal(msg)
 		}
@@ -660,6 +703,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, keys.Doctor):
 			return m.openDoctorDrawer()
+		case key.Matches(msg, keys.Feedback):
+			return m.openFeedbackModal()
 		case key.Matches(msg, keys.Rename):
 			return m.openRenameModal()
 		case key.Matches(msg, keys.Move):
@@ -673,6 +718,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	default:
+		if m.feedbackModal.active {
+			return m.updateFeedbackModal(msg)
+		}
 		if m.renameModal.active {
 			return m.updateRenameModal(msg)
 		}
@@ -777,10 +825,19 @@ func (m Model) View() string {
 		return s.String()
 	}
 
+	if m.feedbackModal.active {
+		s.WriteString(m.renderFeedbackModal())
+		return s.String()
+	}
+
 	// Bottom inspector section when a profile is highlighted
 	if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
 		curProfile := filtered[m.cursor]
 		s.WriteString(m.renderInspector(curProfile))
+	}
+
+	if m.statusMessage != "" {
+		s.WriteString("\n  " + lipgloss.NewStyle().Foreground(StatusGreen).Bold(true).Render(m.statusMessage) + "\n")
 	}
 
 	refreshHint := HintKeyStyle.Render("[r]") + " " + HintLabelStyle.Render("Refresh Quota  ")
@@ -795,6 +852,7 @@ func (m Model) View() string {
 		HintKeyStyle.Render("[l]") + " " + HintLabelStyle.Render("Login  ") +
 		HintKeyStyle.Render("[Tab]") + " " + HintLabelStyle.Render("Switch Agent  ") +
 		HintKeyStyle.Render("[d]") + " " + HintLabelStyle.Render("Doctor  ") +
+		HintKeyStyle.Render("[f]") + " " + HintLabelStyle.Render("Feedback  ") +
 		HintKeyStyle.Render("[m]") + " " + HintLabelStyle.Render("Rename  ") +
 		HintKeyStyle.Render("[x]") + " " + HintLabelStyle.Render("Delete  ") +
 		HintKeyStyle.Render("[/]") + " " + HintLabelStyle.Render("Filter  ") +

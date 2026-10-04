@@ -67,9 +67,29 @@ func TestSanitizeVersion(t *testing.T) {
 			expected: "dev",
 		},
 		{
-			name:     "go module pseudo-version",
+			name:     "go module zero pseudo-version",
 			input:    "v0.0.0-20261001152033-97df544abcdef",
 			expected: "dev",
+		},
+		{
+			name:     "go module tagged pseudo-version with dirty",
+			input:    "v0.12.1-0.20261003181601-1ea426a88366+dirty",
+			expected: "dev",
+		},
+		{
+			name:     "go module tagged pseudo-version without dirty",
+			input:    "0.12.1-0.20261003181601-1ea426a88366",
+			expected: "dev",
+		},
+		{
+			name:     "semver with plus dirty suffix",
+			input:    "0.10.1+dirty",
+			expected: "0.10.1",
+		},
+		{
+			name:     "git describe with plus dirty suffix",
+			input:    "0.10.1-1-g97df544+dirty",
+			expected: "0.10.1",
 		},
 		{
 			name:     "dev fallback",

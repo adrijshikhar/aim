@@ -11,6 +11,7 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -158,6 +159,10 @@ func handleTUIOutcome(res tui.Model, reg *agents.Registry, pm *profile.ProfileMa
 
 func defaultTUIRunner(reg *agents.Registry, pm *profile.ProfileManager) int {
 	cfg, _ := config.LoadConfig()
+	telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, cfg)
+	telClient.Track(telemetry.EventTUIOpened, map[string]any{})
+	_ = telClient.Close()
+
 	m := tui.NewModel(reg, pm, cfg).WithVersion(Version)
 	p := tea.NewProgram(m)
 	// Console logging would draw over the TUI; the session it launches below

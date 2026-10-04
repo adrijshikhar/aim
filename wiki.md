@@ -188,6 +188,7 @@ Launching `aim` without arguments opens the terminal user interface built with C
 | `s` | Sessions Explorer drawer (resume exact or Catalyst handoff) |
 | `l` | Browser OAuth login for the selected profile |
 | `d` | Doctor diagnostics drawer |
+| `F` | In-tool feedback modal (general, bug report, or feature request) |
 | `m` / `R` | Rename selected profile |
 | `v` | Move selected profile |
 | `x` / `Delete` | Delete / unlink selected profile (with confirmation) |
@@ -206,6 +207,7 @@ The `aim doctor` command runs comprehensive pre-flight diagnostics:
 - **ADC Detection**: Confirms Google Cloud Application Default Credentials if active.
 - **Keychain Isolation (macOS)**: Scans the macOS Keychain for lingering agent credentials and automatically purges them to guarantee clean profile isolation.
 - **Dotfile Health**: Verifies that symlinks (such as `.gitconfig` and developer configs) resolve cleanly.
+- **Sanitized Markdown Report (`aim doctor --report`)**: Generates an anonymized diagnostic report formatted in Markdown, scrubbing home directory paths (`~`) and redacting configured profile names (`[profile-1]`, `[profile-2]`), ready for GitHub issue reporting.
 
 ---
 
@@ -355,5 +357,57 @@ For common operational issues, edge cases, and step-by-step remedies:
 - Gatekeeper quarantine clearance
 
 See the complete **[Troubleshooting Guide](TROUBLESHOOTING.md)**.
+
+---
+
+## 10. In-Tool Feedback & Crash Reporting
+
+AIM includes direct feedback channels to report issues, suggest features, or report bugs without context switching:
+
+### 10.1 CLI Feedback (`aim feedback`)
+Submit feedback from the terminal:
+```bash
+aim feedback "Love the Codex session resumption support!"
+aim feedback --category bug "Quota reset timer displays negative offset on macOS"
+aim feedback --include-doctor   # attaches an anonymized doctor diagnostic report
+```
+If piped:
+```bash
+echo "Feature idea: add Claude Code tool call analytics" | aim feedback
+```
+Standard input is bounded to 32KB to protect system resources.
+
+### 10.2 TUI Feedback Modal (`F`)
+Pressing `F` in the interactive dashboard opens the feedback modal:
+- Cycle category with `Tab` (General Feedback 💬, Bug Report 🐛, Feature Request 💡).
+- Toggle inclusion of the anonymized diagnostic report with `Ctrl+D`.
+- Submit with `Enter`.
+
+### 10.3 Panic Recovery & Sanitized Crash Bundles
+AIM registers a top-level crash recovery boundary across all command invocations. If an unexpected panic occurs:
+- The panic message and stack trace are scrubbed of personal home paths (`~`) and credentials (OAuth tokens, API keys, Bearer headers).
+- A structured crash report is written to disk at `~/.aim/reports/`.
+- A pre-filled GitHub issue URL (capped at 4,000 characters to prevent HTTP 414 errors) is printed to the terminal for one-click issue creation.
+
+---
+
+## 11. Privacy & Anonymous Telemetry
+
+AIM implements privacy-by-design anonymous telemetry to understand command performance, failure rates, and agent adoption.
+
+### 11.1 Anonymity Guarantees
+- **No Personal Identifiers**: Machine IDs are random SHA-256 hashes generated locally with `0600` permissions (`~/.aim/telemetry_id`). They contain no usernames, hostnames, MAC addresses, or IP addresses.
+- **Strict Sanitization**: Command names are matched against a known whitelist (`run`, `list`, `doctor`, `sessions`, `feedback`, `whoami`). User-supplied arguments, prompts, profile names, repository names, and flags are stripped before emission.
+- **Credential Redaction**: Stack traces, error logs, and reports pass through regex scrubbers redacting Google (`ya29.`), GitHub (`ghp_`), OpenAI (`sk-`), PostHog (`phc_`/`phx_`), and Bearer authorization tokens.
+- **Zero Ingestion Leakage**: PostHog ingestion rules and client-side event whitelisting drop any unauthorized event names.
+
+### 11.2 Opt-Out Precedence
+Telemetry collection can be fully disabled at any time using standard conventions:
+1. `export DO_NOT_TRACK=1` (universal web/tool standard)
+2. `export AIM_TELEMETRY_DISABLED=1`
+3. `"telemetry": false` in `~/.aim/config.json`
+
+When any opt-out tier is active, telemetry spooling is completely bypassed and zero bytes are written to disk or sent over the network. Test suites run with strict test isolation to prevent telemetry emission in development.
+
 
 

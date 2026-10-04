@@ -22,8 +22,10 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 
 - **Profile isolation** — a virtual `~` per profile with its own config, tokens, and history; dotfiles like `.gitconfig` and `.ssh` are bridged from the host ([details](wiki.md#what-is-isolated-vs-bridged)).
 - **Four agents** — Antigravity (`agy`), Gemini (`gemini`), Claude Code (`claude`), and Codex (`codex`).
-- **Interactive TUI** — profile list, agent tabs, fuzzy filter, live quota gauges, one-key launch.
+- **Interactive TUI** — profile list, agent tabs, fuzzy filter, live quota gauges, in-tool feedback (`F`), one-key launch.
 - **Quota telemetry** — 5h and weekly limits, reset countdowns, and credits across every account.
+- **Diagnostics & crash recovery** — `aim doctor` diagnoses environment health; `aim doctor --report` generates an anonymized Markdown bundle for issue filing; panic boundaries prevent unhandled crashes.
+- **In-tool feedback** — `aim feedback` or `F` in the TUI submits friction, bug reports, and suggestions directly to maintainers.
 - **Sessions & handoffs** — browse history across profiles, resume verbatim, or hand off context with [Catalyst](https://github.com/adrijshikhar/catalyst).
 - **Shared host MCP servers & plugins** — your normal agent config is available in every profile.
 
@@ -63,7 +65,8 @@ git clone https://github.com/adrijshikhar/aim.git && cd aim && make install
 | `aim sessions [agent] [--active] [--json]` | Active and past sessions across profiles and host |
 | `aim resume <agent> <profile> [id] [-- args...]` | Resume verbatim (`--exact`) or via Catalyst (`--catalyst`) |
 | `aim whoami` | Active profile, agent, session, and quota |
-| `aim doctor [agent]` | Check binaries, tokens, ADC status, and keychain isolation |
+| `aim doctor [agent] [--report]` | Check binaries, tokens, ADC status, and keychain (`--report` for sanitized Markdown bundle) |
+| `aim feedback [message]` | Submit feedback, bug reports, or feature requests directly |
 | `aim mv` | Move an agent account and credentials to another profile |
 | `aim remove [agent] <profile>` | Delete profile credentials and state |
 | `aim completion <shell>` | Shell completions (`zsh`, `bash`, `fish`) |
@@ -126,6 +129,32 @@ Thanks to **[Catalyst](https://github.com/adrijshikhar/catalyst)** for the hando
 - 🩺 **[Troubleshooting](TROUBLESHOOTING.md)** — OAuth, session resumption, SQLite, macOS signing.
 - 🎨 **[Design System](design.md)** — palette, tokens, Lipgloss standards.
 - 🛠️ **[Contributing](CONTRIBUTING.md)** — dev setup, tests, builds, new agent adapters.
+
+---
+
+## Privacy & Anonymous Telemetry
+
+To prioritize performance optimizations, agent integrations, and reliability improvements, `aim` collects lightweight, privacy-preserving anonymous usage metrics.
+
+### What is collected
+- **Sanitized command names** (`run`, `list`, `sessions`, `doctor`, `feedback`) and recognized agent names (`agy`, `claude`, `codex`, `gemini`).
+- **Coarse duration buckets** (`<500ms`, `500ms-2s`, `2s-10s`, `>10s`).
+- **Exit status codes** to monitor stability and failure rates.
+- **Pseudonymous machine ID** generated once via random cryptographic SHA-256 hash and stored at `~/.aim/telemetry_id` with `0600` owner-only permissions. Contains no usernames, hostnames, or hardware serials.
+
+### What is NEVER collected
+- ❌ **No prompts, inputs, or code contents** — prompt contents, code snippets, and custom flags are completely stripped.
+- ❌ **No profile or project names** — profile identifiers and repository names are discarded.
+- ❌ **No filesystem paths or usernames** — home directory paths are sanitized to `~`.
+- ❌ **No credentials or tokens** — API keys, OAuth tokens, and auth headers are automatically redacted.
+
+### Strict Opt-Out
+Telemetry is strictly opt-out and honors standard privacy conventions in order of precedence:
+1. Universal standard: `export DO_NOT_TRACK=1`
+2. Dedicated environment variable: `export AIM_TELEMETRY_DISABLED=1`
+3. Configuration file: `"telemetry": false` in `~/.aim/config.json`
+
+When opted out, zero bytes of telemetry are ever spooled to disk or sent over the network.
 
 ---
 

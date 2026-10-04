@@ -84,8 +84,9 @@ func CleanPromptText(raw string) string {
 	raw = strings.TrimSpace(raw)
 
 	// 6. Cap to a sensible length for session titles/summaries
-	if len(raw) > 500 {
-		raw = strings.TrimSpace(raw[:500]) + "..."
+	runes := []rune(raw)
+	if len(runes) > 500 {
+		raw = strings.TrimSpace(string(runes[:500])) + "..."
 	}
 
 	return raw
