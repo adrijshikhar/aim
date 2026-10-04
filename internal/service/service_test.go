@@ -572,3 +572,56 @@ func TestSessionService_ResumeSessionInTerminal(t *testing.T) {
 		t.Errorf("expected host cmd %q, got %q", expectedHostCmd, launcher.launchedCmds[0])
 	}
 }
+
+func TestMCPService_ListServers(t *testing.T) {
+	ctx := context.Background()
+	_, pm, _, _ := setupTestEnv(t)
+
+	// Create profile "isolated"
+	_, _ = pm.EnsureProfile("isolated")
+
+	mcpSvc := service.NewMCPService(pm)
+
+	// Query with empty profile
+	servers, err := mcpSvc.ListServers(ctx, "")
+	if err != nil {
+		t.Fatalf("unexpected error listing servers: %v", err)
+	}
+	if servers == nil {
+		t.Fatalf("expected non-nil slice")
+	}
+
+	// Create profile-scoped mcp_config.json in isolated profile
+	profDir := pm.ProfileDir("isolated")
+	geminiConfig := filepath.Join(profDir, ".gemini", "config")
+	_ = os.MkdirAll(geminiConfig, 0755)
+	_ = os.WriteFile(filepath.Join(geminiConfig, "mcp_config.json"), []byte(`{
+		"mcpServers": {
+			"custom-tool": {
+				"command": "node",
+				"args": ["tool.js"]
+			}
+		}
+	}`), 0644)
+
+	isoServers, err := mcpSvc.ListServers(ctx, "isolated")
+	if err != nil {
+		t.Fatalf("unexpected error listing servers for isolated: %v", err)
+	}
+	found := false
+	for _, s := range isoServers {
+		if s.Name == "custom-tool" {
+			found = true
+			if s.Scope != "profile" {
+				t.Errorf("expected scope profile, got %s", s.Scope)
+			}
+			if s.Command != "node" {
+				t.Errorf("expected command node, got %s", s.Command)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected to find custom-tool in isolated profile servers")
+	}
+}
+

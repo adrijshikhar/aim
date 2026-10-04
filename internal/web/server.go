@@ -28,6 +28,7 @@ type Server struct {
 	profiles  service.ProfileService
 	sessions  service.SessionService
 	launcher  service.LauncherService
+	mcp       service.MCPService
 	port      int
 	devMode   bool
 	version   string
@@ -48,11 +49,18 @@ func NewServer(
 	launcher service.LauncherService,
 	port int,
 	devMode bool,
+	mcp ...service.MCPService,
 ) *Server {
+	var mcpSvc service.MCPService
+	if len(mcp) > 0 {
+		mcpSvc = mcp[0]
+	}
+
 	s := &Server{
 		profiles:  profiles,
 		sessions:  sessions,
 		launcher:  launcher,
+		mcp:       mcpSvc,
 		port:      port,
 		devMode:   devMode,
 		version:   "dev",
@@ -78,6 +86,13 @@ func NewServer(
 	return s
 }
 
+// SetMCPService sets or updates the MCPService instance on Server.
+func (s *Server) SetMCPService(mcp service.MCPService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mcp = mcp
+}
+
 // SetVersion sets the AIM version string reported by /api/status.
 func (s *Server) SetVersion(v string) {
 	if v != "" {
@@ -97,6 +112,7 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("GET /api/sessions", s.handleGetSessions)
 	mux.HandleFunc("POST /api/sessions/resume", s.handleResumeSession)
 	mux.HandleFunc("GET /api/status", s.handleGetStatus)
+	mux.HandleFunc("GET /api/mcp", s.handleGetMcpServers)
 
 	// Catch-all for undefined /api/ routes -> JSON 404
 	mux.HandleFunc("/api/", s.handleAPINotFound)
