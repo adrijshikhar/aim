@@ -37,12 +37,14 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
               <AlertTriangle className="h-4 w-4 text-rose-500" />
               <span>Delete Profile</span>
             </DialogTitle>
-            <Badge
-              variant="outline"
-              className="text-[10px] font-mono bg-[#141414] text-[#888888] border-[#262626] px-2 py-0.5"
-            >
-              {target.agent}
-            </Badge>
+            {target.agent && target.agent.trim() !== '' && (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-mono bg-[#141414] text-[#888888] border-[#262626] px-2 py-0.5"
+              >
+                {target.agent}
+              </Badge>
+            )}
           </div>
           <DialogDescription className="text-xs text-[#888888]">
             This action cannot be undone. Are you sure you want to delete profile{' '}
@@ -55,10 +57,12 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
             <span>Profile Identifier:</span>
             <span className="text-[#ededed] font-medium">{target.name}</span>
           </div>
-          <div className="flex justify-between items-center">
-            <span>Agent Engine:</span>
-            <span className="text-[#ededed] font-medium">{target.agent}</span>
-          </div>
+          {target.agent && target.agent.trim() !== '' && (
+            <div className="flex justify-between items-center">
+              <span>Agent Engine:</span>
+              <span className="text-[#ededed] font-medium">{target.agent}</span>
+            </div>
+          )}
           <p className="text-[11px] text-[#777777] pt-2 border-t border-[#1c1c1c] leading-relaxed">
             This will permanently remove the profile directory, credentials, and configuration from AIM.
           </p>
