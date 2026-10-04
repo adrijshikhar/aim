@@ -17,9 +17,20 @@ type Event struct {
 	Properties map[string]any `json:"properties"`
 }
 
+// IsAllowedEvent validates whether an event name is within the sanctioned AIM telemetry schema.
+func IsAllowedEvent(name string) bool {
+	switch name {
+	case EventCommandExecuted, EventTUIOpened, EventDoctorReportGenerated, EventFeedbackSubmitted, "agent_run_completed", "user_identified":
+		return true
+	default:
+		return false
+	}
+}
+
 // NewEvent constructs an anonymous event with standard system properties.
 func NewEvent(name, distinctID, version, goos, arch string, customProps map[string]any) Event {
-	props := make(map[string]any, len(customProps)+4)
+	props := make(map[string]any, len(customProps)+5)
+	props["version"] = version
 	props["aim_version"] = version
 	props["os"] = goos
 	props["arch"] = arch

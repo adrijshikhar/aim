@@ -74,7 +74,7 @@ func NewClient(baseDir, cacheDir, version string, cfg *config.Config) *DefaultCl
 
 // Track records an anonymous event to the local spool.
 func (c *DefaultClient) Track(event string, properties map[string]any) {
-	if !c.enabled {
+	if !c.enabled || !IsAllowedEvent(event) {
 		return
 	}
 	ev := NewEvent(event, c.distinctID, c.version, runtime.GOOS, runtime.GOARCH, properties)

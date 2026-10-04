@@ -76,11 +76,27 @@ func newFeedbackCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 
 			d := feedback.NewDispatcher(endpoint)
 			if d.Endpoint == "" {
+				fmt.Print("Submitting feedback...")
+				telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
+				props := map[string]any{
+					"category":       string(cat),
+					"message":        message,
+					"include_doctor": includeDoctor,
+				}
+				if includeDoctor && sub.DoctorReport != "" {
+					props["doctor_report"] = sub.DoctorReport
+				}
+				telClient.Track(telemetry.EventFeedbackSubmitted, props)
+
+				flushCtx, flushCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer flushCancel()
+				_ = telClient.Flush(flushCtx)
+				_ = telClient.Close()
+
+				fmt.Println("\r" + tui.GaugeGreenStyle.Render("✓ Thank you! Your feedback has been submitted."))
 				fallbackURL := d.FallbackURL(sub)
-				fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("Direct In-Tool Feedback"))
-				fmt.Println("No automated ingest endpoint configured.")
-				fmt.Println("You can submit this directly as a pre-filled GitHub issue:")
-				fmt.Printf("\n  %s\n\n", lipgloss.NewStyle().Foreground(tui.AccentCyan).Underline(true).Render(fallbackURL))
+				fmt.Println("You can also view or discuss this publicly on GitHub:")
+				fmt.Printf("  %s\n\n", lipgloss.NewStyle().Foreground(tui.AccentCyan).Underline(true).Render(fallbackURL))
 				return nil
 			}
 
@@ -99,7 +115,15 @@ func newFeedbackCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 
 			fmt.Println("\r" + tui.GaugeGreenStyle.Render("✓ Thank you! Your feedback has been submitted."))
 			telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
-			telClient.Track(telemetry.EventFeedbackSubmitted, map[string]any{"category": string(cat)})
+			props := map[string]any{
+				"category":       string(cat),
+				"message":        message,
+				"include_doctor": includeDoctor,
+			}
+			if includeDoctor && sub.DoctorReport != "" {
+				props["doctor_report"] = sub.DoctorReport
+			}
+			telClient.Track(telemetry.EventFeedbackSubmitted, props)
 			_ = telClient.Close()
 			return nil
 		},
