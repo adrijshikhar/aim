@@ -60,6 +60,8 @@ export interface ResumeRequest {
   agent: string;
   profile: string;
   session_id: string;
+  flags?: string[];
+  custom_flags?: string;
 }
 
 export interface MCPServerDTO {

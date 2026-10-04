@@ -47,6 +47,8 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background-image: radial-gradient(ellipse 80% 40% at 50% -10%, rgba(0, 112, 243, 0.08), transparent);
+    background-attachment: fixed;
   }
 
   /* Minimalist UI <kbd> styling */

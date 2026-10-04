@@ -54,7 +54,10 @@ import {
   Copy,
   Cpu,
   ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
+import { ResumeModal } from '@/components/ResumeModal';
+import { AgentBadge } from '@/components/AgentBadge';
 
 interface ProfilesViewProps {
   selectedProfile: string;
@@ -89,6 +92,7 @@ export function ProfilesView({
   const [sessionSearch, setSessionSearch] = React.useState('');
   const [sessionEngineFilter, setSessionEngineFilter] = React.useState<string>('all');
   const [resumingId, setResumingId] = React.useState<string | null>(null);
+  const [flagModalSession, setFlagModalSession] = React.useState<SessionDTO | null>(null);
 
   // Profile MCP Servers
   const [profileMcpServers, setProfileMcpServers] = React.useState<MCPServerDTO[]>([]);
@@ -381,17 +385,20 @@ export function ProfilesView({
     }
   };
 
-  const handleResumeSession = async (s: SessionDTO) => {
+  const handleResumeSession = async (s: SessionDTO, flags?: string[], customFlags?: string) => {
     setResumingId(s.id);
     try {
       const res = await resumeSession({
         agent: s.agent,
         profile: s.profile,
         session_id: s.id,
+        flags: flags,
+        custom_flags: customFlags,
       });
+      const flagsDesc = flags && flags.length > 0 ? ` with ${flags.join(' ')}` : '';
       toast({
         title: 'Terminal Session Launched',
-        description: res.message || `Resumed session ${s.id} in an interactive terminal.`,
+        description: res.message || `Resumed session ${s.id}${flagsDesc} in an interactive terminal.`,
         variant: 'success',
       });
     } catch (err: unknown) {
@@ -420,15 +427,19 @@ export function ProfilesView({
   };
 
   const getAgentBadge = (agent: string) => {
-    const name = agent?.toLowerCase() || 'agent';
-    return (
-      <Badge
-        variant="outline"
-        className="bg-[#161616] text-[#ededed] border-[#2e2e2e] font-mono text-[11px] font-medium tracking-tight px-2 py-0.5 rounded-md"
-      >
-        {name}
-      </Badge>
-    );
+    return <AgentBadge agent={agent} />;
+  };
+
+  const getQuotaProgressColor = (pct: number) => {
+    if (pct <= 15) return 'bg-[#ee0000]';
+    if (pct <= 35) return 'bg-[#f5a623]';
+    return 'bg-[#0070f3]';
+  };
+
+  const getQuotaTextColor = (pct: number) => {
+    if (pct <= 15) return 'text-[#ee0000]';
+    if (pct <= 35) return 'text-[#f5a623]';
+    return 'text-[#0070f3]';
   };
 
   const currentProfile = React.useMemo(() => {
@@ -708,18 +719,18 @@ export function ProfilesView({
                             <Gauge className="h-3 w-3" /> Live Quota Telemetry
                           </span>
                           <span
-                            className={`font-mono text-xs font-medium tabular-nums ${
-                              (ad.quota?.bottleneck_pct ?? 100) <= 10 ? 'text-red-400' : 'text-[#ededed]'
-                            }`}
+                            className={`font-mono text-xs font-medium tabular-nums ${getQuotaTextColor(
+                              ad.quota?.bottleneck_pct ?? 100
+                            )}`}
                           >
                             {ad.quota ? `${ad.quota.bottleneck_pct}% remaining` : '100% remaining'}
                           </span>
                         </div>
                         <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
                           <div
-                            className={`h-full transition-all duration-300 ${
-                              (ad.quota?.bottleneck_pct ?? 100) <= 10 ? 'bg-red-500' : 'bg-[#ededed]'
-                            }`}
+                            className={`h-full transition-all duration-300 ${getQuotaProgressColor(
+                              ad.quota?.bottleneck_pct ?? 100
+                            )}`}
                             style={{ width: `${ad.quota?.bottleneck_pct ?? 100}%` }}
                           />
                         </div>
@@ -857,20 +868,30 @@ export function ProfilesView({
                           {new Date(s.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2.5 text-xs font-mono font-medium rounded-geist border border-[#333333] bg-[#171717] hover:bg-[#222222] text-[#ededed] cursor-pointer"
-                            disabled={resumingId === s.id}
-                            onClick={() => handleResumeSession(s)}
-                          >
-                            {resumingId === s.id ? (
-                              <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-                            ) : (
-                              <Terminal className="h-3 w-3 mr-1" />
-                            )}
-                            Resume
-                          </Button>
+                          <div className="inline-flex items-center rounded-geist border border-[#333333] bg-[#161616] overflow-hidden shadow-sm">
+                            <button
+                              type="button"
+                              className="h-7 px-2.5 text-xs font-mono font-medium hover:bg-[#222222] text-[#ededed] inline-flex items-center gap-1.5 transition-colors cursor-pointer border-r border-[#262626] disabled:opacity-50"
+                              title="Resume session in terminal"
+                              disabled={resumingId === s.id}
+                              onClick={() => handleResumeSession(s)}
+                            >
+                              {resumingId === s.id ? (
+                                <RefreshCw className="h-3 w-3 animate-spin text-[#0070f3]" />
+                              ) : (
+                                <Terminal className="h-3 w-3 text-[#0070f3]" />
+                              )}
+                              Resume
+                            </button>
+                            <button
+                              type="button"
+                              className="h-7 px-1.5 hover:bg-[#222222] text-[#888888] hover:text-[#ededed] inline-flex items-center transition-colors cursor-pointer"
+                              title="Configure flags & options (--exact, --catalyst, --fork, etc.)"
+                              onClick={() => setFlagModalSession(s)}
+                            >
+                              <ChevronDown className="h-3 w-3" />
+                            </button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
@@ -1030,6 +1051,18 @@ export function ProfilesView({
             </div>
           </div>
         )}
+
+        <ResumeModal
+          open={!!flagModalSession}
+          onOpenChange={(open) => !open && setFlagModalSession(null)}
+          session={flagModalSession}
+          isResuming={!!resumingId}
+          onLaunch={async (req) => {
+            if (flagModalSession) {
+              await handleResumeSession(flagModalSession, req.flags, req.custom_flags);
+            }
+          }}
+        />
       </div>
     );
   }
@@ -1336,18 +1369,18 @@ export function ProfilesView({
                             <div className="flex items-center justify-between text-[11px] font-mono">
                               <span className="text-[#888888]">{ad.agent}</span>
                               <span
-                                className={`tabular-nums ${
-                                  (ad.quota?.bottleneck_pct ?? 100) <= 10 ? 'text-red-400' : 'text-[#ededed]'
-                                }`}
+                                className={`tabular-nums ${getQuotaTextColor(
+                                  ad.quota?.bottleneck_pct ?? 100
+                                )}`}
                               >
                                 {ad.quota ? `${ad.quota.bottleneck_pct}%` : '100%'}
                               </span>
                             </div>
                             <div className="w-full bg-[#1c1c1c] h-1 rounded-full overflow-hidden border border-[#262626]">
                               <div
-                                className={`h-full transition-all duration-300 ${
-                                  (ad.quota?.bottleneck_pct ?? 100) <= 10 ? 'bg-red-500' : 'bg-[#ededed]'
-                                }`}
+                                className={`h-full transition-all duration-300 ${getQuotaProgressColor(
+                                  ad.quota?.bottleneck_pct ?? 100
+                                )}`}
                                 style={{ width: `${ad.quota?.bottleneck_pct ?? 100}%` }}
                               />
                             </div>
@@ -1361,22 +1394,18 @@ export function ProfilesView({
                             <Gauge className="h-3 w-3" /> Quota Telemetry
                           </span>
                           <span
-                            className={`font-mono text-xs font-medium tabular-nums ${
-                              (p.quota?.bottleneck_pct ?? 100) <= 10
-                                ? 'text-red-400'
-                                : 'text-[#ededed]'
-                            }`}
+                            className={`font-mono text-xs font-medium tabular-nums ${getQuotaTextColor(
+                              p.quota?.bottleneck_pct ?? 100
+                            )}`}
                           >
                             {p.quota ? `${p.quota.bottleneck_pct}% remaining` : '100% remaining'}
                           </span>
                         </div>
                         <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
                           <div
-                            className={`h-full transition-all duration-300 ${
-                              (p.quota?.bottleneck_pct ?? 100) <= 10
-                                ? 'bg-red-500'
-                                : 'bg-[#ededed]'
-                            }`}
+                            className={`h-full transition-all duration-300 ${getQuotaProgressColor(
+                              p.quota?.bottleneck_pct ?? 100
+                            )}`}
                             style={{ width: `${p.quota?.bottleneck_pct ?? 100}%` }}
                           />
                         </div>
@@ -1410,6 +1439,18 @@ export function ProfilesView({
           })}
         </div>
       )}
+
+      <ResumeModal
+        open={!!flagModalSession}
+        onOpenChange={(open) => !open && setFlagModalSession(null)}
+        session={flagModalSession}
+        isResuming={!!resumingId}
+        onLaunch={async (req) => {
+          if (flagModalSession) {
+            await handleResumeSession(flagModalSession, req.flags, req.custom_flags);
+          }
+        }}
+      />
     </div>
   );
 }

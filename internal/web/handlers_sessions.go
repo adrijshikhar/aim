@@ -62,6 +62,14 @@ func (s *Server) handleResumeSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.sessions.ResumeSessionInTerminal(r.Context(), req); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeJSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "illegal") {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
