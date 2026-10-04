@@ -48,13 +48,11 @@ export function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           {/* Logo & Version */}
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-primary to-blue-400 p-0.5 shadow-md shadow-primary/20 flex items-center justify-center">
-              <div className="h-full w-full bg-background rounded-[10px] flex items-center justify-center">
-                <Cpu className="h-5 w-5 text-primary" />
-              </div>
+            <div className="h-8 w-8 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center">
+              <Cpu className="h-4 w-4 text-primary" />
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-extrabold tracking-tight text-lg bg-gradient-to-r from-foreground via-foreground/90 to-muted-foreground bg-clip-text text-transparent">
+              <span className="font-bold tracking-tight text-base text-foreground">
                 AIM
               </span>
               <span className="text-xs text-muted-foreground hidden sm:inline">
