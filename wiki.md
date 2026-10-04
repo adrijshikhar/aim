@@ -409,5 +409,36 @@ Telemetry collection can be fully disabled at any time using standard convention
 
 When any opt-out tier is active, telemetry spooling is completely bypassed and zero bytes are written to disk or sent over the network. Test suites run with strict test isolation to prevent telemetry emission in development.
 
+---
 
+## 12. Background Daemon Architecture
 
+AIM includes a native background daemon designed to execute lightweight periodic maintenance tasks — specifically pre-warming quota and rate-limit caches across all configured profiles every 15 minutes.
+
+### 12.1 Native OS Service Integration (No Resident Process)
+Rather than keeping a persistent Go runtime daemon in memory (which consumes RAM and risks memory leaks or hanging child processes), AIM registers a scheduled job with the host operating system's native service manager:
+- **macOS**: Registers a User LaunchAgent via `launchd`:
+  - Plist Location: `~/Library/LaunchAgents/dev.aim-cli.daemon.plist`
+  - Configuration: `StartInterval = 900` (15 minutes), `RunAtLoad = true`, executing `aim daemon run`.
+  - Service Label: `dev.aim-cli.daemon`
+  - Logs: `~/.aim/daemon.log`
+- **Linux**: Registers a User Systemd Service and Timer via `systemctl --user`:
+  - Unit Files: `~/.config/systemd/user/aim-daemon.service` and `~/.config/systemd/user/aim-daemon.timer`
+  - Configuration: `OnUnitActiveSec = 15m`, executing `aim daemon run`.
+  - Logs: `~/.aim/daemon.log`
+
+### 12.2 Operational Subcommands
+- `aim daemon install [--binary <path>]`:
+  Generates the platform service definition (plist or systemd unit/timer), unloads any previous instances, registers the service with `launchctl load` or `systemctl --user enable --now`, and starts it immediately.
+- `aim daemon status [--json]`:
+  Queries `launchctl list` or `systemctl --user is-active` and inspects `~/.aim/daemon.log` for the most recent run timestamp and execution message. Supports `--json` for automation and statusline scripting.
+- `aim daemon uninstall`:
+  Gracefully stops the active service and timer from the OS service manager and removes the generated unit/plist files.
+- `aim daemon run`:
+  Single-shot task runner invoked by the host service manager. Dispatches `usage.RefreshAsync` across all configured agent profiles and records execution timestamps to `~/.aim/daemon.log`.
+
+### 12.3 Diagnostic Integration (`aim doctor`)
+`aim doctor` inspects daemon health automatically, reporting:
+- `[OK] Daemon: Active (launchd, interval: 15m, last run: X ago)` if registered and running.
+- `[INFO] Daemon: Not installed (run 'aim daemon install' to enable background tasks)` if not configured.
+- `[WARN] Daemon: Installed but inactive (<path>)` if unit file exists but is not registered in the OS service manager.

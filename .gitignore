@@ -11,6 +11,8 @@
 .agents/
 .catalyst/
 .claude/
+.codex/
+.hermes/
 .playwright-mcp/
 .superpowers/
 
