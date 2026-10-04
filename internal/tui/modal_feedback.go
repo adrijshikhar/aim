@@ -8,7 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/feedback"
+	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -104,6 +107,10 @@ func (m Model) updateFeedbackModal(msg tea.Msg) (Model, tea.Cmd) {
 				Timestamp:     time.Now().UTC(),
 			}
 
+			if includeDoctor {
+				sub.DoctorReport = diagnostics.GenerateReport(m.reg, m.pm, m.cfg, m.agent, m.version, "")
+			}
+
 			endpoint := os.Getenv("AIM_FEEDBACK_ENDPOINT")
 			d := feedback.NewDispatcher(endpoint)
 
@@ -128,12 +135,28 @@ func (m Model) updateFeedbackModal(msg tea.Msg) (Model, tea.Cmd) {
 func submitFeedbackCmd(d *feedback.HTTPDispatcher, sub feedback.Submission) tea.Cmd {
 	return func() tea.Msg {
 		if d == nil || d.Endpoint == "" {
+			telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), sub.AIMVersion, nil)
+			props := map[string]any{
+				"category":       string(sub.Category),
+				"message":        sub.Message,
+				"include_doctor": sub.IncludeDoctor,
+			}
+			if sub.IncludeDoctor && sub.DoctorReport != "" {
+				props["doctor_report"] = sub.DoctorReport
+			}
+			telClient.Track(telemetry.EventFeedbackSubmitted, props)
+
+			flushCtx, flushCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer flushCancel()
+			_ = telClient.Flush(flushCtx)
+			_ = telClient.Close()
+
 			url := ""
 			if d != nil {
 				url = d.FallbackURL(sub)
 			}
 			return feedbackResultMsg{
-				err:         fmt.Errorf("no endpoint configured"),
+				err:         nil,
 				fallbackURL: url,
 			}
 		}

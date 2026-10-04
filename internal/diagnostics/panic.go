@@ -15,6 +15,7 @@ var (
 		regexp.MustCompile(`(ya29\.[a-zA-Z0-9_\-]+)`),
 		regexp.MustCompile(`(gh[pousr]_[a-zA-Z0-9]{36,})`),
 		regexp.MustCompile(`(sk-[a-zA-Z0-9_\-]{20,})`),
+		regexp.MustCompile(`(ph[cx]_[a-zA-Z0-9_\-]{20,})`),
 	}
 )
 
@@ -64,7 +65,7 @@ func BuildGitHubIssueURL(title, body string) string {
 // HandlePanic processes an unhandled panic, scrubs sensitive paths and tokens,
 // and returns both a GitHub issue creation URL and a formatted diagnostic string.
 func HandlePanic(recovered any, stack []byte, homeDir string, version, commit string) (issueURL string, report string) {
-	panicMsg := fmt.Sprintf("%v", recovered)
+	panicMsg := SanitizeText(fmt.Sprintf("%v", recovered), homeDir)
 	sanitizedStack := SanitizeStack(string(stack), homeDir)
 
 	report = fmt.Sprintf(`### Crash Details

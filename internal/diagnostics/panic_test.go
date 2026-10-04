@@ -81,3 +81,37 @@ main.run()
 		t.Errorf("expected version and commit in report")
 	}
 }
+
+func TestSanitizeText_PostHogTokens(t *testing.T) {
+	input := "failed to initialize PostHog with token phc_tTNz7hfe9r6HMVMR5fjrJVEBoaGvZ4V9onEhZrF74Ggs and phx_customsecret1234567890abcdef"
+	sanitized := SanitizeText(input)
+
+	if strings.Contains(sanitized, "phc_tTNz7hfe9r6HMVMR5fjrJVEBoaGvZ4V9onEhZrF74Ggs") {
+		t.Errorf("expected phc token to be redacted, got: %s", sanitized)
+	}
+	if strings.Contains(sanitized, "phx_customsecret1234567890abcdef") {
+		t.Errorf("expected phx token to be redacted, got: %s", sanitized)
+	}
+	if !strings.Contains(sanitized, "[REDACTED]") {
+		t.Errorf("expected [REDACTED] in output, got: %s", sanitized)
+	}
+}
+
+func TestHandlePanic_SanitizesPanicMessageWithSecrets(t *testing.T) {
+	home := "/Users/victim"
+	panicPayload := "unhandled exception in /Users/victim/secrets.json with token sk-ant-secrettoken1234567890"
+	rawStack := []byte("goroutine 1:\nmain.go:10")
+
+	_, report := HandlePanic(panicPayload, rawStack, home, "dev", "head")
+
+	if strings.Contains(report, "/Users/victim") {
+		t.Errorf("panic message in report still contains home dir: %s", report)
+	}
+	if strings.Contains(report, "sk-ant-secrettoken1234567890") {
+		t.Errorf("panic message in report still contains token: %s", report)
+	}
+	if !strings.Contains(report, "~/secrets.json") {
+		t.Errorf("expected ~/secrets.json in sanitized report, got: %s", report)
+	}
+}
+

@@ -2,6 +2,7 @@ package updater
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -36,5 +37,9 @@ func writeCache(cacheDir string, c CacheData) error {
 		return err
 	}
 	cachePath := filepath.Join(cacheDir, "update_check.json")
-	return os.WriteFile(cachePath, data, 0644)
+	tmpPath := fmt.Sprintf("%s.%d.tmp", cachePath, os.Getpid())
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, cachePath)
 }

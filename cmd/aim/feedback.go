@@ -44,8 +44,8 @@ func newFeedbackCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 						return err
 					}
 				} else {
-					// Read piped input
-					data, err := io.ReadAll(os.Stdin)
+					// Read piped input (bounded to 32KB)
+					data, err := io.ReadAll(io.LimitReader(os.Stdin, 32*1024))
 					if err == nil {
 						message = strings.TrimSpace(string(data))
 					}

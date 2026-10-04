@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
@@ -77,7 +78,16 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		postCtx, postCancel := context.WithCancel(ctx)
 		defer func() {
 			postCancel()
-			postWg.Wait()
+			done := make(chan struct{})
+			go func() {
+				postWg.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(500 * time.Millisecond):
+				logger.Debug("[runner] PostLaunch shutdown timed out after 500ms")
+			}
 		}()
 		postWg.Add(1)
 		go func() {

@@ -65,8 +65,11 @@ func (s *Spooler) Append(ev Event) error {
 func (s *Spooler) Read() ([]Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return readEventsFromFile(s.SpoolPath)
+}
 
-	data, err := os.ReadFile(s.SpoolPath)
+func readEventsFromFile(path string) ([]Event, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -101,16 +104,32 @@ func (s *Spooler) Clear() error {
 }
 
 // Flush submits all queued events in a single batch request and clears the spool on success.
+// It uses atomic rename before network flight to ensure concurrent processes appending new events
+// do not suffer data loss when the flushed batch is cleared.
 func (s *Spooler) Flush(ctx context.Context) error {
-	events, err := s.Read()
-	if err != nil || len(events) == 0 {
+	if s.Endpoint == "" {
 		return nil
 	}
-	if s.Endpoint == "" {
-		// If no remote endpoint is set, keep spool bounded
-		if len(events) > 100 {
-			_ = s.Clear()
-		}
+
+	s.mu.Lock()
+	if _, err := os.Stat(s.SpoolPath); os.IsNotExist(err) {
+		s.mu.Unlock()
+		return nil
+	}
+
+	flushPath := fmt.Sprintf("%s.%d.%d.flushing", s.SpoolPath, os.Getpid(), time.Now().UnixNano())
+	if err := os.Rename(s.SpoolPath, flushPath); err != nil {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+
+	defer func() {
+		_ = os.Remove(flushPath)
+	}()
+
+	events, err := readEventsFromFile(flushPath)
+	if err != nil || len(events) == 0 {
 		return nil
 	}
 
@@ -135,15 +154,18 @@ func (s *Spooler) Flush(ctx context.Context) error {
 	req.Header.Set("User-Agent", "aim-telemetry")
 
 	resp, err := s.Client.Do(req)
-	if err != nil {
-		return err
+	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Re-append events back to spool on failure so data is preserved for retry
+		for _, ev := range events {
+			_ = s.Append(ev)
+		}
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		return fmt.Errorf("telemetry endpoint returned status: %d", resp.StatusCode)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		_ = s.Clear()
-		return nil
-	}
-
-	return fmt.Errorf("telemetry endpoint returned status: %d", resp.StatusCode)
+	return nil
 }

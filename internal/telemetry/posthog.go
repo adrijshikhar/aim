@@ -96,6 +96,9 @@ func IdentifyAccount(agentName string, account profile.AccountInfo) {
 // CaptureAccountEvent records a non-PII product event for an authenticated
 // provider account. It is a no-op when analytics is disabled.
 func CaptureAccountEvent(agentName string, account profile.AccountInfo, event string, eventProperties map[string]any) {
+	if !IsAllowedEvent(event) {
+		return
+	}
 	client := PostHogClient()
 	if client == nil {
 		return

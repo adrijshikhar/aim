@@ -626,10 +626,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHelpOverlay(msg)
 		}
 
-		if m.feedbackModal.active {
-			return m.updateFeedbackModal(msg)
-		}
-
 		if m.filter.active {
 			return m.updateFilter(msg)
 		}

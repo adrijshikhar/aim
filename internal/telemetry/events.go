@@ -30,13 +30,14 @@ func IsAllowedEvent(name string) bool {
 // NewEvent constructs an anonymous event with standard system properties.
 func NewEvent(name, distinctID, version, goos, arch string, customProps map[string]any) Event {
 	props := make(map[string]any, len(customProps)+5)
+	for k, v := range customProps {
+		props[k] = v
+	}
+	// System properties are immutable and cannot be overridden by custom properties (anti-spoofing)
 	props["version"] = version
 	props["aim_version"] = version
 	props["os"] = goos
 	props["arch"] = arch
-	for k, v := range customProps {
-		props[k] = v
-	}
 
 	return Event{
 		EventName:  name,
