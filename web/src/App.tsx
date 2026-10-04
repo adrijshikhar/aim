@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { getStatus, getDaemonStatus, StatusDTO, ProfileDTO, DaemonDTO } from '@/lib/api';
+import { getStatus, getDaemonStatus, StatusDTO, DaemonDTO } from '@/lib/api';
 import { ProfilesView } from '@/views/ProfilesView';
 import { SessionsView } from '@/views/SessionsView';
 import { McpView } from '@/views/McpView';
@@ -17,7 +17,6 @@ import {
 export function App() {
   const [activeTab, setActiveTab] = React.useState('profiles');
   const [selectedProfile, setSelectedProfile] = React.useState('all');
-  const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
   const [status, setStatus] = React.useState<StatusDTO>({
     version: 'v0.12.0',
     status: 'healthy',
@@ -58,12 +57,6 @@ export function App() {
     return () => clearInterval(interval);
   }, [fetchDaemonStatus]);
 
-  // Compute unique profile names for top header filter
-  const profileNames = React.useMemo(() => {
-    const names = Array.from(new Set(profiles.map((p) => p.name)));
-    return names.sort();
-  }, [profiles]);
-
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
       {/* Vercel Geist Sticky Header */}
@@ -88,34 +81,6 @@ export function App() {
                 {status.version || 'v0.12.0'}
               </Badge>
             </div>
-          </div>
-
-          {/* Center Profile Filter (Pills) as Primary Controller */}
-          <div className="hidden md:flex items-center gap-1 bg-[#111111] p-1 rounded-full border border-border shadow-sm">
-            <span className="text-[11px] font-medium text-[#777777] px-2 font-mono">profile:</span>
-            <button
-              onClick={() => setSelectedProfile('all')}
-              className={`text-xs px-2.5 py-0.5 rounded-full font-medium transition-all duration-150 cursor-pointer ${
-                selectedProfile === 'all'
-                  ? 'bg-[#ededed] text-[#0a0a0a] font-semibold shadow-sm'
-                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1c1c1c] border border-transparent'
-              }`}
-            >
-              All
-            </button>
-            {profileNames.map((name) => (
-              <button
-                key={name}
-                onClick={() => setSelectedProfile(name)}
-                className={`text-xs px-2.5 py-0.5 rounded-full font-medium transition-all duration-150 cursor-pointer ${
-                  selectedProfile === name
-                    ? 'bg-[#ededed] text-[#0a0a0a] font-semibold shadow-sm'
-                    : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1c1c1c] border border-transparent'
-                }`}
-              >
-                {name}
-              </button>
-            ))}
           </div>
 
           {/* Status Pills: Daemon Modal Trigger & Server Connection */}
@@ -169,7 +134,7 @@ export function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           {/* Navigation Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-3">
+          <div className="flex items-center justify-between border-b border-border pb-3">
             <TabsList className="bg-[#111111] p-0.5 border border-border rounded-geist">
               <TabsTrigger value="profiles" className="flex items-center gap-1.5 text-xs">
                 <Layers className="h-3.5 w-3.5" />
@@ -184,23 +149,6 @@ export function App() {
                 <span>MCP Servers</span>
               </TabsTrigger>
             </TabsList>
-
-            {/* Mobile Profile Selector */}
-            <div className="md:hidden flex items-center gap-2">
-              <span className="text-xs text-[#888888] font-mono">Profile:</span>
-              <select
-                value={selectedProfile}
-                onChange={(e) => setSelectedProfile(e.target.value)}
-                className="text-xs bg-[#111111] border border-border rounded-geist px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-[#0070f3]"
-              >
-                <option value="all">All Profiles</option>
-                {profileNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {/* View Panels */}
@@ -208,7 +156,6 @@ export function App() {
             <ProfilesView
               selectedProfile={selectedProfile}
               onSelectProfile={setSelectedProfile}
-              onProfilesLoaded={setProfiles}
             />
           </TabsContent>
 
