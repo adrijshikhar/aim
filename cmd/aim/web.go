@@ -65,15 +65,18 @@ Examples:
 			}
 			fmt.Println("Press Ctrl+C to stop")
 
-			if !noOpen {
-				go func() {
-					time.Sleep(100 * time.Millisecond)
-					_ = openBrowserURL(serverURL)
-				}()
-			}
-
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+
+			if !noOpen {
+				go func() {
+					select {
+					case <-time.After(100 * time.Millisecond):
+						_ = openBrowserURL(serverURL)
+					case <-ctx.Done():
+					}
+				}()
+			}
 
 			serverErr := make(chan error, 1)
 			go func() {

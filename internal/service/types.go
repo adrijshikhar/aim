@@ -66,9 +66,11 @@ type SessionFilter struct {
 
 // ResumeRequest defines parameters to resume an existing session in a terminal.
 type ResumeRequest struct {
-	Agent     string `json:"agent"`
-	Profile   string `json:"profile"`
-	SessionID string `json:"session_id"`
+	Agent       string   `json:"agent"`
+	Profile     string   `json:"profile"`
+	SessionID   string   `json:"session_id"`
+	Flags       []string `json:"flags,omitempty"`
+	CustomFlags string   `json:"custom_flags,omitempty"`
 }
 
 // LauncherService defines the contract for launching interactive terminal windows.

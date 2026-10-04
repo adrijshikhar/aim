@@ -80,7 +80,7 @@ func parseMCPFile(path string, scope string) map[string]MCPServerDTO {
 }
 
 func (s *mcpService) ListServers(ctx context.Context, profileName string) ([]MCPServerDTO, error) {
-	homeDir, _ := os.UserHomeDir()
+	homeDir := config.RealHomeDir()
 	allServers := make(map[string]MCPServerDTO)
 
 	profileName = strings.TrimSpace(profileName)

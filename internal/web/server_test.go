@@ -385,11 +385,13 @@ func TestResumeSession(t *testing.T) {
 
 	ts, _ := setupTestServer(t, nil, sess, launch, false)
 
-	// Valid resume
+	// Valid resume with flags
 	body := service.ResumeRequest{
-		Agent:     "claude",
-		Profile:   "work",
-		SessionID: "sess-abc-123",
+		Agent:       "claude",
+		Profile:     "work",
+		SessionID:   "sess-abc-123",
+		Flags:       []string{"--exact"},
+		CustomFlags: "--verbose",
 	}
 	b, _ := json.Marshal(body)
 	resp, err := http.Post(ts.URL+"/api/sessions/resume", "application/json", bytes.NewReader(b))
@@ -409,7 +411,7 @@ func TestResumeSession(t *testing.T) {
 	if respData["status"] != "launched" || respData["terminal"] != "Ghostty" {
 		t.Fatalf("unexpected response: %+v", respData)
 	}
-	if resumedReq.SessionID != "sess-abc-123" {
+	if resumedReq.SessionID != "sess-abc-123" || len(resumedReq.Flags) != 1 || resumedReq.Flags[0] != "--exact" || resumedReq.CustomFlags != "--verbose" {
 		t.Fatalf("unexpected resume request: %+v", resumedReq)
 	}
 
@@ -694,5 +696,83 @@ func TestGetMcpServers(t *testing.T) {
 	}
 	if len(isoServers) != 1 || isoServers[0].Name != "local-tool" {
 		t.Fatalf("expected 1 local-tool server, got %v", isoServers)
+	}
+}
+
+func TestResumeSession_ErrorStatusMapping(t *testing.T) {
+	sess := &mockSessionService{
+		resumeSessionInTerminalFn: func(ctx context.Context, req service.ResumeRequest) error {
+			if req.SessionID == "missing" {
+				return errors.New("session not found: missing")
+			}
+			if req.SessionID == "illegal; id" {
+				return errors.New("invalid session ID: contains illegal characters")
+			}
+			return errors.New("internal error")
+		},
+	}
+
+	ts, _ := setupTestServer(t, nil, sess, nil, false)
+
+	// 1. Not Found -> 404
+	bNotFound, _ := json.Marshal(service.ResumeRequest{Agent: "claude", SessionID: "missing"})
+	resp, err := http.Post(ts.URL+"/api/sessions/resume", "application/json", bytes.NewReader(bNotFound))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 for not found, got %d", resp.StatusCode)
+	}
+
+	// 2. Illegal chars -> 400
+	bIllegal, _ := json.Marshal(service.ResumeRequest{Agent: "claude", SessionID: "illegal; id"})
+	resp2, err := http.Post(ts.URL+"/api/sessions/resume", "application/json", bytes.NewReader(bIllegal))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for illegal chars, got %d", resp2.StatusCode)
+	}
+}
+
+func TestDeleteProfile_NotFoundStatus(t *testing.T) {
+	profs := &mockProfileService{
+		removeProfileFn: func(ctx context.Context, agent, name string) error {
+			return errors.New("profile 'missing' does not exist")
+		},
+	}
+	ts, _ := setupTestServer(t, profs, nil, nil, false)
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/profiles/claude/missing", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 for missing profile, got %d", resp.StatusCode)
+	}
+}
+
+func TestServer_MCPService_ThreadSafe(t *testing.T) {
+	srv := web.NewServer(nil, nil, nil, 0, false)
+	done := make(chan struct{})
+
+	go func() {
+		for i := 0; i < 100; i++ {
+			srv.SetMCPService(&mockMCPService{})
+		}
+		close(done)
+	}()
+
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			_ = srv.MCPService()
+		}
 	}
 }

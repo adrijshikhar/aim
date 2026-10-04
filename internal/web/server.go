@@ -11,7 +11,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"path/filepath"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,6 +93,13 @@ func (s *Server) SetMCPService(mcp service.MCPService) {
 	s.mcp = mcp
 }
 
+// MCPService returns the configured MCPService instance safely under mutex lock.
+func (s *Server) MCPService() service.MCPService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mcp
+}
+
 // SetVersion sets the AIM version string reported by /api/status.
 func (s *Server) SetVersion(v string) {
 	if v != "" {
@@ -163,7 +170,7 @@ func (s *Server) serveEmbeddedSPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleanPath := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
+	cleanPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 	if cleanPath == "" || cleanPath == "." {
 		cleanPath = "index.html"
 	}
@@ -234,7 +241,9 @@ func (s *Server) Listen() error {
 	}
 	s.listener = ln
 	s.httpServer = &http.Server{
-		Handler: s.handler,
+		Handler:           s.handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	return nil
 }

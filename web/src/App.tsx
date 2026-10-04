@@ -75,14 +75,14 @@ export function App() {
           </div>
 
           {/* Center Profile Filter (Pills) as Primary Controller */}
-          <div className="hidden md:flex items-center gap-1 bg-[#111111] p-1 rounded-full border border-border">
-            <span className="text-[11px] font-medium text-[#888888] px-2 font-mono">profile:</span>
+          <div className="hidden md:flex items-center gap-1 bg-[#111111] p-1 rounded-full border border-border shadow-sm">
+            <span className="text-[11px] font-medium text-[#777777] px-2 font-mono">profile:</span>
             <button
               onClick={() => setSelectedProfile('all')}
               className={`text-xs px-2.5 py-0.5 rounded-full font-medium transition-all duration-150 cursor-pointer ${
                 selectedProfile === 'all'
-                  ? 'bg-[#222222] text-[#ededed] border border-[#333333] shadow-sm'
-                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#161616] border border-transparent'
+                  ? 'bg-[#ededed] text-[#0a0a0a] font-semibold shadow-sm'
+                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1c1c1c] border border-transparent'
               }`}
             >
               All
@@ -93,8 +93,8 @@ export function App() {
                 onClick={() => setSelectedProfile(name)}
                 className={`text-xs px-2.5 py-0.5 rounded-full font-medium transition-all duration-150 cursor-pointer ${
                   selectedProfile === name
-                    ? 'bg-[#222222] text-[#ededed] border border-[#333333] shadow-sm'
-                    : 'text-[#888888] hover:text-[#ededed] hover:bg-[#161616] border border-transparent'
+                    ? 'bg-[#ededed] text-[#0a0a0a] font-semibold shadow-sm'
+                    : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1c1c1c] border border-transparent'
                 }`}
               >
                 {name}
@@ -104,9 +104,20 @@ export function App() {
 
           {/* Daemon Status Pill */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-[#111111] text-xs">
-              <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              <span className="font-mono text-[11px] text-[#888888]">
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#262626] bg-[#111111] text-xs">
+              <span className="relative flex h-2 w-2">
+                <span
+                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    isOnline ? 'bg-[#00e599]' : 'bg-[#f5a623]'
+                  }`}
+                />
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    isOnline ? 'bg-[#00e599] shadow-[0_0_8px_rgba(0,229,153,0.6)]' : 'bg-[#f5a623]'
+                  }`}
+                />
+              </span>
+              <span className="font-mono text-[11px] text-[#ededed]">
                 {isOnline ? 'Daemon Connected' : 'Connecting...'}
               </span>
             </div>

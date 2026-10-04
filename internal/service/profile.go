@@ -268,6 +268,9 @@ func (s *profileService) RemoveProfile(ctx context.Context, agent, name string) 
 	if name == "" {
 		return errors.New("profile name cannot be empty")
 	}
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") || filepath.Base(name) != name {
+		return fmt.Errorf("invalid profile name %q: path traversal not allowed", name)
+	}
 
 	cfg, err := config.LoadConfig()
 	if err != nil || cfg == nil {
@@ -339,6 +342,12 @@ func (s *profileService) RenameProfile(ctx context.Context, agent, oldName, newN
 	if newName == "" {
 		return errors.New("target profile name cannot be empty")
 	}
+	if oldName == "." || oldName == ".." || strings.ContainsAny(oldName, "/\\") || filepath.Base(oldName) != oldName {
+		return fmt.Errorf("invalid source profile name %q: path traversal not allowed", oldName)
+	}
+	if newName == "." || newName == ".." || strings.ContainsAny(newName, "/\\") || filepath.Base(newName) != newName {
+		return fmt.Errorf("invalid target profile name %q: path traversal not allowed", newName)
+	}
 
 	cfg, err := config.LoadConfig()
 	if err != nil || cfg == nil {
@@ -380,6 +389,12 @@ func (s *profileService) UpdateProfileConfig(ctx context.Context, name string, m
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errors.New("profile name cannot be empty")
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") || filepath.Base(name) != name {
+		return fmt.Errorf("invalid profile name %q: path traversal not allowed", name)
+	}
+	if !s.pm.ProfileExists(name) {
+		return fmt.Errorf("profile '%s' does not exist", name)
 	}
 
 	cfg, err := config.LoadConfig()

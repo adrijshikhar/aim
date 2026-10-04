@@ -571,6 +571,22 @@ func TestSessionService_ResumeSessionInTerminal(t *testing.T) {
 	if launcher.launchedCmds[0] != expectedHostCmd {
 		t.Errorf("expected host cmd %q, got %q", expectedHostCmd, launcher.launchedCmds[0])
 	}
+
+	// Resume with explicit flags and custom flags
+	launcher.launchedCmds = nil
+	err = svc.ResumeSessionInTerminal(ctx, service.ResumeRequest{
+		Agent:       "claude",
+		SessionID:   "abcdef12",
+		Flags:       []string{"--exact", "--fork"},
+		CustomFlags: "--dangerously-skip-permissions",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error resuming with flags: %v", err)
+	}
+	expectedFlagsCmd := "aim resume claude work abcdef12-3456-7890-abcd-ef1234567890 --exact --fork --dangerously-skip-permissions"
+	if launcher.launchedCmds[0] != expectedFlagsCmd {
+		t.Errorf("expected cmd with flags %q, got %q", expectedFlagsCmd, launcher.launchedCmds[0])
+	}
 }
 
 func TestMCPService_ListServers(t *testing.T) {
@@ -622,5 +638,110 @@ func TestMCPService_ListServers(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected to find custom-tool in isolated profile servers")
+	}
+}
+
+func TestSessionService_ResumeSessionInTerminal_SecurityValidation(t *testing.T) {
+	ctx := context.Background()
+	launcher := &mockLauncher{}
+	mgr := session.NewManager()
+	prov := &mockSessionProvider{
+		agent: "claude",
+		sessions: []session.Session{
+			{
+				ID:           "valid-session-123",
+				ShortID:      "valid-123",
+				Agent:        "claude",
+				Profile:      "work",
+				LastActiveAt: time.Now(),
+			},
+		},
+	}
+	mgr.RegisterProvider(prov)
+	svc := service.NewSessionService(mgr, launcher)
+
+	testCases := []struct {
+		name string
+		req  service.ResumeRequest
+	}{
+		{
+			name: "injection in agent",
+			req: service.ResumeRequest{
+				Agent:     "claude; rm -rf /",
+				SessionID: "valid-session-123",
+			},
+		},
+		{
+			name: "injection in session_id",
+			req: service.ResumeRequest{
+				Agent:     "claude",
+				SessionID: "valid-session-123 | id",
+			},
+		},
+		{
+			name: "injection in profile",
+			req: service.ResumeRequest{
+				Agent:     "claude",
+				Profile:   "work; touch /tmp/pwned",
+				SessionID: "valid-session-123",
+			},
+		},
+		{
+			name: "illegal flag",
+			req: service.ResumeRequest{
+				Agent:     "claude",
+				SessionID: "valid-session-123",
+				Flags:     []string{"--exact; echo 1"},
+			},
+		},
+		{
+			name: "illegal custom flags",
+			req: service.ResumeRequest{
+				Agent:       "claude",
+				SessionID:   "valid-session-123",
+				CustomFlags: "--verbose; rm -rf ~",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := svc.ResumeSessionInTerminal(ctx, tc.req)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestProfileService_PathTraversalAndValidation(t *testing.T) {
+	ctx := context.Background()
+	_, pm, reg, _ := setupTestEnv(t)
+	svc := service.NewProfileService(pm, reg)
+
+	// UpdateProfileConfig: path traversal
+	traversal := true
+	if err := svc.UpdateProfileConfig(ctx, "../evil", &traversal, nil); err == nil {
+		t.Errorf("expected path traversal error for UpdateProfileConfig")
+	}
+
+	// UpdateProfileConfig: non-existent profile
+	if err := svc.UpdateProfileConfig(ctx, "non-existent-profile", &traversal, nil); err == nil {
+		t.Errorf("expected not found error for non-existent profile in UpdateProfileConfig")
+	}
+
+	// RemoveProfile: path traversal
+	if err := svc.RemoveProfile(ctx, "claude", "../evil"); err == nil {
+		t.Errorf("expected path traversal error for RemoveProfile")
+	}
+
+	// RenameProfile: path traversal in source
+	if err := svc.RenameProfile(ctx, "claude", "../evil", "target"); err == nil {
+		t.Errorf("expected path traversal error for RenameProfile source")
+	}
+
+	// RenameProfile: path traversal in target
+	if err := svc.RenameProfile(ctx, "claude", "source", "../evil"); err == nil {
+		t.Errorf("expected path traversal error for RenameProfile target")
 	}
 }

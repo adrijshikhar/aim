@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 type linuxLauncher struct {
@@ -33,7 +34,8 @@ func NewLinuxLauncher(
 	}
 	if startCmd == nil {
 		startCmd = func(ctx context.Context, name string, args ...string) error {
-			cmd := exec.CommandContext(ctx, name, args...)
+			cmd := exec.Command(name, args...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			return cmd.Start()
 		}
 	}

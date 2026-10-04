@@ -14,7 +14,6 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Terminal,
@@ -24,7 +23,10 @@ import {
   Clock,
   MessageSquare,
   Activity,
+  ChevronDown,
 } from 'lucide-react';
+import { ResumeModal } from '@/components/ResumeModal';
+import { AgentBadge } from '@/components/AgentBadge';
 
 interface SessionsViewProps {
   selectedProfile?: string;
@@ -36,6 +38,7 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
   const [loading, setLoading] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [resumingId, setResumingId] = React.useState<string | null>(null);
+  const [flagModalSession, setFlagModalSession] = React.useState<SessionDTO | null>(null);
 
   const { toast } = useToast();
 
@@ -104,18 +107,21 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
     fetchSessions();
   }, [fetchSessions]);
 
-  const handleResume = async (s: SessionDTO) => {
+  const handleResume = async (s: SessionDTO, flags?: string[], customFlags?: string) => {
     setResumingId(s.id);
     try {
       const res = await resumeSession({
         agent: s.agent,
         profile: s.profile,
         session_id: s.id,
+        flags: flags,
+        custom_flags: customFlags,
       });
 
+      const flagsDesc = flags && flags.length > 0 ? ` with ${flags.join(' ')}` : '';
       toast({
         title: 'Terminal Session Launched',
-        description: res.message || `Resumed session ${s.id} (${s.agent}/${s.profile}) in an interactive terminal.`,
+        description: res.message || `Resumed session ${s.id} (${s.agent}/${s.profile})${flagsDesc} in terminal.`,
         variant: 'success',
       });
     } catch (err: unknown) {
@@ -165,17 +171,6 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
     }
   };
 
-  const getAgentBadge = (agent: string) => {
-    const name = agent?.toLowerCase() || 'agent';
-    return (
-      <Badge
-        variant="outline"
-        className="bg-[#161616] text-[#ededed] border-[#2e2e2e] font-mono text-[11px] font-medium tracking-tight px-2 py-0.5 rounded-md"
-      >
-        {name}
-      </Badge>
-    );
-  };
 
   return (
     <div className="space-y-4">
@@ -262,7 +257,7 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
                 <TableRow key={s.id} className="group hover:bg-[#161616] transition-colors border-b border-[#1f1f1f]">
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      {getAgentBadge(s.agent)}
+                      <AgentBadge agent={s.agent} />
                       {s.is_active && (
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" title="Active session" />
                       )}
@@ -310,20 +305,30 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
                   </TableCell>
 
                   <TableCell className="text-right">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 px-2.5 text-xs font-mono font-medium rounded-geist border border-[#333333] bg-[#171717] hover:bg-[#222222] hover:border-[#555555] text-[#ededed] transition-all cursor-pointer"
-                      disabled={resumingId === s.id}
-                      onClick={() => handleResume(s)}
-                    >
-                      {resumingId === s.id ? (
-                        <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-                      ) : (
-                        <Terminal className="h-3 w-3 mr-1 text-[#ededed]" />
-                      )}
-                      Resume
-                    </Button>
+                    <div className="inline-flex items-center rounded-geist border border-[#333333] bg-[#161616] overflow-hidden shadow-sm">
+                      <button
+                        type="button"
+                        className="h-7 px-2.5 text-xs font-mono font-medium hover:bg-[#222222] text-[#ededed] inline-flex items-center gap-1.5 transition-colors cursor-pointer border-r border-[#262626] disabled:opacity-50"
+                        title="Resume session in terminal"
+                        disabled={resumingId === s.id}
+                        onClick={() => handleResume(s)}
+                      >
+                        {resumingId === s.id ? (
+                          <RefreshCw className="h-3 w-3 animate-spin text-[#0070f3]" />
+                        ) : (
+                          <Terminal className="h-3 w-3 text-[#0070f3]" />
+                        )}
+                        Resume
+                      </button>
+                      <button
+                        type="button"
+                        className="h-7 px-1.5 hover:bg-[#222222] text-[#888888] hover:text-[#ededed] inline-flex items-center transition-colors cursor-pointer"
+                        title="Configure flags & options (--exact, --catalyst, --fork, etc.)"
+                        onClick={() => setFlagModalSession(s)}
+                      >
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -331,6 +336,18 @@ export function SessionsView({ selectedProfile = 'all', onSelectProfile }: Sessi
           </TableBody>
         </Table>
       </div>
+
+      <ResumeModal
+        open={!!flagModalSession}
+        onOpenChange={(open) => !open && setFlagModalSession(null)}
+        session={flagModalSession}
+        isResuming={!!resumingId}
+        onLaunch={async (req) => {
+          if (flagModalSession) {
+            await handleResume(flagModalSession, req.flags, req.custom_flags);
+          }
+        }}
+      />
 
       <div className="flex items-center justify-between text-xs text-[#888888] px-1 font-mono">
         <span className="tabular-nums">
