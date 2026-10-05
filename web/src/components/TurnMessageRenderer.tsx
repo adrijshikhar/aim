@@ -180,6 +180,18 @@ function StructuredTextBlock({ text }: { text: string }) {
     }
   }
 
+  // Detect whether output is raw preformatted terminal stdout
+  // Non-markdown command stdout shouldn't be parsed with ReactMarkdown to prevent bullet/newline distortion
+  const isPreformattedStdout = React.useMemo(() => {
+    if (!mainContent) return false;
+    if (exitCode !== null) {
+      const hasMarkdownHeader = /^(#{1,6}\s|[*-]\s\*\*)/m.test(mainContent);
+      return !hasMarkdownHeader;
+    }
+    if (/^[-d][rwx-]{9}/m.test(mainContent)) return true;
+    return false;
+  }, [exitCode, mainContent]);
+
   return (
     <div className="space-y-2">
       {hasMetadata && (
@@ -210,32 +222,37 @@ function StructuredTextBlock({ text }: { text: string }) {
       )}
 
       {mainContent && (
-        <div className="prose-subtle text-xs text-[#ededed] font-sans leading-relaxed selection:bg-[#333333]">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              // Headings
-              h1: ({ children }) => (
-                <h1 className="text-sm font-semibold text-white mt-4 mb-2 pb-1 border-b border-[#262626]">
-                  {children}
-                </h1>
-              ),
-              h2: ({ children }) => (
-                <h2 className="text-xs font-semibold text-white mt-3 mb-1.5">
-                  {children}
-                </h2>
-              ),
-              h3: ({ children }) => (
-                <h3 className="text-xs font-medium text-[#ededed] mt-2 mb-1">
-                  {children}
-                </h3>
-              ),
-              // Paragraphs and Blocks
-              p: ({ children }) => (
-                <div className="mb-2 last:mb-0 leading-relaxed text-[#d4d4d4]">
-                  {children}
-                </div>
-              ),
+        isPreformattedStdout ? (
+          <pre className="p-3 rounded-[4px] bg-[#0c0c0c] border border-[#222222] font-mono text-[11px] text-[#d4d4d4] overflow-x-auto whitespace-pre leading-relaxed">
+            {mainContent}
+          </pre>
+        ) : (
+          <div className="prose-subtle text-xs text-[#ededed] font-sans leading-relaxed selection:bg-[#333333]">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // Headings
+                h1: ({ children }) => (
+                  <h1 className="text-base font-semibold text-white mt-4 mb-2 pb-1 border-b border-[#262626]">
+                    {children}
+                  </h1>
+                ),
+                h2: ({ children }) => (
+                  <h2 className="text-sm font-semibold text-white mt-3 mb-1.5">
+                    {children}
+                  </h2>
+                ),
+                h3: ({ children }) => (
+                  <h3 className="text-xs font-semibold text-[#ededed] mt-2 mb-1">
+                    {children}
+                  </h3>
+                ),
+                // Paragraphs and Blocks
+                p: ({ children }) => (
+                  <div className="mb-2 last:mb-0 leading-relaxed text-[#d4d4d4]">
+                    {children}
+                  </div>
+                ),
               // Lists
               ul: ({ children }) => (
                 <ul className="list-disc pl-5 mb-2 space-y-1 text-[#d4d4d4]">
@@ -307,6 +324,7 @@ function StructuredTextBlock({ text }: { text: string }) {
             {mainContent}
           </ReactMarkdown>
         </div>
+        )
       )}
     </div>
   );

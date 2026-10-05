@@ -133,6 +133,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
   const [loading, setLoading] = React.useState(true);
   const [skipPermissions, setSkipPermissions] = React.useState(false);
   const [resumeModalOpen, setResumeModalOpen] = React.useState(false);
+  const [targetForkTurn, setTargetForkTurn] = React.useState<number | null>(null);
   const [isResuming, setIsResuming] = React.useState(false);
   const [copiedCmd, setCopiedCmd] = React.useState(false);
   const [copiedCwd, setCopiedCwd] = React.useState(false);
@@ -288,10 +289,17 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
 
   // Floating scroll-to-top button detector (scrolled > 350px)
   React.useEffect(() => {
+    let ticking = false;
     const mainElem = document.querySelector('main');
     const handleScroll = () => {
-      const scrollY = mainElem ? mainElem.scrollTop : window.scrollY;
-      setShowScrollTop(scrollY > 350);
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const scrollY = mainElem ? mainElem.scrollTop : window.scrollY;
+          setShowScrollTop(scrollY > 350);
+          ticking = false;
+        });
+        ticking = true;
+      }
     };
 
     if (mainElem) {
@@ -308,11 +316,13 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
   }, []);
 
   const scrollToTop = () => {
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const behavior: ScrollBehavior = prefersReducedMotion ? 'auto' : 'smooth';
     const mainElem = document.querySelector('main');
     if (mainElem && mainElem.scrollTop > 0) {
-      mainElem.scrollTo({ top: 0, behavior: 'smooth' });
+      mainElem.scrollTo({ top: 0, behavior });
     } else {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior });
     }
   };
 
@@ -481,7 +491,10 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setResumeModalOpen(true)}
+              onClick={() => {
+                setTargetForkTurn(null);
+                setResumeModalOpen(true);
+              }}
               className="h-8 px-3 text-xs font-sans font-medium border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] rounded-geist flex items-center gap-1.5 cursor-pointer"
               title="Configure all AIM and adapter flags"
             >
@@ -508,15 +521,17 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
             <span className="text-[#ededed] font-medium">{session.profile || 'default'}</span>
           </div>
 
-          <div
+          <button
+            type="button"
             onClick={copyCwd}
-            className="flex items-center gap-1.5 bg-[#0a0a0a] px-2.5 py-1 rounded-[4px] border border-border cursor-pointer hover:border-[#333333] transition-colors"
+            className="flex items-center gap-1.5 bg-[#0a0a0a] px-2.5 py-1 rounded-[4px] border border-border cursor-pointer hover:border-[#333333] hover:text-[#ededed] transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
             title="Click to copy path"
+            aria-label={`Copy current working directory: ${session.cwd}`}
           >
             <Folder className="h-3 w-3 text-[#666666]" />
             <span className="truncate max-w-[260px] text-[#ededed] font-mono text-[11px]">{session.cwd}</span>
             {copiedCwd ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3 text-[#666666]" />}
-          </div>
+          </button>
 
           <div className="flex items-center gap-1.5 bg-[#0a0a0a] px-2.5 py-1 rounded-[4px] border border-border">
             <MessageSquare className="h-3 w-3 text-[#666666]" />
@@ -709,7 +724,10 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setResumeModalOpen(true)}
+                          onClick={() => {
+                            setTargetForkTurn(turn.turn_index);
+                            setResumeModalOpen(true);
+                          }}
                           className="h-6 px-2 text-[10px] font-sans text-[#c08532] hover:text-[#e09e42] hover:bg-[#c08532]/10 border border-[#c08532]/30 bg-[#c08532]/5 rounded-[3px] flex items-center gap-1 transition-colors cursor-pointer"
                           title={`Resume or fork session starting from Turn #${turn.turn_index}`}
                         >
@@ -782,10 +800,13 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                   cfg.bgClass
                                 )}
                               >
-                                <div
+                                <button
+                                  type="button"
                                   onClick={() => toggleTool(toolKey)}
+                                  aria-expanded={isToolOpen}
+                                  aria-controls={`tool-panel-${toolKey}`}
                                   className={cn(
-                                    'flex items-center justify-between px-3 py-1.5 text-xs font-mono cursor-pointer transition-colors select-none',
+                                    'w-full flex items-center justify-between px-3 py-1.5 text-xs font-mono cursor-pointer transition-colors select-none text-left focus:outline-none focus:ring-1 focus:ring-ring',
                                     cfg.headerHoverClass
                                   )}
                                 >
@@ -812,10 +833,10 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                       <ChevronRight className="h-3 w-3 text-[#666666]" />
                                     )}
                                   </div>
-                                </div>
+                                </button>
 
                                 {isToolOpen && (
-                                  <div className="p-3 border-t border-[#1c1c1c] space-y-2 text-xs font-mono bg-[#050505]">
+                                  <div id={`tool-panel-${toolKey}`} className="p-3 border-t border-[#1c1c1c] space-y-2 text-xs font-mono bg-[#050505]">
                                     {tool.arguments && (
                                       <div className="space-y-1">
                                         <span className="text-[10px] text-[#666666] uppercase tracking-wider">
@@ -876,10 +897,15 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
       {/* Resume Modal */}
       <ResumeModal
         open={resumeModalOpen}
-        onOpenChange={setResumeModalOpen}
+        onOpenChange={(open) => {
+          setResumeModalOpen(open);
+          if (!open) setTargetForkTurn(null);
+        }}
         session={session}
         onLaunch={handleModalLaunch}
         isResuming={isResuming}
+        initialFork={targetForkTurn !== null}
+        forkTurnIndex={targetForkTurn}
       />
 
       {/* Floating Scroll-to-Top Action Button (Appears after scrolling down) */}

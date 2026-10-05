@@ -75,16 +75,17 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
             size="sm"
             disabled={isDeleting}
             onClick={() => onOpenChange(false)}
-            className="border-[#262626] bg-[#0a0a0a] hover:bg-[#161616] text-[#a1a1a1] hover:text-[#ededed] text-xs font-mono rounded-geist"
+            className="border-[#262626] bg-[#0a0a0a] hover:bg-[#161616] text-[#a1a1a1] hover:text-[#ededed] text-xs font-sans rounded-geist cursor-pointer"
           >
             Cancel
           </Button>
           <Button
             type="button"
+            variant="destructive"
             size="sm"
             disabled={isDeleting}
             onClick={onConfirm}
-            className="bg-[#f13242] hover:bg-[#e2162a] text-white text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist"
+            className="text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist"
           >
             {isDeleting ? (
               <>

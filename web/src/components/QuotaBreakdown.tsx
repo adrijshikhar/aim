@@ -85,46 +85,57 @@ interface QuotaBreakdownProps {
 export function QuotaBreakdown({
   summary,
   bottleneckPct = 100,
+  isExhausted = false,
 }: QuotaBreakdownProps) {
   const parsed = React.useMemo(() => parseQuotaSummary(summary), [summary]);
 
+  const effectiveBottleneckPct = isExhausted ? 0 : bottleneckPct;
+
   const getStatusColor = (pct: number) => {
-    if (pct <= 0) return 'bg-status-danger-solid';
+    if (isExhausted || pct <= 0) return 'bg-status-danger-solid';
     if (pct <= 30) return 'bg-status-warning-solid';
-    return 'bg-foreground';
+    return 'bg-status-success-solid';
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-status-danger';
+    if (isExhausted || pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
-    return 'text-foreground';
+    return 'text-status-success';
   };
 
   const renderMeter = (win: QuotaWindow) => {
+    const isEx = isExhausted || win.pct <= 0;
     return (
-      <div key={win.key} className="space-y-1.5 p-2.5 rounded-[6px] bg-[#111111] border border-[#262626]">
+      <div key={win.key} className="space-y-1.5 p-2 rounded-[6px] bg-[#111111] border border-[#222222]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-[#a1a1a1] flex items-center gap-1.5">
+          <span className="text-[#a1a1a1] flex items-center gap-1.5 font-medium">
             {win.label}
           </span>
           <div className="flex items-center gap-2">
             {win.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-[#333333] bg-[#0a0a0a] text-[#a1a1a1]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-[#2a2a2a] bg-[#0a0a0a] text-[#888888]">
                 <Clock className="h-2.5 w-2.5 text-[#666666]" />
                 <span>resets in {win.reset}</span>
               </span>
             )}
-            <span className={`font-semibold tabular-nums ${getTextColor(win.pct)}`}>
+            <span className={`font-semibold tabular-nums text-xs ${getTextColor(win.pct)}`}>
               {win.pct}%
             </span>
           </div>
         </div>
 
-        {/* Standardized h-1.5 progress bar */}
-        <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
+        {/* Standardized h-1.5 progress bar with visible minimum alert indicator */}
+        <div
+          role="progressbar"
+          aria-valuenow={win.pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`${win.label} quota`}
+          className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]"
+        >
           <div
             className={`h-full transition-all duration-300 ${getStatusColor(win.pct)}`}
-            style={{ width: `${Math.max(0, Math.min(100, win.pct))}%` }}
+            style={{ width: `${Math.max(isEx ? 6 : 0, Math.min(100, win.pct))}%` }}
           />
         </div>
       </div>
@@ -132,21 +143,29 @@ export function QuotaBreakdown({
   };
 
   if (!parsed || parsed.type === 'fallback') {
+    const isEx = isExhausted || effectiveBottleneckPct <= 0;
     return (
       <div className="space-y-2 p-3 rounded-[6px] bg-[#0a0a0a] border border-[#262626]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-[#a1a1a1] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="text-[#a1a1a1] uppercase tracking-wider flex items-center gap-1.5 font-medium">
             <Gauge className="h-3 w-3 text-[#666666]" />
             Live Quota Telemetry
           </span>
-          <span className={`font-semibold tabular-nums ${getTextColor(bottleneckPct)}`}>
-            {bottleneckPct}% remaining
+          <span className={`font-semibold tabular-nums ${getTextColor(effectiveBottleneckPct)}`}>
+            {effectiveBottleneckPct}% remaining
           </span>
         </div>
-        <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
+        <div
+          role="progressbar"
+          aria-valuenow={effectiveBottleneckPct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Live quota telemetry"
+          className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]"
+        >
           <div
-            className={`h-full transition-all duration-300 ${getStatusColor(bottleneckPct)}`}
-            style={{ width: `${Math.max(0, Math.min(100, bottleneckPct))}%` }}
+            className={`h-full transition-all duration-300 ${getStatusColor(effectiveBottleneckPct)}`}
+            style={{ width: `${Math.max(isEx ? 6 : 0, Math.min(100, effectiveBottleneckPct))}%` }}
           />
         </div>
         {summary && (
@@ -159,6 +178,7 @@ export function QuotaBreakdown({
   }
 
   if (parsed.type === 'single' && parsed.single) {
+    const isEx = isExhausted || parsed.single.pct <= 0;
     return (
       <div className="space-y-2 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#262626]">
         <div className="flex items-center justify-between text-xs font-sans">
@@ -178,10 +198,17 @@ export function QuotaBreakdown({
             </span>
           </div>
         </div>
-        <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
+        <div
+          role="progressbar"
+          aria-valuenow={parsed.single.pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`${parsed.single.label} quota`}
+          className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]"
+        >
           <div
             className={`h-full transition-all duration-300 ${getStatusColor(parsed.single.pct)}`}
-            style={{ width: `${Math.max(0, Math.min(100, parsed.single.pct))}%` }}
+            style={{ width: `${Math.max(isEx ? 6 : 0, Math.min(100, parsed.single.pct))}%` }}
           />
         </div>
       </div>

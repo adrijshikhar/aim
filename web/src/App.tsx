@@ -66,7 +66,7 @@ export function App() {
         setStatus(s);
         setIsOnline(true);
       } catch {
-        setIsOnline(true);
+        setIsOnline(false);
       }
     }
     checkStatus();
@@ -75,6 +75,7 @@ export function App() {
     const interval = setInterval(() => {
       checkStatus();
       fetchDaemonStatus();
+      fetchProfiles();
     }, 30000);
     return () => clearInterval(interval);
   }, [fetchDaemonStatus, fetchProfiles]);
@@ -131,9 +132,9 @@ export function App() {
     switch (currentView) {
       case 'overview':
         return (
-          <span className="font-semibold text-sm text-[#ededed]">
-            All Agent Profiles
-          </span>
+          <div className="flex items-center gap-1.5 text-sm font-mono">
+            <span className="text-[#ededed] font-semibold">All Agent Profiles</span>
+          </div>
         );
       case 'profile-detail':
         return (

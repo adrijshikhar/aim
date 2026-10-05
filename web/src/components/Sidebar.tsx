@@ -35,8 +35,8 @@ export function Sidebar({
   const getProfileQuotaStatus = (p: ProfileDTO) => {
     if (!p.has_credentials) {
       return {
-        color: 'bg-[#ffb200]',
-        text: 'text-[#ff9900]',
+        color: 'bg-status-warning-solid',
+        text: 'text-status-warning',
         label: 'Auth',
       };
     }
@@ -56,7 +56,7 @@ export function Sidebar({
       };
     }
     return {
-      color: 'bg-foreground',
+      color: 'bg-status-success-solid',
       text: 'text-muted-foreground',
       label: `${pct}%`,
     };
@@ -91,7 +91,7 @@ export function Sidebar({
             type="button"
             onClick={() => onSelectView('overview')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-[6px] text-xs font-mono transition-colors cursor-pointer text-left ${
-              currentView === 'overview'
+              currentView === 'overview' || currentView === 'profile-detail'
                 ? 'bg-[#161616] text-[#ededed] border border-[#333333] shadow-sm font-medium'
                 : 'text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#111111] border border-transparent'
             }`}
@@ -140,9 +140,10 @@ export function Sidebar({
               type="button"
               onClick={onOpenAddProfile}
               title="Add new profile"
-              className="h-4 w-4 rounded flex items-center justify-center text-[#888888] hover:text-[#ededed] hover:bg-[#161616] transition-colors cursor-pointer"
+              aria-label="Add new profile"
+              className="h-6 w-6 rounded-[4px] flex items-center justify-center text-[#888888] hover:text-[#ededed] hover:bg-[#161616] transition-colors cursor-pointer"
             >
-              <Plus className="h-3 w-3" />
+              <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
 

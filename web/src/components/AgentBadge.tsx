@@ -1,11 +1,29 @@
 import React from 'react';
 import { Badge } from './ui/badge';
+import { cn } from '@/lib/utils';
 
 interface AgentBadgeProps {
   agent: string;
   className?: string;
   size?: 'sm' | 'default';
 }
+
+const getAgentColorStyle = (agent: string) => {
+  const a = agent?.toLowerCase() || '';
+  switch (a) {
+    case 'claude':
+      return 'border-[#c08532]/30 bg-[#c08532]/10 text-[#d49746]';
+    case 'codex':
+      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400';
+    case 'gemini':
+      return 'border-sky-500/30 bg-sky-500/10 text-sky-400';
+    case 'agy':
+    case 'antigravity':
+      return 'border-purple-500/30 bg-purple-500/10 text-purple-400';
+    default:
+      return 'border-border bg-secondary text-foreground';
+  }
+};
 
 export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent, className = '', size = 'default' }) => {
   const name = agent?.toLowerCase() || 'agent';
@@ -14,7 +32,12 @@ export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent, className = '', s
   return (
     <Badge
       variant="outline"
-      className={`font-mono font-medium tracking-tight rounded-md border border-[#2e2e2e] bg-[#161616] text-[#ededed] hover:border-[#444444] transition-colors ${sizeClasses} ${className}`}
+      className={cn(
+        'font-mono font-medium tracking-tight rounded-md transition-colors',
+        getAgentColorStyle(name),
+        sizeClasses,
+        className
+      )}
     >
       {name}
     </Badge>

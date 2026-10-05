@@ -81,6 +81,8 @@ export function SessionsView({
   React.useEffect(() => {
     if (selectedProfile && selectedProfile !== 'all') {
       setSelectedProfiles(new Set([selectedProfile]));
+    } else {
+      setSelectedProfiles(new Set());
     }
   }, [selectedProfile]);
 
@@ -127,6 +129,8 @@ export function SessionsView({
   // Global hotkey '/' focuses search
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (document.querySelector('[role="dialog"]')) return;
       if (
         e.key === '/' &&
         document.activeElement?.tagName !== 'INPUT' &&
@@ -144,7 +148,8 @@ export function SessionsView({
   const engineCounts = React.useMemo(() => {
     const map: Record<string, number> = {};
     sessions.forEach((s) => {
-      const a = s.agent.toLowerCase();
+      let a = s.agent.toLowerCase();
+      if (a === 'agy') a = 'antigravity';
       map[a] = (map[a] || 0) + 1;
     });
     return map;
@@ -173,7 +178,7 @@ export function SessionsView({
     () => [
       { label: 'Claude', value: 'claude' },
       { label: 'Codex', value: 'codex' },
-      { label: 'Antigravity', value: 'agy' },
+      { label: 'Antigravity', value: 'antigravity' },
       { label: 'Gemini', value: 'gemini' },
     ],
     []
@@ -213,9 +218,14 @@ export function SessionsView({
         if (!match) return false;
       }
 
-      // Engine multi-select
+      // Engine multi-select (supports both 'antigravity' and 'agy')
       if (selectedEngines.size > 0) {
-        if (!selectedEngines.has(s.agent.toLowerCase())) return false;
+        const a = s.agent.toLowerCase();
+        const matches =
+          selectedEngines.has(a) ||
+          (a === 'antigravity' && selectedEngines.has('agy')) ||
+          (a === 'agy' && selectedEngines.has('antigravity'));
+        if (!matches) return false;
       }
 
       // Profile multi-select
@@ -334,14 +344,21 @@ export function SessionsView({
         accessorKey: 'cwd',
         header: 'DIRECTORY (CWD)',
         size: 160,
-        cell: ({ row }) => (
-          <div className="flex items-center gap-1.5 font-mono text-xs text-[#a1a1a1] max-w-[155px]">
-            <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
-            <span className="truncate" title={row.original.cwd}>
-              {row.original.cwd}
-            </span>
-          </div>
-        ),
+        cell: ({ row }) => {
+          const rawCwd = row.original.cwd || '';
+          const parts = rawCwd.split('/').filter(Boolean);
+          const basename = parts.length > 0 ? parts[parts.length - 1] : rawCwd;
+          const parent = parts.length > 1 ? `.../${parts[parts.length - 2]}/` : '';
+          return (
+            <div className="flex items-center gap-1.5 font-mono text-xs text-[#a1a1a1] max-w-[155px]" title={rawCwd}>
+              <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
+              <div className="truncate">
+                <span className="text-[#666666]">{parent}</span>
+                <span className="text-[#ededed] font-medium">{basename}</span>
+              </div>
+            </div>
+          );
+        },
       },
       {
         id: 'goal_title',
@@ -489,6 +506,7 @@ export function SessionsView({
           <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-[#666666]" />
           <Input
             ref={searchInputRef}
+            aria-label="Search sessions by goal, cwd, title, or profile"
             placeholder="Search sessions by goal, cwd, title, or profile..."
             className="pl-9 pr-8 h-8 text-xs rounded-geist border-border bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
             value={searchQuery}
@@ -500,6 +518,7 @@ export function SessionsView({
               onClick={() => setSearchQuery('')}
               className="absolute right-2.5 top-2 text-[#666666] hover:text-[#ededed] cursor-pointer"
               title="Clear search"
+              aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -596,12 +615,34 @@ export function SessionsView({
 
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="text-center py-12 text-[#a1a1a1] font-mono text-xs">
-                  <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-[#666666]" />
-                  Loading sessions...
-                </TableCell>
-              </TableRow>
+              Array.from({ length: 6 }).map((_, idx) => (
+                <TableRow key={`skeleton-${idx}`} className="border-border">
+                  <TableCell className="py-2.5 px-3">
+                    <div className="h-5 w-16 bg-[#1a1a1a] rounded animate-pulse" />
+                  </TableCell>
+                  <TableCell className="py-2.5 px-3">
+                    <div className="h-5 w-14 bg-[#161616] rounded animate-pulse" />
+                  </TableCell>
+                  <TableCell className="py-2.5 px-3">
+                    <div className="h-4 w-32 bg-[#1a1a1a] rounded animate-pulse" />
+                  </TableCell>
+                  <TableCell className="py-2.5 px-3">
+                    <div className="space-y-1">
+                      <div className="h-4 w-52 bg-[#1c1c1c] rounded animate-pulse" />
+                      <div className="h-3 w-36 bg-[#141414] rounded animate-pulse" />
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-2.5 px-3">
+                    <div className="h-4 w-12 bg-[#1a1a1a] rounded animate-pulse" />
+                  </TableCell>
+                  <TableCell className="py-2.5 px-3">
+                    <div className="h-4 w-16 bg-[#181818] rounded animate-pulse" />
+                  </TableCell>
+                  <TableCell className="py-2.5 px-3 text-right">
+                    <div className="h-7 w-20 bg-[#1c1c1c] rounded ml-auto animate-pulse" />
+                  </TableCell>
+                </TableRow>
+              ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={columns.length} className="text-center py-12 text-[#a1a1a1] font-mono text-xs">
@@ -667,7 +708,8 @@ export function SessionsView({
                 size="sm"
                 onClick={() => table.previousPage()}
                 disabled={!table.getCanPreviousPage()}
-                className="h-7 w-7 p-0 rounded-geist border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-40"
+                aria-label="Previous page"
+                className="h-7 w-7 p-0 rounded-geist border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-40 cursor-pointer"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </Button>
@@ -679,7 +721,8 @@ export function SessionsView({
                 size="sm"
                 onClick={() => table.nextPage()}
                 disabled={!table.getCanNextPage()}
-                className="h-7 w-7 p-0 rounded-geist border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-40"
+                aria-label="Next page"
+                className="h-7 w-7 p-0 rounded-geist border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-40 cursor-pointer"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>

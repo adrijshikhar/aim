@@ -112,12 +112,12 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
           {/* Semantic Badges from Theme */}
           <div className="flex items-center gap-1.5 ml-1">
             {totalAdditions > 0 && (
-              <span className="badge-success text-[10px] px-1.5 py-0.2">
+              <span className="badge-success text-[10px] px-1.5 py-0.5">
                 +{totalAdditions}
               </span>
             )}
             {totalDeletions > 0 && (
-              <span className="badge-danger text-[10px] px-1.5 py-0.2">
+              <span className="badge-danger text-[10px] px-1.5 py-0.5">
                 -{totalDeletions}
               </span>
             )}
@@ -161,12 +161,12 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                       {file.to?.replace(/^b\//, '') || file.from?.replace(/^a\//, '') || `File ${fileIdx + 1}`}
                     </span>
                     {file.new && (
-                      <span className="inline-flex items-center gap-0.5 text-emerald-400 bg-emerald-950/40 px-1 py-0.2 rounded text-[9px]">
+                      <span className="inline-flex items-center gap-0.5 text-emerald-400 bg-emerald-950/40 px-1 py-0.5 rounded text-[9px]">
                         <PlusCircle className="h-2.5 w-2.5" /> new file
                       </span>
                     )}
                     {file.deleted && (
-                      <span className="inline-flex items-center gap-0.5 text-rose-400 bg-rose-950/40 px-1 py-0.2 rounded text-[9px]">
+                      <span className="inline-flex items-center gap-0.5 text-rose-400 bg-rose-950/40 px-1 py-0.5 rounded text-[9px]">
                         <MinusCircle className="h-2.5 w-2.5" /> deleted
                       </span>
                     )}
@@ -219,24 +219,25 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                                 ? 'diff-line-add'
                                 : isDel
                                 ? 'diff-line-del'
-                                : 'text-[#a1a1a1] hover:bg-white/[0.02]'
+                                : 'text-[#a1a1a1] hover:bg-white/[0.02] bg-[#0d0d0d]'
                             }`}
                           >
-                            {/* Line numbers gutter */}
-                            <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555] select-none font-mono">
-                              {oldNum ?? ''}
-                            </div>
-                            <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555] select-none font-mono border-r border-[#222222]">
-                              {newNum ?? ''}
-                            </div>
-
-                            {/* Sign indicator */}
-                            <div className="w-5 shrink-0 text-center py-0.5 font-bold select-none text-[11px]">
-                              {isAdd ? '+' : isDel ? '-' : ' '}
+                            {/* Line numbers gutter (sticky left edge) */}
+                            <div className="sticky left-0 flex items-center bg-inherit z-10 shrink-0 select-none font-mono border-r border-[#222222]">
+                              <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
+                                {oldNum ?? ''}
+                              </div>
+                              <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
+                                {newNum ?? ''}
+                              </div>
+                              {/* Sign indicator */}
+                              <div className="w-5 shrink-0 text-center py-0.5 font-bold text-[11px]">
+                                {isAdd ? '+' : isDel ? '-' : ' '}
+                              </div>
                             </div>
 
                             {/* Line content */}
-                            <div className="flex-1 py-0.5 pr-3 whitespace-pre overflow-x-auto break-all font-mono">
+                            <div className="flex-1 py-0.5 px-3 whitespace-pre font-mono">
                               {lineText || '\u00A0'}
                             </div>
                           </div>

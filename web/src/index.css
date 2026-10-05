@@ -51,6 +51,7 @@
     --ds-green-text: #00ca52;
 
     --ds-blue-bg: #06193a;
+    --ds-blue-border: #0b2d64;
     --ds-blue-solid: #0070f3;
     --ds-blue-text: #50a8ff;
   }
@@ -63,15 +64,26 @@
   html, body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE / Edge */
   }
 
-  /* Hide scrollbars across WebKit / Chromium / Safari */
+  /* Styled Geist Minimal Scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #262626 transparent;
+  }
   ::-webkit-scrollbar {
-    display: none;
-    width: 0;
-    height: 0;
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #262626;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #383838;
   }
 
   /* Minimalist UI <kbd> styling */

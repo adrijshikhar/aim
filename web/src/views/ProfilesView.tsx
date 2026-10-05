@@ -1,11 +1,9 @@
 import * as React from 'react';
 import {
   ProfileDTO,
-  CreateProfileRequest,
   SessionDTO,
   MCPServerDTO,
   getProfiles,
-  createProfile,
   deleteProfile,
   updateProfileConfig,
   getSessions,
@@ -14,17 +12,7 @@ import {
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Plus,
@@ -44,6 +32,7 @@ import {
   Boxes,
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
+import { AddProfileModal } from '@/components/AddProfileModal';
 import { AgentBadge } from '@/components/AgentBadge';
 import { QuotaBreakdown } from '@/components/QuotaBreakdown';
 
@@ -68,14 +57,6 @@ export function ProfilesView({
 
   // Dialog State
   const [isAddOpen, setIsAddOpen] = React.useState(false);
-  const [enableClone, setEnableClone] = React.useState(false);
-  const [submitting, setSubmitting] = React.useState(false);
-  const [formData, setFormData] = React.useState<CreateProfileRequest>({
-    agent: 'claude',
-    name: '',
-    email: '',
-    clone_from: '',
-  });
 
   // Profile-specific counts for direct launcher cards
   const [profileSessions, setProfileSessions] = React.useState<SessionDTO[]>([]);
@@ -206,49 +187,6 @@ export function ProfilesView({
     }
   }, [selectedProfile]);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.name.trim()) {
-      toast({
-        title: 'Validation Error',
-        description: 'Profile name cannot be empty.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await createProfile({
-        ...formData,
-        clone_from: enableClone ? formData.clone_from : '',
-      });
-      toast({
-        title: 'Profile Created',
-        description: `Successfully added ${formData.agent} profile "${formData.name}".`,
-        variant: 'success',
-      });
-      setIsAddOpen(false);
-      setEnableClone(false);
-      setFormData({
-        agent: 'claude',
-        name: '',
-        email: '',
-        clone_from: '',
-      });
-      fetchProfiles();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to create profile';
-      toast({
-        title: 'Creation Failed',
-        description: msg,
-        variant: 'destructive',
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   // Delete confirmation modal state
   const [deleteTarget, setDeleteTarget] = React.useState<{ agent: string; name: string } | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
@@ -342,13 +280,13 @@ export function ProfilesView({
   const getProgressColor = (pct: number) => {
     if (pct <= 0) return 'bg-status-danger-solid';
     if (pct <= 30) return 'bg-status-warning-solid';
-    return 'bg-foreground';
+    return 'bg-status-success-solid';
   };
 
   const getTextColor = (pct: number) => {
     if (pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
-    return 'text-foreground';
+    return 'text-status-success';
   };
 
   const currentProfile = React.useMemo(() => {
@@ -711,141 +649,20 @@ export function ProfilesView({
             Refresh
           </Button>
 
-          <Dialog
-            open={isAddOpen}
-            onOpenChange={(open) => {
-              setIsAddOpen(open);
-              if (!open) setEnableClone(false);
-            }}
+          <Button
+            size="sm"
+            onClick={() => setIsAddOpen(true)}
+            className="bg-[#ededed] text-[#000000] hover:bg-white rounded-geist h-8 font-medium cursor-pointer"
           >
-            <DialogTrigger asChild>
-              <Button size="sm" className="bg-[#ededed] text-[#000000] hover:bg-white rounded-geist h-8 font-medium">
-                <Plus className="h-3.5 w-3.5 mr-1" />
-                Add Profile
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="border border-[#262626] bg-[#111111] text-[#ededed] rounded-geist sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle className="text-base font-semibold tracking-tight text-[#ededed]">
-                  Create New Agent Profile
-                </DialogTitle>
-                <DialogDescription className="text-xs text-[#a1a1a1]">
-                  Scaffold an isolated environment and configuration for your agent.
-                </DialogDescription>
-              </DialogHeader>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add Profile
+          </Button>
 
-              <form onSubmit={handleCreate} className="space-y-4 py-2">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
-                    Target Agent
-                  </label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {['claude', 'codex', 'gemini', 'agy'].map((ag) => (
-                      <button
-                        key={ag}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, agent: ag })}
-                        className={`py-2 px-3 text-xs font-sans font-medium rounded-geist border text-center transition-all cursor-pointer ${
-                          formData.agent === ag
-                            ? 'border-[#ededed] bg-[#222222] text-[#ededed] font-bold shadow-sm'
-                            : 'border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] hover:border-[#333333]'
-                        }`}
-                      >
-                        {ag.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
-                    Profile Name *
-                  </label>
-                  <Input
-                    required
-                    placeholder="e.g. work, sandbox, client-x"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="rounded-geist border-[#262626] bg-[#0a0a0a] text-xs h-9 text-[#ededed] placeholder:text-[#666666]"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
-                    Associated Email (Optional)
-                  </label>
-                  <Input
-                    type="email"
-                    placeholder="dev@example.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="rounded-geist border-[#262626] bg-[#0a0a0a] text-xs h-9 text-[#ededed] placeholder:text-[#666666]"
-                  />
-                </div>
-
-                {/* Clone from existing profile rendered with toggle switch */}
-                <div className="space-y-2 pt-2 border-t border-[#262626]">
-                  <div className="flex items-center justify-between py-0.5">
-                    <div className="space-y-0.5">
-                      <label htmlFor="clone-toggle" className="text-xs font-medium text-[#ededed] cursor-pointer">
-                        Clone from existing profile
-                      </label>
-                      <p className="text-[11px] text-[#a1a1a1]">
-                        Copy authentication, credentials, and settings
-                      </p>
-                    </div>
-                    <Switch
-                      id="clone-toggle"
-                      checked={enableClone}
-                      onCheckedChange={(checked) => {
-                        setEnableClone(checked);
-                        if (!checked) {
-                          setFormData((prev) => ({ ...prev, clone_from: '' }));
-                        }
-                      }}
-                    />
-                  </div>
-
-                  {enableClone && (
-                    <div className="space-y-1.5 pt-1">
-                      <label className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
-                        Source Profile to Clone
-                      </label>
-                      <Input
-                        placeholder="e.g. default"
-                        value={formData.clone_from}
-                        onChange={(e) => setFormData({ ...formData, clone_from: e.target.value })}
-                        className="rounded-geist border-[#262626] bg-[#0a0a0a] text-xs h-9 text-[#ededed] placeholder:text-[#666666]"
-                        autoFocus
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <DialogFooter className="pt-3 border-t border-[#262626] flex gap-2 justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setIsAddOpen(false);
-                      setEnableClone(false);
-                    }}
-                    disabled={submitting}
-                    className="rounded-geist text-xs h-8 border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={submitting}
-                    className="bg-[#ededed] text-[#000000] hover:bg-white rounded-geist text-xs h-8 font-medium"
-                  >
-                    {submitting ? 'Creating...' : 'Create Profile'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <AddProfileModal
+            open={isAddOpen}
+            onOpenChange={setIsAddOpen}
+            onProfileCreated={fetchProfiles}
+          />
         </div>
       </div>
 
@@ -872,7 +689,16 @@ export function ProfilesView({
             return (
               <Card
                 key={p.name}
-                className="group relative overflow-hidden transition-all duration-150 border border-[#262626] bg-[#111111] hover:border-[#333333] rounded-geist flex flex-col justify-between cursor-pointer"
+                tabIndex={0}
+                role="button"
+                aria-label={`View profile ${p.name}`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelectProfile(p.name);
+                  }
+                }}
+                className="group relative overflow-hidden transition-all duration-150 border border-[#262626] bg-[#111111] hover:border-[#333333] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#0070f3] rounded-geist flex flex-col justify-between cursor-pointer"
                 onClick={() => onSelectProfile(p.name)}
               >
                 <div>
@@ -986,10 +812,22 @@ export function ProfilesView({
                                   {pct}%
                                 </span>
                               </div>
-                              <div className="w-full bg-[#262626] h-1.5 rounded-full overflow-hidden">
+                              <div
+                                role="progressbar"
+                                aria-valuenow={pct}
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-label={`${ad.agent} quota`}
+                                className="w-full bg-[#262626] h-1.5 rounded-full overflow-hidden"
+                              >
                                 <div
                                   className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
-                                  style={{ width: `${pct}%` }}
+                                  style={{
+                                    width: `${Math.max(
+                                      ad.quota?.is_exhausted || pct <= 0 ? 6 : 0,
+                                      Math.min(100, pct)
+                                    )}%`,
+                                  }}
                                 />
                               </div>
                             </div>
@@ -1011,7 +849,7 @@ export function ProfilesView({
                                   ? 'badge-danger'
                                   : pct <= 30
                                   ? 'badge-warning'
-                                  : 'text-foreground'
+                                  : 'text-status-success'
                               }`}
                             >
                               {p.quota ? `${pct}% remaining` : '100% remaining'}
@@ -1019,12 +857,24 @@ export function ProfilesView({
                           );
                         })()}
                         </div>
-                        <div className="w-full bg-[#262626] h-1.5 rounded-full overflow-hidden">
+                        <div
+                          role="progressbar"
+                          aria-valuenow={p.quota?.bottleneck_pct ?? 100}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-label="Profile quota"
+                          className="w-full bg-[#262626] h-1.5 rounded-full overflow-hidden"
+                        >
                           <div
                             className={`h-full transition-all duration-300 ${getProgressColor(
                               p.quota?.bottleneck_pct ?? 100
                             )}`}
-                            style={{ width: `${p.quota?.bottleneck_pct ?? 100}%` }}
+                            style={{
+                              width: `${Math.max(
+                                p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0 ? 6 : 0,
+                                Math.min(100, p.quota?.bottleneck_pct ?? 100)
+                              )}%`,
+                            }}
                           />
                         </div>
                         {p.quota?.summary && (
