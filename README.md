@@ -20,7 +20,7 @@ aim doctor               # diagnose binaries, tokens, and dotfile health
 
 ## Features
 
-- **Profile isolation** — a virtual `~` per profile with its own config, tokens, and history; dotfiles like `.gitconfig` and `.ssh` are bridged from the host ([details](wiki.md#what-is-isolated-vs-bridged)).
+- **Profile isolation** — a virtual `~` per profile with its own config, tokens, and history; dotfiles like `.gitconfig` and `.ssh` are bridged from the host.
 - **Four agents** — Antigravity (`agy`), Gemini (`gemini`), Claude Code (`claude`), and Codex (`codex`).
 - **Interactive TUI** — profile list, agent tabs, fuzzy filter, live quota gauges, in-tool feedback (`F`), one-key launch.
 - **Quota telemetry** — 5h and weekly limits, reset countdowns, and credits across every account.
@@ -98,7 +98,7 @@ aim daemon uninstall    # stop and remove the background service
 
 ### TUI
 
-Press `?` in the dashboard for every shortcut. The essentials: `↑`/`↓` select, `Enter` launch, `Tab` switch agent, `/` filter, `s` sessions, `q` quit. Full list in the [wiki](wiki.md#4-interactive-tui-dashboard).
+Press `?` in the dashboard for every shortcut. The essentials: `↑`/`↓` select, `Enter` launch, `Tab` switch agent, `/` filter, `s` sessions, `q` quit.
 
 ---
 
@@ -113,8 +113,6 @@ MCP servers and enabled plugins from your normal agent config (the host) are mer
 | agy | `mcpServers` in the shared `mcp_config.json` | — (already shared) |
 
 If a session changes a server or plugin, aim asks at exit whether to promote it to the host or keep it in the profile. Turn the merge off per profile in `~/.aim/config.json` with `"mcp_global": false` or `"plugins_global": false`.
-
-Prompts, overrides, backups, and edge cases: see the [wiki](wiki.md#8-host-servers--plugins).
 
 ---
 
@@ -133,12 +131,10 @@ Thanks to **[Catalyst](https://github.com/adrijshikhar/catalyst)** for the hando
 
 ---
 
-## Documentation
+## Development & Contributing
 
-- 📖 **[Wiki](wiki.md)** — isolation model, directory layout, config schema, TUI, host merge.
-- 🩺 **[Troubleshooting](TROUBLESHOOTING.md)** — OAuth, session resumption, SQLite, macOS signing.
-- 🎨 **[Design System](design.md)** — palette, tokens, Lipgloss standards.
-- 🛠️ **[Contributing](CONTRIBUTING.md)** — dev setup, tests, builds, new agent adapters.
+- 🛠️ **[Contributing](CONTRIBUTING.md)** — dev setup, tests, builds, and adding agent adapters.
+- 📋 **[Changelog](CHANGELOG.md)** — release history and notes.
 
 ---
 
