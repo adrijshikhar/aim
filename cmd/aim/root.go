@@ -128,6 +128,7 @@ Primary Commands:
   mv <agent> <src> <dst>     Move agent account and credentials between profiles
   daemon [cmd]               Manage periodic background daemon tasks
   whoami                     Show active profile, agent, session, and quota
+  web                        Start the AIM web dashboard
   completion <shell>         Generate shell completion script (zsh, bash, fish)
 
 Flags:
@@ -174,6 +175,7 @@ Flags:
 		newFeedbackCmd(reg, pm),
 		newCompletionCmd(rootCmd),
 		newVersionCmd(),
+		newWebCmd(reg, pm),
 	)
 
 	return rootCmd
