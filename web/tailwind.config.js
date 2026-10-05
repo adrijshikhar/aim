@@ -89,6 +89,58 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        ds: {
+          red: {
+            bg: "var(--ds-red-bg)",
+            border: "var(--ds-red-border)",
+            solid: "var(--ds-red-solid)",
+            text: "var(--ds-red-text)",
+          },
+          amber: {
+            bg: "var(--ds-amber-bg)",
+            border: "var(--ds-amber-border)",
+            solid: "var(--ds-amber-solid)",
+            text: "var(--ds-amber-text)",
+          },
+          green: {
+            bg: "var(--ds-green-bg)",
+            border: "var(--ds-green-border)",
+            solid: "var(--ds-green-solid)",
+            text: "var(--ds-green-text)",
+          },
+          blue: {
+            bg: "var(--ds-blue-bg)",
+            border: "var(--ds-blue-border)",
+            solid: "var(--ds-blue-solid)",
+            text: "var(--ds-blue-text)",
+          },
+        },
+        status: {
+          danger: {
+            bg: "var(--ds-red-bg)",
+            border: "var(--ds-red-border)",
+            solid: "var(--ds-red-solid)",
+            text: "var(--ds-red-text)",
+          },
+          warning: {
+            bg: "var(--ds-amber-bg)",
+            border: "var(--ds-amber-border)",
+            solid: "var(--ds-amber-solid)",
+            text: "var(--ds-amber-text)",
+          },
+          success: {
+            bg: "var(--ds-green-bg)",
+            border: "var(--ds-green-border)",
+            solid: "var(--ds-green-solid)",
+            text: "var(--ds-green-text)",
+          },
+          info: {
+            bg: "var(--ds-blue-bg)",
+            border: "var(--ds-blue-border)",
+            solid: "var(--ds-blue-solid)",
+            text: "var(--ds-blue-text)",
+          },
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

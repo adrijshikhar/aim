@@ -228,14 +228,14 @@ export function App() {
             >
               <span className="flex h-2 w-2 relative items-center justify-center">
                 {daemonInfo?.active ? (
-                  <span className="h-2 w-2 rounded-full bg-[#00ca52]" />
+                  <span className="h-2 w-2 rounded-full bg-status-success-solid" />
                 ) : daemonInfo?.installed ? (
-                  <span className="h-2 w-2 rounded-full bg-[#ffb200]" />
+                  <span className="h-2 w-2 rounded-full bg-status-warning-solid" />
                 ) : (
                   <span className="h-2 w-2 rounded-full bg-[#666666]" />
                 )}
               </span>
-              <span className="font-mono text-[11px] text-[#a1a1a1] group-hover:text-[#ededed] transition-colors">
+              <span className="font-mono text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
                 {daemonInfo?.active
                   ? 'Daemon: Active'
                   : daemonInfo?.installed
@@ -244,16 +244,16 @@ export function App() {
               </span>
             </button>
 
-            <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#262626] bg-[#111111] text-xs">
+            <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-[#111111] text-xs">
               <span className="relative flex h-2 w-2">
                 <span
                   className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                    isOnline ? 'bg-[#00ca52]' : 'bg-[#ffb200]'
+                    isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
                   }`}
                 />
                 <span
                   className={`relative inline-flex rounded-full h-2 w-2 ${
-                    isOnline ? 'bg-[#00ca52]' : 'bg-[#ffb200]'
+                    isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
                   }`}
                 />
               </span>

@@ -89,15 +89,15 @@ export function QuotaBreakdown({
   const parsed = React.useMemo(() => parseQuotaSummary(summary), [summary]);
 
   const getStatusColor = (pct: number) => {
-    if (pct <= 0) return 'bg-[#f13242]';
-    if (pct <= 30) return 'bg-[#ffb200]';
-    return 'bg-[#ededed]';
+    if (pct <= 0) return 'bg-status-danger-solid';
+    if (pct <= 30) return 'bg-status-warning-solid';
+    return 'bg-foreground';
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-[#ff5e63]';
-    if (pct <= 30) return 'text-[#ff9900]';
-    return 'text-[#ededed]';
+    if (pct <= 0) return 'text-status-danger';
+    if (pct <= 30) return 'text-status-warning';
+    return 'text-foreground';
   };
 
   const renderMeter = (win: QuotaWindow) => {

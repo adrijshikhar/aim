@@ -109,15 +109,15 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
             </span>
           )}
 
-          {/* Vercel Geist Semantic Badges */}
+          {/* Semantic Badges from Theme */}
           <div className="flex items-center gap-1.5 ml-1">
             {totalAdditions > 0 && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#00250a] text-[#00ca52] border border-[#003814]">
+              <span className="badge-success text-[10px] px-1.5 py-0.2">
                 +{totalAdditions}
               </span>
             )}
             {totalDeletions > 0 && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#330a11] text-[#ff5e63] border border-[#5d0e17]">
+              <span className="badge-danger text-[10px] px-1.5 py-0.2">
                 -{totalDeletions}
               </span>
             )}
@@ -171,8 +171,8 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                       </span>
                     )}
                     <span className="ml-auto font-sans">
-                      <span className="text-[#00ca52]">+{file.additions}</span>{' '}
-                      <span className="text-[#ff5e63]">-{file.deletions}</span>
+                      <span className="text-status-success">+{file.additions}</span>{' '}
+                      <span className="text-status-danger">-{file.deletions}</span>
                     </span>
                   </div>
                 )}
@@ -181,7 +181,7 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                 {file.chunks.map((chunk, chunkIdx) => (
                   <div key={chunkIdx}>
                     {/* Hunk Header */}
-                    <div className="px-3 py-1 bg-[#0c1420] text-[#70b8ff] font-mono text-[10px] tracking-tight border-y border-[#1e2e42]/60 select-none">
+                    <div className="diff-hunk-header px-3 py-1 font-mono text-[10px] tracking-tight">
                       {chunk.content}
                     </div>
 
@@ -216,9 +216,9 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                             key={changeIdx}
                             className={`flex items-start transition-colors min-h-[20px] ${
                               isAdd
-                                ? 'bg-[#00250a]/70 text-[#00ca52]'
+                                ? 'diff-line-add'
                                 : isDel
-                                ? 'bg-[#330a11]/70 text-[#ff5e63]'
+                                ? 'diff-line-del'
                                 : 'text-[#a1a1a1] hover:bg-white/[0.02]'
                             }`}
                           >

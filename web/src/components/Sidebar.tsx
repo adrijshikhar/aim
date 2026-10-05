@@ -43,21 +43,21 @@ export function Sidebar({
     const pct = p.quota?.bottleneck_pct ?? 100;
     if (p.quota?.is_exhausted || pct <= 0) {
       return {
-        color: 'bg-[#f13242]',
-        text: 'text-[#ff5e63]',
+        color: 'bg-status-danger-solid',
+        text: 'text-status-danger',
         label: '0%',
       };
     }
     if (pct <= 30) {
       return {
-        color: 'bg-[#ffb200]',
-        text: 'text-[#ff9900]',
+        color: 'bg-status-warning-solid',
+        text: 'text-status-warning',
         label: `${pct}%`,
       };
     }
     return {
-      color: 'bg-[#ededed]',
-      text: 'text-[#a1a1a1]',
+      color: 'bg-foreground',
+      text: 'text-muted-foreground',
       label: `${pct}%`,
     };
   };
@@ -187,14 +187,14 @@ export function Sidebar({
           <div className="flex items-center gap-2">
             <span className="flex h-2 w-2 relative items-center justify-center">
               {daemonInfo?.active ? (
-                <span className="h-2 w-2 rounded-full bg-[#00ca52]" />
+                <span className="h-2 w-2 rounded-full bg-status-success-solid" />
               ) : daemonInfo?.installed ? (
-                <span className="h-2 w-2 rounded-full bg-[#ffb200]" />
+                <span className="h-2 w-2 rounded-full bg-status-warning-solid" />
               ) : (
                 <span className="h-2 w-2 rounded-full bg-[#555555]" />
               )}
             </span>
-            <span className="font-mono text-[11px] text-[#a1a1a1] group-hover:text-[#ededed]">
+            <span className="font-mono text-[11px] text-muted-foreground group-hover:text-foreground">
               {daemonInfo?.active ? 'Daemon: Active' : daemonInfo?.installed ? 'Daemon: Inactive' : 'Daemon: Off'}
             </span>
           </div>
@@ -205,12 +205,12 @@ export function Sidebar({
             <span className="relative flex h-1.5 w-1.5">
               <span
                 className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isOnline ? 'bg-[#00ca52]' : 'bg-[#ffb200]'
+                  isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
                 }`}
               />
               <span
                 className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
-                  isOnline ? 'bg-[#00ca52]' : 'bg-[#ffb200]'
+                  isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
                 }`}
               />
             </span>

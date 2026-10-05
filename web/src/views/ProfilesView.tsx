@@ -340,15 +340,15 @@ export function ProfilesView({
   };
 
   const getProgressColor = (pct: number) => {
-    if (pct <= 0) return 'bg-[#f13242]';
-    if (pct <= 30) return 'bg-[#ffb200]';
-    return 'bg-[#ededed]';
+    if (pct <= 0) return 'bg-status-danger-solid';
+    if (pct <= 30) return 'bg-status-warning-solid';
+    return 'bg-foreground';
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-[#ff5e63]';
-    if (pct <= 30) return 'text-[#ff9900]';
-    return 'text-[#ededed]';
+    if (pct <= 0) return 'text-status-danger';
+    if (pct <= 30) return 'text-status-warning';
+    return 'text-foreground';
   };
 
   const currentProfile = React.useMemo(() => {
@@ -429,7 +429,7 @@ export function ProfilesView({
                 onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
                 title="Delete profile"
                 aria-label="Delete profile"
-                className="h-8 w-8 rounded-geist border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ff5e63] hover:bg-[#330a11] hover:border-[#5d0e17]"
+                className="h-8 w-8 rounded-geist border-border bg-[#0a0a0a] text-muted-foreground hover:text-status-danger hover:bg-status-danger-bg hover:border-status-danger-border"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -677,7 +677,7 @@ export function ProfilesView({
   return (
     <div className="space-y-6">
       {error && (
-        <div className="rounded-geist border border-[#4f2900] bg-[#291800] px-3.5 py-2 text-xs text-[#ff9900] font-sans flex items-center justify-between">
+        <div className="rounded-geist border border-status-warning-border bg-status-warning-bg px-3.5 py-2 text-xs text-status-warning font-sans flex items-center justify-between">
           <span>Notice: {error}</span>
           <button
             type="button"
@@ -918,7 +918,7 @@ export function ProfilesView({
                           size="icon"
                           title={`Delete profile ${p.name}`}
                           aria-label={`Delete profile ${p.name}`}
-                          className="h-7 w-7 text-[#666666] hover:text-[#ff5e63] hover:bg-[#330a11] rounded-geist transition-colors"
+                          className="h-7 w-7 text-muted-foreground hover:text-status-danger hover:bg-status-danger-bg rounded-geist transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             openDeleteDialog(p.agent, p.name);
@@ -1008,10 +1008,10 @@ export function ProfilesView({
                             <span
                               className={`font-sans text-xs font-medium tabular-nums ${
                                 pct <= 0
-                                  ? 'px-1.5 py-0.5 rounded-[4px] bg-[#330a11] text-[#ff5e63] border border-[#5d0e17]'
+                                  ? 'badge-danger'
                                   : pct <= 30
-                                  ? 'px-1.5 py-0.5 rounded-[4px] bg-[#291800] text-[#ff9900] border border-[#4f2900]'
-                                  : 'text-[#ededed]'
+                                  ? 'badge-warning'
+                                  : 'text-foreground'
                               }`}
                             >
                               {p.quota ? `${pct}% remaining` : '100% remaining'}

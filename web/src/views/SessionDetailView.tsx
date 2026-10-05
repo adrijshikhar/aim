@@ -801,13 +801,8 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        'text-[9px] font-mono px-1.5 py-0 rounded-[3px] border',
-                                        tool.status === 'error'
-                                          ? 'border-[#5d0e17] text-[#ff5e63] bg-[#330a11]'
-                                          : 'border-[#003814] text-[#00ca52] bg-[#00250a]'
-                                      )}
+                                      variant={tool.status === 'error' ? 'destructive' : 'success'}
+                                      className="text-[9px] font-mono px-1.5 py-0 rounded-[3px]"
                                     >
                                       {tool.status || 'ok'}
                                     </Badge>

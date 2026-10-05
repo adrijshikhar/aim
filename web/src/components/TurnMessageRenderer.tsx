@@ -9,30 +9,15 @@ interface TurnMessageRendererProps {
   content: string;
 }
 
-interface CodeBlockProps {
-  inline?: boolean;
-  className?: string;
-  children?: React.ReactNode;
+interface FencedCodeBlockProps {
+  text: string;
+  language: string;
 }
 
-function CodeBlock({ inline, className, children, ...props }: CodeBlockProps) {
+function FencedCodeBlock({ text, language }: FencedCodeBlockProps) {
   const [copied, setCopied] = useState(false);
-  const match = /language-(\w+)/.exec(className || '');
-  const language = match ? match[1] : '';
-  const text = String(children).replace(/\n$/, '');
 
-  if (inline) {
-    return (
-      <code
-        className="px-1.5 py-0.5 rounded bg-[#181818] border border-[#262626] font-mono text-[11px] text-[#ededed] break-all"
-        {...props}
-      >
-        {children}
-      </code>
-    );
-  }
-
-  // If this code block is specifically marked as diff
+  // If this code block is specifically marked as diff or formatted as unified diff
   if (language === 'diff' || text.startsWith('@@') || (text.includes('\n+') && text.includes('\n-'))) {
     return <DiffViewer diffText={text} />;
   }
@@ -44,9 +29,9 @@ function CodeBlock({ inline, className, children, ...props }: CodeBlockProps) {
   };
 
   return (
-    <div className="rounded-[6px] border border-[#262626] bg-[#0c0c0c] overflow-hidden my-3 shadow-sm">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#141414] border-b border-[#262626]">
-        <span className="text-[10px] font-mono font-medium text-[#888888] uppercase tracking-wider">
+    <div className="rounded-[6px] border border-border bg-[#0c0c0c] overflow-hidden my-2.5 shadow-sm">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[#141414] border-b border-border">
+        <span className="text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-wider">
           {language || 'code'}
         </span>
         <Button
@@ -54,12 +39,12 @@ function CodeBlock({ inline, className, children, ...props }: CodeBlockProps) {
           variant="ghost"
           size="sm"
           onClick={handleCopy}
-          className="h-5 px-1.5 text-[10px] font-sans text-[#888888] hover:text-[#ededed] hover:bg-[#222222] rounded-[3px] gap-1"
+          className="h-5 px-1.5 text-[10px] font-sans text-muted-foreground hover:text-foreground hover:bg-[#222222] rounded-[3px] gap-1"
         >
           {copied ? (
             <>
-              <Check className="h-3 w-3 text-emerald-400" />
-              <span className="text-emerald-400">Copied</span>
+              <Check className="h-3 w-3 text-status-success" />
+              <span className="text-status-success">Copied</span>
             </>
           ) : (
             <>
@@ -207,10 +192,8 @@ function StructuredTextBlock({ text }: { text: string }) {
           )}
           {exitCode !== null && (
             <span
-              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium border ${
-                exitCode === 0
-                  ? 'bg-[#00250a] text-[#00ca52] border-[#003814]'
-                  : 'bg-[#330a11] text-[#ff5e63] border-[#5d0e17]'
+              className={`inline-flex items-center gap-1 font-mono text-[10px] font-medium ${
+                exitCode === 0 ? 'badge-success' : 'badge-danger'
               }`}
             >
               <Terminal className="h-2.5 w-2.5" />
@@ -253,7 +236,6 @@ function StructuredTextBlock({ text }: { text: string }) {
                   {children}
                 </div>
               ),
-              pre: ({ children }) => <>{children}</>,
               // Lists
               ul: ({ children }) => (
                 <ul className="list-disc pl-5 mb-2 space-y-1 text-[#d4d4d4]">
@@ -300,8 +282,26 @@ function StructuredTextBlock({ text }: { text: string }) {
                   {children}
                 </a>
               ),
-              // Code
-              code: CodeBlock as any,
+              // Fenced Code Blocks
+              pre: ({ children }: any) => {
+                const codeEl = React.isValidElement(children) ? children : null;
+                const codeProps = (codeEl?.props || {}) as { className?: string; children?: React.ReactNode };
+                const className = codeProps.className || '';
+                const match = /language-(\w+)/.exec(className);
+                const language = match ? match[1] : '';
+                const raw = codeProps.children;
+                const text = Array.isArray(raw) ? raw.join('') : String(raw || '').replace(/\n$/, '');
+
+                return <FencedCodeBlock text={text} language={language} />;
+              },
+              // Inline Code
+              code: ({ children, ...props }: any) => {
+                return (
+                  <code className="inline-code" {...props}>
+                    {children}
+                  </code>
+                );
+              },
             }}
           >
             {mainContent}
