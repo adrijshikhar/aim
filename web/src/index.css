@@ -4,60 +4,60 @@
 
 @layer base {
   :root {
-    --background: 220 16% 4%; /* #090b0d Deep Cool Slate Canvas */
-    --foreground: 220 10% 90%; /* #e1e4ea Soft Off-White (Skill Shade 50) */
+    --background: 0 0% 0%; /* #000000 Authentic Pitch Black Vercel Canvas (--ds-background-200) */
+    --foreground: 0 0% 93%; /* #ededed Vercel Text (--ds-gray-1000) */
 
-    --card: 220 14% 7%; /* #101215 Cool Elevated Card (Skill Shade 900) */
-    --card-foreground: 220 10% 90%;
+    --card: 0 0% 4%; /* #0a0a0a Vercel Card Surface (--ds-background-100) */
+    --card-foreground: 0 0% 93%;
 
-    --popover: 220 14% 7%;
-    --popover-foreground: 220 10% 90%;
+    --popover: 0 0% 4%; /* #0a0a0a */
+    --popover-foreground: 0 0% 93%;
 
-    --primary: 220 10% 90%; /* #e1e4ea Soft Primary */
-    --primary-foreground: 220 16% 4%;
+    --primary: 0 0% 98%; /* #fafafa */
+    --primary-foreground: 0 0% 9%;
 
-    --secondary: 220 12% 10%; /* #16191d */
-    --secondary-foreground: 220 10% 90%;
+    --secondary: 0 0% 7%; /* #111111 Vercel Secondary / Container */
+    --secondary-foreground: 0 0% 93%;
 
-    --muted: 220 12% 9%; /* #14171a */
-    --muted-foreground: 220 9% 56%; /* #868c98 Cool Slate Muted Text (AAA 6.8:1) */
+    --muted: 0 0% 10%; /* #1a1a1a Vercel Muted Track (--ds-gray-100) */
+    --muted-foreground: 0 0% 63%; /* #a1a1a1 Vercel Muted Text (--ds-gray-900) */
 
-    --accent: 220 12% 11%; /* #181c21 Hover */
-    --accent-foreground: 220 10% 96%;
+    --accent: 0 0% 10%; /* #1a1a1a Vercel Hover */
+    --accent-foreground: 0 0% 98%;
 
-    --destructive: 352 52% 48%; /* #ba3b4c Cool Crimson/Rose */
-    --destructive-foreground: 220 10% 96%;
+    --destructive: 358 75% 59%; /* #e5484d Vercel --ds-red-700 */
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 220 12% 14%; /* #1f2329 Hairline Border (Skill Shade 800) */
-    --input: 220 12% 14%;
-    --ring: 216 55% 48%; /* #376dbe Cool Slate Blue */
+    --border: 0 0% 15%; /* #262626 Vercel Hairline Border (--ds-gray-400) */
+    --input: 0 0% 15%;
+    --ring: 212 100% 48%; /* #0070f3 Vercel Blue Focus Ring */
 
     --radius: 0.375rem; /* 6px Vercel standard */
 
-    /* Semantic Status Scales (Generated via jezweb-claude-skills-color-palette, cool & low-contrast) */
-    /* Cool Red (Danger / 0%) */
-    --ds-red-bg: rgba(186, 59, 76, 0.12);
-    --ds-red-border: rgba(186, 59, 76, 0.28);
-    --ds-red-solid: #ba3b4c;
-    --ds-red-text: #ce6e7b;
+    /* Official Vercel Geist Semantic Colors (Dark Mode) */
+    /* Lower tones (less contrasty): 12% alpha bg, 28% alpha border, solid 700, text 900 */
+    --ds-red-bg: rgba(229, 72, 77, 0.12);
+    --ds-red-border: rgba(229, 72, 77, 0.28);
+    --ds-red-solid: #e5484d;
+    --ds-red-text: #ff6369;
 
-    /* Cool Amber (Warning / Low Quota / Needs Auth) */
-    --ds-amber-bg: rgba(190, 145, 55, 0.12);
-    --ds-amber-border: rgba(190, 145, 55, 0.28);
-    --ds-amber-solid: #be9137;
-    --ds-amber-text: #d1af6b;
+    --ds-amber-bg: rgba(245, 166, 35, 0.12);
+    --ds-amber-border: rgba(245, 166, 35, 0.28);
+    --ds-amber-solid: #f5a623;
+    --ds-amber-text: #ff9900;
 
-    /* Cool Green (Success / Active / Authenticated) */
-    --ds-green-bg: rgba(71, 174, 143, 0.12);
-    --ds-green-border: rgba(71, 174, 143, 0.28);
-    --ds-green-solid: #47ae8f;
-    --ds-green-text: #77c5ae;
+    --ds-green-bg: rgba(46, 160, 67, 0.12);
+    --ds-green-border: rgba(46, 160, 67, 0.28);
+    --ds-green-solid: #30a46c;
+    --ds-green-text: #46a758;
 
-    /* Cool Blue (Info / Links / Focus Ring) */
-    --ds-blue-bg: rgba(55, 109, 190, 0.12);
-    --ds-blue-border: rgba(55, 109, 190, 0.28);
-    --ds-blue-solid: #376dbe;
-    --ds-blue-text: #6b94d1;
+    --ds-blue-bg: rgba(0, 112, 243, 0.12);
+    --ds-blue-border: rgba(0, 112, 243, 0.28);
+    --ds-blue-solid: #0070f3;
+    --ds-blue-text: #52a8ff;
+
+    /* Vercel Geist Neutral Progress Meter (var(--ds-gray-500) #454545) */
+    --ds-meter-healthy: #454545;
   }
 }
 

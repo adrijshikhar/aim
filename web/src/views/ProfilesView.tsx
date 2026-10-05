@@ -280,13 +280,13 @@ export function ProfilesView({
   const getProgressColor = (pct: number) => {
     if (pct <= 0) return 'bg-status-danger-solid';
     if (pct <= 30) return 'bg-status-warning-solid';
-    return 'bg-[#c5c9d2]';
+    return 'bg-status-meter';
   };
 
   const getTextColor = (pct: number) => {
     if (pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
-    return 'text-foreground';
+    return 'text-muted-foreground';
   };
 
   const currentProfile = React.useMemo(() => {
@@ -304,20 +304,20 @@ export function ProfilesView({
     return (
       <div className="space-y-6">
         {/* Profile Header Banner */}
-        <div className="rounded-geist border border-[#262626] bg-[#111111] p-5 space-y-4">
+        <div className="rounded-geist border border-border bg-card p-5 space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => onSelectProfile('all')}
-                className="h-8 rounded-geist text-xs font-sans font-medium text-[#a1a1a1] hover:text-[#ededed] border-[#262626] bg-[#0a0a0a] hover:bg-[#161616]"
+                className="h-8 rounded-geist text-xs font-sans font-medium text-muted-foreground hover:text-foreground border-border bg-secondary hover:bg-accent cursor-pointer"
               >
                 <ArrowLeft className="h-3.5 w-3.5 mr-1" />
                 All Profiles
               </Button>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg font-semibold tracking-tight text-[#ededed]">
+                <h1 className="text-lg font-semibold tracking-tight text-foreground">
                   {currentProfile.name}
                 </h1>
                 {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
@@ -332,7 +332,7 @@ export function ProfilesView({
                 {currentProfile.has_credentials ? (
                   <Badge
                     variant="outline"
-                    className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                    className="badge-success"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                     <span>Authenticated</span>
@@ -340,7 +340,7 @@ export function ProfilesView({
                 ) : (
                   <Badge
                     variant="outline"
-                    className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                    className="badge-warning"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
                     <span>Needs Auth</span>
@@ -357,7 +357,7 @@ export function ProfilesView({
                 disabled={loading}
                 title="Refresh profile"
                 aria-label="Refresh profile"
-                className="h-8 w-8 rounded-geist border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#161616]"
+                className="h-8 w-8 rounded-geist border-border bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
               </Button>
@@ -367,7 +367,7 @@ export function ProfilesView({
                 onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
                 title="Delete profile"
                 aria-label="Delete profile"
-                className="h-8 w-8 rounded-geist border-border bg-[#0a0a0a] text-muted-foreground hover:text-status-danger hover:bg-status-danger-bg hover:border-status-danger-border"
+                className="h-8 w-8 rounded-geist border-border bg-secondary text-muted-foreground hover:text-status-danger hover:bg-status-danger-bg hover:border-status-danger-border cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -375,20 +375,20 @@ export function ProfilesView({
           </div>
 
           {/* Path and identity sub-bar */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-[#262626] text-xs font-sans text-[#a1a1a1]">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-border text-xs font-sans text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <Folder className="h-3.5 w-3.5 text-[#666666]" />
-              <span className="text-[#ededed] font-mono">{currentProfile.path}</span>
+              <Folder className="h-3.5 w-3.5 text-muted-foreground/70" />
+              <span className="text-foreground font-mono">{currentProfile.path}</span>
             </div>
             {currentProfile.account?.email && (
               <div className="flex items-center gap-1.5">
-                <Mail className="h-3.5 w-3.5 text-[#666666]" />
+                <Mail className="h-3.5 w-3.5 text-muted-foreground/70" />
                 <span>{currentProfile.account.email}</span>
               </div>
             )}
             {currentProfile.account?.auth_method && (
               <div className="flex items-center gap-1.5">
-                <Key className="h-3.5 w-3.5 text-[#666666]" />
+                <Key className="h-3.5 w-3.5 text-muted-foreground/70" />
                 <span>{currentProfile.account.auth_method}</span>
               </div>
             )}
@@ -398,22 +398,22 @@ export function ProfilesView({
         {/* Deep-link Action Cards: Single-View Navigation to Sessions & MCP */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Card 1: Sessions Deep Link */}
-          <Card className="border border-[#262626] bg-[#111111] rounded-geist hover:border-[#333333] transition-colors">
+          <Card className="border border-border bg-card rounded-geist hover:border-border/80 transition-colors">
             <CardHeader className="p-5 pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                  <Terminal className="h-4 w-4 text-[#a1a1a1]" />
+                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Terminal className="h-4 w-4 text-muted-foreground" />
                   Agent Sessions
                 </CardTitle>
                 <Badge
                   variant="outline"
-                  className="text-xs font-sans font-medium bg-[#0a0a0a] border-[#262626] text-[#ededed] px-2 py-0.5"
+                  className="text-xs font-sans font-medium bg-secondary border-border text-foreground px-2 py-0.5"
                 >
                   {resourcesLoading ? '...' : `${profileSessions.length} sessions`}
                 </Badge>
               </div>
-              <CardDescription className="text-xs text-[#a1a1a1] pt-1">
-                View, filter, and resume interactive CLI terminal sessions for <code className="text-[#ededed]">{currentProfile.name}</code>.
+              <CardDescription className="text-xs text-muted-foreground pt-1">
+                View, filter, and resume interactive CLI terminal sessions for <code className="text-foreground">{currentProfile.name}</code>.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-5 pt-0">
@@ -421,30 +421,30 @@ export function ProfilesView({
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigateToSessions && onNavigateToSessions(currentProfile.name)}
-                className="w-full justify-between h-9 rounded-geist border-[#262626] bg-[#0a0a0a] text-xs font-sans font-medium text-[#ededed] hover:bg-[#161616] hover:border-[#333333] cursor-pointer"
+                className="w-full justify-between h-9 rounded-geist border-border bg-secondary text-xs font-sans font-medium text-foreground hover:bg-accent hover:border-border/80 cursor-pointer"
               >
                 <span>Open in All Sessions View ({currentProfile.name})</span>
-                <ArrowRight className="h-3.5 w-3.5 ml-1 text-[#a1a1a1]" />
+                <ArrowRight className="h-3.5 w-3.5 ml-1 text-muted-foreground" />
               </Button>
             </CardContent>
           </Card>
 
           {/* Card 2: MCP Catalog Deep Link */}
-          <Card className="border border-[#262626] bg-[#111111] rounded-geist hover:border-[#333333] transition-colors">
+          <Card className="border border-border bg-card rounded-geist hover:border-border/80 transition-colors">
             <CardHeader className="p-5 pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                  <Server className="h-4 w-4 text-[#a1a1a1]" />
+                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Server className="h-4 w-4 text-muted-foreground" />
                   MCP Catalog & Tools
                 </CardTitle>
                 <Badge
                   variant="outline"
-                  className="text-xs font-sans font-medium bg-[#0a0a0a] border-[#262626] text-[#ededed] px-2 py-0.5"
+                  className="text-xs font-sans font-medium bg-secondary border-border text-foreground px-2 py-0.5"
                 >
                   {resourcesLoading ? '...' : `${profileMcpServers.length} active`}
                 </Badge>
               </div>
-              <CardDescription className="text-xs text-[#a1a1a1] pt-1">
+              <CardDescription className="text-xs text-muted-foreground pt-1">
                 Explore connected MCP servers, global inheritance, and sandbox integrations.
               </CardDescription>
             </CardHeader>
@@ -453,34 +453,34 @@ export function ProfilesView({
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigateToMcp && onNavigateToMcp(currentProfile.name)}
-                className="w-full justify-between h-9 rounded-geist border-[#262626] bg-[#0a0a0a] text-xs font-sans font-medium text-[#ededed] hover:bg-[#161616] hover:border-[#333333] cursor-pointer"
+                className="w-full justify-between h-9 rounded-geist border-border bg-secondary text-xs font-sans font-medium text-foreground hover:bg-accent hover:border-border/80 cursor-pointer"
               >
                 <span>Open in MCP Catalog ({currentProfile.name})</span>
-                <ArrowRight className="h-3.5 w-3.5 ml-1 text-[#a1a1a1]" />
+                <ArrowRight className="h-3.5 w-3.5 ml-1 text-muted-foreground" />
               </Button>
             </CardContent>
           </Card>
         </div>
 
         {/* Compact Profile Environment Sandbox Card (No scattered layout or 800px void) */}
-        <Card className="border border-[#262626] bg-[#111111] rounded-geist">
+        <Card className="border border-border bg-card rounded-geist">
           <CardHeader className="pb-3 p-5">
-            <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-              <Folder className="h-4 w-4 text-[#a1a1a1]" />
+            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Folder className="h-4 w-4 text-muted-foreground" />
               Profile Environment & Storage Sandbox
             </CardTitle>
-            <CardDescription className="text-xs text-[#a1a1a1]">
+            <CardDescription className="text-xs text-muted-foreground">
               Filesystem sandbox isolation and global configuration inheritance.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-5 pt-0">
             <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-6 gap-y-3.5 text-xs font-sans py-1">
-              <span className="text-[#a1a1a1]">Storage Sandbox:</span>
-              <span className="text-[#ededed] font-mono break-all select-all">
+              <span className="text-muted-foreground">Storage Sandbox:</span>
+              <span className="text-foreground font-mono break-all select-all">
                 {currentProfile.path}
               </span>
 
-              <span className="text-[#a1a1a1]">Connected Engines:</span>
+              <span className="text-muted-foreground">Connected Engines:</span>
               <div className="flex items-center gap-1.5 flex-wrap">
                 {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
                   currentProfile.adapters.map((ad) => (
@@ -493,26 +493,26 @@ export function ProfilesView({
                 )}
               </div>
 
-              <span className="text-[#a1a1a1]">Global MCP Inheritance:</span>
+              <span className="text-muted-foreground">Global MCP Inheritance:</span>
               <div className="flex items-center gap-3">
                 <Switch
                   checked={isMcpGlobalOn}
                   disabled={updatingConfig}
                   onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
                 />
-                <span className="text-[#ededed]">
+                <span className="text-foreground">
                   {isMcpGlobalOn ? 'Enabled (Inherit host MCP servers)' : 'Disabled (Strict sandbox isolation)'}
                 </span>
               </div>
 
-              <span className="text-[#a1a1a1]">Global Plugin Inheritance:</span>
+              <span className="text-muted-foreground">Global Plugin Inheritance:</span>
               <div className="flex items-center gap-3">
                 <Switch
                   checked={isPluginsGlobalOn}
                   disabled={updatingConfig}
                   onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
                 />
-                <span className="text-[#ededed]">
+                <span className="text-foreground">
                   {isPluginsGlobalOn ? 'Enabled (Inherit host plugins)' : 'Disabled (Strict sandbox isolation)'}
                 </span>
               </div>
@@ -522,7 +522,7 @@ export function ProfilesView({
 
         {/* Visual Live Quota Breakdown (Replaces raw monospace text) */}
         <div className="space-y-3">
-          <h3 className="text-xs font-sans font-semibold uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1.5">
+          <h3 className="text-xs font-sans font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
             <Gauge className="h-3.5 w-3.5" />
             Live Quota Telemetry & Rate Limits
           </h3>
@@ -539,17 +539,17 @@ export function ProfilesView({
                   },
                 ]
             ).map((ad) => (
-              <Card key={ad.agent} className="border border-[#262626] bg-[#111111] rounded-geist flex flex-col justify-between">
+              <Card key={ad.agent} className="border border-border bg-card rounded-geist flex flex-col justify-between">
                 <CardHeader className="pb-3 p-5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {getAgentBadge(ad.agent)}
-                      <span className="text-xs font-sans text-[#a1a1a1]">Engine</span>
+                      <span className="text-xs font-sans text-muted-foreground">Engine</span>
                     </div>
                     {ad.has_credentials ? (
                       <Badge
                         variant="outline"
-                        className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                        className="badge-success"
                       >
                         <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                         <span>Authenticated</span>
@@ -557,14 +557,14 @@ export function ProfilesView({
                     ) : (
                       <Badge
                         variant="outline"
-                        className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                        className="badge-warning"
                       >
                         <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
                         <span>Needs Auth</span>
                       </Badge>
                     )}
                   </div>
-                  <CardDescription className="text-xs text-[#a1a1a1] pt-1">
+                  <CardDescription className="text-xs text-muted-foreground pt-1">
                     {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials detected' : 'No credentials detected')}
                   </CardDescription>
                 </CardHeader>
@@ -578,17 +578,17 @@ export function ProfilesView({
                   />
 
                   {/* Account detail chips */}
-                  <div className="p-3 rounded-geist bg-[#0a0a0a] border border-[#262626] space-y-1.5 text-xs font-sans">
-                    <div className="flex justify-between items-center text-[#a1a1a1]">
+                  <div className="p-3 rounded-geist bg-secondary/50 border border-border space-y-1.5 text-xs font-sans">
+                    <div className="flex justify-between items-center text-muted-foreground">
                       <span>Account:</span>
-                      <span className="text-[#ededed] font-medium truncate max-w-[180px]">
+                      <span className="text-foreground font-medium truncate max-w-[180px]">
                         {ad.account?.name || currentProfile.name}
                       </span>
                     </div>
                     {ad.account?.auth_method && (
-                      <div className="flex justify-between items-center text-[#a1a1a1]">
+                      <div className="flex justify-between items-center text-muted-foreground">
                         <span>Auth Method:</span>
-                        <span className="text-[#ededed] truncate max-w-[180px]">{ad.account.auth_method}</span>
+                        <span className="text-foreground truncate max-w-[180px]">{ad.account.auth_method}</span>
                       </div>
                     )}
                   </div>
@@ -849,7 +849,7 @@ export function ProfilesView({
                                   ? 'badge-danger'
                                   : pct <= 30
                                   ? 'badge-warning'
-                                  : 'text-foreground'
+                                  : 'text-muted-foreground'
                               }`}
                             >
                               {p.quota ? `${pct}% remaining` : '100% remaining'}
