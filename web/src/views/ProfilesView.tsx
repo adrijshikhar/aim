@@ -280,13 +280,13 @@ export function ProfilesView({
   const getProgressColor = (pct: number) => {
     if (pct <= 0) return 'bg-status-danger-solid';
     if (pct <= 30) return 'bg-status-warning-solid';
-    return 'bg-[#ededed]';
+    return 'bg-[#c5c9d2]';
   };
 
   const getTextColor = (pct: number) => {
     if (pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
-    return 'text-[#ededed]';
+    return 'text-foreground';
   };
 
   const currentProfile = React.useMemo(() => {
@@ -698,7 +698,7 @@ export function ProfilesView({
                     onSelectProfile(p.name);
                   }
                 }}
-                className="group relative overflow-hidden transition-all duration-150 border border-[#262626] bg-[#111111] hover:border-[#333333] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#0070f3] rounded-geist flex flex-col justify-between cursor-pointer"
+                className="group relative overflow-hidden transition-all duration-150 border border-border bg-card hover:border-border/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-geist flex flex-col justify-between cursor-pointer"
                 onClick={() => onSelectProfile(p.name)}
               >
                 <div>
@@ -718,7 +718,7 @@ export function ProfilesView({
                       {p.has_credentials ? (
                         <Badge
                           variant="outline"
-                          className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                          className="bg-muted text-muted-foreground border-border text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
                           <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                           <span>Authenticated</span>
@@ -726,7 +726,7 @@ export function ProfilesView({
                       ) : (
                         <Badge
                           variant="outline"
-                          className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                          className="bg-muted text-muted-foreground border-border text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
                           <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
                           <span>Needs Auth</span>
@@ -736,7 +736,7 @@ export function ProfilesView({
 
                     <div className="pt-2">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-base font-semibold text-[#ededed] group-hover:text-white transition-colors">
+                        <CardTitle className="text-base font-semibold text-foreground group-hover:text-foreground transition-colors">
                           {p.name}
                         </CardTitle>
                         <Button
@@ -753,8 +753,8 @@ export function ProfilesView({
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
-                      <CardDescription className="text-xs text-[#a1a1a1] truncate pt-0.5 flex items-center gap-1">
-                        <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
+                      <CardDescription className="text-xs text-muted-foreground truncate pt-0.5 flex items-center gap-1">
+                        <Folder className="h-3 w-3 shrink-0 text-muted-foreground/60" />
                         <span className="truncate font-mono">{p.path}</span>
                       </CardDescription>
                     </div>
@@ -762,31 +762,31 @@ export function ProfilesView({
 
                   <CardContent className="space-y-3 pb-4 p-5 pt-0">
                     {/* Account Info Box */}
-                    <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] p-3 text-xs space-y-1.5 font-sans">
-                      <div className="flex items-center justify-between text-[#a1a1a1]">
+                    <div className="rounded-geist border border-border bg-muted p-3 text-xs space-y-1.5 font-sans">
+                      <div className="flex items-center justify-between text-muted-foreground">
                         <span className="flex items-center gap-1.5">
-                          <User className="h-3 w-3 text-[#666666]" /> Account
+                          <User className="h-3 w-3 text-muted-foreground/60" /> Account
                         </span>
-                        <span className="text-[#ededed] font-medium truncate max-w-[140px]">
+                        <span className="text-foreground font-medium truncate max-w-[140px]">
                           {p.account?.name || p.name}
                         </span>
                       </div>
                       {p.account?.email && (
-                        <div className="flex items-center justify-between text-[#a1a1a1]">
+                        <div className="flex items-center justify-between text-muted-foreground">
                           <span className="flex items-center gap-1.5">
-                            <Mail className="h-3 w-3 text-[#666666]" /> Email
+                            <Mail className="h-3 w-3 text-muted-foreground/60" /> Email
                           </span>
-                          <span className="text-[#ededed] truncate max-w-[160px]">
+                          <span className="text-foreground truncate max-w-[160px]">
                             {p.account.email}
                           </span>
                         </div>
                       )}
                       {p.account?.auth_method && (
-                        <div className="flex items-center justify-between text-[#a1a1a1]">
+                        <div className="flex items-center justify-between text-muted-foreground">
                           <span className="flex items-center gap-1.5">
-                            <Key className="h-3 w-3 text-[#666666]" /> Auth
+                            <Key className="h-3 w-3 text-muted-foreground/60" /> Auth
                           </span>
-                          <span className="text-[#ededed] truncate max-w-[140px]">
+                          <span className="text-foreground truncate max-w-[140px]">
                             {p.account.auth_method}
                           </span>
                         </div>
@@ -795,8 +795,8 @@ export function ProfilesView({
 
                     {/* Standardized Quota Telemetry (Strict h-1.5 across multi- and single-engine) */}
                     {p.adapters && p.adapters.length > 1 ? (
-                      <div className="space-y-2 pt-1 border-t border-[#262626]">
-                        <div className="flex items-center justify-between text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
+                      <div className="space-y-2 pt-1 border-t border-border">
+                        <div className="flex items-center justify-between text-[11px] font-sans font-medium uppercase tracking-wider text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Gauge className="h-3 w-3" /> Engine Quotas
                           </span>
@@ -807,7 +807,7 @@ export function ProfilesView({
                           return (
                             <div key={ad.agent} className="space-y-1">
                               <div className="flex items-center justify-between text-[11px] font-sans">
-                                <span className="text-[#a1a1a1]">{ad.agent}</span>
+                                <span className="text-muted-foreground">{ad.agent}</span>
                                 <span className={`tabular-nums ${getTextColor(pct)}`}>
                                   {pct}%
                                 </span>
@@ -818,7 +818,7 @@ export function ProfilesView({
                                 aria-valuemin={0}
                                 aria-valuemax={100}
                                 aria-label={`${ad.agent} quota`}
-                                className="w-full bg-[#262626] h-1.5 rounded-full overflow-hidden"
+                                className="w-full bg-secondary h-1.5 rounded-full overflow-hidden"
                               >
                                 <div
                                   className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
@@ -837,7 +837,7 @@ export function ProfilesView({
                     ) : (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1">
+                          <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <Gauge className="h-3 w-3" /> Quota Telemetry
                           </span>
                         {(() => {
@@ -849,7 +849,7 @@ export function ProfilesView({
                                   ? 'badge-danger'
                                   : pct <= 30
                                   ? 'badge-warning'
-                                  : 'text-[#ededed]'
+                                  : 'text-foreground'
                               }`}
                             >
                               {p.quota ? `${pct}% remaining` : '100% remaining'}
@@ -863,7 +863,7 @@ export function ProfilesView({
                           aria-valuemin={0}
                           aria-valuemax={100}
                           aria-label="Profile quota"
-                          className="w-full bg-[#262626] h-1.5 rounded-full overflow-hidden"
+                          className="w-full bg-secondary h-1.5 rounded-full overflow-hidden"
                         >
                           <div
                             className={`h-full transition-all duration-300 ${getProgressColor(
@@ -878,7 +878,7 @@ export function ProfilesView({
                           />
                         </div>
                         {p.quota?.summary && (
-                          <p className="text-[11px] text-[#666666] font-sans truncate" title={p.quota.summary}>
+                          <p className="text-[11px] text-muted-foreground/70 font-sans truncate" title={p.quota.summary}>
                             {p.quota.summary}
                           </p>
                         )}
@@ -888,25 +888,25 @@ export function ProfilesView({
                 </div>
 
                 {/* Card Footer: MCP & Plugin configuration chips + Inspect Action */}
-                <CardFooter className="pt-2 pb-4 px-5 border-t border-[#262626] flex items-center justify-between text-[11px] font-sans text-[#a1a1a1]">
+                <CardFooter className="pt-2 pb-4 px-5 border-t border-border flex items-center justify-between text-[11px] font-sans text-muted-foreground">
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-sans font-medium text-[#a1a1a1]">
-                      <Server className="h-3 w-3 text-[#666666]" />
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted text-[10px] font-sans font-medium text-muted-foreground">
+                      <Server className="h-3 w-3 text-muted-foreground/60" />
                       <span>MCP</span>
-                      <span className={isMcpOn ? 'text-[#ededed] font-medium' : 'text-[#666666]'}>
+                      <span className={isMcpOn ? 'text-foreground font-medium' : 'text-muted-foreground/60'}>
                         {isMcpOn ? 'on' : 'off'}
                       </span>
                     </span>
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-sans font-medium text-[#a1a1a1]">
-                      <Boxes className="h-3 w-3 text-[#666666]" />
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted text-[10px] font-sans font-medium text-muted-foreground">
+                      <Boxes className="h-3 w-3 text-muted-foreground/60" />
                       <span>Plugins</span>
-                      <span className={isPluginsOn ? 'text-[#ededed] font-medium' : 'text-[#666666]'}>
+                      <span className={isPluginsOn ? 'text-foreground font-medium' : 'text-muted-foreground/60'}>
                         {isPluginsOn ? 'on' : 'off'}
                       </span>
                     </span>
                   </div>
 
-                  <span className="flex items-center text-[#ededed] group-hover:text-white transition-colors">
+                  <span className="flex items-center text-foreground group-hover:text-foreground transition-colors">
                     Inspect <ChevronRight className="h-3 w-3 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
                   </span>
                 </CardFooter>

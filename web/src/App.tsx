@@ -196,7 +196,7 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-[#000000] text-[#ededed] overflow-hidden font-sans">
+    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
       {/* Desktop Left Sidebar */}
       <Sidebar
         currentView={currentView}
@@ -212,9 +212,9 @@ export function App() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#000000]">
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
         {/* Top Header Bar */}
-        <header className="h-14 border-b border-[#262626] bg-[#0a0a0a]/90 backdrop-blur-md px-6 flex items-center justify-between shrink-0">
+        <header className="h-14 border-b border-border bg-background/90 backdrop-blur-md px-6 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             {getHeaderTitle()}
           </div>
@@ -225,7 +225,7 @@ export function App() {
               type="button"
               onClick={() => setIsDaemonOpen(true)}
               title="Manage OS Background Daemon (15m Quota Pre-Warm)"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#262626] bg-[#111111] hover:bg-[#161616] hover:border-[#333333] transition-colors cursor-pointer text-xs group"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-card hover:bg-secondary hover:border-border/80 transition-colors cursor-pointer text-xs group"
             >
               <span className="flex h-2 w-2 relative items-center justify-center">
                 {daemonInfo?.active ? (
@@ -233,7 +233,7 @@ export function App() {
                 ) : daemonInfo?.installed ? (
                   <span className="h-2 w-2 rounded-full bg-status-warning-solid" />
                 ) : (
-                  <span className="h-2 w-2 rounded-full bg-[#666666]" />
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
                 )}
               </span>
               <span className="font-mono text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
@@ -245,7 +245,7 @@ export function App() {
               </span>
             </button>
 
-            <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-[#111111] text-xs">
+            <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-card text-xs">
               <span className="relative flex h-2 w-2">
                 <span
                   className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
@@ -258,7 +258,7 @@ export function App() {
                   }`}
                 />
               </span>
-              <span className="font-mono text-[11px] text-[#ededed]">
+              <span className="font-mono text-[11px] text-foreground">
                 {isOnline ? 'Server Connected' : 'Connecting...'}
               </span>
             </div>
@@ -266,7 +266,7 @@ export function App() {
         </header>
 
         {/* Stage Content */}
-        <main className="flex-1 overflow-y-auto px-6 py-6 min-h-0 bg-[#000000]">
+        <main className="flex-1 overflow-y-auto px-6 py-6 min-h-0 bg-background">
           <div className="max-w-7xl mx-auto">
             {currentView === 'overview' && (
               <ProfilesView

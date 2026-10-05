@@ -94,13 +94,13 @@ export function QuotaBreakdown({
   const getStatusColor = (pct: number) => {
     if (isExhausted || pct <= 0) return 'bg-status-danger-solid';
     if (pct <= 30) return 'bg-status-warning-solid';
-    return 'bg-[#ededed]';
+    return 'bg-[#c5c9d2]';
   };
 
   const getTextColor = (pct: number) => {
     if (isExhausted || pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
-    return 'text-[#ededed]';
+    return 'text-foreground';
   };
 
   const renderMeter = (win: QuotaWindow) => {

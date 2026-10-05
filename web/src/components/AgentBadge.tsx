@@ -11,16 +11,16 @@ const getAgentDotColor = (agent: string) => {
   const a = agent?.toLowerCase() || '';
   switch (a) {
     case 'claude':
-      return 'bg-[#f5a623]';
+      return 'bg-[#be9137]'; // Cool muted bronze
     case 'codex':
-      return 'bg-[#30a46c]';
+      return 'bg-[#47ae8f]'; // Cool slate-pine / sage
     case 'gemini':
-      return 'bg-[#52a8ff]';
+      return 'bg-[#6b94d1]'; // Cool slate-blue
     case 'agy':
     case 'antigravity':
-      return 'bg-[#a78bfa]';
+      return 'bg-[#8e7dbf]'; // Cool slate-iris
     default:
-      return 'bg-[#888888]';
+      return 'bg-muted-foreground';
   }
 };
 
@@ -32,7 +32,7 @@ export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent, className = '', s
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 font-mono font-medium tracking-tight rounded-geist border border-[#262626] bg-[#141414] text-[#ededed] select-none transition-colors hover:border-[#383838]',
+        'inline-flex items-center gap-1.5 font-mono font-medium tracking-tight rounded-geist border border-border bg-secondary text-foreground select-none transition-colors hover:border-border/80',
         sizeClasses,
         className
       )}

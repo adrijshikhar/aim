@@ -56,23 +56,23 @@ export function Sidebar({
       };
     }
     return {
-      color: 'bg-[#333333]',
-      text: 'text-[#666666]',
+      color: 'bg-[#2b3039]',
+      text: 'text-muted-foreground/60',
       label: `${pct}%`,
     };
   };
 
   return (
-    <aside className="w-64 border-r border-[#262626] bg-[#0a0a0a] flex flex-col h-full shrink-0 select-none">
+    <aside className="w-64 border-r border-border bg-background flex flex-col h-full shrink-0 select-none">
       {/* Brand Header */}
-      <div className="h-14 px-4 border-b border-[#262626] flex items-center justify-between gap-2">
+      <div className="h-14 px-4 border-b border-border flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
-          <div className="h-7 w-7 rounded-[6px] bg-[#111111] border border-[#262626] flex items-center justify-center">
-            <Cpu className="h-3.5 w-3.5 text-[#ededed]" />
+          <div className="h-7 w-7 rounded-[6px] bg-card border border-border flex items-center justify-center">
+            <Cpu className="h-3.5 w-3.5 text-foreground" />
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="font-semibold text-sm tracking-tight text-[#ededed]">AIM</span>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-[#262626] bg-[#111111] text-[#a1a1a1]">
+            <span className="font-semibold text-sm tracking-tight text-foreground">AIM</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground">
               {version}
             </span>
           </div>
@@ -83,7 +83,7 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
         {/* Section 1: Workspaces */}
         <div className="space-y-1">
-          <div className="px-2 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-[#666666]">
+          <div className="px-2 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70">
             Workspaces
           </div>
 
@@ -92,13 +92,13 @@ export function Sidebar({
             onClick={() => onSelectView('overview')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-[6px] text-xs font-mono transition-colors cursor-pointer text-left ${
               currentView === 'overview' || currentView === 'profile-detail'
-                ? 'bg-[#161616] text-[#ededed] border border-[#333333] shadow-sm font-medium'
-                : 'text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#111111] border border-transparent'
+                ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
             }`}
           >
-            <Layers className="h-3.5 w-3.5 text-[#888888]" />
+            <Layers className="h-3.5 w-3.5 text-muted-foreground" />
             <span>Profiles</span>
-            <span className="ml-auto text-[10px] font-mono text-[#666666]">
+            <span className="ml-auto text-[10px] font-mono text-muted-foreground/70">
               {profiles.length}
             </span>
           </button>
@@ -108,11 +108,11 @@ export function Sidebar({
             onClick={() => onSelectView('sessions')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-[6px] text-xs font-mono transition-colors cursor-pointer text-left ${
               currentView === 'sessions' || currentView === 'session-detail'
-                ? 'bg-[#161616] text-[#ededed] border border-[#333333] shadow-sm font-medium'
-                : 'text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#111111] border border-transparent'
+                ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
             }`}
           >
-            <Terminal className="h-3.5 w-3.5 text-[#888888]" />
+            <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
             <span>Sessions</span>
           </button>
 
@@ -121,11 +121,11 @@ export function Sidebar({
             onClick={() => onSelectView('mcp')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-[6px] text-xs font-mono transition-colors cursor-pointer text-left ${
               currentView === 'mcp'
-                ? 'bg-[#161616] text-[#ededed] border border-[#333333] shadow-sm font-medium'
-                : 'text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#111111] border border-transparent'
+                ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
             }`}
           >
-            <Server className="h-3.5 w-3.5 text-[#888888]" />
+            <Server className="h-3.5 w-3.5 text-muted-foreground" />
             <span>MCP Catalog</span>
           </button>
         </div>
@@ -133,7 +133,7 @@ export function Sidebar({
         {/* Section 2: Active Profiles List */}
         <div className="space-y-1">
           <div className="flex items-center justify-between px-2 pb-1.5">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666]">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70">
               Active Profiles ({profiles.length})
             </span>
             <button
@@ -141,7 +141,7 @@ export function Sidebar({
               onClick={onOpenAddProfile}
               title="Add new profile"
               aria-label="Add new profile"
-              className="h-6 w-6 rounded-[4px] flex items-center justify-center text-[#888888] hover:text-[#ededed] hover:bg-[#161616] transition-colors cursor-pointer"
+              className="h-6 w-6 rounded-[4px] flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -159,8 +159,8 @@ export function Sidebar({
                   onClick={() => onSelectProfile(p.name)}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-[6px] text-xs font-mono transition-colors cursor-pointer text-left group ${
                     isSelected
-                      ? 'bg-[#161616] text-[#ededed] border border-[#333333] shadow-sm font-medium'
-                      : 'text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#111111] border border-transparent'
+                      ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
@@ -178,11 +178,11 @@ export function Sidebar({
       </div>
 
       {/* Footer System Status */}
-      <div className="p-3 border-t border-[#262626] space-y-2 bg-[#0e0e0e]/50">
+      <div className="p-3 border-t border-border space-y-2 bg-muted/30">
         <button
           type="button"
           onClick={onOpenDaemonModal}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-[6px] border border-[#262626] bg-[#111111] hover:bg-[#161616] hover:border-[#383838] transition-colors cursor-pointer text-xs group"
+          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-[6px] border border-border bg-card hover:bg-secondary hover:border-border/80 transition-colors cursor-pointer text-xs group"
           title="Manage OS Background Daemon"
         >
           <div className="flex items-center gap-2">
@@ -192,7 +192,7 @@ export function Sidebar({
               ) : daemonInfo?.installed ? (
                 <span className="h-2 w-2 rounded-full bg-status-warning-solid" />
               ) : (
-                <span className="h-2 w-2 rounded-full bg-[#555555]" />
+                <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
               )}
             </span>
             <span className="font-mono text-[11px] text-muted-foreground group-hover:text-foreground">
@@ -201,7 +201,7 @@ export function Sidebar({
           </div>
         </button>
 
-        <div className="flex items-center justify-between px-2.5 py-1 rounded-[6px] border border-[#1f1f1f] bg-[#0a0a0a] text-[11px] font-mono text-[#888888]">
+        <div className="flex items-center justify-between px-2.5 py-1 rounded-[6px] border border-border/60 bg-muted/60 text-[11px] font-mono text-muted-foreground">
           <div className="flex items-center gap-2">
             <span className="relative flex h-1.5 w-1.5">
               <span
