@@ -40,13 +40,18 @@
   * {
     @apply border-border;
   }
-  html {
-    scrollbar-gutter: stable;
-    overflow-y: scroll;
-  }
-  body {
+  html, body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE / Edge */
+  }
+
+  /* Hide scrollbars across WebKit / Chromium / Safari */
+  ::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
   }
 
   /* Minimalist UI <kbd> styling */
@@ -54,25 +59,9 @@
     @apply inline-flex items-center justify-center font-mono text-[10px] font-medium px-1.5 py-0.5 rounded border border-[#2e2e2e] bg-[#171717] text-[#888888] shadow-sm;
   }
 
-  /* Impeccable Craft Floor: themed selection & scrollbars */
+  /* Impeccable Craft Floor: themed selection */
   ::selection {
     background-color: hsl(212 100% 48% / 0.3);
     color: #ffffff;
-  }
-
-  /* Custom subtle dark scrollbars matching Vercel dark */
-  ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #0a0a0a;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #262626;
-    border-radius: 2.5px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #333333;
   }
 }
