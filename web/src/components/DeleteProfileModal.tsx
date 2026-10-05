@@ -30,29 +30,29 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(val) => !isDeleting && onOpenChange(val)}>
-      <DialogContent className="max-w-md bg-[#0c0c0c] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
-        <DialogHeader className="space-y-1.5 pb-2 border-b border-[#1f1f1f] pr-8">
+      <DialogContent className="max-w-md bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
+        <DialogHeader className="space-y-1.5 pb-2 border-b border-[#262626] pr-8">
           <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-rose-500" />
+              <AlertTriangle className="h-4 w-4 text-[#ee0000]" />
               <span>Delete Profile</span>
             </DialogTitle>
             {target.agent && target.agent.trim() !== '' && (
               <Badge
                 variant="outline"
-                className="text-[10px] font-mono bg-[#141414] text-[#888888] border-[#262626] px-2 py-0.5"
+                className="text-[10px] font-mono bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] px-2 py-0.5 rounded-geist"
               >
                 {target.agent}
               </Badge>
             )}
           </div>
-          <DialogDescription className="text-xs text-[#888888]">
+          <DialogDescription className="text-xs text-[#a1a1a1]">
             This action cannot be undone. Are you sure you want to delete profile{' '}
-            <span className="text-[#ededed] font-medium font-mono">"{target.name}"</span>?
+            <span className="text-[#ededed] font-medium font-mono">&ldquo;{target.name}&rdquo;</span>?
           </DialogDescription>
         </DialogHeader>
 
-        <div className="rounded-md border border-[#222222] bg-[#121212] p-3 text-xs space-y-2 font-mono text-[#888888]">
+        <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] p-3 text-xs space-y-2 font-mono text-[#a1a1a1]">
           <div className="flex justify-between items-center">
             <span>Profile Identifier:</span>
             <span className="text-[#ededed] font-medium">{target.name}</span>
@@ -63,19 +63,19 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
               <span className="text-[#ededed] font-medium">{target.agent}</span>
             </div>
           )}
-          <p className="text-[11px] text-[#777777] pt-2 border-t border-[#1c1c1c] leading-relaxed">
+          <p className="text-[11px] text-[#666666] pt-2 border-t border-[#262626] leading-relaxed">
             This will permanently remove the profile directory, credentials, and configuration from AIM.
           </p>
         </div>
 
-        <DialogFooter className="pt-2 border-t border-[#1f1f1f] flex items-center justify-between sm:justify-between w-full">
+        <DialogFooter className="pt-2 border-t border-[#262626] flex items-center justify-between sm:justify-between w-full">
           <Button
             type="button"
             variant="outline"
             size="sm"
             disabled={isDeleting}
             onClick={() => onOpenChange(false)}
-            className="border-[#262626] bg-[#141414] hover:bg-[#1a1a1a] text-[#888888] hover:text-[#ededed] text-xs font-mono"
+            className="border-[#262626] bg-[#0a0a0a] hover:bg-[#161616] text-[#a1a1a1] hover:text-[#ededed] text-xs font-mono rounded-geist"
           >
             Cancel
           </Button>
@@ -84,7 +84,7 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
             size="sm"
             disabled={isDeleting}
             onClick={onConfirm}
-            className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-mono font-medium shadow-sm transition-all cursor-pointer"
+            className="bg-[#ee0000] hover:bg-[#ee0000]/90 text-white text-xs font-mono font-medium shadow-sm transition-all cursor-pointer rounded-geist"
           >
             {isDeleting ? (
               <>

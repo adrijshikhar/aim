@@ -136,8 +136,8 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl bg-[#0c0c0c] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
-        <DialogHeader className="space-y-1.5 pb-3 border-b border-[#1f1f1f] pr-8">
+      <DialogContent className="max-w-xl bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
+        <DialogHeader className="space-y-1.5 pb-3 border-b border-[#262626] pr-8">
           <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
               <Activity className="h-4 w-4 text-[#ededed]" />
@@ -145,57 +145,57 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
             </DialogTitle>
             <Badge
               variant="outline"
-              className="text-[10px] font-mono bg-[#141414] text-[#888888] border-[#262626] px-2 py-0.5"
+              className="text-[10px] font-mono bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] px-2 py-0.5 rounded-geist"
             >
               15m Quota Pre-Warm
             </Badge>
           </div>
-          <DialogDescription className="text-xs text-[#888888] leading-relaxed">
+          <DialogDescription className="text-xs text-[#a1a1a1] leading-relaxed">
             Native scheduled background service (launchd on macOS / systemd on Linux) for pre-warming quota and rate-limit caches without resident memory overhead.
           </DialogDescription>
         </DialogHeader>
 
         {/* Operational Status Banner */}
-        <div className="rounded-md border border-[#222222] bg-[#121212] p-3 text-xs space-y-2">
+        <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] p-3 text-xs space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-wider font-mono text-[#888888]">
+            <span className="text-[11px] uppercase tracking-wider font-mono text-[#a1a1a1]">
               Operational Status
             </span>
             {isActive ? (
               <Badge
                 variant="outline"
-                className="bg-[#141414] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-md"
+                className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[#00e599]" />
                 <span>Active (Every 15m)</span>
               </Badge>
             ) : isInstalled ? (
               <Badge
                 variant="outline"
-                className="bg-[#141414] text-[#888888] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-md"
+                className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[#f5a623]" />
                 <span>Installed (Inactive)</span>
               </Badge>
             ) : (
               <Badge
                 variant="outline"
-                className="bg-[#141414] text-[#888888] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-md"
+                className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-[#555555]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[#666666]" />
                 <span>Not Installed</span>
               </Badge>
             )}
           </div>
 
           <div className="grid grid-cols-2 gap-2 font-mono text-[11px] pt-1">
-            <div className="p-2 rounded bg-[#0e0e0e] border border-[#1f1f1f]">
+            <div className="p-2 rounded-geist bg-[#111111] border border-[#262626]">
               <span className="text-[#666666] block text-[10px] uppercase">Service Label</span>
               <span className="text-[#ededed] font-medium truncate block" title={daemonInfo?.label || 'dev.aim-cli.daemon'}>
                 {daemonInfo?.label || 'dev.aim-cli.daemon'}
               </span>
             </div>
-            <div className="p-2 rounded bg-[#0e0e0e] border border-[#1f1f1f]">
+            <div className="p-2 rounded-geist bg-[#111111] border border-[#262626]">
               <span className="text-[#666666] block text-[10px] uppercase">Schedule Interval</span>
               <span className="text-[#ededed] font-medium block">
                 Every {daemonInfo?.interval_sec ? `${daemonInfo.interval_sec / 60}m` : '15m'}
@@ -205,8 +205,8 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         </div>
 
         {/* Execution & Telemetry Recap */}
-        <div className="rounded-md border border-[#222222] bg-[#121212] p-3 text-xs space-y-2.5 font-mono">
-          <div className="flex items-center justify-between text-[#888888]">
+        <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] p-3 text-xs space-y-2.5 font-mono">
+          <div className="flex items-center justify-between text-[#a1a1a1]">
             <span className="flex items-center gap-1.5 text-[11px]">
               <Clock className="h-3.5 w-3.5 text-[#666666]" /> Last Sync
             </span>
@@ -216,13 +216,13 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
           </div>
 
           {daemonInfo?.last_run_message && (
-            <div className="p-2.5 rounded bg-[#0e0e0e] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] leading-relaxed break-words" title={daemonInfo.last_run_message}>
+            <div className="p-2.5 rounded-geist bg-[#111111] border border-[#262626] text-[11px] text-[#a1a1a1] leading-relaxed break-words" title={daemonInfo.last_run_message}>
               {daemonInfo.last_run_message}
             </div>
           )}
 
           {daemonInfo?.config_path && (
-            <div className="flex items-center justify-between gap-3 text-[#888888] pt-1.5 border-t border-[#1c1c1c]">
+            <div className="flex items-center justify-between gap-3 text-[#a1a1a1] pt-1.5 border-t border-[#262626]">
               <span className="flex items-center gap-1.5 text-[11px] truncate flex-1 min-w-0" title={daemonInfo.config_path}>
                 <FileText className="h-3 w-3 shrink-0 text-[#666666]" />
                 <span className="truncate">{daemonInfo.config_path}</span>
@@ -230,16 +230,16 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleCopy('config', daemonInfo.config_path)}
-                className="text-[10px] text-[#888888] hover:text-[#ededed] px-2 py-1 rounded bg-[#161616] hover:bg-[#202020] border border-[#262626] inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                className="text-[10px] text-[#a1a1a1] hover:text-[#ededed] px-2 py-1 rounded-geist bg-[#111111] hover:bg-[#161616] border border-[#262626] inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
               >
-                {copiedKey === 'config' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                {copiedKey === 'config' ? <Check className="h-3 w-3 text-[#00e599]" /> : <Copy className="h-3 w-3" />}
                 {copiedKey === 'config' ? 'Copied' : 'Copy'}
               </button>
             </div>
           )}
 
           {daemonInfo?.log_path && (
-            <div className="flex items-center justify-between gap-3 text-[#888888]">
+            <div className="flex items-center justify-between gap-3 text-[#a1a1a1]">
               <span className="flex items-center gap-1.5 text-[11px] truncate flex-1 min-w-0" title={daemonInfo.log_path}>
                 <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
                 <span className="truncate">{daemonInfo.log_path}</span>
@@ -247,16 +247,16 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleCopy('log', daemonInfo.log_path)}
-                className="text-[10px] text-[#888888] hover:text-[#ededed] px-2 py-1 rounded bg-[#161616] hover:bg-[#202020] border border-[#262626] inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                className="text-[10px] text-[#a1a1a1] hover:text-[#ededed] px-2 py-1 rounded-geist bg-[#111111] hover:bg-[#161616] border border-[#262626] inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
               >
-                {copiedKey === 'log' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                {copiedKey === 'log' ? <Check className="h-3 w-3 text-[#00e599]" /> : <Copy className="h-3 w-3" />}
                 {copiedKey === 'log' ? 'Copied' : 'Copy'}
               </button>
             </div>
           )}
         </div>
 
-        <DialogFooter className="pt-2 border-t border-[#1f1f1f] flex items-center justify-between sm:justify-between w-full">
+        <DialogFooter className="pt-2 border-t border-[#262626] flex items-center justify-between sm:justify-between w-full">
           {isInstalled ? (
             <Button
               type="button"
@@ -264,7 +264,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               size="sm"
               disabled={uninstalling || running}
               onClick={handleUninstall}
-              className="border-[#262626] bg-[#141414] hover:bg-rose-500/10 hover:border-rose-500/30 text-[#888888] hover:text-rose-400 text-xs font-mono"
+              className="border-[#262626] bg-[#0a0a0a] hover:bg-[#ee0000]/10 hover:border-[#ee0000]/30 text-[#a1a1a1] hover:text-[#ee0000] text-xs font-mono rounded-geist"
             >
               {uninstalling ? (
                 <>
@@ -284,7 +284,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               variant="outline"
               size="sm"
               onClick={() => onOpenChange(false)}
-              className="border-[#262626] bg-[#141414] hover:bg-[#1a1a1a] text-[#888888] hover:text-[#ededed] text-xs font-mono"
+              className="border-[#262626] bg-[#0a0a0a] hover:bg-[#161616] text-[#a1a1a1] hover:text-[#ededed] text-xs font-mono rounded-geist"
             >
               Close
             </Button>
@@ -297,7 +297,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 size="sm"
                 disabled={running || uninstalling}
                 onClick={handleRunNow}
-                className="bg-[#ededed] hover:bg-white text-[#0a0a0a] text-xs font-mono font-medium shadow-sm transition-all cursor-pointer"
+                className="bg-[#ededed] hover:bg-white text-[#000000] text-xs font-mono font-medium shadow-sm transition-all cursor-pointer rounded-geist"
               >
                 {running ? (
                   <>
@@ -317,7 +317,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 size="sm"
                 disabled={installing}
                 onClick={handleInstall}
-                className="bg-[#ededed] hover:bg-white text-[#0a0a0a] text-xs font-mono font-medium shadow-sm transition-all cursor-pointer"
+                className="bg-[#ededed] hover:bg-white text-[#000000] text-xs font-mono font-medium shadow-sm transition-all cursor-pointer rounded-geist"
               >
                 {installing ? (
                   <>
