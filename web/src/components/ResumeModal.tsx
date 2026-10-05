@@ -260,7 +260,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                     onClick={() => toggleAimFlag(f.key)}
                     className={`flex items-start gap-2 p-2 rounded-geist border cursor-pointer transition-colors ${
                       isChecked
-                        ? 'border-[#f54e00]/50 bg-[#f54e00]/10'
+                        ? 'border-[#0070f3]/50 bg-[#0070f3]/10'
                         : 'border-[#262626] bg-[#0a0a0a] hover:border-[#333333] hover:bg-[#121212]'
                     }`}
                   >
@@ -268,7 +268,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                       <div
                         className={`h-3 w-3 rounded-[3px] border flex items-center justify-center transition-colors ${
                           isChecked
-                            ? 'bg-[#f54e00] border-[#f54e00] text-white'
+                            ? 'bg-[#0070f3] border-[#0070f3] text-white'
                             : 'border-[#444444] bg-[#0a0a0a]'
                         }`}
                       >
@@ -306,7 +306,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                         isChecked
                           ? rf.dangerous
                             ? 'border-amber-500/50 bg-amber-500/10'
-                            : 'border-[#f54e00]/50 bg-[#f54e00]/10'
+                            : 'border-[#0070f3]/50 bg-[#0070f3]/10'
                           : 'border-[#262626] bg-[#0a0a0a] hover:border-[#333333] hover:bg-[#121212]'
                       }`}
                     >
@@ -316,7 +316,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                             isChecked
                               ? rf.dangerous
                                 ? 'bg-amber-400 border-amber-400 text-black'
-                                : 'bg-[#f54e00] border-[#f54e00] text-white'
+                                : 'bg-[#0070f3] border-[#0070f3] text-white'
                               : 'border-[#444444] bg-[#0a0a0a]'
                           }`}
                         >
@@ -390,7 +390,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               type="submit"
               size="sm"
               disabled={isResuming}
-              className="rounded-geist h-7 px-3.5 text-xs font-sans bg-[#f54e00] text-white hover:bg-[#d04200] font-medium shadow-sm transition-colors cursor-pointer"
+              className="rounded-geist h-7 px-3.5 text-xs font-sans bg-[#ededed] text-black hover:bg-white font-medium shadow-sm transition-colors cursor-pointer"
             >
               {isResuming ? (
                 <>

@@ -25,8 +25,8 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
         ref={ref}
         onClick={handleClick}
         className={cn(
-          'peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-[#2e2e2e] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
-          checked ? 'bg-[#f54e00] border-transparent' : 'bg-[#1c1c1c]',
+          'peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-[#2e2e2e] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#0070f3] disabled:cursor-not-allowed disabled:opacity-50',
+          checked ? 'bg-[#0070f3] border-transparent' : 'bg-[#1c1c1c]',
           className
         )}
         {...props}

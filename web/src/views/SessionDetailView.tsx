@@ -24,9 +24,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  ChevronLeft,
-  ChevronsLeft,
-  ChevronsRight,
   ShieldAlert,
   Wrench,
   Sparkles,
@@ -46,7 +43,7 @@ interface SessionDetailViewProps {
   onBack: () => void;
 }
 
-const PAGE_SIZE = 25;
+const INITIAL_BATCH_SIZE = 25;
 
 const getToolConfig = (toolName: string) => {
   const name = toolName.toLowerCase();
@@ -145,22 +142,19 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
   // Search & Filter state for Conversation History
   const [turnSearch, setTurnSearch] = React.useState('');
   const [roleFilter, setRoleFilter] = React.useState<'all' | 'user' | 'assistant'>('all');
-  const [currentPage, setCurrentPage] = React.useState(1);
-  const [jumpTurnInput, setJumpTurnInput] = React.useState('');
+  const [visibleCount, setVisibleCount] = React.useState(INITIAL_BATCH_SIZE);
+  const [showScrollTop, setShowScrollTop] = React.useState(false);
 
   const { toast } = useToast();
   const topRef = React.useRef<HTMLDivElement>(null);
+  const bottomSentinelRef = React.useRef<HTMLDivElement>(null);
 
   const fetchTranscript = React.useCallback(async () => {
     setLoading(true);
     try {
       const data = await getSessionTranscript(session.agent, session.id);
       setTranscript(data);
-      // Default to the last page (most recent turns)
-      if (data.turns && data.turns.length > 0) {
-        const totalPages = Math.ceil(data.turns.length / PAGE_SIZE);
-        setCurrentPage(totalPages);
-      }
+      setVisibleCount(INITIAL_BATCH_SIZE);
     } catch {
       // Fallback synthetic transcript from session metadata
       const fallbackData: SessionTranscriptDTO = {
@@ -184,7 +178,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
         ],
       };
       setTranscript(fallbackData);
-      setCurrentPage(1);
+      setVisibleCount(INITIAL_BATCH_SIZE);
     } finally {
       setLoading(false);
     }
@@ -291,8 +285,34 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
     }
   };
 
+  // Floating scroll-to-top button detector (scrolled > 350px)
+  React.useEffect(() => {
+    const mainElem = document.querySelector('main');
+    const handleScroll = () => {
+      const scrollY = mainElem ? mainElem.scrollTop : window.scrollY;
+      setShowScrollTop(scrollY > 350);
+    };
+
+    if (mainElem) {
+      mainElem.addEventListener('scroll', handleScroll, { passive: true });
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      if (mainElem) {
+        mainElem.removeEventListener('scroll', handleScroll);
+      }
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
   const scrollToTop = () => {
-    topRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const mainElem = document.querySelector('main');
+    if (mainElem && mainElem.scrollTop > 0) {
+      mainElem.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   // Synchronized turns count
@@ -325,38 +345,43 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
     });
   }, [allTurns, turnSearch, roleFilter]);
 
-  // Pagination calculation
-  const totalPages = Math.max(1, Math.ceil(filteredTurns.length / PAGE_SIZE));
-  const validPage = Math.min(Math.max(1, currentPage), totalPages);
+  // Reverse chronological order: newest turns first at the top, traversing back in time down to Turn #1
+  const reversedTurns = React.useMemo(() => {
+    return [...filteredTurns].reverse();
+  }, [filteredTurns]);
 
-  const paginatedTurns = React.useMemo(() => {
-    const startIdx = (validPage - 1) * PAGE_SIZE;
-    return filteredTurns.slice(startIdx, startIdx + PAGE_SIZE);
-  }, [filteredTurns, validPage]);
+  // Reset visible turns count whenever query or role filter changes
+  React.useEffect(() => {
+    setVisibleCount(INITIAL_BATCH_SIZE);
+  }, [turnSearch, roleFilter]);
 
-  const handleJumpToTurn = (e: React.FormEvent) => {
-    e.preventDefault();
-    const turnNum = parseInt(jumpTurnInput.trim(), 10);
-    if (isNaN(turnNum)) return;
+  // Infinite scroll slice (top N newest turns)
+  const visibleTurns = React.useMemo(() => {
+    return reversedTurns.slice(0, visibleCount);
+  }, [reversedTurns, visibleCount]);
 
-    // Find the index of this turn in filteredTurns
-    const foundIdx = filteredTurns.findIndex((t) => t.turn_index === turnNum);
-    if (foundIdx !== -1) {
-      const targetPage = Math.floor(foundIdx / PAGE_SIZE) + 1;
-      setCurrentPage(targetPage);
-      setJumpTurnInput('');
-      toast({
-        title: `Jumped to Turn #${turnNum}`,
-        description: `Page ${targetPage} of ${totalPages}`,
-      });
-    } else {
-      toast({
-        variant: 'destructive',
-        title: 'Turn not found',
-        description: `Turn #${turnNum} was not found in filtered turns.`,
-      });
-    }
-  };
+  // Infinite scroll intersection observer observing bottom sentinel
+  React.useEffect(() => {
+    const sentinel = bottomSentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => {
+            if (prev < reversedTurns.length) {
+              return Math.min(prev + INITIAL_BATCH_SIZE, reversedTurns.length);
+            }
+            return prev;
+          });
+        }
+      },
+      { root: null, rootMargin: '400px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [reversedTurns.length]);
 
   return (
     <div ref={topRef} className="space-y-4 pb-12">
@@ -441,7 +466,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
               size="sm"
               onClick={handleQuickResume}
               disabled={isResuming}
-              className="h-8 px-3 text-xs font-sans font-medium rounded-geist bg-[#f54e00] text-white hover:bg-[#d04200] flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors"
+              className="h-8 px-3 text-xs font-sans font-medium rounded-geist bg-[#ededed] text-black hover:bg-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors"
             >
               {isResuming ? (
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -510,7 +535,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#111111] p-3 rounded-geist border border-border">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-semibold uppercase tracking-wider text-[#ededed] flex items-center gap-1.5 font-sans">
-              <Sparkles className="h-3.5 w-3.5 text-[#f54e00]" />
+              <Sparkles className="h-3.5 w-3.5 text-[#0070f3]" />
               Conversation Explorer
             </span>
             <Badge
@@ -524,7 +549,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
             <div className="flex items-center bg-[#0a0a0a] border border-border rounded-[4px] p-0.5 text-[11px] font-sans">
               <button
                 type="button"
-                onClick={() => { setRoleFilter('all'); setCurrentPage(1); }}
+                onClick={() => setRoleFilter('all')}
                 className={cn(
                   'px-2 py-0.5 rounded transition-colors cursor-pointer',
                   roleFilter === 'all' ? 'bg-[#222222] text-[#ededed] font-medium' : 'text-[#888888] hover:text-[#ededed]'
@@ -534,7 +559,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
               </button>
               <button
                 type="button"
-                onClick={() => { setRoleFilter('user'); setCurrentPage(1); }}
+                onClick={() => setRoleFilter('user')}
                 className={cn(
                   'px-2 py-0.5 rounded transition-colors cursor-pointer',
                   roleFilter === 'user' ? 'bg-[#222222] text-[#ededed] font-medium' : 'text-[#888888] hover:text-[#ededed]'
@@ -544,7 +569,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
               </button>
               <button
                 type="button"
-                onClick={() => { setRoleFilter('assistant'); setCurrentPage(1); }}
+                onClick={() => setRoleFilter('assistant')}
                 className={cn(
                   'px-2 py-0.5 rounded transition-colors cursor-pointer',
                   roleFilter === 'assistant' ? 'bg-[#222222] text-[#ededed] font-medium' : 'text-[#888888] hover:text-[#ededed]'
@@ -562,34 +587,19 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
               <Input
                 placeholder="Search transcript..."
                 value={turnSearch}
-                onChange={(e) => {
-                  setTurnSearch(e.target.value);
-                  setCurrentPage(1);
-                }}
+                onChange={(e) => setTurnSearch(e.target.value)}
                 className="h-7 pl-8 pr-7 text-xs bg-[#0a0a0a] border-border text-[#ededed] placeholder:text-[#666666] focus:border-[#333333] rounded-[4px]"
               />
               {turnSearch && (
                 <button
                   type="button"
-                  onClick={() => { setTurnSearch(''); setCurrentPage(1); }}
+                  onClick={() => setTurnSearch('')}
                   className="absolute right-2 top-1.5 text-[#666666] hover:text-[#ededed] cursor-pointer"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
-
-            {/* Scroll to Top Action */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={scrollToTop}
-              className="h-7 px-2 text-xs font-sans border-border bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#161616] rounded-[4px] cursor-pointer"
-              title="Scroll to top of conversation"
-            >
-              <ChevronUp className="h-3.5 w-3.5 mr-1" />
-              Top
-            </Button>
           </div>
         </div>
 
@@ -619,19 +629,20 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
           </div>
         ) : (
           <>
-            {/* Pagination Controls Bar (Top) */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-2 py-1 text-xs text-[#a1a1a1] font-sans">
-              <div className="flex items-center gap-2">
+            {/* Turns Stream Header & Status Bar */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 px-2 py-1 text-xs text-[#a1a1a1] font-sans">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span>
                   Showing{' '}
-                  <strong className="text-[#ededed] font-mono">
-                    {(validPage - 1) * PAGE_SIZE + 1}
+                  <strong className="text-[#ededed] font-medium font-mono">
+                    {Math.min(visibleCount, reversedTurns.length)}
                   </strong>{' '}
-                  to{' '}
-                  <strong className="text-[#ededed] font-mono">
-                    {Math.min(validPage * PAGE_SIZE, filteredTurns.length)}
+                  of{' '}
+                  <strong className="text-[#ededed] font-medium font-mono">
+                    {reversedTurns.length}
                   </strong>{' '}
-                  of <strong className="text-[#ededed] font-mono">{filteredTurns.length}</strong> turns
+                  turns
+                  <span className="text-[#666666] ml-1.5 font-normal">(Newest first)</span>
                 </span>
                 {turnSearch && (
                   <Badge variant="outline" className="text-[10px] font-sans border-border text-emerald-400 bg-emerald-500/10 px-1.5 py-0">
@@ -640,78 +651,16 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                 )}
               </div>
 
-              <div className="flex items-center gap-1.5">
-                {/* Jump to Turn Form */}
-                <form onSubmit={handleJumpToTurn} className="flex items-center gap-1 mr-2">
-                  <span className="text-[11px] text-[#666666]">Turn:</span>
-                  <Input
-                    placeholder="#"
-                    value={jumpTurnInput}
-                    onChange={(e) => setJumpTurnInput(e.target.value)}
-                    className="h-6 w-14 text-[11px] font-mono text-center p-0 bg-[#0a0a0a] border-border text-[#ededed]"
-                  />
-                  <Button
-                    type="submit"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-1.5 text-[11px] font-sans text-[#a1a1a1] hover:text-[#ededed]"
-                  >
-                    Go
-                  </Button>
-                </form>
-
-                {/* Page Navigation Buttons */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(1)}
-                  disabled={validPage <= 1}
-                  className="h-6 w-6 p-0 border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-30 rounded-[4px]"
-                  title="First page"
-                >
-                  <ChevronsLeft className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={validPage <= 1}
-                  className="h-6 w-6 p-0 border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-30 rounded-[4px]"
-                  title="Previous page"
-                >
-                  <ChevronLeft className="h-3 w-3" />
-                </Button>
-
-                <span className="text-xs font-mono px-1">
-                  {validPage} / {totalPages}
+              {reversedTurns.length > visibleCount && (
+                <span className="text-[11px] text-[#666666] font-sans">
+                  Scroll down to load older turns ({reversedTurns.length - visibleCount} remaining)
                 </span>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={validPage >= totalPages}
-                  className="h-6 w-6 p-0 border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-30 rounded-[4px]"
-                  title="Next page"
-                >
-                  <ChevronRight className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(totalPages)}
-                  disabled={validPage >= totalPages}
-                  className="h-6 w-6 p-0 border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-30 rounded-[4px]"
-                  title="Latest page"
-                >
-                  <ChevronsRight className="h-3 w-3" />
-                </Button>
-              </div>
+              )}
             </div>
 
-            {/* Conversation Stream Items */}
+            {/* Conversation Stream Items (Reverse Chronological: Latest at Top) */}
             <div className="space-y-3">
-              {paginatedTurns.map((turn) => {
+              {visibleTurns.map((turn) => {
                 const isUser = turn.role === 'user';
                 const hasThinking = !!turn.thinking?.trim();
                 const hasTools = turn.tool_calls && turn.tool_calls.length > 0;
@@ -911,35 +860,19 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
               })}
             </div>
 
-            {/* Bottom Pagination Bar */}
-            <div className="flex items-center justify-between pt-2 px-1 text-xs text-[#a1a1a1] font-sans">
-              <span className="text-[11px] text-[#666666]">
-                Page {validPage} of {totalPages}
-              </span>
+            {/* Infinite scroll sentinel & status indicators */}
+            <div ref={bottomSentinelRef} className="h-6 w-full pointer-events-none" />
 
-              <div className="flex items-center gap-1.5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => { setCurrentPage((p) => Math.max(1, p - 1)); scrollToTop(); }}
-                  disabled={validPage <= 1}
-                  className="h-7 px-2.5 text-xs font-sans border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-30 rounded-[4px]"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5 mr-1" />
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => { setCurrentPage((p) => Math.min(totalPages, p + 1)); scrollToTop(); }}
-                  disabled={validPage >= totalPages}
-                  className="h-7 px-2.5 text-xs font-sans border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-30 rounded-[4px]"
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                </Button>
+            {visibleCount < reversedTurns.length ? (
+              <div className="py-6 text-center text-xs font-sans text-[#777777] flex items-center justify-center gap-2">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#666666]" />
+                <span>Loading older conversation turns...</span>
               </div>
-            </div>
+            ) : reversedTurns.length > 0 ? (
+              <div className="py-8 text-center text-xs font-sans text-[#555555] border-t border-[#1c1c1c] flex items-center justify-center gap-2">
+                <span>Reached beginning of session transcript ({reversedTurns.length} total turns)</span>
+              </div>
+            ) : null}
           </>
         )}
       </div>
@@ -952,6 +885,19 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
         onLaunch={handleModalLaunch}
         isResuming={isResuming}
       />
+
+      {/* Floating Scroll-to-Top Action Button (Appears after scrolling down) */}
+      {showScrollTop && (
+        <button
+          type="button"
+          onClick={scrollToTop}
+          className="fixed bottom-8 right-8 z-50 px-3.5 py-2.5 rounded-full border border-[#333333] bg-[#111111]/90 backdrop-blur-md text-[#ededed] hover:text-white hover:border-[#555555] shadow-2xl transition-all cursor-pointer flex items-center gap-1.5 text-xs font-sans font-medium group animate-in fade-in slide-in-from-bottom-2 duration-200"
+          title="Scroll to top of session"
+        >
+          <ChevronUp className="h-4 w-4 group-hover:-translate-y-0.5 transition-transform text-[#0070f3]" />
+          <span>Top</span>
+        </button>
+      )}
     </div>
   );
 };

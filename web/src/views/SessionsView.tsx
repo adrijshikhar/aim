@@ -420,7 +420,7 @@ export function SessionsView({
           const isThisResuming = resumingId === sess.id;
           return (
             <div className="flex items-center justify-end" onClick={(e) => e.stopPropagation()}>
-              <div className="inline-flex items-center rounded-geist border border-border bg-[#111111] overflow-hidden hover:border-[#f54e00]/50 transition-colors">
+              <div className="inline-flex items-center rounded-geist border border-border bg-[#111111] overflow-hidden hover:border-[#383838] transition-colors">
                 <button
                   type="button"
                   onClick={() => handleQuickResume(sess)}
@@ -428,9 +428,9 @@ export function SessionsView({
                   className="h-7 pl-2.5 pr-2 text-xs font-sans font-medium text-[#ededed] hover:bg-[#1a1a1a] flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   {isThisResuming ? (
-                    <RefreshCw className="h-3 w-3 animate-spin text-[#f54e00]" />
+                    <RefreshCw className="h-3 w-3 animate-spin text-[#ededed]" />
                   ) : (
-                    <Terminal className="h-3 w-3 text-[#f54e00]" />
+                    <Terminal className="h-3 w-3 text-[#ededed]" />
                   )}
                   <span>Resume</span>
                 </button>

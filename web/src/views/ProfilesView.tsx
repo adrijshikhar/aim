@@ -373,7 +373,7 @@ export function ProfilesView({
                 variant="outline"
                 size="sm"
                 onClick={() => onSelectProfile('all')}
-                className="h-8 rounded-geist text-xs font-mono text-[#a1a1a1] hover:text-[#ededed] border-[#262626] bg-[#0a0a0a] hover:bg-[#161616]"
+                className="h-8 rounded-geist text-xs font-sans font-medium text-[#a1a1a1] hover:text-[#ededed] border-[#262626] bg-[#0a0a0a] hover:bg-[#161616]"
               >
                 <ArrowLeft className="h-3.5 w-3.5 mr-1" />
                 All Profiles
@@ -394,7 +394,7 @@ export function ProfilesView({
                 {currentProfile.has_credentials ? (
                   <Badge
                     variant="outline"
-                    className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                    className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     <span>Authenticated</span>
@@ -402,7 +402,7 @@ export function ProfilesView({
                 ) : (
                   <Badge
                     variant="outline"
-                    className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                    className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-[#f5a623]" />
                     <span>Needs Auth</span>
@@ -437,10 +437,10 @@ export function ProfilesView({
           </div>
 
           {/* Path and identity sub-bar */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-[#262626] text-xs font-mono text-[#a1a1a1]">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-[#262626] text-xs font-sans text-[#a1a1a1]">
             <div className="flex items-center gap-1.5">
               <Folder className="h-3.5 w-3.5 text-[#666666]" />
-              <span className="text-[#ededed]">{currentProfile.path}</span>
+              <span className="text-[#ededed] font-mono">{currentProfile.path}</span>
             </div>
             {currentProfile.account?.email && (
               <div className="flex items-center gap-1.5">
@@ -469,7 +469,7 @@ export function ProfilesView({
                 </CardTitle>
                 <Badge
                   variant="outline"
-                  className="text-xs font-mono bg-[#0a0a0a] border-[#262626] text-[#ededed] px-2 py-0.5"
+                  className="text-xs font-sans font-medium bg-[#0a0a0a] border-[#262626] text-[#ededed] px-2 py-0.5"
                 >
                   {resourcesLoading ? '...' : `${profileSessions.length} sessions`}
                 </Badge>
@@ -483,7 +483,7 @@ export function ProfilesView({
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigateToSessions && onNavigateToSessions(currentProfile.name)}
-                className="w-full justify-between h-9 rounded-geist border-[#262626] bg-[#0a0a0a] text-xs font-mono text-[#ededed] hover:bg-[#161616] hover:border-[#333333] cursor-pointer"
+                className="w-full justify-between h-9 rounded-geist border-[#262626] bg-[#0a0a0a] text-xs font-sans font-medium text-[#ededed] hover:bg-[#161616] hover:border-[#333333] cursor-pointer"
               >
                 <span>Open in All Sessions View ({currentProfile.name})</span>
                 <ArrowRight className="h-3.5 w-3.5 ml-1 text-[#a1a1a1]" />
@@ -501,7 +501,7 @@ export function ProfilesView({
                 </CardTitle>
                 <Badge
                   variant="outline"
-                  className="text-xs font-mono bg-[#0a0a0a] border-[#262626] text-[#ededed] px-2 py-0.5"
+                  className="text-xs font-sans font-medium bg-[#0a0a0a] border-[#262626] text-[#ededed] px-2 py-0.5"
                 >
                   {resourcesLoading ? '...' : `${profileMcpServers.length} active`}
                 </Badge>
@@ -515,7 +515,7 @@ export function ProfilesView({
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigateToMcp && onNavigateToMcp(currentProfile.name)}
-                className="w-full justify-between h-9 rounded-geist border-[#262626] bg-[#0a0a0a] text-xs font-mono text-[#ededed] hover:bg-[#161616] hover:border-[#333333] cursor-pointer"
+                className="w-full justify-between h-9 rounded-geist border-[#262626] bg-[#0a0a0a] text-xs font-sans font-medium text-[#ededed] hover:bg-[#161616] hover:border-[#333333] cursor-pointer"
               >
                 <span>Open in MCP Catalog ({currentProfile.name})</span>
                 <ArrowRight className="h-3.5 w-3.5 ml-1 text-[#a1a1a1]" />
@@ -536,7 +536,7 @@ export function ProfilesView({
             </CardDescription>
           </CardHeader>
           <CardContent className="p-5 pt-0">
-            <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-6 gap-y-3.5 text-xs font-mono py-1">
+            <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-6 gap-y-3.5 text-xs font-sans py-1">
               <span className="text-[#a1a1a1]">Storage Sandbox:</span>
               <span className="text-[#ededed] font-mono break-all select-all">
                 {currentProfile.path}
@@ -584,7 +584,7 @@ export function ProfilesView({
 
         {/* Visual Live Quota Breakdown (Replaces raw monospace text) */}
         <div className="space-y-3">
-          <h3 className="text-xs font-mono font-medium uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1.5">
+          <h3 className="text-xs font-sans font-semibold uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1.5">
             <Gauge className="h-3.5 w-3.5" />
             Live Quota Telemetry & Rate Limits
           </h3>
@@ -606,12 +606,12 @@ export function ProfilesView({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {getAgentBadge(ad.agent)}
-                      <span className="text-xs font-mono text-[#a1a1a1]">Engine</span>
+                      <span className="text-xs font-sans text-[#a1a1a1]">Engine</span>
                     </div>
                     {ad.has_credentials ? (
                       <Badge
                         variant="outline"
-                        className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                        className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                       >
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                         <span>Authenticated</span>
@@ -619,7 +619,7 @@ export function ProfilesView({
                     ) : (
                       <Badge
                         variant="outline"
-                        className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                        className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                       >
                         <span className="h-1.5 w-1.5 rounded-full bg-[#f5a623]" />
                         <span>Needs Auth</span>
@@ -640,7 +640,7 @@ export function ProfilesView({
                   />
 
                   {/* Account detail chips */}
-                  <div className="p-3 rounded-geist bg-[#0a0a0a] border border-[#262626] space-y-1.5 text-xs font-mono">
+                  <div className="p-3 rounded-geist bg-[#0a0a0a] border border-[#262626] space-y-1.5 text-xs font-sans">
                     <div className="flex justify-between items-center text-[#a1a1a1]">
                       <span>Account:</span>
                       <span className="text-[#ededed] font-medium truncate max-w-[180px]">
@@ -677,7 +677,7 @@ export function ProfilesView({
   return (
     <div className="space-y-6">
       {error && (
-        <div className="rounded-geist border border-[#f5a623]/30 bg-[#f5a623]/10 px-3.5 py-2 text-xs text-[#f5a623] font-mono flex items-center justify-between">
+        <div className="rounded-geist border border-[#f5a623]/30 bg-[#f5a623]/10 px-3.5 py-2 text-xs text-[#f5a623] font-sans flex items-center justify-between">
           <span>Notice: {error}</span>
           <button
             type="button"
@@ -694,7 +694,7 @@ export function ProfilesView({
           <h2 className="text-sm font-semibold tracking-tight text-[#ededed]">
             All Agent Profiles
           </h2>
-          <span className="font-mono text-[11px] px-2 py-0.5 rounded-full border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] tabular-nums">
+          <span className="font-sans text-[11px] font-medium px-2 py-0.5 rounded-full border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] tabular-nums">
             {profiles.length} active
           </span>
         </div>
@@ -736,7 +736,7 @@ export function ProfilesView({
 
               <form onSubmit={handleCreate} className="space-y-4 py-2">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono font-medium uppercase tracking-wider text-[#a1a1a1]">
+                  <label className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
                     Target Agent
                   </label>
                   <div className="grid grid-cols-4 gap-2">
@@ -745,7 +745,7 @@ export function ProfilesView({
                         key={ag}
                         type="button"
                         onClick={() => setFormData({ ...formData, agent: ag })}
-                        className={`py-2 px-3 text-xs font-mono rounded-geist border text-center transition-all cursor-pointer ${
+                        className={`py-2 px-3 text-xs font-sans font-medium rounded-geist border text-center transition-all cursor-pointer ${
                           formData.agent === ag
                             ? 'border-[#ededed] bg-[#222222] text-[#ededed] font-bold shadow-sm'
                             : 'border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] hover:border-[#333333]'
@@ -758,7 +758,7 @@ export function ProfilesView({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono font-medium uppercase tracking-wider text-[#a1a1a1]">
+                  <label className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
                     Profile Name *
                   </label>
                   <Input
@@ -771,7 +771,7 @@ export function ProfilesView({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono font-medium uppercase tracking-wider text-[#a1a1a1]">
+                  <label className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
                     Associated Email (Optional)
                   </label>
                   <Input
@@ -808,7 +808,7 @@ export function ProfilesView({
 
                   {enableClone && (
                     <div className="space-y-1.5 pt-1">
-                      <label className="text-[11px] font-mono font-medium uppercase tracking-wider text-[#a1a1a1]">
+                      <label className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
                         Source Profile to Clone
                       </label>
                       <Input
@@ -892,7 +892,7 @@ export function ProfilesView({
                       {p.has_credentials ? (
                         <Badge
                           variant="outline"
-                          className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                          className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                           <span>Authenticated</span>
@@ -900,7 +900,7 @@ export function ProfilesView({
                       ) : (
                         <Badge
                           variant="outline"
-                          className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                          className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
                           <span className="h-1.5 w-1.5 rounded-full bg-[#f5a623]" />
                           <span>Needs Auth</span>
@@ -927,16 +927,16 @@ export function ProfilesView({
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
-                      <CardDescription className="text-xs text-[#a1a1a1] font-mono truncate pt-0.5 flex items-center gap-1">
+                      <CardDescription className="text-xs text-[#a1a1a1] truncate pt-0.5 flex items-center gap-1">
                         <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
-                        <span className="truncate">{p.path}</span>
+                        <span className="truncate font-mono">{p.path}</span>
                       </CardDescription>
                     </div>
                   </CardHeader>
 
                   <CardContent className="space-y-3 pb-4 p-5 pt-0">
                     {/* Account Info Box */}
-                    <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] p-3 text-xs space-y-1.5 font-mono">
+                    <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] p-3 text-xs space-y-1.5 font-sans">
                       <div className="flex items-center justify-between text-[#a1a1a1]">
                         <span className="flex items-center gap-1.5">
                           <User className="h-3 w-3 text-[#666666]" /> Account
@@ -970,7 +970,7 @@ export function ProfilesView({
                     {/* Standardized Quota Telemetry (Strict h-1.5 across multi- and single-engine) */}
                     {p.adapters && p.adapters.length > 1 ? (
                       <div className="space-y-2 pt-1 border-t border-[#262626]">
-                        <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-[#a1a1a1]">
+                        <div className="flex items-center justify-between text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1]">
                           <span className="flex items-center gap-1">
                             <Gauge className="h-3 w-3" /> Engine Quotas
                           </span>
@@ -980,7 +980,7 @@ export function ProfilesView({
                           const pct = ad.quota?.bottleneck_pct ?? 100;
                           return (
                             <div key={ad.agent} className="space-y-1">
-                              <div className="flex items-center justify-between text-[11px] font-mono">
+                              <div className="flex items-center justify-between text-[11px] font-sans">
                                 <span className="text-[#a1a1a1]">{ad.agent}</span>
                                 <span className={`tabular-nums ${getTextColor(pct)}`}>
                                   {pct}%
@@ -999,11 +999,11 @@ export function ProfilesView({
                     ) : (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-[11px] font-mono uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1">
+                          <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1">
                             <Gauge className="h-3 w-3" /> Quota Telemetry
                           </span>
                           <span
-                            className={`font-mono text-xs font-medium tabular-nums ${getTextColor(
+                            className={`font-sans text-xs font-medium tabular-nums ${getTextColor(
                               p.quota?.bottleneck_pct ?? 100
                             )}`}
                           >
@@ -1019,7 +1019,7 @@ export function ProfilesView({
                           />
                         </div>
                         {p.quota?.summary && (
-                          <p className="text-[11px] text-[#666666] font-mono truncate" title={p.quota.summary}>
+                          <p className="text-[11px] text-[#666666] font-sans truncate" title={p.quota.summary}>
                             {p.quota.summary}
                           </p>
                         )}
@@ -1029,16 +1029,16 @@ export function ProfilesView({
                 </div>
 
                 {/* Card Footer: MCP & Plugin configuration chips + Inspect Action */}
-                <CardFooter className="pt-2 pb-4 px-5 border-t border-[#262626] flex items-center justify-between text-[11px] font-mono text-[#a1a1a1]">
+                <CardFooter className="pt-2 pb-4 px-5 border-t border-[#262626] flex items-center justify-between text-[11px] font-sans text-[#a1a1a1]">
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-mono text-[#a1a1a1]">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-sans font-medium text-[#a1a1a1]">
                       <Server className="h-3 w-3 text-[#666666]" />
                       <span>MCP</span>
                       <span className={isMcpOn ? 'text-emerald-400 font-semibold' : 'text-[#666666]'}>
                         {isMcpOn ? 'on' : 'off'}
                       </span>
                     </span>
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-mono text-[#a1a1a1]">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-sans font-medium text-[#a1a1a1]">
                       <Boxes className="h-3 w-3 text-[#666666]" />
                       <span>Plugins</span>
                       <span className={isPluginsOn ? 'text-emerald-400 font-semibold' : 'text-[#666666]'}>

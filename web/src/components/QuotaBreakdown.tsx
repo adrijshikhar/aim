@@ -103,13 +103,13 @@ export function QuotaBreakdown({
   const renderMeter = (win: QuotaWindow) => {
     return (
       <div key={win.key} className="space-y-1.5 p-2.5 rounded-[6px] bg-[#111111] border border-[#262626]">
-        <div className="flex items-center justify-between text-xs font-mono">
+        <div className="flex items-center justify-between text-xs font-sans">
           <span className="text-[#a1a1a1] flex items-center gap-1.5">
             {win.label}
           </span>
           <div className="flex items-center gap-2">
             {win.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border border-[#333333] bg-[#0a0a0a] text-[#a1a1a1]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-[#333333] bg-[#0a0a0a] text-[#a1a1a1]">
                 <Clock className="h-2.5 w-2.5 text-[#666666]" />
                 <span>resets in {win.reset}</span>
               </span>
@@ -134,7 +134,7 @@ export function QuotaBreakdown({
   if (!parsed || parsed.type === 'fallback') {
     return (
       <div className="space-y-2 p-3 rounded-[6px] bg-[#0a0a0a] border border-[#262626]">
-        <div className="flex items-center justify-between text-xs font-mono">
+        <div className="flex items-center justify-between text-xs font-sans">
           <span className="text-[#a1a1a1] uppercase tracking-wider flex items-center gap-1.5">
             <Gauge className="h-3 w-3 text-[#666666]" />
             Live Quota Telemetry
@@ -150,7 +150,7 @@ export function QuotaBreakdown({
           />
         </div>
         {summary && (
-          <p className="text-[11px] font-mono text-[#a1a1a1] pt-1">
+          <p className="text-[11px] font-sans text-[#a1a1a1] pt-1">
             {summary}
           </p>
         )}
@@ -161,14 +161,14 @@ export function QuotaBreakdown({
   if (parsed.type === 'single' && parsed.single) {
     return (
       <div className="space-y-2 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#262626]">
-        <div className="flex items-center justify-between text-xs font-mono">
+        <div className="flex items-center justify-between text-xs font-sans">
           <span className="text-[#a1a1a1] uppercase tracking-wider flex items-center gap-1.5 font-medium">
             <Gauge className="h-3.5 w-3.5 text-[#666666]" />
             {parsed.single.label}
           </span>
           <div className="flex items-center gap-2">
             {parsed.single.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border border-[#333333] bg-[#111111] text-[#a1a1a1]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-[#333333] bg-[#111111] text-[#a1a1a1]">
                 <Clock className="h-2.5 w-2.5 text-[#666666]" />
                 <span>resets in {parsed.single.reset}</span>
               </span>
@@ -191,7 +191,7 @@ export function QuotaBreakdown({
   // Multi-model layout (e.g. Gemini + Claude)
   return (
     <div className="space-y-3 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#262626]">
-      <div className="flex items-center justify-between border-b border-[#1f1f1f] pb-2 text-xs font-mono">
+      <div className="flex items-center justify-between border-b border-[#1f1f1f] pb-2 text-xs font-sans">
         <span className="text-[#a1a1a1] uppercase tracking-wider flex items-center gap-1.5 font-medium">
           <Gauge className="h-3.5 w-3.5 text-[#666666]" />
           Visual Quota Breakdown
@@ -204,7 +204,7 @@ export function QuotaBreakdown({
       <div className="space-y-3">
         {parsed.models?.map((m) => (
           <div key={m.name} className="space-y-2">
-            <div className="flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center justify-between text-xs font-sans">
               <span className="text-[#ededed] font-medium flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#a1a1a1]" />
                 {m.name} Engine
