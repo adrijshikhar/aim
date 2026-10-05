@@ -166,7 +166,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 variant="outline"
                 className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                 <span>Active (Every 15m)</span>
               </Badge>
             ) : isInstalled ? (

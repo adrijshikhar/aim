@@ -56,8 +56,8 @@ export function Sidebar({
       };
     }
     return {
-      color: 'bg-status-success-solid',
-      text: 'text-muted-foreground',
+      color: 'bg-[#333333]',
+      text: 'text-[#666666]',
       label: `${pct}%`,
     };
   };

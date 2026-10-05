@@ -439,8 +439,8 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                 {session.title || 'Untitled Session'}
               </h1>
               {session.is_active && (
-                <Badge className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-mono px-2 py-0.5 rounded-[4px] flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <Badge className="badge-success text-[10px] font-mono px-2 py-0.5 rounded-[4px] flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
                   Active Process
                 </Badge>
               )}
@@ -637,7 +637,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                 variant="ghost"
                 size="sm"
                 onClick={() => setTurnSearch('')}
-                className="h-7 text-xs font-sans text-emerald-400 hover:text-emerald-300"
+                className="h-7 text-xs font-sans text-[#a1a1a1] hover:text-[#ededed]"
               >
                 Clear search filter
               </Button>
@@ -661,7 +661,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                   <span className="text-[#666666] ml-1.5 font-normal">(Newest first)</span>
                 </span>
                 {turnSearch && (
-                  <Badge variant="outline" className="text-[10px] font-sans border-border text-emerald-400 bg-emerald-500/10 px-1.5 py-0">
+                  <Badge variant="outline" className="text-[10px] font-sans border-[#262626] text-[#ededed] bg-[#141414] px-1.5 py-0">
                     Filtered
                   </Badge>
                 )}

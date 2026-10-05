@@ -280,13 +280,13 @@ export function ProfilesView({
   const getProgressColor = (pct: number) => {
     if (pct <= 0) return 'bg-status-danger-solid';
     if (pct <= 30) return 'bg-status-warning-solid';
-    return 'bg-status-success-solid';
+    return 'bg-[#ededed]';
   };
 
   const getTextColor = (pct: number) => {
     if (pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
-    return 'text-status-success';
+    return 'text-[#ededed]';
   };
 
   const currentProfile = React.useMemo(() => {
@@ -334,7 +334,7 @@ export function ProfilesView({
                     variant="outline"
                     className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                     <span>Authenticated</span>
                   </Badge>
                 ) : (
@@ -342,7 +342,7 @@ export function ProfilesView({
                     variant="outline"
                     className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#ffb200]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
                     <span>Needs Auth</span>
                   </Badge>
                 )}
@@ -551,7 +551,7 @@ export function ProfilesView({
                         variant="outline"
                         className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                       >
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                         <span>Authenticated</span>
                       </Badge>
                     ) : (
@@ -559,7 +559,7 @@ export function ProfilesView({
                         variant="outline"
                         className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                       >
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#ffb200]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
                         <span>Needs Auth</span>
                       </Badge>
                     )}
@@ -720,7 +720,7 @@ export function ProfilesView({
                           variant="outline"
                           className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                           <span>Authenticated</span>
                         </Badge>
                       ) : (
@@ -728,7 +728,7 @@ export function ProfilesView({
                           variant="outline"
                           className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#ffb200]" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
                           <span>Needs Auth</span>
                         </Badge>
                       )}
@@ -849,7 +849,7 @@ export function ProfilesView({
                                   ? 'badge-danger'
                                   : pct <= 30
                                   ? 'badge-warning'
-                                  : 'text-status-success'
+                                  : 'text-[#ededed]'
                               }`}
                             >
                               {p.quota ? `${pct}% remaining` : '100% remaining'}
@@ -893,14 +893,14 @@ export function ProfilesView({
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-sans font-medium text-[#a1a1a1]">
                       <Server className="h-3 w-3 text-[#666666]" />
                       <span>MCP</span>
-                      <span className={isMcpOn ? 'text-emerald-400 font-semibold' : 'text-[#666666]'}>
+                      <span className={isMcpOn ? 'text-[#ededed] font-medium' : 'text-[#666666]'}>
                         {isMcpOn ? 'on' : 'off'}
                       </span>
                     </span>
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-sans font-medium text-[#a1a1a1]">
                       <Boxes className="h-3 w-3 text-[#666666]" />
                       <span>Plugins</span>
-                      <span className={isPluginsOn ? 'text-emerald-400 font-semibold' : 'text-[#666666]'}>
+                      <span className={isPluginsOn ? 'text-[#ededed] font-medium' : 'text-[#666666]'}>
                         {isPluginsOn ? 'on' : 'off'}
                       </span>
                     </span>

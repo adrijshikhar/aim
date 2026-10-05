@@ -35,25 +35,25 @@
     --radius: 0.375rem; /* 6px Vercel standard */
 
     /* Official Vercel Geist Semantic Colors (Dark Mode) */
-    --ds-red-bg: #330a11;
-    --ds-red-border: #5d0e17;
-    --ds-red-solid: #f13242;
-    --ds-red-text: #ff5e63;
+    --ds-red-bg: rgba(229, 72, 77, 0.12);
+    --ds-red-border: rgba(229, 72, 77, 0.3);
+    --ds-red-solid: #e5484d;
+    --ds-red-text: #ff6369;
 
-    --ds-amber-bg: #291800;
-    --ds-amber-border: #4f2900;
-    --ds-amber-solid: #ffb200;
-    --ds-amber-text: #ff9900;
+    --ds-amber-bg: rgba(245, 166, 35, 0.12);
+    --ds-amber-border: rgba(245, 166, 35, 0.3);
+    --ds-amber-solid: #f5a623;
+    --ds-amber-text: #ffb224;
 
-    --ds-green-bg: #00250a;
-    --ds-green-border: #003814;
-    --ds-green-solid: #00ab3e;
-    --ds-green-text: #00ca52;
+    --ds-green-bg: rgba(46, 160, 67, 0.12);
+    --ds-green-border: rgba(46, 160, 67, 0.3);
+    --ds-green-solid: #30a46c;
+    --ds-green-text: #46a758;
 
-    --ds-blue-bg: #06193a;
-    --ds-blue-border: #0b2d64;
+    --ds-blue-bg: rgba(0, 112, 243, 0.12);
+    --ds-blue-border: rgba(0, 112, 243, 0.3);
     --ds-blue-solid: #0070f3;
-    --ds-blue-text: #50a8ff;
+    --ds-blue-text: #52a8ff;
   }
 }
 

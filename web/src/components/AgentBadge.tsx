@@ -1,5 +1,4 @@
 import React from 'react';
-import { Badge } from './ui/badge';
 import { cn } from '@/lib/utils';
 
 interface AgentBadgeProps {
@@ -8,38 +7,38 @@ interface AgentBadgeProps {
   size?: 'sm' | 'default';
 }
 
-const getAgentColorStyle = (agent: string) => {
+const getAgentDotColor = (agent: string) => {
   const a = agent?.toLowerCase() || '';
   switch (a) {
     case 'claude':
-      return 'border-[#c08532]/30 bg-[#c08532]/10 text-[#d49746]';
+      return 'bg-[#f5a623]';
     case 'codex':
-      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400';
+      return 'bg-[#30a46c]';
     case 'gemini':
-      return 'border-sky-500/30 bg-sky-500/10 text-sky-400';
+      return 'bg-[#52a8ff]';
     case 'agy':
     case 'antigravity':
-      return 'border-purple-500/30 bg-purple-500/10 text-purple-400';
+      return 'bg-[#a78bfa]';
     default:
-      return 'border-border bg-secondary text-foreground';
+      return 'bg-[#888888]';
   }
 };
 
 export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent, className = '', size = 'default' }) => {
   const name = agent?.toLowerCase() || 'agent';
-  const sizeClasses = size === 'sm' ? 'text-[10px] px-1.5 py-0' : 'text-[11px] px-2 py-0.5';
+  const sizeClasses = size === 'sm' ? 'text-[10px] px-2 py-0.5' : 'text-[11px] px-2.5 py-1';
+  const dotSize = size === 'sm' ? 'h-1.5 w-1.5' : 'h-1.5 w-1.5';
 
   return (
-    <Badge
-      variant="outline"
+    <span
       className={cn(
-        'font-mono font-medium tracking-tight rounded-md transition-colors',
-        getAgentColorStyle(name),
+        'inline-flex items-center gap-1.5 font-mono font-medium tracking-tight rounded-geist border border-[#262626] bg-[#141414] text-[#ededed] select-none transition-colors hover:border-[#383838]',
         sizeClasses,
         className
       )}
     >
-      {name}
-    </Badge>
+      <span className={cn('rounded-full shrink-0', dotSize, getAgentDotColor(name))} />
+      <span>{name}</span>
+    </span>
   );
 };

@@ -161,12 +161,12 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                       {file.to?.replace(/^b\//, '') || file.from?.replace(/^a\//, '') || `File ${fileIdx + 1}`}
                     </span>
                     {file.new && (
-                      <span className="inline-flex items-center gap-0.5 text-emerald-400 bg-emerald-950/40 px-1 py-0.5 rounded text-[9px]">
+                      <span className="badge-success text-[9px] px-1 py-0.5 rounded">
                         <PlusCircle className="h-2.5 w-2.5" /> new file
                       </span>
                     )}
                     {file.deleted && (
-                      <span className="inline-flex items-center gap-0.5 text-rose-400 bg-rose-950/40 px-1 py-0.5 rounded text-[9px]">
+                      <span className="badge-danger text-[9px] px-1 py-0.5 rounded">
                         <MinusCircle className="h-2.5 w-2.5" /> deleted
                       </span>
                     )}
