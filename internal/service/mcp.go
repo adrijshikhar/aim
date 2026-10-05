@@ -124,7 +124,7 @@ func (s *mcpService) ListServers(ctx context.Context, profileName string) ([]MCP
 			filepath.Join(pDir, ".claude", "mcp_config.json"),
 		}
 		for _, pp := range profilePaths {
-			servers := parseMCPFile(pp, "profile")
+			servers := parseMCPFile(pp, profileName)
 			for k, v := range servers {
 				// Profile servers override global servers
 				allServers[k] = v

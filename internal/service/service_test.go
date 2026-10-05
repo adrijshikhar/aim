@@ -628,8 +628,8 @@ func TestMCPService_ListServers(t *testing.T) {
 	for _, s := range isoServers {
 		if s.Name == "custom-tool" {
 			found = true
-			if s.Scope != "profile" {
-				t.Errorf("expected scope profile, got %s", s.Scope)
+			if s.Scope != "isolated" {
+				t.Errorf("expected scope isolated, got %s", s.Scope)
 			}
 			if s.Command != "node" {
 				t.Errorf("expected command node, got %s", s.Command)
