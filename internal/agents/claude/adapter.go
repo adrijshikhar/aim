@@ -25,12 +25,13 @@ import (
 
 // Compile-time assertions that Adapter implements the segregated agent interfaces.
 var (
-	_ agents.AgentAdapter        = (*Adapter)(nil)
-	_ agents.Authenticator       = (*Adapter)(nil)
-	_ agents.Diagnostician       = (*Adapter)(nil)
-	_ agents.UsageProvider       = (*Adapter)(nil)
-	_ agents.AccountInfoProvider = (*Adapter)(nil)
-	_ agents.FullAdapter         = (*Adapter)(nil)
+	_ agents.AgentAdapter          = (*Adapter)(nil)
+	_ agents.Authenticator         = (*Adapter)(nil)
+	_ agents.Diagnostician         = (*Adapter)(nil)
+	_ agents.UsageProvider         = (*Adapter)(nil)
+	_ agents.AccountInfoProvider   = (*Adapter)(nil)
+	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
+	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
 type Adapter struct {
@@ -566,4 +567,31 @@ func parseClaudeResetTime(s string, now time.Time) (time.Time, time.Duration) {
 	}
 
 	return time.Time{}, 0
+}
+
+// RunnableFlags returns the list of CLI flags supported by the claude executable.
+func (a *Adapter) RunnableFlags() []agents.RunnableFlag {
+	return []agents.RunnableFlag{
+		{
+			Flag:        "--dangerously-skip-permissions",
+			Name:        "Dangerously Skip Permissions",
+			Description: "Bypass all confirmation prompts for tool execution, bash commands, and file edits.",
+			Type:        "bool",
+			Dangerous:   true,
+		},
+		{
+			Flag:        "--verbose",
+			Name:        "Verbose Logging",
+			Description: "Enable detailed engine diagnostics, debugging traces, and raw API responses.",
+			Type:        "bool",
+			Dangerous:   false,
+		},
+		{
+			Flag:        "--print",
+			Name:        "Print & Exit",
+			Description: "Print conversation output directly to stdout without entering the interactive TUI.",
+			Type:        "bool",
+			Dangerous:   false,
+		},
+	}
 }

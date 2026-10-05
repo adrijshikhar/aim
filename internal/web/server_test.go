@@ -18,6 +18,7 @@ import (
 // mockProfileService is a mock implementation of service.ProfileService.
 type mockProfileService struct {
 	listProfilesFn  func(ctx context.Context, agent string) ([]service.ProfileDTO, error)
+	listAdaptersFn  func(ctx context.Context) ([]service.AdapterDTO, error)
 	createProfileFn func(ctx context.Context, req service.CreateProfileRequest) (*service.ProfileDTO, error)
 	removeProfileFn func(ctx context.Context, agent, name string) error
 	renameProfileFn func(ctx context.Context, agent, oldName, newName string) error
@@ -28,6 +29,19 @@ func (m *mockProfileService) ListProfiles(ctx context.Context, agent string) ([]
 		return m.listProfilesFn(ctx, agent)
 	}
 	return []service.ProfileDTO{}, nil
+}
+
+func (m *mockProfileService) ListAdapters(ctx context.Context) ([]service.AdapterDTO, error) {
+	if m.listAdaptersFn != nil {
+		return m.listAdaptersFn(ctx)
+	}
+	return []service.AdapterDTO{
+		{
+			Name:        "claude",
+			DisplayName: "Claude Code",
+			BinaryName:  "claude",
+		},
+	}, nil
 }
 
 func (m *mockProfileService) CreateProfile(ctx context.Context, req service.CreateProfileRequest) (*service.ProfileDTO, error) {
@@ -59,6 +73,7 @@ func (m *mockProfileService) UpdateProfileConfig(ctx context.Context, name strin
 type mockSessionService struct {
 	listSessionsFn            func(ctx context.Context, filter service.SessionFilter) ([]service.SessionDTO, error)
 	resumeSessionInTerminalFn func(ctx context.Context, req service.ResumeRequest) error
+	getSessionTranscriptFn    func(ctx context.Context, agent, sessionID string) (*service.SessionTranscriptDTO, error)
 }
 
 func (m *mockSessionService) ListSessions(ctx context.Context, filter service.SessionFilter) ([]service.SessionDTO, error) {
@@ -73,6 +88,21 @@ func (m *mockSessionService) ResumeSessionInTerminal(ctx context.Context, req se
 		return m.resumeSessionInTerminalFn(ctx, req)
 	}
 	return nil
+}
+
+func (m *mockSessionService) GetSessionTranscript(ctx context.Context, agent, sessionID string) (*service.SessionTranscriptDTO, error) {
+	if m.getSessionTranscriptFn != nil {
+		return m.getSessionTranscriptFn(ctx, agent, sessionID)
+	}
+	return &service.SessionTranscriptDTO{
+		SessionID: sessionID,
+		Agent:     agent,
+		Title:     "Mock Session",
+		Turns: []service.SessionTurnDTO{
+			{TurnIndex: 1, Role: "user", Content: "Hello"},
+			{TurnIndex: 2, Role: "assistant", Content: "Hi there!"},
+		},
+	}, nil
 }
 
 // mockLauncherService is a mock implementation of service.LauncherService.
@@ -894,5 +924,51 @@ func TestDaemonRun(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetAdapters(t *testing.T) {
+	profs := &mockProfileService{}
+	ts, _ := setupTestServer(t, profs, nil, nil, false)
+
+	resp, err := http.Get(ts.URL + "/api/adapters")
+	if err != nil {
+		t.Fatalf("GET /api/adapters failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var adapters []service.AdapterDTO
+	if err := json.NewDecoder(resp.Body).Decode(&adapters); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(adapters) != 1 || adapters[0].Name != "claude" {
+		t.Fatalf("unexpected adapters: %+v", adapters)
+	}
+}
+
+func TestGetSessionTranscript(t *testing.T) {
+	sess := &mockSessionService{}
+	ts, _ := setupTestServer(t, nil, sess, nil, false)
+
+	resp, err := http.Get(ts.URL + "/api/sessions/claude/sess-123/transcript")
+	if err != nil {
+		t.Fatalf("GET transcript failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var transcript service.SessionTranscriptDTO
+	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
+		t.Fatalf("failed to decode transcript: %v", err)
+	}
+	if transcript.SessionID != "sess-123" || len(transcript.Turns) != 2 {
+		t.Fatalf("unexpected transcript: %+v", transcript)
 	}
 }

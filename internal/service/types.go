@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -20,6 +21,15 @@ type AdapterInfo struct {
 	HasCredentials bool                 `json:"has_credentials"`
 	Account        *profile.AccountInfo `json:"account,omitempty"`
 	Quota          *QuotaDTO            `json:"quota,omitempty"`
+}
+
+// AdapterDTO represents a registered agent adapter and its supported runnable CLI flags.
+type AdapterDTO struct {
+	Name          string                `json:"name"`
+	DisplayName   string                `json:"display_name"`
+	BinaryName    string                `json:"binary_name"`
+	Aliases       []string              `json:"aliases"`
+	RunnableFlags []agents.RunnableFlag `json:"runnable_flags"`
 }
 
 // ProfileDTO represents an agent profile, which may host one or more agent adapters.
@@ -65,13 +75,46 @@ type SessionFilter struct {
 	Limit   int    `json:"limit,omitempty"`
 }
 
+// ToolCallDTO represents an invoked tool action within an assistant turn.
+type ToolCallDTO struct {
+	ID        string `json:"id,omitempty"`
+	ToolName  string `json:"tool_name"`
+	Arguments string `json:"arguments,omitempty"`
+	Output    string `json:"output,omitempty"`
+	Status    string `json:"status,omitempty"` // "ok", "error"
+}
+
+// SessionTurnDTO represents a single conversational turn (user, assistant, or system).
+type SessionTurnDTO struct {
+	TurnIndex int           `json:"turn_index"`
+	Role      string        `json:"role"` // "user", "assistant", "system"
+	Timestamp time.Time     `json:"timestamp,omitempty"`
+	Content   string        `json:"content"`
+	Thinking  string        `json:"thinking,omitempty"`
+	ToolCalls []ToolCallDTO `json:"tool_calls,omitempty"`
+}
+
+// SessionTranscriptDTO represents the full conversation replay and metadata for a session.
+type SessionTranscriptDTO struct {
+	SessionID string           `json:"session_id"`
+	Agent     string           `json:"agent"`
+	Profile   string           `json:"profile"`
+	Title     string           `json:"title"`
+	Cwd       string           `json:"cwd"`
+	Goal      string           `json:"goal"`
+	Turns     []SessionTurnDTO `json:"turns"`
+}
+
 // ResumeRequest defines parameters to resume an existing session in a terminal.
 type ResumeRequest struct {
-	Agent       string   `json:"agent"`
-	Profile     string   `json:"profile"`
-	SessionID   string   `json:"session_id"`
-	Flags       []string `json:"flags,omitempty"`
-	CustomFlags string   `json:"custom_flags,omitempty"`
+	Agent        string   `json:"agent"`
+	Profile      string   `json:"profile"`
+	SessionID    string   `json:"session_id"`
+	Flags        []string `json:"flags,omitempty"`         // Legacy combined fallback
+	AimFlags     []string `json:"aim_flags,omitempty"`     // Orchestrator flags: --exact, --catalyst, --fork, --force
+	AdapterFlags []string `json:"adapter_flags,omitempty"` // Runnable adapter flags: e.g. --dangerously-skip-permissions
+	CustomFlags  string   `json:"custom_flags,omitempty"`  // Legacy custom flags string
+	CustomArgs   string   `json:"custom_args,omitempty"`   // Custom adapter arguments string
 }
 
 // LauncherService defines the contract for launching interactive terminal windows.
@@ -83,6 +126,7 @@ type LauncherService interface {
 // ProfileService encapsulates all profile management business logic.
 type ProfileService interface {
 	ListProfiles(ctx context.Context, agent string) ([]ProfileDTO, error)
+	ListAdapters(ctx context.Context) ([]AdapterDTO, error)
 	CreateProfile(ctx context.Context, req CreateProfileRequest) (*ProfileDTO, error)
 	RemoveProfile(ctx context.Context, agent, name string) error
 	RenameProfile(ctx context.Context, agent, oldName, newName string) error
@@ -93,6 +137,7 @@ type ProfileService interface {
 type SessionService interface {
 	ListSessions(ctx context.Context, filter SessionFilter) ([]SessionDTO, error)
 	ResumeSessionInTerminal(ctx context.Context, req ResumeRequest) error
+	GetSessionTranscript(ctx context.Context, agent, sessionID string) (*SessionTranscriptDTO, error)
 }
 
 // MCPServerDTO represents a configured MCP server.

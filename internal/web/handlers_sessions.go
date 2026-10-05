@@ -87,3 +87,30 @@ func (s *Server) handleResumeSession(w http.ResponseWriter, r *http.Request) {
 		"terminal": terminalName,
 	})
 }
+
+// handleGetSessionTranscript handles GET /api/sessions/{agent}/{id}/transcript.
+func (s *Server) handleGetSessionTranscript(w http.ResponseWriter, r *http.Request) {
+	if s.sessions == nil {
+		writeJSONError(w, http.StatusInternalServerError, "session service unavailable")
+		return
+	}
+
+	agent := r.PathValue("agent")
+	sessionID := r.PathValue("id")
+	if strings.TrimSpace(agent) == "" || strings.TrimSpace(sessionID) == "" {
+		writeJSONError(w, http.StatusBadRequest, "agent and session id are required")
+		return
+	}
+
+	transcript, err := s.sessions.GetSessionTranscript(r.Context(), agent, sessionID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no such file") {
+			writeJSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, transcript)
+}

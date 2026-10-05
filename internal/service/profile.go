@@ -416,3 +416,27 @@ func (s *profileService) UpdateProfileConfig(ctx context.Context, name string, m
 
 	return config.SaveConfig(cfg)
 }
+
+// ListAdapters returns all registered agent adapters and their declared runnable CLI flags.
+func (s *profileService) ListAdapters(ctx context.Context) ([]AdapterDTO, error) {
+	if s.reg == nil {
+		return []AdapterDTO{}, nil
+	}
+	all := s.reg.All()
+	dtos := make([]AdapterDTO, 0, len(all))
+	for _, a := range all {
+		dto := AdapterDTO{
+			Name:        a.Name(),
+			DisplayName: a.DisplayName(),
+			BinaryName:  a.BinaryName(),
+			Aliases:     a.Aliases(),
+		}
+		if rf, ok := a.(agents.RunnableFlagsProvider); ok {
+			dto.RunnableFlags = rf.RunnableFlags()
+		} else {
+			dto.RunnableFlags = []agents.RunnableFlag{}
+		}
+		dtos = append(dtos, dto)
+	}
+	return dtos, nil
+}

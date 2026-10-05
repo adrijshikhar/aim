@@ -65,3 +65,19 @@ type FullAdapter interface {
 	UsageProvider
 	AccountInfoProvider
 }
+
+// RunnableFlag describes a supported flag that can be passed directly to the underlying agent CLI.
+type RunnableFlag struct {
+	Flag        string   `json:"flag"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Type        string   `json:"type"` // "bool", "string", "choice"
+	Default     string   `json:"default,omitempty"`
+	Choices     []string `json:"choices,omitempty"`
+	Dangerous   bool     `json:"dangerous,omitempty"`
+}
+
+// RunnableFlagsProvider is optionally implemented by adapters that expose supported upstream CLI flags.
+type RunnableFlagsProvider interface {
+	RunnableFlags() []RunnableFlag
+}

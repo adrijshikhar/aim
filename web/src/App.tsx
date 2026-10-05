@@ -6,9 +6,11 @@ import {
   StatusDTO,
   DaemonDTO,
   ProfileDTO,
+  SessionDTO,
 } from '@/lib/api';
 import { ProfilesView } from '@/views/ProfilesView';
 import { SessionsView } from '@/views/SessionsView';
+import { SessionDetailView } from '@/views/SessionDetailView';
 import { McpView } from '@/views/McpView';
 import { Sidebar } from '@/components/Sidebar';
 import { DaemonModal } from '@/components/DaemonModal';
@@ -18,11 +20,12 @@ import { ChevronRight } from 'lucide-react';
 
 export function App() {
   const [currentView, setCurrentView] = React.useState<
-    'overview' | 'sessions' | 'mcp' | 'profile-detail'
+    'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail'
   >('overview');
   const [selectedProfile, setSelectedProfile] = React.useState<string>('all');
   const [selectedMcpScope, setSelectedMcpScope] = React.useState<string>('all');
   const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
+  const [viewedSession, setViewedSession] = React.useState<SessionDTO | null>(null);
 
   const [status, setStatus] = React.useState<StatusDTO>({
     version: 'v0.12.0',
@@ -78,6 +81,7 @@ export function App() {
 
   // Navigation handlers
   const handleSelectView = (view: 'overview' | 'sessions' | 'mcp') => {
+    setViewedSession(null);
     if (view === 'overview') {
       setSelectedProfile('all');
       setCurrentView('overview');
@@ -91,6 +95,7 @@ export function App() {
   };
 
   const handleSelectProfile = (profileName: string) => {
+    setViewedSession(null);
     if (profileName === 'all') {
       setSelectedProfile('all');
       setCurrentView('overview');
@@ -101,13 +106,25 @@ export function App() {
   };
 
   const handleNavigateToSessions = (profileName: string) => {
+    setViewedSession(null);
     setSelectedProfile(profileName);
     setCurrentView('sessions');
   };
 
   const handleNavigateToMcp = (profileName: string) => {
+    setViewedSession(null);
     setSelectedMcpScope(profileName);
     setCurrentView('mcp');
+  };
+
+  const handleViewSession = (session: SessionDTO) => {
+    setViewedSession(session);
+    setCurrentView('session-detail');
+  };
+
+  const handleBackFromSession = () => {
+    setViewedSession(null);
+    setCurrentView('sessions');
   };
 
   const getHeaderTitle = () => {
@@ -142,6 +159,24 @@ export function App() {
                 <span className="text-[#a1a1a1]">{selectedProfile}</span>
               </>
             )}
+          </div>
+        );
+      case 'session-detail':
+        return (
+          <div className="flex items-center gap-1.5 text-sm font-mono">
+            <button
+              type="button"
+              onClick={handleBackFromSession}
+              className="text-[#a1a1a1] hover:text-[#ededed] cursor-pointer"
+            >
+              Sessions
+            </button>
+            <ChevronRight className="h-3.5 w-3.5 text-[#666666]" />
+            <span className="text-[#a1a1a1]">{viewedSession?.agent}</span>
+            <ChevronRight className="h-3.5 w-3.5 text-[#666666]" />
+            <span className="text-[#ededed] font-semibold">
+              {viewedSession ? viewedSession.id.slice(0, 8) : 'Detail'}
+            </span>
           </div>
         );
       case 'mcp':
@@ -255,6 +290,13 @@ export function App() {
                 selectedProfile={selectedProfile}
                 onSelectProfile={setSelectedProfile}
                 profiles={profiles}
+                onViewSession={handleViewSession}
+              />
+            )}
+            {currentView === 'session-detail' && viewedSession && (
+              <SessionDetailView
+                session={viewedSession}
+                onBack={handleBackFromSession}
               />
             )}
             {currentView === 'mcp' && (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
 import {
   Dialog,
   DialogContent,
@@ -10,8 +10,8 @@ import {
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
-import { Terminal, Copy, Check, RefreshCw, Folder, MessageSquare } from 'lucide-react';
-import { SessionDTO, ResumeRequest } from '../lib/api';
+import { Terminal, Copy, Check, RefreshCw, Folder, MessageSquare, ShieldAlert } from 'lucide-react';
+import { SessionDTO, ResumeRequest, AdapterDTO, getAdapters, RunnableFlagDTO } from '../lib/api';
 
 interface ResumeModalProps {
   open: boolean;
@@ -19,39 +19,40 @@ interface ResumeModalProps {
   session: SessionDTO | null;
   onLaunch: (req: ResumeRequest) => Promise<void>;
   isResuming?: boolean;
+  adapters?: AdapterDTO[];
 }
 
-interface FlagOption {
+interface AimFlagOption {
   key: string;
   flag: string;
   name: string;
   description: string;
 }
 
-const AVAILABLE_FLAGS: FlagOption[] = [
+const AIM_DIRECT_FLAGS: AimFlagOption[] = [
   {
     key: 'exact',
     flag: '--exact',
     name: 'Verbatim Conversation Thread',
-    description: 'Resumes the native full conversation history thread without summary truncation.',
+    description: 'Resumes native full conversation history without summary truncation.',
   },
   {
     key: 'catalyst',
     flag: '--catalyst',
-    name: 'Catalyst Handoff',
-    description: 'Resume via Catalyst checkpoint brief (-c) for clean regrounded context.',
+    name: 'Catalyst Handoff (-c)',
+    description: 'Resume via Catalyst checkpoint brief for clean regrounded context.',
   },
   {
     key: 'fork',
     flag: '--fork',
-    name: 'Fork Session',
-    description: 'Branch the session into a new conversation ID (-b), keeping the original untouched.',
+    name: 'Fork Session (-b)',
+    description: 'Branch the session into a new conversation ID, preserving original untouched.',
   },
   {
     key: 'force',
     flag: '--force',
-    name: 'Force Resume',
-    description: 'Force resume (-f) even if the session is marked currently active.',
+    name: 'Force Resume (-f)',
+    description: 'Force resume even if marked currently active in another terminal process.',
   },
 ];
 
@@ -61,43 +62,93 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
   session,
   onLaunch,
   isResuming = false,
+  adapters: initialAdapters,
 }) => {
-  const [selectedFlags, setSelectedFlags] = useState<Record<string, boolean>>({
+  const [adapters, setAdapters] = React.useState<AdapterDTO[]>(initialAdapters || []);
+  const [selectedAimFlags, setSelectedAimFlags] = React.useState<Record<string, boolean>>({
     exact: false,
     catalyst: false,
     fork: false,
     force: false,
   });
-  const [customFlags, setCustomFlags] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [selectedAdapterFlags, setSelectedAdapterFlags] = React.useState<Record<string, boolean>>({});
+  const [customArgs, setCustomArgs] = React.useState('');
+  const [copied, setCopied] = React.useState(false);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (open) {
-      setSelectedFlags({
+      if (!initialAdapters || initialAdapters.length === 0) {
+        getAdapters().then(setAdapters).catch(() => {});
+      }
+      setSelectedAimFlags({
         exact: false,
         catalyst: false,
         fork: false,
         force: !!session?.is_active,
       });
-      setCustomFlags('');
+      // Default to empty adapter flags, user can toggle --dangerously-skip-permissions
+      setSelectedAdapterFlags({});
+      setCustomArgs('');
       setCopied(false);
     }
-  }, [open, session]);
+  }, [open, session, initialAdapters]);
 
   if (!session) return null;
 
-  const toggleFlag = (key: string) => {
-    setSelectedFlags((prev) => ({
+  const currentAdapter = adapters.find(
+    (a) => a.name.toLowerCase() === session.agent.toLowerCase() || a.aliases?.includes(session.agent.toLowerCase())
+  );
+
+  const runnableFlags: RunnableFlagDTO[] = currentAdapter?.runnable_flags || [
+    ...(session.agent.toLowerCase() === 'claude'
+      ? [
+          {
+            flag: '--dangerously-skip-permissions',
+            name: 'Dangerously Skip Permissions',
+            description: 'Bypass all confirmation prompts for tool execution, bash commands, and file edits.',
+            type: 'bool' as const,
+            dangerous: true,
+          },
+          {
+            flag: '--verbose',
+            name: 'Verbose Logging',
+            description: 'Enable detailed engine diagnostics and API traces.',
+            type: 'bool' as const,
+            dangerous: false,
+          },
+        ]
+      : []),
+  ];
+
+  const toggleAimFlag = (key: string) => {
+    setSelectedAimFlags((prev) => ({
       ...prev,
       [key]: !prev[key],
     }));
   };
 
-  const getActiveFlagsList = (): string[] => {
+  const toggleAdapterFlag = (flag: string) => {
+    setSelectedAdapterFlags((prev) => ({
+      ...prev,
+      [flag]: !prev[flag],
+    }));
+  };
+
+  const getActiveAimFlagsList = (): string[] => {
     const list: string[] = [];
-    AVAILABLE_FLAGS.forEach((f) => {
-      if (selectedFlags[f.key]) {
+    AIM_DIRECT_FLAGS.forEach((f) => {
+      if (selectedAimFlags[f.key]) {
         list.push(f.flag);
+      }
+    });
+    return list;
+  };
+
+  const getActiveAdapterFlagsList = (): string[] => {
+    const list: string[] = [];
+    Object.entries(selectedAdapterFlags).forEach(([flag, active]) => {
+      if (active) {
+        list.push(flag);
       }
     });
     return list;
@@ -108,16 +159,31 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
     const profile = session.profile && session.profile !== '<host>' ? session.profile : '';
     const sid = session.id;
 
-    let cmd = profile ? `aim resume ${agent} ${profile} ${sid}` : `aim resume ${agent} ${sid}`;
-    const flags = getActiveFlagsList();
-    if (flags.length > 0) {
-      cmd += ' ' + flags.join(' ');
+    const aimFlags = getActiveAimFlagsList();
+    const adapterFlags = getActiveAdapterFlagsList();
+    const custom = customArgs.trim();
+
+    const parts = ['aim', 'resume'];
+    if (aimFlags.length > 0) {
+      parts.push(...aimFlags);
     }
-    const custom = customFlags.trim();
+    parts.push(agent);
+    if (profile) {
+      parts.push(profile);
+    }
+    parts.push(sid);
+
+    const allAdapterArgs = [...adapterFlags];
     if (custom) {
-      cmd += ' ' + custom;
+      allAdapterArgs.push(custom);
     }
-    return cmd;
+
+    if (allAdapterArgs.length > 0) {
+      parts.push('--');
+      parts.push(...allAdapterArgs);
+    }
+
+    return parts.join(' ');
   };
 
   const handleCopyCommand = () => {
@@ -133,15 +199,16 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
       agent: session.agent,
       profile: session.profile,
       session_id: session.id,
-      flags: getActiveFlagsList(),
-      custom_flags: customFlags.trim() || undefined,
+      aim_flags: getActiveAimFlagsList(),
+      adapter_flags: getActiveAdapterFlagsList(),
+      custom_args: customArgs.trim() || undefined,
     });
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
+      <DialogContent className="max-w-xl bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist max-h-[90vh] overflow-y-auto">
         <DialogHeader className="space-y-1.5 pb-2 border-b border-[#262626] pr-8">
           <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
@@ -156,7 +223,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
             </Badge>
           </div>
           <DialogDescription className="text-xs text-[#a1a1a1]">
-            Configure execution flags and launch options before opening an interactive terminal.
+            Configure orchestrator switches and native {session.agent} CLI flags before launching terminal.
           </DialogDescription>
         </DialogHeader>
 
@@ -182,106 +249,150 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
           )}
         </div>
 
-        {/* Active Process Warning */}
-        {session.is_active && (
-          <div className="rounded-geist border border-[#f5a623]/30 bg-[#f5a623]/10 p-3 text-xs space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00e599] opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00e599]" />
-              </span>
-              <span className="text-[#ededed] font-medium font-mono text-xs">
-                Active Session Running {session.pid ? `(PID ${session.pid})` : ''}
-              </span>
-            </div>
-            <p className="text-[11px] text-[#a1a1a1] pl-4 leading-relaxed">
-              This session is running in another process. <strong className="text-[#ededed] font-mono">--force</strong> is pre-selected to resume directly without CLI prompt interruptions. Or select <strong className="text-[#ededed] font-mono">--fork</strong> to branch safely into a new conversation.
-            </p>
-          </div>
-        )}
-
         <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-          {/* Quick Flags Toggles */}
+          {/* Section 1: AIM Direct Flags */}
           <div className="space-y-2">
-            <label className="text-[11px] uppercase tracking-wider font-mono text-[#a1a1a1]">
-              Execution Flags
-            </label>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#ededed] uppercase tracking-wider font-mono">
+                1. AIM Direct Flags (Orchestrator)
+              </span>
+              <span className="text-[10px] text-[#666666] font-mono">Profile &amp; Context</span>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {AVAILABLE_FLAGS.map((f) => {
-                const active = !!selectedFlags[f.key];
+              {AIM_DIRECT_FLAGS.map((f) => {
+                const isChecked = selectedAimFlags[f.key];
                 return (
-                  <button
+                  <div
                     key={f.key}
-                    type="button"
-                    onClick={() => toggleFlag(f.key)}
-                    className={`flex flex-col text-left p-2.5 rounded-geist border transition-all cursor-pointer select-none ${
-                      active
-                        ? 'bg-[#161616] border-[#ededed] text-[#ededed]'
-                        : 'bg-[#0a0a0a] border-[#262626] hover:border-[#333333] text-[#a1a1a1]'
+                    onClick={() => toggleAimFlag(f.key)}
+                    className={`flex items-start gap-2.5 p-2.5 rounded-geist border cursor-pointer transition-colors ${
+                      isChecked
+                        ? 'border-[#444444] bg-[#161616]'
+                        : 'border-[#262626] bg-[#0a0a0a] hover:border-[#333333] hover:bg-[#121212]'
                     }`}
                   >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <span className="font-mono text-xs font-semibold text-[#ededed]">
-                        {f.flag}
-                      </span>
+                    <div className="pt-0.5">
                       <div
-                        className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${
-                          active
+                        className={`h-3.5 w-3.5 rounded-[3px] border flex items-center justify-center transition-colors ${
+                          isChecked
                             ? 'bg-[#ededed] border-[#ededed] text-[#000000]'
-                            : 'border-[#333333] bg-[#111111]'
+                            : 'border-[#444444] bg-[#0a0a0a]'
                         }`}
                       >
-                        {active && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                        {isChecked && <Check className="h-2.5 w-2.5 stroke-[3]" />}
                       </div>
                     </div>
-                    <span className="text-[11px] font-medium text-[#ededed] mb-0.5">{f.name}</span>
-                    <span className="text-[10px] text-[#666666] leading-tight">{f.description}</span>
-                  </button>
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-mono text-[11px] font-bold text-[#ededed]">{f.flag}</span>
+                      </div>
+                      <p className="text-[10px] text-[#888888] leading-tight line-clamp-2">{f.description}</p>
+                    </div>
+                  </div>
                 );
               })}
             </div>
           </div>
 
-          {/* Custom Flags Input */}
-          <div className="space-y-1.5">
-            <label className="text-[11px] uppercase tracking-wider font-mono text-[#a1a1a1]">
-              Additional Flags / Arguments
+          {/* Section 2: Adapter Runnable Flags */}
+          {runnableFlags.length > 0 && (
+            <div className="space-y-2 pt-1 border-t border-[#262626]">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-[#ededed] uppercase tracking-wider font-mono">
+                  2. {session.agent} Runnable Flags (Passthrough via --)
+                </span>
+                <span className="text-[10px] text-[#666666] font-mono">Agent CLI Flags</span>
+              </div>
+
+              <div className="space-y-2">
+                {runnableFlags.map((rf) => {
+                  const isChecked = !!selectedAdapterFlags[rf.flag];
+                  return (
+                    <div
+                      key={rf.flag}
+                      onClick={() => toggleAdapterFlag(rf.flag)}
+                      className={`flex items-start gap-3 p-3 rounded-geist border cursor-pointer transition-colors ${
+                        isChecked
+                          ? rf.dangerous
+                            ? 'border-amber-500/50 bg-amber-500/10'
+                            : 'border-[#444444] bg-[#161616]'
+                          : 'border-[#262626] bg-[#0a0a0a] hover:border-[#333333] hover:bg-[#121212]'
+                      }`}
+                    >
+                      <div className="pt-0.5">
+                        <div
+                          className={`h-4 w-4 rounded-[3px] border flex items-center justify-center transition-colors ${
+                            isChecked
+                              ? rf.dangerous
+                                ? 'bg-amber-400 border-amber-400 text-black'
+                                : 'bg-[#ededed] border-[#ededed] text-[#000000]'
+                              : 'border-[#444444] bg-[#0a0a0a]'
+                          }`}
+                        >
+                          {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
+                        </div>
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-xs font-bold text-[#ededed]">{rf.flag}</span>
+                          {rf.dangerous && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] font-mono border-amber-500/40 text-amber-300 bg-amber-500/10 px-1.5 py-0.5 flex items-center gap-1"
+                            >
+                              <ShieldAlert className="h-3 w-3 text-amber-400" />
+                              High Velocity / Skip Prompts
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-[#a1a1a1] leading-tight">{rf.description}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Section 3: Custom Adapter Arguments */}
+          <div className="space-y-1.5 pt-1 border-t border-[#262626]">
+            <label htmlFor="custom-args" className="text-xs font-mono text-[#a1a1a1] flex items-center justify-between">
+              <span>Additional Adapter Arguments:</span>
+              <span className="text-[10px] text-[#666666]">Appended after --</span>
             </label>
             <Input
-              value={customFlags}
-              onChange={(e) => setCustomFlags(e.target.value)}
-              placeholder="e.g. --dangerously-skip-permissions --verbose"
-              className="bg-[#0a0a0a] border-[#262626] font-mono text-xs text-[#ededed] placeholder:text-[#666666] focus-visible:ring-1 focus-visible:ring-[#ededed] focus-visible:border-[#ededed] rounded-geist"
+              id="custom-args"
+              placeholder="e.g. --model claude-3-5-sonnet"
+              className="h-8 text-xs font-mono rounded-geist border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
+              value={customArgs}
+              onChange={(e) => setCustomArgs(e.target.value)}
             />
           </div>
 
           {/* Live Command Preview Box */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10.5px] uppercase tracking-wider font-mono text-[#a1a1a1]">
-                Command Preview
-              </span>
+          <div className="space-y-1.5 pt-1">
+            <span className="text-[11px] font-mono text-[#a1a1a1]">Terminal Launch Command:</span>
+            <div className="relative rounded-geist border border-[#262626] bg-[#0a0a0a] p-2.5 font-mono text-xs text-[#ededed] flex items-center justify-between gap-2 overflow-x-auto">
+              <span className="select-all text-[11px] text-[#ededed]">{buildCommandString()}</span>
               <button
                 type="button"
                 onClick={handleCopyCommand}
-                className="inline-flex items-center gap-1 text-[10.5px] font-mono text-[#a1a1a1] hover:text-[#ededed] transition-colors cursor-pointer"
+                className="shrink-0 p-1 rounded-geist hover:bg-[#1f1f1f] text-[#a1a1a1] hover:text-[#ededed] transition-colors"
+                title="Copy command to clipboard"
               >
-                {copied ? <Check className="h-3 w-3 text-[#00e599]" /> : <Copy className="h-3 w-3" />}
-                {copied ? 'Copied' : 'Copy'}
+                {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
-            </div>
-            <div className="p-2.5 rounded-geist bg-[#000000] border border-[#262626] font-mono text-[11.5px] text-[#ededed] overflow-x-auto select-all whitespace-pre">
-              {buildCommandString()}
             </div>
           </div>
 
-          <DialogFooter className="pt-2 border-t border-[#262626] flex items-center justify-between sm:justify-between w-full">
+          <DialogFooter className="pt-2 flex items-center justify-end gap-2 border-t border-[#262626]">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => onOpenChange(false)}
-              className="border-[#262626] bg-[#0a0a0a] hover:bg-[#161616] text-[#a1a1a1] hover:text-[#ededed] text-xs font-mono rounded-geist"
+              className="rounded-geist h-8 border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
             >
               Cancel
             </Button>
@@ -289,7 +400,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               type="submit"
               size="sm"
               disabled={isResuming}
-              className="bg-[#ededed] hover:bg-white text-[#000000] text-xs font-mono font-medium shadow-sm transition-all cursor-pointer rounded-geist"
+              className="rounded-geist h-8 bg-[#ededed] text-[#000000] hover:bg-[#ffffff] font-medium"
             >
               {isResuming ? (
                 <>
@@ -299,7 +410,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               ) : (
                 <>
                   <Terminal className="h-3.5 w-3.5 mr-1.5" />
-                  Launch in Terminal
+                  Resume in Terminal
                 </>
               )}
             </Button>

@@ -4,7 +4,17 @@ import {
   ProfileDTO,
   getSessions,
   resumeSession,
+  ResumeRequest,
 } from '@/lib/api';
+import {
+  ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  SortingState,
+  useReactTable,
+} from '@tanstack/react-table';
 import {
   Table,
   TableHeader,
@@ -15,6 +25,7 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Terminal,
@@ -23,52 +34,62 @@ import {
   Folder,
   Clock,
   MessageSquare,
-  Activity,
-  ChevronDown,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  X,
   ChevronLeft,
   ChevronRight,
-  X,
-  Filter,
 } from 'lucide-react';
 import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
+import { DataTableFacetedFilter } from '@/components/DataTableFacetedFilter';
+import { cn } from '@/lib/utils';
 
 interface SessionsViewProps {
   selectedProfile?: string;
   onSelectProfile?: (profile: string) => void;
   profiles?: ProfileDTO[];
+  onViewSession?: (session: SessionDTO) => void;
 }
 
 export function SessionsView({
   selectedProfile = 'all',
   onSelectProfile,
   profiles = [],
+  onViewSession,
 }: SessionsViewProps) {
   const [sessions, setSessions] = React.useState<SessionDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState('');
-  const [selectedEngine, setSelectedEngine] = React.useState<string>('all');
+  const [selectedEngines, setSelectedEngines] = React.useState<Set<string>>(new Set());
+  const [selectedProfiles, setSelectedProfiles] = React.useState<Set<string>>(
+    selectedProfile && selectedProfile !== 'all' ? new Set([selectedProfile]) : new Set()
+  );
+  const [selectedStatuses, setSelectedStatuses] = React.useState<Set<string>>(new Set());
   const [resumingId, setResumingId] = React.useState<string | null>(null);
   const [flagModalSession, setFlagModalSession] = React.useState<SessionDTO | null>(null);
-
-  // Pagination state
-  const [page, setPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(15);
+  const [sorting, setSorting] = React.useState<SortingState>([
+    { id: 'updated_at', desc: true },
+  ]);
 
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
+  // Sync external selectedProfile prop
+  React.useEffect(() => {
+    if (selectedProfile && selectedProfile !== 'all') {
+      setSelectedProfiles(new Set([selectedProfile]));
+    }
+  }, [selectedProfile]);
+
   const fetchSessions = React.useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getSessions({
-        profile: selectedProfile === 'all' ? undefined : selectedProfile,
-        agent: selectedEngine === 'all' ? undefined : selectedEngine,
-        query: searchQuery ? searchQuery : undefined,
-      });
+      const data = await getSessions();
       setSessions(data);
     } catch {
-      // Fallback dev data if server is offline
+      // Fallback data if server unreachable
       setSessions([
         {
           id: 'sess-89412e',
@@ -92,160 +113,175 @@ export function SessionsView({
           updated_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
           is_active: false,
         },
-        {
-          id: 'sess-55128c',
-          agent: 'gemini',
-          profile: 'research',
-          title: 'Evaluate vector embeddings performance',
-          cwd: '/Users/developer/Workspace/ai-evals',
-          goal: 'Benchmark latency and recall on 100k test vectors across batch sizes',
-          turns: 41,
-          updated_at: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
-          is_active: false,
-        },
-        {
-          id: 'sess-99014b',
-          agent: 'agy',
-          profile: 'default',
-          title: 'Autonomous multi-file refactor',
-          cwd: '/Users/developer/Projects/catalyst',
-          goal: 'Decouple session runners and add isolated state management hooks',
-          turns: 58,
-          updated_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-          is_active: true,
-        },
       ]);
     } finally {
       setLoading(false);
     }
-  }, [selectedProfile, selectedEngine, searchQuery]);
+  }, []);
 
   React.useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
 
-  // Reset to page 1 whenever filters change
-  React.useEffect(() => {
-    setPage(1);
-  }, [searchQuery, selectedProfile, selectedEngine, pageSize]);
-
-  // Keyboard shortcut listener: `/` to focus search, `[` for prev page, `]` for next page
+  // Global hotkey '/' focuses search
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      const isInput =
-        activeEl instanceof HTMLInputElement ||
-        activeEl instanceof HTMLTextAreaElement ||
-        activeEl instanceof HTMLSelectElement;
-
-      if (e.key === '/' && !isInput) {
+      if (
+        e.key === '/' &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
         e.preventDefault();
         searchInputRef.current?.focus();
-      } else if (!isInput && e.key === '[') {
-        setPage((p) => Math.max(1, p - 1));
-      } else if (!isInput && e.key === ']') {
-        setPage((p) => p + 1);
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Compute profile options
+  // Compute faceted counts
+  const engineCounts = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    sessions.forEach((s) => {
+      const a = s.agent.toLowerCase();
+      map[a] = (map[a] || 0) + 1;
+    });
+    return map;
+  }, [sessions]);
+
+  const profileCounts = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    sessions.forEach((s) => {
+      const p = s.profile || '<host>';
+      map[p] = (map[p] || 0) + 1;
+    });
+    return map;
+  }, [sessions]);
+
+  const statusCounts = React.useMemo(() => {
+    const map: Record<string, number> = { active: 0, idle: 0 };
+    sessions.forEach((s) => {
+      if (s.is_active) map.active++;
+      else map.idle++;
+    });
+    return map;
+  }, [sessions]);
+
+  // Options for filters
+  const engineOptions = React.useMemo(
+    () => [
+      { label: 'Claude', value: 'claude' },
+      { label: 'Codex', value: 'codex' },
+      { label: 'Antigravity', value: 'agy' },
+      { label: 'Gemini', value: 'gemini' },
+    ],
+    []
+  );
+
   const profileOptions = React.useMemo(() => {
     const set = new Set<string>();
-    if (profiles && profiles.length > 0) {
-      profiles.forEach((p) => set.add(p.name));
-    }
-    sessions.forEach((s) => set.add(s.profile));
-    return Array.from(set).sort();
+    profiles.forEach((p) => set.add(p.name));
+    sessions.forEach((s) => {
+      if (s.profile) set.add(s.profile);
+    });
+    const list = Array.from(set).sort();
+    return list.map((p) => ({ label: p, value: p }));
   }, [profiles, sessions]);
 
-  const handleResume = async (s: SessionDTO, flags?: string[], customFlags?: string) => {
-    if (s.is_active && (!flags || flags.length === 0) && !customFlags) {
-      setFlagModalSession(s);
-      return;
-    }
+  const statusOptions = React.useMemo(
+    () => [
+      { label: 'Active', value: 'active' },
+      { label: 'Idle', value: 'idle' },
+    ],
+    []
+  );
 
-    setResumingId(s.id);
+  // Filtered rows
+  const filteredData = React.useMemo(() => {
+    return sessions.filter((s) => {
+      // Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const match =
+          s.id.toLowerCase().includes(q) ||
+          (s.title && s.title.toLowerCase().includes(q)) ||
+          (s.goal && s.goal.toLowerCase().includes(q)) ||
+          (s.cwd && s.cwd.toLowerCase().includes(q)) ||
+          (s.profile && s.profile.toLowerCase().includes(q)) ||
+          (s.agent && s.agent.toLowerCase().includes(q));
+        if (!match) return false;
+      }
+
+      // Engine multi-select
+      if (selectedEngines.size > 0) {
+        if (!selectedEngines.has(s.agent.toLowerCase())) return false;
+      }
+
+      // Profile multi-select
+      if (selectedProfiles.size > 0) {
+        const prof = s.profile || '<host>';
+        if (!selectedProfiles.has(prof)) return false;
+      }
+
+      // Status multi-select
+      if (selectedStatuses.size > 0) {
+        const st = s.is_active ? 'active' : 'idle';
+        if (!selectedStatuses.has(st)) return false;
+      }
+
+      return true;
+    });
+  }, [sessions, searchQuery, selectedEngines, selectedProfiles, selectedStatuses]);
+
+  const handleQuickResume = async (sess: SessionDTO) => {
+    setResumingId(sess.id);
     try {
       const res = await resumeSession({
-        agent: s.agent,
-        profile: s.profile,
-        session_id: s.id,
-        flags: flags,
-        custom_flags: customFlags,
+        agent: sess.agent,
+        profile: sess.profile,
+        session_id: sess.id,
       });
-
-      const flagsDesc = flags && flags.length > 0 ? ` with ${flags.join(' ')}` : '';
       toast({
-        title: 'Terminal Session Launched',
-        description: res.message || `Resumed session ${s.id} (${s.agent}/${s.profile})${flagsDesc} in terminal.`,
-        variant: 'success',
+        title: 'Terminal launched',
+        description: `Resumed in ${res.terminal || 'terminal'} window.`,
       });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to launch terminal';
+    } catch (err: any) {
       toast({
-        title: 'Resume Failed',
-        description: msg,
         variant: 'destructive',
+        title: 'Resume failed',
+        description: err.message || 'Could not launch terminal',
       });
     } finally {
       setResumingId(null);
     }
   };
 
-  const filteredSessions = React.useMemo(() => {
-    return sessions.filter((s) => {
-      const matchProfile =
-        !selectedProfile || selectedProfile === 'all' || s.profile.toLowerCase() === selectedProfile.toLowerCase();
-      if (!matchProfile) return false;
-
-      const matchEngine =
-        !selectedEngine || selectedEngine === 'all' || s.agent.toLowerCase() === selectedEngine.toLowerCase();
-      if (!matchEngine) return false;
-
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase();
-      return (
-        s.id.toLowerCase().includes(q) ||
-        s.profile.toLowerCase().includes(q) ||
-        s.agent.toLowerCase().includes(q) ||
-        s.title.toLowerCase().includes(q) ||
-        s.goal.toLowerCase().includes(q) ||
-        s.cwd.toLowerCase().includes(q)
-      );
-    });
-  }, [sessions, selectedProfile, selectedEngine, searchQuery]);
-
-  // Pagination calculation
-  const totalItems = filteredSessions.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = Math.min(startIndex + pageSize, totalItems);
-  const paginatedSessions = React.useMemo(() => {
-    return filteredSessions.slice(startIndex, endIndex);
-  }, [filteredSessions, startIndex, endIndex]);
-
-  const hasActiveFilters =
-    (selectedProfile && selectedProfile !== 'all') ||
-    (selectedEngine && selectedEngine !== 'all') ||
-    searchQuery.trim().length > 0;
-
-  const resetAllFilters = () => {
-    if (onSelectProfile) onSelectProfile('all');
-    setSelectedEngine('all');
-    setSearchQuery('');
+  const handleModalLaunch = async (req: ResumeRequest) => {
+    setResumingId(req.session_id);
+    try {
+      const res = await resumeSession(req);
+      toast({
+        title: 'Terminal launched',
+        description: `Resumed in ${res.terminal || 'terminal'} window.`,
+      });
+    } catch (err: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Resume failed',
+        description: err.message || 'Could not launch terminal',
+      });
+    } finally {
+      setResumingId(null);
+    }
   };
 
   const formatRelativeTime = (isoString: string) => {
     try {
-      const date = new Date(isoString);
-      const diffMs = Date.now() - date.getTime();
-      const diffMins = Math.floor(diffMs / (1000 * 60));
-      if (diffMins < 1) return 'Just now';
+      const d = new Date(isoString);
+      const now = new Date();
+      const diffSecs = Math.floor((now.getTime() - d.getTime()) / 1000);
+      if (diffSecs < 60) return 'just now';
+      const diffMins = Math.floor(diffSecs / 60);
       if (diffMins < 60) return `${diffMins}m ago`;
       const diffHours = Math.floor(diffMins / 60);
       if (diffHours < 24) return `${diffHours}h ago`;
@@ -254,6 +290,192 @@ export function SessionsView({
     } catch {
       return isoString;
     }
+  };
+
+  // Define TanStack Table columns
+  const columns = React.useMemo<ColumnDef<SessionDTO>[]>(
+    () => [
+      {
+        accessorKey: 'agent',
+        header: 'AGENT',
+        size: 110,
+        cell: ({ row }) => (
+          <div className="flex items-center gap-1.5">
+            <AgentBadge agent={row.original.agent} />
+            {row.original.is_active && (
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" title="Active Process" />
+            )}
+          </div>
+        ),
+      },
+      {
+        accessorKey: 'profile',
+        header: 'PROFILE',
+        size: 110,
+        cell: ({ row }) => {
+          const prof = row.original.profile || '<host>';
+          return (
+            <Badge
+              variant="outline"
+              className={cn(
+                'text-[10px] font-mono border-0 rounded-[4px] px-1.5 py-0.5',
+                prof === '<host>'
+                  ? 'bg-[#181818] text-[#888888]'
+                  : 'bg-[#1a1a1a] text-[#ededed] border border-[#2a2a2a]'
+              )}
+            >
+              {prof}
+            </Badge>
+          );
+        },
+      },
+      {
+        accessorKey: 'cwd',
+        header: 'DIRECTORY (CWD)',
+        size: 280,
+        cell: ({ row }) => (
+          <div className="flex items-center gap-1.5 font-mono text-xs text-[#a1a1a1] max-w-[280px]">
+            <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
+            <span className="truncate" title={row.original.cwd}>
+              {row.original.cwd}
+            </span>
+          </div>
+        ),
+      },
+      {
+        id: 'goal_title',
+        header: 'GOAL / TITLE',
+        cell: ({ row }) => (
+          <div className="space-y-0.5 max-w-xl">
+            <div className="text-xs font-medium text-[#ededed] truncate">
+              {row.original.title || 'Untitled Session'}
+            </div>
+            {row.original.goal && (
+              <div className="text-[11px] text-[#888888] truncate">{row.original.goal}</div>
+            )}
+          </div>
+        ),
+      },
+      {
+        accessorKey: 'turns',
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className="h-7 px-1 text-xs font-mono text-[#a1a1a1] hover:text-[#ededed]"
+          >
+            TURNS
+            {column.getIsSorted() === 'asc' ? (
+              <ArrowUp className="ml-1 h-3 w-3" />
+            ) : column.getIsSorted() === 'desc' ? (
+              <ArrowDown className="ml-1 h-3 w-3" />
+            ) : (
+              <ArrowUpDown className="ml-1 h-3 w-3 text-[#555555]" />
+            )}
+          </Button>
+        ),
+        size: 90,
+        cell: ({ row }) => (
+          <span className="flex items-center gap-1 font-mono text-xs text-[#a1a1a1]">
+            <MessageSquare className="h-3 w-3 text-[#666666]" />
+            {row.original.turns}
+          </span>
+        ),
+      },
+      {
+        accessorKey: 'updated_at',
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className="h-7 px-1 text-xs font-mono text-[#a1a1a1] hover:text-[#ededed]"
+          >
+            UPDATED
+            {column.getIsSorted() === 'asc' ? (
+              <ArrowUp className="ml-1 h-3 w-3" />
+            ) : column.getIsSorted() === 'desc' ? (
+              <ArrowDown className="ml-1 h-3 w-3" />
+            ) : (
+              <ArrowUpDown className="ml-1 h-3 w-3 text-[#555555]" />
+            )}
+          </Button>
+        ),
+        size: 110,
+        cell: ({ row }) => (
+          <span className="flex items-center gap-1 font-mono text-xs text-[#a1a1a1]">
+            <Clock className="h-3 w-3 text-[#666666]" />
+            {formatRelativeTime(row.original.updated_at)}
+          </span>
+        ),
+      },
+      {
+        id: 'actions',
+        header: () => <div className="text-right">ACTION</div>,
+        size: 130,
+        cell: ({ row }) => {
+          const sess = row.original;
+          const isThisResuming = resumingId === sess.id;
+          return (
+            <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuickResume(sess)}
+                disabled={isThisResuming}
+                className="rounded-geist h-7 px-2 text-xs font-mono border-border bg-[#111111] text-[#ededed] hover:bg-[#1a1a1a]"
+              >
+                {isThisResuming ? (
+                  <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <Terminal className="h-3 w-3 mr-1 text-[#a1a1a1]" />
+                )}
+                Resume
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setFlagModalSession(sess)}
+                className="rounded-geist h-7 px-1.5 border-border bg-[#111111] text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                title="Resume with flags"
+              >
+                ▼
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    [resumingId]
+  );
+
+  const table = useReactTable({
+    data: filteredData,
+    columns,
+    state: {
+      sorting,
+    },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    initialState: {
+      pagination: {
+        pageSize: 15,
+      },
+    },
+  });
+
+  const hasActiveFilters =
+    searchQuery !== '' || selectedEngines.size > 0 || selectedProfiles.size > 0 || selectedStatuses.size > 0;
+
+  const resetAllFilters = () => {
+    setSearchQuery('');
+    setSelectedEngines(new Set());
+    setSelectedProfiles(new Set());
+    setSelectedStatuses(new Set());
+    if (onSelectProfile) onSelectProfile('all');
   };
 
   return (
@@ -266,7 +488,7 @@ export function SessionsView({
           <Input
             ref={searchInputRef}
             placeholder="Search sessions by goal, cwd, title, or profile..."
-            className="pl-9 pr-8 h-8 text-xs rounded-geist border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
+            className="pl-9 pr-8 h-8 text-xs rounded-geist border-border bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -281,241 +503,121 @@ export function SessionsView({
             </button>
           ) : (
             <div className="absolute right-2.5 top-1.5 pointer-events-none">
-              <kbd className="text-[10px] font-mono px-1.5 py-0.5 border border-[#262626] bg-[#111111] text-[#a1a1a1] rounded">
+              <kbd className="text-[10px] font-mono px-1.5 py-0.5 border border-border bg-[#111111] text-[#a1a1a1] rounded">
                 /
               </kbd>
             </div>
           )}
         </div>
 
-        {/* Dropdown Filters and Actions */}
+        {/* Faceted Multi-Select Filters and Actions */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Profile Filter Dropdown */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-[#666666] font-mono hidden sm:inline">Profile:</span>
-            <select
-              value={selectedProfile}
-              onChange={(e) => onSelectProfile && onSelectProfile(e.target.value)}
-              className="h-8 px-2.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:border-[#333333] focus:outline-none focus:border-[#333333] cursor-pointer"
-              title="Filter by Profile"
-            >
-              <option value="all">All Profiles</option>
-              {profileOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Engine Multi-Select Popover */}
+          <DataTableFacetedFilter
+            title="Engine"
+            options={engineOptions}
+            selectedValues={selectedEngines}
+            onSelect={setSelectedEngines}
+            counts={engineCounts}
+          />
 
-          {/* Engine Filter Dropdown */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-[#666666] font-mono hidden sm:inline">Engine:</span>
-            <select
-              value={selectedEngine}
-              onChange={(e) => setSelectedEngine(e.target.value)}
-              className="h-8 px-2.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:border-[#333333] focus:outline-none focus:border-[#333333] cursor-pointer"
-              title="Filter by Engine"
+          {/* Profile Multi-Select Popover */}
+          <DataTableFacetedFilter
+            title="Profile"
+            options={profileOptions}
+            selectedValues={selectedProfiles}
+            onSelect={(vals) => {
+              setSelectedProfiles(vals);
+              if (onSelectProfile && vals.size === 1) {
+                onSelectProfile(Array.from(vals)[0]);
+              } else if (onSelectProfile && vals.size === 0) {
+                onSelectProfile('all');
+              }
+            }}
+            counts={profileCounts}
+          />
+
+          {/* Status Multi-Select Popover */}
+          <DataTableFacetedFilter
+            title="Status"
+            options={statusOptions}
+            selectedValues={selectedStatuses}
+            onSelect={setSelectedStatuses}
+            counts={statusCounts}
+          />
+
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={resetAllFilters}
+              className="h-8 px-2 text-xs font-mono text-[#a1a1a1] hover:text-[#ededed] rounded-geist"
             >
-              <option value="all">All Engines</option>
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-              <option value="gemini">Gemini</option>
-              <option value="agy">Antigravity</option>
-            </select>
-          </div>
+              <X className="mr-1 h-3.5 w-3.5" />
+              Reset
+            </Button>
+          )}
 
           <Button
             variant="outline"
             size="sm"
             onClick={fetchSessions}
             disabled={loading}
-            className="rounded-geist h-8 border-[#262626] bg-[#111111] text-[#ededed] hover:bg-[#1a1a1a]"
+            className="rounded-geist h-8 border-border bg-[#111111] text-[#ededed] hover:bg-[#1a1a1a]"
           >
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={cn('h-3.5 w-3.5 mr-1.5', loading && 'animate-spin')} />
             Refresh
           </Button>
         </div>
       </div>
 
-      {/* Active Filter Chips */}
-      {hasActiveFilters && (
-        <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-          <span className="flex items-center gap-1 text-[#666666] text-[11px] font-mono">
-            <Filter className="h-3 w-3" /> Filters:
-          </span>
-
-          {selectedProfile && selectedProfile !== 'all' && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] font-mono text-[11px]">
-              profile: <strong className="text-[#ededed]">{selectedProfile}</strong>
-              <button
-                type="button"
-                onClick={() => onSelectProfile && onSelectProfile('all')}
-                className="hover:text-[#ededed] cursor-pointer"
-                title="Clear profile filter"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          )}
-
-          {selectedEngine && selectedEngine !== 'all' && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] font-mono text-[11px]">
-              engine: <strong className="text-[#ededed]">{selectedEngine}</strong>
-              <button
-                type="button"
-                onClick={() => setSelectedEngine('all')}
-                className="hover:text-[#ededed] cursor-pointer"
-                title="Clear engine filter"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          )}
-
-          {searchQuery && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] font-mono text-[11px]">
-              query: &ldquo;<strong className="text-[#ededed]">{searchQuery}</strong>&rdquo;
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="hover:text-[#ededed] cursor-pointer"
-                title="Clear query filter"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          )}
-
-          <button
-            type="button"
-            onClick={resetAllFilters}
-            className="text-[11px] font-mono text-[#a1a1a1] hover:text-[#ededed] underline ml-1 cursor-pointer"
-          >
-            Reset all
-          </button>
-        </div>
-      )}
-
-      {/* Sessions Table */}
-      <div className="rounded-geist border border-[#262626] bg-[#111111] overflow-hidden">
+      {/* TanStack Table Container */}
+      <div className="rounded-geist border border-border bg-[#111111] overflow-hidden shadow-sm">
         <Table>
-          <TableHeader className="bg-[#0a0a0a] border-b border-[#262626]">
-            <TableRow className="border-b border-[#262626] hover:bg-transparent">
-              <TableHead className="w-[120px] font-mono text-[11px] uppercase tracking-wider text-[#a1a1a1]">Agent</TableHead>
-              <TableHead className="w-[110px] font-mono text-[11px] uppercase tracking-wider text-[#a1a1a1]">Profile</TableHead>
-              <TableHead className="min-w-[200px] font-mono text-[11px] uppercase tracking-wider text-[#a1a1a1]">Directory (CWD)</TableHead>
-              <TableHead className="min-w-[280px] font-mono text-[11px] uppercase tracking-wider text-[#a1a1a1]">Goal / Title</TableHead>
-              <TableHead className="w-[90px] text-center font-mono text-[11px] uppercase tracking-wider text-[#a1a1a1]">Turns</TableHead>
-              <TableHead className="w-[110px] font-mono text-[11px] uppercase tracking-wider text-[#a1a1a1]">Updated</TableHead>
-              <TableHead className="w-[130px] text-right font-mono text-[11px] uppercase tracking-wider text-[#a1a1a1]">Action</TableHead>
-            </TableRow>
+          <TableHeader className="bg-[#0a0a0a] border-b border-border">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id} className="border-border hover:bg-transparent">
+                {headerGroup.headers.map((header) => (
+                  <TableHead
+                    key={header.id}
+                    className="text-[11px] font-mono font-semibold text-[#888888] tracking-wider py-2.5 px-3"
+                    style={{ width: header.column.getSize() }}
+                  >
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
           </TableHeader>
+
           <TableBody>
-            {loading && sessions.length === 0 ? (
+            {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-40 text-center text-[#a1a1a1]">
-                  <div className="flex items-center justify-center gap-2 font-mono text-xs">
-                    <RefreshCw className="h-4 w-4 animate-spin text-[#ededed]" />
-                    <span>Loading sessions...</span>
-                  </div>
+                <TableCell colSpan={columns.length} className="text-center py-12 text-[#a1a1a1] font-mono text-xs">
+                  <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-[#666666]" />
+                  Loading sessions...
                 </TableCell>
               </TableRow>
-            ) : filteredSessions.length === 0 ? (
+            ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-40 text-center text-[#a1a1a1]">
-                  <div className="flex flex-col items-center justify-center gap-1.5 py-4">
-                    <Activity className="h-7 w-7 text-[#666666] mb-1" />
-                    <span className="font-medium text-[#ededed] text-xs">No sessions found</span>
-                    <span className="text-[11px] text-[#666666]">
-                      {hasActiveFilters
-                        ? 'Try modifying or clearing your filter criteria.'
-                        : 'No active or archived agent sessions detected.'}
-                    </span>
-                  </div>
+                <TableCell colSpan={columns.length} className="text-center py-12 text-[#a1a1a1] font-mono text-xs">
+                  No sessions match the current search or filters.
                 </TableCell>
               </TableRow>
             ) : (
-              paginatedSessions.map((s) => (
+              table.getRowModel().rows.map((row) => (
                 <TableRow
-                  key={s.id}
-                  className="group hover:bg-[#161616] transition-colors border-b border-[#262626]"
+                  key={row.id}
+                  onClick={() => onViewSession && onViewSession(row.original)}
+                  className="border-border hover:bg-[#151515] transition-colors cursor-pointer group"
                 >
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <AgentBadge agent={s.agent} />
-                      {s.is_active && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#00e599] shrink-0" title="Active session" />
-                      )}
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <span className="font-mono text-xs px-2 py-0.5 rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed]">
-                      {s.profile}
-                    </span>
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="flex items-center gap-1.5 text-xs text-[#a1a1a1] max-w-[240px]">
-                      <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
-                      <span className="font-mono truncate" title={s.cwd}>
-                        {s.cwd}
-                      </span>
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="space-y-0.5 max-w-[340px]">
-                      <div className="font-medium text-xs text-[#ededed] truncate" title={s.title}>
-                        {s.title}
-                      </div>
-                      <div className="text-[11px] text-[#a1a1a1] truncate" title={s.goal}>
-                        {s.goal}
-                      </div>
-                    </div>
-                  </TableCell>
-
-                  <TableCell className="text-center">
-                    <span className="inline-flex items-center gap-1 text-xs text-[#a1a1a1] font-mono tabular-nums">
-                      <MessageSquare className="h-3 w-3 text-[#666666]" />
-                      {s.turns}
-                    </span>
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="flex items-center gap-1 text-xs text-[#a1a1a1] font-mono tabular-nums">
-                      <Clock className="h-3 w-3 text-[#666666]" />
-                      <span>{formatRelativeTime(s.updated_at)}</span>
-                    </div>
-                  </TableCell>
-
-                  <TableCell className="text-right">
-                    <div className="inline-flex items-center rounded-geist border border-[#262626] bg-[#0a0a0a] overflow-hidden shadow-sm">
-                      <button
-                        type="button"
-                        className="h-7 px-2.5 text-xs font-mono font-medium hover:bg-[#161616] text-[#ededed] inline-flex items-center gap-1.5 transition-colors cursor-pointer border-r border-[#262626] disabled:opacity-50"
-                        title="Resume session in terminal"
-                        disabled={resumingId === s.id}
-                        onClick={() => handleResume(s)}
-                      >
-                        {resumingId === s.id ? (
-                          <RefreshCw className="h-3 w-3 animate-spin text-[#ededed]" />
-                        ) : (
-                          <Terminal className="h-3 w-3 text-[#ededed]" />
-                        )}
-                        Resume
-                      </button>
-                      <button
-                        type="button"
-                        className="h-7 px-1.5 hover:bg-[#161616] text-[#a1a1a1] hover:text-[#ededed] inline-flex items-center transition-colors cursor-pointer"
-                        title="Configure flags & options (--exact, --catalyst, --fork, etc.)"
-                        onClick={() => setFlagModalSession(s)}
-                      >
-                        <ChevronDown className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </TableCell>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id} className="py-2.5 px-3">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
             )}
@@ -523,74 +625,76 @@ export function SessionsView({
         </Table>
       </div>
 
-      {/* Pagination & Status Footer */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#a1a1a1] px-1 font-mono">
-        <div className="flex items-center gap-4">
-          <span className="tabular-nums">
-            Showing{' '}
-            <strong className="text-[#ededed]">
-              {totalItems === 0 ? 0 : startIndex + 1}–{endIndex}
-            </strong>{' '}
-            of <strong className="text-[#ededed]">{totalItems}</strong> session{totalItems !== 1 ? 's' : ''}
-          </span>
+      {/* Pagination Controls */}
+      {!loading && table.getPageCount() > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-1 text-xs text-[#a1a1a1] font-mono">
+          <div className="flex items-center gap-2">
+            <span>
+              Showing{' '}
+              <strong className="text-[#ededed]">
+                {table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1}
+              </strong>{' '}
+              to{' '}
+              <strong className="text-[#ededed]">
+                {Math.min(
+                  (table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize,
+                  filteredData.length
+                )}
+              </strong>{' '}
+              of <strong className="text-[#ededed]">{filteredData.length}</strong> sessions
+            </span>
+          </div>
 
-          {/* Rows per page selector */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-[#666666]">Per page:</span>
-            <select
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-              className="h-6 px-1.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:border-[#333333] focus:outline-none cursor-pointer"
-            >
-              <option value={15}>15</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span>Rows per page:</span>
+              <select
+                value={table.getState().pagination.pageSize}
+                onChange={(e) => table.setPageSize(Number(e.target.value))}
+                className="h-7 px-2 text-xs font-mono rounded-geist border border-border bg-[#0a0a0a] text-[#ededed] hover:border-[#333333] focus:outline-none cursor-pointer"
+              >
+                <option value={15}>15</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+                className="h-7 w-7 p-0 rounded-geist border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-40"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="px-2 text-xs">
+                Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+                className="h-7 w-7 p-0 rounded-geist border-border bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616] disabled:opacity-40"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Page Nav controls */}
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-[#666666]">
-            Page <strong className="text-[#ededed]">{currentPage}</strong> of{' '}
-            <strong className="text-[#ededed]">{totalPages}</strong>
-          </span>
-
-          <div className="inline-flex items-center rounded-geist border border-[#262626] bg-[#0a0a0a] overflow-hidden">
-            <button
-              type="button"
-              disabled={currentPage <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="h-7 px-2 hover:bg-[#161616] text-[#ededed] disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed border-r border-[#262626] flex items-center gap-1"
-              title="Previous page ([)"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              <span className="text-[10px] hidden sm:inline">Prev</span>
-            </button>
-            <button
-              type="button"
-              disabled={currentPage >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="h-7 px-2 hover:bg-[#161616] text-[#ededed] disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed flex items-center gap-1"
-              title="Next page (])"
-            >
-              <span className="text-[10px] hidden sm:inline">Next</span>
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
+      {/* Two-Tier Resume Modal */}
       <ResumeModal
         open={!!flagModalSession}
-        onOpenChange={(open) => !open && setFlagModalSession(null)}
-        session={flagModalSession}
-        isResuming={!!resumingId}
-        onLaunch={async (req) => {
-          if (flagModalSession) {
-            await handleResume(flagModalSession, req.flags, req.custom_flags);
-          }
+        onOpenChange={(open) => {
+          if (!open) setFlagModalSession(null);
         }}
+        session={flagModalSession}
+        onLaunch={handleModalLaunch}
+        isResuming={resumingId === flagModalSession?.id}
       />
     </div>
   );

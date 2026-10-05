@@ -14,12 +14,13 @@ import (
 
 // Compile-time assertions that Adapter implements the segregated agent interfaces.
 var (
-	_ agents.AgentAdapter        = (*Adapter)(nil)
-	_ agents.Authenticator       = (*Adapter)(nil)
-	_ agents.Diagnostician       = (*Adapter)(nil)
-	_ agents.UsageProvider       = (*Adapter)(nil)
-	_ agents.AccountInfoProvider = (*Adapter)(nil)
-	_ agents.FullAdapter         = (*Adapter)(nil)
+	_ agents.AgentAdapter          = (*Adapter)(nil)
+	_ agents.Authenticator         = (*Adapter)(nil)
+	_ agents.Diagnostician         = (*Adapter)(nil)
+	_ agents.UsageProvider         = (*Adapter)(nil)
+	_ agents.AccountInfoProvider   = (*Adapter)(nil)
+	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
+	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
 type Adapter struct {
@@ -88,4 +89,24 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		Summary:   "Active credentials",
 		FetchedAt: time.Now(),
 	}, nil
+}
+
+// RunnableFlags returns the list of CLI flags supported by the gemini executable.
+func (a *Adapter) RunnableFlags() []agents.RunnableFlag {
+	return []agents.RunnableFlag{
+		{
+			Flag:        "--auto-approve",
+			Name:        "Auto Approve",
+			Description: "Automatically execute proposed tool actions without manual confirmation.",
+			Type:        "bool",
+			Dangerous:   true,
+		},
+		{
+			Flag:        "--stream",
+			Name:        "Stream Output",
+			Description: "Stream model output tokens in real time.",
+			Type:        "bool",
+			Dangerous:   false,
+		},
+	}
 }

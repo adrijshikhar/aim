@@ -151,35 +151,75 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 		return fmt.Errorf("invalid resolved session ID %q: contains illegal characters", resolvedID)
 	}
 
-	var cmdStr string
-	if resolvedProfile != "" && resolvedProfile != "<host>" {
-		cmdStr = fmt.Sprintf("aim resume %s %s %s", agent, resolvedProfile, resolvedID)
-	} else {
-		cmdStr = fmt.Sprintf("aim resume %s %s", agent, resolvedID)
-	}
-
-	var extra []string
-	for _, f := range req.Flags {
+	// Process AIM orchestrator flags
+	var aimFlags []string
+	for _, f := range req.AimFlags {
 		f = strings.TrimSpace(f)
 		if f != "" {
 			if !safeFlagPattern.MatchString(f) {
-				return fmt.Errorf("invalid flag %q: contains illegal characters", f)
+				return fmt.Errorf("invalid AIM flag %q: contains illegal characters", f)
 			}
-			extra = append(extra, f)
+			aimFlags = append(aimFlags, f)
 		}
 	}
-	if custom := strings.TrimSpace(req.CustomFlags); custom != "" {
-		tokens := strings.Fields(custom)
-		for _, tok := range tokens {
-			if !safeFlagPattern.MatchString(tok) {
-				return fmt.Errorf("invalid custom flag token %q: contains illegal characters", tok)
+
+	// Process Adapter runnable flags
+	var adapterFlags []string
+	for _, f := range req.AdapterFlags {
+		f = strings.TrimSpace(f)
+		if f != "" {
+			if !safeFlagPattern.MatchString(f) {
+				return fmt.Errorf("invalid adapter flag %q: contains illegal characters", f)
 			}
-			extra = append(extra, tok)
+			adapterFlags = append(adapterFlags, f)
 		}
 	}
-	if len(extra) > 0 {
-		cmdStr += " " + strings.Join(extra, " ")
+
+	// Support custom arguments
+	customTokens := strings.Fields(req.CustomArgs)
+	if len(customTokens) == 0 && req.CustomFlags != "" {
+		customTokens = strings.Fields(req.CustomFlags)
 	}
+	for _, tok := range customTokens {
+		if !safeFlagPattern.MatchString(tok) {
+			return fmt.Errorf("invalid custom argument %q: contains illegal characters", tok)
+		}
+		adapterFlags = append(adapterFlags, tok)
+	}
+
+	// Support legacy req.Flags for backwards compatibility
+	for _, f := range req.Flags {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if !safeFlagPattern.MatchString(f) {
+			return fmt.Errorf("invalid flag %q: contains illegal characters", f)
+		}
+		switch f {
+		case "--exact", "--catalyst", "-c", "--fork", "-b", "--force", "-f":
+			aimFlags = append(aimFlags, f)
+		default:
+			adapterFlags = append(adapterFlags, f)
+		}
+	}
+
+	cmdParts := []string{"aim", "resume"}
+	if len(aimFlags) > 0 {
+		cmdParts = append(cmdParts, aimFlags...)
+	}
+	cmdParts = append(cmdParts, agent)
+	if resolvedProfile != "" && resolvedProfile != "<host>" {
+		cmdParts = append(cmdParts, resolvedProfile)
+	}
+	cmdParts = append(cmdParts, resolvedID)
+
+	if len(adapterFlags) > 0 {
+		cmdParts = append(cmdParts, "--")
+		cmdParts = append(cmdParts, adapterFlags...)
+	}
+
+	cmdStr := strings.Join(cmdParts, " ")
 
 	// Detach terminal launch context from ephemeral request context
 	launchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

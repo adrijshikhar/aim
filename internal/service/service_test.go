@@ -38,6 +38,15 @@ func (m *mockAdapter) PrepareEnv(ctx context.Context, profileName, profileDir st
 	return agents.LaunchEnv{BinaryPath: m.name, WorkingDir: profileDir}, nil
 }
 
+type mockAdapterWithFlags struct {
+	mockAdapter
+	flags []agents.RunnableFlag
+}
+
+func (m *mockAdapterWithFlags) RunnableFlags() []agents.RunnableFlag {
+	return m.flags
+}
+
 // mockSessionProvider implements session.SessionProvider for testing.
 type mockSessionProvider struct {
 	agent    string
@@ -572,7 +581,7 @@ func TestSessionService_ResumeSessionInTerminal(t *testing.T) {
 		t.Errorf("expected host cmd %q, got %q", expectedHostCmd, launcher.launchedCmds[0])
 	}
 
-	// Resume with explicit flags and custom flags
+	// Resume with explicit flags and custom flags (two-tier separation)
 	launcher.launchedCmds = nil
 	err = svc.ResumeSessionInTerminal(ctx, service.ResumeRequest{
 		Agent:       "claude",
@@ -583,9 +592,116 @@ func TestSessionService_ResumeSessionInTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error resuming with flags: %v", err)
 	}
-	expectedFlagsCmd := "aim resume claude work abcdef12-3456-7890-abcd-ef1234567890 --exact --fork --dangerously-skip-permissions"
+	expectedFlagsCmd := "aim resume --exact --fork claude work abcdef12-3456-7890-abcd-ef1234567890 -- --dangerously-skip-permissions"
 	if launcher.launchedCmds[0] != expectedFlagsCmd {
 		t.Errorf("expected cmd with flags %q, got %q", expectedFlagsCmd, launcher.launchedCmds[0])
+	}
+
+	// Resume with two-tier fields AimFlags and AdapterFlags directly
+	launcher.launchedCmds = nil
+	err = svc.ResumeSessionInTerminal(ctx, service.ResumeRequest{
+		Agent:        "claude",
+		Profile:      "work",
+		SessionID:    "abcdef12-3456-7890-abcd-ef1234567890",
+		AimFlags:     []string{"--force"},
+		AdapterFlags: []string{"--dangerously-skip-permissions", "--verbose"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error resuming with two-tier flags: %v", err)
+	}
+	expectedTwoTierCmd := "aim resume --force claude work abcdef12-3456-7890-abcd-ef1234567890 -- --dangerously-skip-permissions --verbose"
+	if launcher.launchedCmds[0] != expectedTwoTierCmd {
+		t.Errorf("expected two-tier cmd %q, got %q", expectedTwoTierCmd, launcher.launchedCmds[0])
+	}
+}
+
+func TestSessionService_GetSessionTranscript(t *testing.T) {
+	ctx := context.Background()
+	mgr := session.NewManager()
+	prov := &mockSessionProvider{
+		agent: "claude",
+		sessions: []session.Session{
+			{
+				ID:           "abcdef12-3456-7890-abcd-ef1234567890",
+				ShortID:      "abcdef12",
+				Agent:        "claude",
+				Profile:      "work",
+				LastActiveAt: time.Now(),
+				Summary:      "Initial work on feature",
+				Goal:         "Implement feature X",
+			},
+		},
+	}
+	mgr.RegisterProvider(prov)
+	svc := service.NewSessionService(mgr, &mockLauncher{})
+
+	// Should return fallback transcript for existing session
+	transcript, err := svc.GetSessionTranscript(ctx, "claude", "abcdef12")
+	if err != nil {
+		t.Fatalf("expected transcript, got error: %v", err)
+	}
+	if transcript == nil || transcript.SessionID != "abcdef12-3456-7890-abcd-ef1234567890" {
+		t.Errorf("unexpected transcript session ID: %+v", transcript)
+	}
+	if len(transcript.Turns) == 0 {
+		t.Errorf("expected turns in transcript, got none")
+	}
+
+	// Should error for non-existent session
+	_, err = svc.GetSessionTranscript(ctx, "claude", "nonexistent-uuid")
+	if err == nil {
+		t.Errorf("expected error for nonexistent session, got nil")
+	}
+}
+
+func TestProfileService_ListAdapters(t *testing.T) {
+	ctx := context.Background()
+	_, pm, reg, _ := setupTestEnv(t)
+	reg.Register(&mockAdapterWithFlags{
+		mockAdapter: mockAdapter{name: "claude-runnable"},
+		flags: []agents.RunnableFlag{
+			{
+				Flag:        "--dangerously-skip-permissions",
+				Name:        "Skip Permissions",
+				Description: "Skip all approval prompts",
+				Type:        "bool",
+				Dangerous:   true,
+			},
+		},
+	})
+	svc := service.NewProfileService(pm, reg)
+
+	adapters, err := svc.ListAdapters(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error listing adapters: %v", err)
+	}
+	if len(adapters) == 0 {
+		t.Fatalf("expected registered adapters, got 0")
+	}
+
+	var foundClaudeRunnable bool
+	for _, a := range adapters {
+		if a.Name == "claude-runnable" {
+			foundClaudeRunnable = true
+			if len(a.RunnableFlags) == 0 {
+				t.Errorf("expected claude-runnable to have runnable flags, got 0")
+			}
+			var foundSkipPerms bool
+			for _, rf := range a.RunnableFlags {
+				if rf.Flag == "--dangerously-skip-permissions" {
+					foundSkipPerms = true
+					if !rf.Dangerous {
+						t.Errorf("expected --dangerously-skip-permissions to be marked dangerous")
+					}
+				}
+			}
+			if !foundSkipPerms {
+				t.Errorf("expected --dangerously-skip-permissions in claude-runnable runnable flags")
+			}
+		}
+	}
+	if !foundClaudeRunnable {
+		t.Errorf("expected claude-runnable adapter in list")
 	}
 }
 

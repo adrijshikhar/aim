@@ -62,7 +62,55 @@ export interface ResumeRequest {
   profile: string;
   session_id: string;
   flags?: string[];
+  aim_flags?: string[];
+  adapter_flags?: string[];
   custom_flags?: string;
+  custom_args?: string;
+}
+
+export interface RunnableFlagDTO {
+  flag: string;
+  name: string;
+  description: string;
+  type: 'bool' | 'string' | 'choice';
+  default?: string;
+  choices?: string[];
+  dangerous?: boolean;
+}
+
+export interface AdapterDTO {
+  name: string;
+  display_name: string;
+  binary_name: string;
+  aliases: string[];
+  runnable_flags: RunnableFlagDTO[];
+}
+
+export interface ToolCallDTO {
+  id?: string;
+  tool_name: string;
+  arguments?: string;
+  output?: string;
+  status?: string;
+}
+
+export interface SessionTurnDTO {
+  turn_index: number;
+  role: 'user' | 'assistant' | 'system';
+  timestamp?: string;
+  content: string;
+  thinking?: string;
+  tool_calls?: ToolCallDTO[];
+}
+
+export interface SessionTranscriptDTO {
+  session_id: string;
+  agent: string;
+  profile: string;
+  title: string;
+  cwd: string;
+  goal: string;
+  turns: SessionTurnDTO[];
 }
 
 export interface MCPServerDTO {
@@ -159,7 +207,9 @@ export async function getSessions(filter?: SessionFilter): Promise<SessionDTO[]>
   return handleResponse<SessionDTO[]>(res);
 }
 
-export async function resumeSession(req: ResumeRequest): Promise<{ success: boolean; message?: string }> {
+export async function resumeSession(
+  req: ResumeRequest
+): Promise<{ success?: boolean; status?: string; terminal?: string; message?: string }> {
   const res = await fetch(`${BASE_URL}/sessions/resume`, {
     method: 'POST',
     headers: {
@@ -167,7 +217,7 @@ export async function resumeSession(req: ResumeRequest): Promise<{ success: bool
     },
     body: JSON.stringify(req),
   });
-  return handleResponse<{ success: boolean; message?: string }>(res);
+  return handleResponse<{ success?: boolean; status?: string; terminal?: string; message?: string }>(res);
 }
 
 export async function getMcpServers(profile?: string): Promise<MCPServerDTO[]> {
@@ -238,4 +288,14 @@ export async function runDaemonOnce(): Promise<{ status: string; message: string
     body: JSON.stringify({}),
   });
   return handleResponse<{ status: string; message: string; info?: DaemonDTO }>(res);
+}
+
+export async function getAdapters(): Promise<AdapterDTO[]> {
+  const res = await fetch(`${BASE_URL}/adapters`);
+  return handleResponse<AdapterDTO[]>(res);
+}
+
+export async function getSessionTranscript(agent: string, id: string): Promise<SessionTranscriptDTO> {
+  const res = await fetch(`${BASE_URL}/sessions/${encodeURIComponent(agent)}/${encodeURIComponent(id)}/transcript`);
+  return handleResponse<SessionTranscriptDTO>(res);
 }

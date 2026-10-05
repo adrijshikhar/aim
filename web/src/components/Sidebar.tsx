@@ -8,7 +8,7 @@ import {
 import { ProfileDTO, DaemonDTO } from '@/lib/api';
 
 interface SidebarProps {
-  currentView: 'overview' | 'sessions' | 'mcp' | 'profile-detail';
+  currentView: 'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail';
   selectedProfile: string;
   profiles: ProfileDTO[];
   daemonInfo: DaemonDTO | null;
@@ -81,10 +81,10 @@ export function Sidebar({
 
       {/* Navigation Sections */}
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-        {/* Section 1: Global Explorers (ON TOP) */}
+        {/* Section 1: Workspaces */}
         <div className="space-y-1">
           <div className="px-2 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-[#666666]">
-            Global Explorers
+            Workspaces
           </div>
 
           <button
@@ -97,7 +97,7 @@ export function Sidebar({
             }`}
           >
             <Layers className="h-3.5 w-3.5 text-[#888888]" />
-            <span>All Profiles</span>
+            <span>Profiles</span>
             <span className="ml-auto text-[10px] font-mono text-[#666666]">
               {profiles.length}
             </span>
@@ -107,13 +107,13 @@ export function Sidebar({
             type="button"
             onClick={() => onSelectView('sessions')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-[6px] text-xs font-mono transition-colors cursor-pointer text-left ${
-              currentView === 'sessions'
+              currentView === 'sessions' || currentView === 'session-detail'
                 ? 'bg-[#161616] text-[#ededed] border border-[#333333] shadow-sm font-medium'
                 : 'text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#111111] border border-transparent'
             }`}
           >
             <Terminal className="h-3.5 w-3.5 text-[#888888]" />
-            <span>All Sessions</span>
+            <span>Sessions</span>
           </button>
 
           <button
@@ -130,11 +130,11 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* Section 2: Profiles List */}
+        {/* Section 2: Active Profiles List */}
         <div className="space-y-1">
           <div className="flex items-center justify-between px-2 pb-1.5">
             <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666]">
-              Profiles ({profiles.length})
+              Active Profiles ({profiles.length})
             </span>
             <button
               type="button"
