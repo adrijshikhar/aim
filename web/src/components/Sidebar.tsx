@@ -35,23 +35,23 @@ export function Sidebar({
   const getProfileQuotaStatus = (p: ProfileDTO) => {
     if (!p.has_credentials) {
       return {
-        color: 'bg-[#f5a623]',
-        text: 'text-[#f5a623]',
+        color: 'bg-[#ffb200]',
+        text: 'text-[#ff9900]',
         label: 'Auth',
       };
     }
     const pct = p.quota?.bottleneck_pct ?? 100;
     if (p.quota?.is_exhausted || pct <= 0) {
       return {
-        color: 'bg-[#e5484d]',
-        text: 'text-[#f87171]',
+        color: 'bg-[#f13242]',
+        text: 'text-[#ff5e63]',
         label: '0%',
       };
     }
     if (pct <= 30) {
       return {
-        color: 'bg-[#f5a623]',
-        text: 'text-[#f5a623]',
+        color: 'bg-[#ffb200]',
+        text: 'text-[#ff9900]',
         label: `${pct}%`,
       };
     }
@@ -187,9 +187,9 @@ export function Sidebar({
           <div className="flex items-center gap-2">
             <span className="flex h-2 w-2 relative items-center justify-center">
               {daemonInfo?.active ? (
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="h-2 w-2 rounded-full bg-[#00ca52]" />
               ) : daemonInfo?.installed ? (
-                <span className="h-2 w-2 rounded-full bg-[#f5a623]" />
+                <span className="h-2 w-2 rounded-full bg-[#ffb200]" />
               ) : (
                 <span className="h-2 w-2 rounded-full bg-[#555555]" />
               )}
@@ -205,12 +205,12 @@ export function Sidebar({
             <span className="relative flex h-1.5 w-1.5">
               <span
                 className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isOnline ? 'bg-emerald-500' : 'bg-[#f5a623]'
+                  isOnline ? 'bg-[#00ca52]' : 'bg-[#ffb200]'
                 }`}
               />
               <span
                 className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
-                  isOnline ? 'bg-emerald-500' : 'bg-[#f5a623]'
+                  isOnline ? 'bg-[#00ca52]' : 'bg-[#ffb200]'
                 }`}
               />
             </span>

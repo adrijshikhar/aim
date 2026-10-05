@@ -12,12 +12,12 @@ const badgeVariants = cva(
         secondary:
           'border-[#262626] bg-[#1a1a1a] text-[#ededed]',
         destructive:
-          'border-[#e5484d]/30 bg-[#e5484d]/10 text-[#f87171]',
+          'border-[#5d0e17] bg-[#330a11] text-[#ff5e63]',
         outline: 'border-[#262626] text-foreground',
         success:
-          'border-emerald-500/25 bg-emerald-500/10 text-emerald-400',
+          'border-[#003814] bg-[#00250a] text-[#00ca52]',
         warning:
-          'border-amber-500/25 bg-amber-500/10 text-amber-400',
+          'border-[#4f2900] bg-[#291800] text-[#ff9900]',
         cursor:
           'border-[#f54e00]/30 bg-[#f54e00]/10 text-[#f54e00]',
         thinking:

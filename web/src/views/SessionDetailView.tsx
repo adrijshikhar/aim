@@ -805,8 +805,8 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                       className={cn(
                                         'text-[9px] font-mono px-1.5 py-0 rounded-[3px] border',
                                         tool.status === 'error'
-                                          ? 'border-[#cf2d56]/40 text-[#cf2d56] bg-[#cf2d56]/10'
-                                          : 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10'
+                                          ? 'border-[#5d0e17] text-[#ff5e63] bg-[#330a11]'
+                                          : 'border-[#003814] text-[#00ca52] bg-[#00250a]'
                                       )}
                                     >
                                       {tool.status || 'ok'}

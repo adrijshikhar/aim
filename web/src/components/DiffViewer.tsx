@@ -97,12 +97,12 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
           </span>
           <div className="flex items-center gap-1.5 ml-1">
             {adds > 0 && (
-              <span className="text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className="text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#00250a] text-[#00ca52] border border-[#003814]">
                 +{adds}
               </span>
             )}
             {dels > 0 && (
-              <span className="text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#e5484d]/10 text-[#f87171] border border-[#e5484d]/20">
+              <span className="text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#330a11] text-[#ff5e63] border border-[#5d0e17]">
                 -{dels}
               </span>
             )}
@@ -163,9 +163,9 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                 key={idx}
                 className={`flex items-start hover:bg-white/[0.02] transition-colors ${
                   isAdd
-                    ? 'bg-emerald-500/10 text-emerald-300'
+                    ? 'bg-[#00250a]/70 text-[#00ca52]'
                     : isDel
-                    ? 'bg-[#e5484d]/10 text-[#f87171]'
+                    ? 'bg-[#330a11]/70 text-[#ff5e63]'
                     : 'text-[#a1a1a1]'
                 }`}
               >

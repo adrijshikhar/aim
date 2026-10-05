@@ -34,7 +34,7 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
         <DialogHeader className="space-y-1.5 pb-2 border-b border-[#262626] pr-8">
           <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-[#f87171]" />
+              <AlertTriangle className="h-4 w-4 text-[#ff5e63]" />
               <span>Delete Profile</span>
             </DialogTitle>
             {target.agent && target.agent.trim() !== '' && (
@@ -84,7 +84,7 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
             size="sm"
             disabled={isDeleting}
             onClick={onConfirm}
-            className="bg-[#e5484d] hover:bg-[#d93d42] text-white text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist"
+            className="bg-[#f13242] hover:bg-[#e2162a] text-white text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist"
           >
             {isDeleting ? (
               <>

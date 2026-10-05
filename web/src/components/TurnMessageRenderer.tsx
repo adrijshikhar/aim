@@ -209,8 +209,8 @@ function StructuredTextBlock({ text }: { text: string }) {
             <span
               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium border ${
                 exitCode === 0
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                  : 'bg-[#e5484d]/10 text-[#f87171] border-[#e5484d]/20'
+                  ? 'bg-[#00250a] text-[#00ca52] border-[#003814]'
+                  : 'bg-[#330a11] text-[#ff5e63] border-[#5d0e17]'
               }`}
             >
               <Terminal className="h-2.5 w-2.5" />

@@ -228,9 +228,9 @@ export function App() {
             >
               <span className="flex h-2 w-2 relative items-center justify-center">
                 {daemonInfo?.active ? (
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="h-2 w-2 rounded-full bg-[#00ca52]" />
                 ) : daemonInfo?.installed ? (
-                  <span className="h-2 w-2 rounded-full bg-[#f5a623]" />
+                  <span className="h-2 w-2 rounded-full bg-[#ffb200]" />
                 ) : (
                   <span className="h-2 w-2 rounded-full bg-[#666666]" />
                 )}
@@ -248,12 +248,12 @@ export function App() {
               <span className="relative flex h-2 w-2">
                 <span
                   className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                    isOnline ? 'bg-emerald-500' : 'bg-[#f5a623]'
+                    isOnline ? 'bg-[#00ca52]' : 'bg-[#ffb200]'
                   }`}
                 />
                 <span
                   className={`relative inline-flex rounded-full h-2 w-2 ${
-                    isOnline ? 'bg-emerald-500' : 'bg-[#f5a623]'
+                    isOnline ? 'bg-[#00ca52]' : 'bg-[#ffb200]'
                   }`}
                 />
               </span>

@@ -340,14 +340,14 @@ export function ProfilesView({
   };
 
   const getProgressColor = (pct: number) => {
-    if (pct <= 0) return 'bg-[#e5484d]';
-    if (pct <= 30) return 'bg-[#f5a623]';
+    if (pct <= 0) return 'bg-[#f13242]';
+    if (pct <= 30) return 'bg-[#ffb200]';
     return 'bg-[#ededed]';
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-[#f87171]';
-    if (pct <= 30) return 'text-[#f5a623]';
+    if (pct <= 0) return 'text-[#ff5e63]';
+    if (pct <= 30) return 'text-[#ff9900]';
     return 'text-[#ededed]';
   };
 
@@ -404,7 +404,7 @@ export function ProfilesView({
                     variant="outline"
                     className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#f5a623]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#ffb200]" />
                     <span>Needs Auth</span>
                   </Badge>
                 )}
@@ -429,7 +429,7 @@ export function ProfilesView({
                 onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
                 title="Delete profile"
                 aria-label="Delete profile"
-                className="h-8 w-8 rounded-geist border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#f87171] hover:bg-[#e5484d]/10 hover:border-[#e5484d]/30"
+                className="h-8 w-8 rounded-geist border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ff5e63] hover:bg-[#330a11] hover:border-[#5d0e17]"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -621,7 +621,7 @@ export function ProfilesView({
                         variant="outline"
                         className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                       >
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#f5a623]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#ffb200]" />
                         <span>Needs Auth</span>
                       </Badge>
                     )}
@@ -677,7 +677,7 @@ export function ProfilesView({
   return (
     <div className="space-y-6">
       {error && (
-        <div className="rounded-geist border border-[#f5a623]/30 bg-[#f5a623]/10 px-3.5 py-2 text-xs text-[#f5a623] font-sans flex items-center justify-between">
+        <div className="rounded-geist border border-[#4f2900] bg-[#291800] px-3.5 py-2 text-xs text-[#ff9900] font-sans flex items-center justify-between">
           <span>Notice: {error}</span>
           <button
             type="button"
@@ -902,7 +902,7 @@ export function ProfilesView({
                           variant="outline"
                           className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#f5a623]" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#ffb200]" />
                           <span>Needs Auth</span>
                         </Badge>
                       )}
@@ -918,7 +918,7 @@ export function ProfilesView({
                           size="icon"
                           title={`Delete profile ${p.name}`}
                           aria-label={`Delete profile ${p.name}`}
-                          className="h-7 w-7 text-[#666666] hover:text-[#f87171] hover:bg-[#e5484d]/10 rounded-geist transition-colors"
+                          className="h-7 w-7 text-[#666666] hover:text-[#ff5e63] hover:bg-[#330a11] rounded-geist transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             openDeleteDialog(p.agent, p.name);
@@ -1008,9 +1008,9 @@ export function ProfilesView({
                             <span
                               className={`font-sans text-xs font-medium tabular-nums ${
                                 pct <= 0
-                                  ? 'px-1.5 py-0.5 rounded-[4px] bg-[#e5484d]/10 text-[#f87171] border border-[#e5484d]/25'
+                                  ? 'px-1.5 py-0.5 rounded-[4px] bg-[#330a11] text-[#ff5e63] border border-[#5d0e17]'
                                   : pct <= 30
-                                  ? 'px-1.5 py-0.5 rounded-[4px] bg-[#f5a623]/10 text-[#f5a623] border border-[#f5a623]/25'
+                                  ? 'px-1.5 py-0.5 rounded-[4px] bg-[#291800] text-[#ff9900] border border-[#4f2900]'
                                   : 'text-[#ededed]'
                               }`}
                             >

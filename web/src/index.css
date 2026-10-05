@@ -25,7 +25,7 @@
     --accent: 0 0% 10%; /* #1a1a1a Vercel hover */
     --accent-foreground: 0 0% 98%;
 
-    --destructive: 358 75% 59%; /* #e5484d Radix/Vercel Red 9 */
+    --destructive: 358 75% 59%; /* #f13242 Vercel --ds-red-700 */
     --destructive-foreground: 0 0% 98%;
 
     --border: 0 0% 15%; /* #262626 Vercel hairline */
@@ -33,6 +33,26 @@
     --ring: 212 100% 48%; /* #0070f3 Vercel blue */
 
     --radius: 0.375rem; /* 6px Vercel standard */
+
+    /* Official Vercel Geist Semantic Colors (Dark Mode) */
+    --ds-red-bg: #330a11;
+    --ds-red-border: #5d0e17;
+    --ds-red-solid: #f13242;
+    --ds-red-text: #ff5e63;
+
+    --ds-amber-bg: #291800;
+    --ds-amber-border: #4f2900;
+    --ds-amber-solid: #ffb200;
+    --ds-amber-text: #ff9900;
+
+    --ds-green-bg: #00250a;
+    --ds-green-border: #003814;
+    --ds-green-solid: #00ab3e;
+    --ds-green-text: #00ca52;
+
+    --ds-blue-bg: #06193a;
+    --ds-blue-solid: #0070f3;
+    --ds-blue-text: #50a8ff;
   }
 }
 
