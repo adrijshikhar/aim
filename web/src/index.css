@@ -25,8 +25,8 @@
     --accent: 0 0% 10%; /* #1a1a1a Vercel hover */
     --accent-foreground: 0 0% 98%;
 
-    --destructive: 0 100% 47%; /* #ee0000 Vercel error */
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 358 75% 59%; /* #e5484d Radix/Vercel Red 9 */
+    --destructive-foreground: 0 0% 98%;
 
     --border: 0 0% 15%; /* #262626 Vercel hairline */
     --input: 0 0% 15%;

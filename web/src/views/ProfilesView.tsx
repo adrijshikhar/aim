@@ -340,13 +340,13 @@ export function ProfilesView({
   };
 
   const getProgressColor = (pct: number) => {
-    if (pct <= 0) return 'bg-[#ee0000]';
+    if (pct <= 0) return 'bg-[#e5484d]';
     if (pct <= 30) return 'bg-[#f5a623]';
     return 'bg-[#ededed]';
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-[#ee0000]';
+    if (pct <= 0) return 'text-[#f87171]';
     if (pct <= 30) return 'text-[#f5a623]';
     return 'text-[#ededed]';
   };
@@ -429,7 +429,7 @@ export function ProfilesView({
                 onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
                 title="Delete profile"
                 aria-label="Delete profile"
-                className="h-8 w-8 rounded-geist border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ee0000] hover:bg-[#ee0000]/10 hover:border-[#ee0000]/30"
+                className="h-8 w-8 rounded-geist border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#f87171] hover:bg-[#e5484d]/10 hover:border-[#e5484d]/30"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -918,7 +918,7 @@ export function ProfilesView({
                           size="icon"
                           title={`Delete profile ${p.name}`}
                           aria-label={`Delete profile ${p.name}`}
-                          className="h-7 w-7 text-[#666666] hover:text-[#ee0000] rounded-geist transition-colors"
+                          className="h-7 w-7 text-[#666666] hover:text-[#f87171] hover:bg-[#e5484d]/10 rounded-geist transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             openDeleteDialog(p.agent, p.name);
@@ -1002,13 +1002,22 @@ export function ProfilesView({
                           <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1">
                             <Gauge className="h-3 w-3" /> Quota Telemetry
                           </span>
-                          <span
-                            className={`font-sans text-xs font-medium tabular-nums ${getTextColor(
-                              p.quota?.bottleneck_pct ?? 100
-                            )}`}
-                          >
-                            {p.quota ? `${p.quota.bottleneck_pct}% remaining` : '100% remaining'}
-                          </span>
+                        {(() => {
+                          const pct = p.quota?.bottleneck_pct ?? 100;
+                          return (
+                            <span
+                              className={`font-sans text-xs font-medium tabular-nums ${
+                                pct <= 0
+                                  ? 'px-1.5 py-0.5 rounded-[4px] bg-[#e5484d]/10 text-[#f87171] border border-[#e5484d]/25'
+                                  : pct <= 30
+                                  ? 'px-1.5 py-0.5 rounded-[4px] bg-[#f5a623]/10 text-[#f5a623] border border-[#f5a623]/25'
+                                  : 'text-[#ededed]'
+                              }`}
+                            >
+                              {p.quota ? `${pct}% remaining` : '100% remaining'}
+                            </span>
+                          );
+                        })()}
                         </div>
                         <div className="w-full bg-[#262626] h-1.5 rounded-full overflow-hidden">
                           <div

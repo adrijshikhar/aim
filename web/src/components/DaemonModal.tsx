@@ -264,7 +264,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               size="sm"
               disabled={uninstalling || running}
               onClick={handleUninstall}
-              className="border-[#262626] bg-[#0a0a0a] hover:bg-[#ee0000]/10 hover:border-[#ee0000]/30 text-[#a1a1a1] hover:text-[#ee0000] text-xs font-mono rounded-geist"
+              className="border-[#262626] bg-[#0a0a0a] hover:bg-[#e5484d]/10 hover:border-[#e5484d]/30 text-[#a1a1a1] hover:text-[#f87171] text-xs font-sans rounded-geist"
             >
               {uninstalling ? (
                 <>

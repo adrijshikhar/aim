@@ -12,7 +12,7 @@ const badgeVariants = cva(
         secondary:
           'border-[#262626] bg-[#1a1a1a] text-[#ededed]',
         destructive:
-          'border-[#ee0000]/30 bg-[#ee0000]/10 text-[#ee0000]',
+          'border-[#e5484d]/30 bg-[#e5484d]/10 text-[#f87171]',
         outline: 'border-[#262626] text-foreground',
         success:
           'border-emerald-500/25 bg-emerald-500/10 text-emerald-400',

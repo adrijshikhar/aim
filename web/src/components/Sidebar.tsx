@@ -43,8 +43,8 @@ export function Sidebar({
     const pct = p.quota?.bottleneck_pct ?? 100;
     if (p.quota?.is_exhausted || pct <= 0) {
       return {
-        color: 'bg-[#ee0000]',
-        text: 'text-[#ee0000]',
+        color: 'bg-[#e5484d]',
+        text: 'text-[#f87171]',
         label: '0%',
       };
     }

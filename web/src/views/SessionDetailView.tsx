@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 import { AgentBadge } from '@/components/AgentBadge';
 import { ResumeModal } from '@/components/ResumeModal';
+import { TurnMessageRenderer } from '@/components/TurnMessageRenderer';
 import {
   ArrowLeft,
   Terminal,
@@ -835,9 +836,9 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                         <span className="text-[10px] text-[#666666] uppercase tracking-wider">
                                           Output:
                                         </span>
-                                        <pre className="p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto whitespace-pre-wrap max-h-60">
-                                          {tool.output}
-                                        </pre>
+                                        <div className="p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto">
+                                          <TurnMessageRenderer content={tool.output} />
+                                        </div>
                                       </div>
                                     )}
                                   </div>
@@ -850,8 +851,8 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
 
                       {/* Main Prose Content */}
                       {turn.content && (
-                        <div className="text-xs text-[#ededed] whitespace-pre-wrap font-sans leading-relaxed selection:bg-[#333333]">
-                          {turn.content}
+                        <div className="text-xs text-[#ededed] font-sans leading-relaxed selection:bg-[#333333]">
+                          <TurnMessageRenderer content={turn.content} />
                         </div>
                       )}
                     </div>

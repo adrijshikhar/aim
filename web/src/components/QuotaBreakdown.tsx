@@ -89,14 +89,14 @@ export function QuotaBreakdown({
   const parsed = React.useMemo(() => parseQuotaSummary(summary), [summary]);
 
   const getStatusColor = (pct: number) => {
-    if (pct <= 0) return 'bg-[#ee0000]';
-    if (pct <= 30) return 'bg-amber-500';
+    if (pct <= 0) return 'bg-[#e5484d]';
+    if (pct <= 30) return 'bg-[#f5a623]';
     return 'bg-[#ededed]';
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-[#e5484d]';
-    if (pct <= 30) return 'text-amber-400';
+    if (pct <= 0) return 'text-[#f87171]';
+    if (pct <= 30) return 'text-[#f5a623]';
     return 'text-[#ededed]';
   };
 
