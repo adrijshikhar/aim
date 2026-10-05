@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --background: 0 0% 4%; /* #0a0a0a Vercel canvas */
+    --background: 0 0% 0%; /* #000000 Vercel True Canvas */
     --foreground: 0 0% 93%; /* #ededed Vercel ink */
 
     --card: 0 0% 7%; /* #111111 Elevated card */
@@ -14,15 +14,15 @@
     --popover-foreground: 0 0% 93%;
 
     --primary: 0 0% 93%; /* #ededed Vercel Primary Button */
-    --primary-foreground: 0 0% 4%; /* #0a0a0a */
+    --primary-foreground: 0 0% 0%; /* #000000 */
 
     --secondary: 0 0% 10%; /* #1a1a1a */
     --secondary-foreground: 0 0% 93%;
 
-    --muted: 0 0% 10%; /* #1a1a1a */
-    --muted-foreground: 0 0% 55%; /* #8c8c8c Vercel mute */
+    --muted: 0 0% 4%; /* #0a0a0a Vercel recessed */
+    --muted-foreground: 0 0% 63%; /* #a1a1a1 Vercel secondary text */
 
-    --accent: 0 0% 13%; /* #222222 Vercel tab active */
+    --accent: 0 0% 10%; /* #1a1a1a Vercel hover */
     --accent-foreground: 0 0% 98%;
 
     --destructive: 0 100% 47%; /* #ee0000 Vercel error */
