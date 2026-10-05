@@ -1,18 +1,12 @@
 import React, { useState } from 'react';
-import { FileCode, Copy, Check, ChevronDown, ChevronRight } from 'lucide-react';
+import parseDiff from 'parse-diff';
+import { FileCode, Copy, Check, ChevronDown, ChevronRight, PlusCircle, MinusCircle } from 'lucide-react';
 import { Button } from './ui/button';
 
 interface DiffViewerProps {
   diffText: string;
   filePath?: string;
   defaultCollapsed?: boolean;
-}
-
-interface ParsedDiffLine {
-  type: 'add' | 'del' | 'hunk' | 'meta' | 'context';
-  text: string;
-  oldNum?: number;
-  newNum?: number;
 }
 
 export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: DiffViewerProps) {
@@ -27,45 +21,44 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
       .trim();
   }, [diffText]);
 
-  // Parse lines and compute stats
-  const { lines, adds, dels } = React.useMemo(() => {
-    const rawLines = cleanedDiff.split('\n');
-    const parsed: ParsedDiffLine[] = [];
-    let addCount = 0;
-    let delCount = 0;
+  // Parse diff with AST parser
+  const parsedFiles = React.useMemo(() => {
+    if (!cleanedDiff) return [];
 
-    let curOld = 0;
-    let curNew = 0;
-
-    for (const line of rawLines) {
-      if (line.startsWith('@@')) {
-        // Hunk header: @@ -oldStart,oldCount +newStart,newCount @@
-        const match = line.match(/@@\s*-(\d+)(?:,\d+)?\s*\+(\d+)(?:,\d+)?\s*@@/);
-        if (match) {
-          curOld = parseInt(match[1], 10);
-          curNew = parseInt(match[2], 10);
-        }
-        parsed.push({ type: 'hunk', text: line });
-      } else if (line.startsWith('---') || line.startsWith('+++')) {
-        parsed.push({ type: 'meta', text: line });
-      } else if (line.startsWith('+')) {
-        addCount++;
-        parsed.push({ type: 'add', text: line, newNum: curNew++ });
-      } else if (line.startsWith('-')) {
-        delCount++;
-        parsed.push({ type: 'del', text: line, oldNum: curOld++ });
-      } else {
-        parsed.push({
-          type: 'context',
-          text: line,
-          oldNum: curOld ? curOld++ : undefined,
-          newNum: curNew ? curNew++ : undefined,
-        });
-      }
+    let textToParse = cleanedDiff;
+    // If input is bare changes without hunk/git headers, synthesize a hunk header so parse-diff can construct the AST
+    if (
+      !textToParse.includes('@@') &&
+      !textToParse.startsWith('diff --git') &&
+      !textToParse.startsWith('---')
+    ) {
+      textToParse = `@@ -1,1 +1,1 @@\n${textToParse}`;
     }
 
-    return { lines: parsed, adds: addCount, dels: delCount };
+    try {
+      return parseDiff(textToParse);
+    } catch {
+      return [];
+    }
   }, [cleanedDiff]);
+
+  // Compute total additions / deletions across all files
+  const { totalAdditions, totalDeletions } = React.useMemo(() => {
+    if (!parsedFiles.length) {
+      // Fallback counting if AST parsing returned no files
+      let addCount = 0;
+      let delCount = 0;
+      for (const line of cleanedDiff.split('\n')) {
+        if (line.startsWith('+') && !line.startsWith('+++')) addCount++;
+        if (line.startsWith('-') && !line.startsWith('---')) delCount++;
+      }
+      return { totalAdditions: addCount, totalDeletions: delCount };
+    }
+
+    const adds = parsedFiles.reduce((acc, f) => acc + (f.additions || 0), 0);
+    const dels = parsedFiles.reduce((acc, f) => acc + (f.deletions || 0), 0);
+    return { totalAdditions: adds, totalDeletions: dels };
+  }, [parsedFiles, cleanedDiff]);
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -74,7 +67,22 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const fileName = filePath ? filePath.split('/').pop() : undefined;
+  // Derive file title
+  const displayFileName = React.useMemo(() => {
+    if (filePath) {
+      return filePath.split('/').pop() || filePath;
+    }
+    const first = parsedFiles[0];
+    if (first?.to) {
+      return first.to.replace(/^b\//, '').split('/').pop() || first.to;
+    }
+    if (first?.from) {
+      return first.from.replace(/^a\//, '').split('/').pop() || first.from;
+    }
+    return 'Diff Changes';
+  }, [filePath, parsedFiles]);
+
+  const fullDisplayPath = filePath || parsedFiles[0]?.to?.replace(/^b\//, '') || parsedFiles[0]?.from?.replace(/^a\//, '');
 
   return (
     <div className="rounded-[6px] border border-[#262626] bg-[#0d0d0d] overflow-hidden my-2.5 font-mono text-xs shadow-sm">
@@ -92,18 +100,25 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
             {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
           <FileCode className="h-3.5 w-3.5 text-sky-400 shrink-0" />
-          <span className="text-[#ededed] font-medium text-[11px] truncate" title={filePath || 'Diff Changes'}>
-            {fileName || filePath || 'File Changes'}
+          <span className="text-[#ededed] font-medium text-[11px] truncate" title={fullDisplayPath || displayFileName}>
+            {displayFileName}
           </span>
+          {fullDisplayPath && fullDisplayPath !== displayFileName && (
+            <span className="text-[#666666] text-[10px] truncate hidden sm:inline" title={fullDisplayPath}>
+              {fullDisplayPath}
+            </span>
+          )}
+
+          {/* Vercel Geist Semantic Badges */}
           <div className="flex items-center gap-1.5 ml-1">
-            {adds > 0 && (
-              <span className="text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#00250a] text-[#00ca52] border border-[#003814]">
-                +{adds}
+            {totalAdditions > 0 && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#00250a] text-[#00ca52] border border-[#003814]">
+                +{totalAdditions}
               </span>
             )}
-            {dels > 0 && (
-              <span className="text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#330a11] text-[#ff5e63] border border-[#5d0e17]">
-                -{dels}
+            {totalDeletions > 0 && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-sans font-medium px-1.5 py-0.2 rounded bg-[#330a11] text-[#ff5e63] border border-[#5d0e17]">
+                -{totalDeletions}
               </span>
             )}
           </div>
@@ -134,61 +149,110 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
 
       {/* Diff body */}
       {!isCollapsed && (
-        <div className="overflow-x-auto max-h-[500px] overflow-y-auto divide-y divide-[#181818]/60 text-[11px] leading-5">
-          {lines.map((line, idx) => {
-            if (line.type === 'hunk') {
-              return (
-                <div
-                  key={idx}
-                  className="px-3 py-1 bg-[#121620] text-sky-400/90 font-mono text-[10px] tracking-tight border-y border-sky-500/20 select-none"
-                >
-                  {line.text}
-                </div>
-              );
-            }
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto text-[11px] leading-5 divide-y divide-[#181818]/60">
+          {parsedFiles.length > 0 ? (
+            parsedFiles.map((file, fileIdx) => (
+              <div key={fileIdx} className="divide-y divide-[#181818]/40">
+                {/* File Sub-header if multi-file */}
+                {parsedFiles.length > 1 && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[#111111] border-b border-[#222222] text-[#888888] text-[10px]">
+                    <FileCode className="h-3 w-3 text-sky-400" />
+                    <span className="text-[#cccccc] font-medium">
+                      {file.to?.replace(/^b\//, '') || file.from?.replace(/^a\//, '') || `File ${fileIdx + 1}`}
+                    </span>
+                    {file.new && (
+                      <span className="inline-flex items-center gap-0.5 text-emerald-400 bg-emerald-950/40 px-1 py-0.2 rounded text-[9px]">
+                        <PlusCircle className="h-2.5 w-2.5" /> new file
+                      </span>
+                    )}
+                    {file.deleted && (
+                      <span className="inline-flex items-center gap-0.5 text-rose-400 bg-rose-950/40 px-1 py-0.2 rounded text-[9px]">
+                        <MinusCircle className="h-2.5 w-2.5" /> deleted
+                      </span>
+                    )}
+                    <span className="ml-auto font-sans">
+                      <span className="text-[#00ca52]">+{file.additions}</span>{' '}
+                      <span className="text-[#ff5e63]">-{file.deletions}</span>
+                    </span>
+                  </div>
+                )}
 
-            if (line.type === 'meta') {
-              return (
-                <div key={idx} className="px-3 py-0.5 text-[#666666] font-mono text-[10px] bg-[#0f0f0f]">
-                  {line.text}
-                </div>
-              );
-            }
+                {/* Chunks */}
+                {file.chunks.map((chunk, chunkIdx) => (
+                  <div key={chunkIdx}>
+                    {/* Hunk Header */}
+                    <div className="px-3 py-1 bg-[#0c1420] text-[#70b8ff] font-mono text-[10px] tracking-tight border-y border-[#1e2e42]/60 select-none">
+                      {chunk.content}
+                    </div>
 
-            const isAdd = line.type === 'add';
-            const isDel = line.type === 'del';
+                    {/* Chunk Changes */}
+                    <div>
+                      {chunk.changes.map((change, changeIdx) => {
+                        const isAdd = change.type === 'add';
+                        const isDel = change.type === 'del';
+                        const isNormal = change.type === 'normal';
 
-            return (
-              <div
-                key={idx}
-                className={`flex items-start hover:bg-white/[0.02] transition-colors ${
-                  isAdd
-                    ? 'bg-[#00250a]/70 text-[#00ca52]'
-                    : isDel
-                    ? 'bg-[#330a11]/70 text-[#ff5e63]'
-                    : 'text-[#a1a1a1]'
-                }`}
-              >
-                {/* Line numbers */}
-                <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555] select-none font-mono">
-                  {line.oldNum ?? ''}
-                </div>
-                <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555] select-none font-mono border-r border-[#222222]">
-                  {line.newNum ?? ''}
-                </div>
+                        // Line numbers
+                        let oldNum: number | undefined;
+                        let newNum: number | undefined;
 
-                {/* Sign indicator */}
-                <div className="w-5 shrink-0 text-center py-0.5 font-bold select-none text-[11px]">
-                  {isAdd ? '+' : isDel ? '-' : ' '}
-                </div>
+                        if (isNormal) {
+                          oldNum = change.ln1;
+                          newNum = change.ln2;
+                        } else if (isDel) {
+                          oldNum = change.ln;
+                        } else if (isAdd) {
+                          newNum = change.ln;
+                        }
 
-                {/* Line content */}
-                <div className="flex-1 py-0.5 pr-3 whitespace-pre overflow-x-auto break-all">
-                  {line.text.slice(line.type === 'add' || line.type === 'del' ? 1 : 0)}
-                </div>
+                        // Strip leading '+', '-', or ' ' from change content
+                        let lineText = change.content;
+                        if (lineText.startsWith('+') || lineText.startsWith('-') || lineText.startsWith(' ')) {
+                          lineText = lineText.slice(1);
+                        }
+
+                        return (
+                          <div
+                            key={changeIdx}
+                            className={`flex items-start transition-colors min-h-[20px] ${
+                              isAdd
+                                ? 'bg-[#00250a]/70 text-[#00ca52]'
+                                : isDel
+                                ? 'bg-[#330a11]/70 text-[#ff5e63]'
+                                : 'text-[#a1a1a1] hover:bg-white/[0.02]'
+                            }`}
+                          >
+                            {/* Line numbers gutter */}
+                            <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555] select-none font-mono">
+                              {oldNum ?? ''}
+                            </div>
+                            <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555] select-none font-mono border-r border-[#222222]">
+                              {newNum ?? ''}
+                            </div>
+
+                            {/* Sign indicator */}
+                            <div className="w-5 shrink-0 text-center py-0.5 font-bold select-none text-[11px]">
+                              {isAdd ? '+' : isDel ? '-' : ' '}
+                            </div>
+
+                            {/* Line content */}
+                            <div className="flex-1 py-0.5 pr-3 whitespace-pre overflow-x-auto break-all font-mono">
+                              {lineText || '\u00A0'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
-            );
-          })}
+            ))
+          ) : (
+            // Fallback for unparseable diffs: render raw lines
+            <div className="p-3 font-mono text-[11px] text-[#a1a1a1] whitespace-pre overflow-x-auto">
+              {cleanedDiff}
+            </div>
+          )}
         </div>
       )}
     </div>
