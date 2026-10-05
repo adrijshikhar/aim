@@ -1,0 +1,224 @@
+import * as React from 'react';
+import { Clock, Gauge } from 'lucide-react';
+
+interface QuotaWindow {
+  key: string;
+  label: string;
+  pct: number;
+  reset: string | null;
+}
+
+interface ModelQuota {
+  name: string;
+  windows: QuotaWindow[];
+}
+
+interface ParsedQuota {
+  type: 'multi-model' | 'single' | 'fallback';
+  models?: ModelQuota[];
+  single?: QuotaWindow;
+}
+
+function parseQuotaSummary(summary?: string): ParsedQuota | null {
+  if (!summary || !summary.trim()) return null;
+
+  // Pattern A: Model1 (5h: 0% [2h 3m], wk: 6% [4d 8h]), Model2 (...)
+  const modelRegex = /([A-Za-z0-9_-]+)\s*\(([^)]+)\)/g;
+  const models: ModelQuota[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = modelRegex.exec(summary)) !== null) {
+    const modelName = match[1];
+    const windowsStr = match[2];
+    const windows: QuotaWindow[] = [];
+
+    const winParts = windowsStr.split(',').map((s) => s.trim());
+    for (const part of winParts) {
+      const winMatch = part.match(/^([a-zA-Z0-9]+)\s*:\s*(\d+)%(?:\s*\[([^\]]+)\])?/);
+      if (winMatch) {
+        let label = winMatch[1];
+        const lower = label.toLowerCase();
+        if (lower === '5h') label = '5-Hour Window';
+        else if (lower === 'wk' || lower === 'week' || lower === 'weekly') label = 'Weekly Window';
+        else if (lower === 'd' || lower === 'day' || lower === 'daily') label = 'Daily Window';
+
+        windows.push({
+          key: winMatch[1],
+          label,
+          pct: parseInt(winMatch[2], 10),
+          reset: winMatch[3] ? winMatch[3].trim() : null,
+        });
+      }
+    }
+    if (windows.length > 0) {
+      models.push({ name: modelName, windows });
+    }
+  }
+
+  if (models.length > 0) {
+    return { type: 'multi-model', models };
+  }
+
+  // Pattern B: "Weekly Limit: 100%" or "5h limit: 68% remaining"
+  const singleMatch = summary.match(/(.+?):\s*(\d+)%(?:\s*(?:remaining)?)?(?:\s*\[([^\]]+)\])?/i);
+  if (singleMatch) {
+    return {
+      type: 'single',
+      single: {
+        key: 'single',
+        label: singleMatch[1].trim(),
+        pct: parseInt(singleMatch[2], 10),
+        reset: singleMatch[3] ? singleMatch[3].trim() : null,
+      },
+    };
+  }
+
+  return { type: 'fallback' };
+}
+
+interface QuotaBreakdownProps {
+  summary?: string;
+  bottleneckPct?: number;
+  isExhausted?: boolean;
+}
+
+export function QuotaBreakdown({
+  summary,
+  bottleneckPct = 100,
+}: QuotaBreakdownProps) {
+  const parsed = React.useMemo(() => parseQuotaSummary(summary), [summary]);
+
+  const getStatusColor = (pct: number) => {
+    if (pct <= 0) return 'bg-rose-500';
+    if (pct <= 30) return 'bg-amber-500';
+    return 'bg-[#ededed]';
+  };
+
+  const getTextColor = (pct: number) => {
+    if (pct <= 0) return 'text-rose-400';
+    if (pct <= 30) return 'text-amber-400';
+    return 'text-[#ededed]';
+  };
+
+  const renderMeter = (win: QuotaWindow) => {
+    return (
+      <div key={win.key} className="space-y-1.5 p-2.5 rounded-[6px] bg-[#111111] border border-[#262626]">
+        <div className="flex items-center justify-between text-xs font-mono">
+          <span className="text-[#a1a1a1] flex items-center gap-1.5">
+            {win.label}
+          </span>
+          <div className="flex items-center gap-2">
+            {win.reset && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border border-[#333333] bg-[#0a0a0a] text-[#a1a1a1]">
+                <Clock className="h-2.5 w-2.5 text-[#666666]" />
+                <span>resets in {win.reset}</span>
+              </span>
+            )}
+            <span className={`font-semibold tabular-nums ${getTextColor(win.pct)}`}>
+              {win.pct}%
+            </span>
+          </div>
+        </div>
+
+        {/* Standardized h-1.5 progress bar */}
+        <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
+          <div
+            className={`h-full transition-all duration-300 ${getStatusColor(win.pct)}`}
+            style={{ width: `${Math.max(0, Math.min(100, win.pct))}%` }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  if (!parsed || parsed.type === 'fallback') {
+    return (
+      <div className="space-y-2 p-3 rounded-[6px] bg-[#0a0a0a] border border-[#262626]">
+        <div className="flex items-center justify-between text-xs font-mono">
+          <span className="text-[#a1a1a1] uppercase tracking-wider flex items-center gap-1.5">
+            <Gauge className="h-3 w-3 text-[#666666]" />
+            Live Quota Telemetry
+          </span>
+          <span className={`font-semibold tabular-nums ${getTextColor(bottleneckPct)}`}>
+            {bottleneckPct}% remaining
+          </span>
+        </div>
+        <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
+          <div
+            className={`h-full transition-all duration-300 ${getStatusColor(bottleneckPct)}`}
+            style={{ width: `${Math.max(0, Math.min(100, bottleneckPct))}%` }}
+          />
+        </div>
+        {summary && (
+          <p className="text-[11px] font-mono text-[#a1a1a1] pt-1">
+            {summary}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if (parsed.type === 'single' && parsed.single) {
+    return (
+      <div className="space-y-2 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#262626]">
+        <div className="flex items-center justify-between text-xs font-mono">
+          <span className="text-[#a1a1a1] uppercase tracking-wider flex items-center gap-1.5 font-medium">
+            <Gauge className="h-3.5 w-3.5 text-[#666666]" />
+            {parsed.single.label}
+          </span>
+          <div className="flex items-center gap-2">
+            {parsed.single.reset && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border border-[#333333] bg-[#111111] text-[#a1a1a1]">
+                <Clock className="h-2.5 w-2.5 text-[#666666]" />
+                <span>resets in {parsed.single.reset}</span>
+              </span>
+            )}
+            <span className={`font-semibold tabular-nums ${getTextColor(parsed.single.pct)}`}>
+              {parsed.single.pct}% remaining
+            </span>
+          </div>
+        </div>
+        <div className="w-full bg-[#1c1c1c] h-1.5 rounded-full overflow-hidden border border-[#262626]">
+          <div
+            className={`h-full transition-all duration-300 ${getStatusColor(parsed.single.pct)}`}
+            style={{ width: `${Math.max(0, Math.min(100, parsed.single.pct))}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Multi-model layout (e.g. Gemini + Claude)
+  return (
+    <div className="space-y-3 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#262626]">
+      <div className="flex items-center justify-between border-b border-[#1f1f1f] pb-2 text-xs font-mono">
+        <span className="text-[#a1a1a1] uppercase tracking-wider flex items-center gap-1.5 font-medium">
+          <Gauge className="h-3.5 w-3.5 text-[#666666]" />
+          Visual Quota Breakdown
+        </span>
+        <span className="text-[11px] text-[#666666]">
+          {parsed.models?.length || 1} Engine Models Monitored
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        {parsed.models?.map((m) => (
+          <div key={m.name} className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-[#ededed] font-medium flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#a1a1a1]" />
+                {m.name} Engine
+              </span>
+              <span className="text-[11px] text-[#666666]">
+                {m.windows.length} Time Windows
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {m.windows.map((w) => renderMeter(w))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
