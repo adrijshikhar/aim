@@ -322,7 +322,7 @@ export function McpView({
                         </>
                       ) : (
                         <>
-                          <Lock className="h-3 w-3 text-[#0070f3]" />
+                          <Lock className="h-3 w-3 text-[#f54e00]" />
                           Profile: {srv.scope}
                         </>
                       )}
@@ -368,7 +368,7 @@ export function McpView({
                       onClick={() => copyConfig(srv)}
                     >
                       {copiedName === srv.name ? (
-                        <Check className="h-3.5 w-3.5 mr-1 text-[#0070f3]" />
+                        <Check className="h-3.5 w-3.5 mr-1 text-emerald-400" />
                       ) : (
                         <Copy className="h-3.5 w-3.5 mr-1 text-[#666666]" />
                       )}

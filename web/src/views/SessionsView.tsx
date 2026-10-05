@@ -40,6 +40,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
@@ -298,12 +299,12 @@ export function SessionsView({
       {
         accessorKey: 'agent',
         header: 'AGENT',
-        size: 110,
+        size: 90,
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5">
             <AgentBadge agent={row.original.agent} />
             {row.original.is_active && (
-              <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3] animate-pulse" title="Active Process" />
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" title="Active Process" />
             )}
           </div>
         ),
@@ -311,14 +312,14 @@ export function SessionsView({
       {
         accessorKey: 'profile',
         header: 'PROFILE',
-        size: 110,
+        size: 85,
         cell: ({ row }) => {
           const prof = row.original.profile || '<host>';
           return (
             <Badge
               variant="outline"
               className={cn(
-                'text-[10px] font-mono border-0 rounded-[4px] px-1.5 py-0.5',
+                'text-[10px] font-mono border-0 rounded-[4px] px-1.5 py-0.5 truncate max-w-[80px]',
                 prof === '<host>'
                   ? 'bg-[#181818] text-[#888888]'
                   : 'bg-[#1a1a1a] text-[#ededed] border border-[#2a2a2a]'
@@ -332,9 +333,9 @@ export function SessionsView({
       {
         accessorKey: 'cwd',
         header: 'DIRECTORY (CWD)',
-        size: 280,
+        size: 160,
         cell: ({ row }) => (
-          <div className="flex items-center gap-1.5 font-mono text-xs text-[#a1a1a1] max-w-[280px]">
+          <div className="flex items-center gap-1.5 font-mono text-xs text-[#a1a1a1] max-w-[155px]">
             <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
             <span className="truncate" title={row.original.cwd}>
               {row.original.cwd}
@@ -346,12 +347,12 @@ export function SessionsView({
         id: 'goal_title',
         header: 'GOAL / TITLE',
         cell: ({ row }) => (
-          <div className="space-y-0.5 max-w-xl">
-            <div className="text-xs font-medium text-[#ededed] truncate">
+          <div className="space-y-0.5 min-w-0 pr-2">
+            <div className="text-xs font-sans font-medium text-[#ededed] truncate">
               {row.original.title || 'Untitled Session'}
             </div>
             {row.original.goal && (
-              <div className="text-[11px] text-[#888888] truncate">{row.original.goal}</div>
+              <div className="text-[11px] font-sans text-[#888888] truncate">{row.original.goal}</div>
             )}
           </div>
         ),
@@ -375,7 +376,7 @@ export function SessionsView({
             )}
           </Button>
         ),
-        size: 90,
+        size: 70,
         cell: ({ row }) => (
           <span className="flex items-center gap-1 font-mono text-xs text-[#a1a1a1]">
             <MessageSquare className="h-3 w-3 text-[#666666]" />
@@ -402,7 +403,7 @@ export function SessionsView({
             )}
           </Button>
         ),
-        size: 110,
+        size: 90,
         cell: ({ row }) => (
           <span className="flex items-center gap-1 font-mono text-xs text-[#a1a1a1]">
             <Clock className="h-3 w-3 text-[#666666]" />
@@ -412,36 +413,37 @@ export function SessionsView({
       },
       {
         id: 'actions',
-        header: () => <div className="text-right">ACTION</div>,
-        size: 130,
+        header: () => null,
+        size: 110,
         cell: ({ row }) => {
           const sess = row.original;
           const isThisResuming = resumingId === sess.id;
           return (
-            <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleQuickResume(sess)}
-                disabled={isThisResuming}
-                className="rounded-geist h-7 px-2 text-xs font-mono border-border bg-[#111111] text-[#ededed] hover:bg-[#1a1a1a]"
-              >
-                {isThisResuming ? (
-                  <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-                ) : (
-                  <Terminal className="h-3 w-3 mr-1 text-[#a1a1a1]" />
-                )}
-                Resume
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setFlagModalSession(sess)}
-                className="rounded-geist h-7 px-1.5 border-border bg-[#111111] text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                title="Resume with flags"
-              >
-                ▼
-              </Button>
+            <div className="flex items-center justify-end" onClick={(e) => e.stopPropagation()}>
+              <div className="inline-flex items-center rounded-geist border border-border bg-[#111111] overflow-hidden hover:border-[#f54e00]/50 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => handleQuickResume(sess)}
+                  disabled={isThisResuming}
+                  className="h-7 pl-2.5 pr-2 text-xs font-sans font-medium text-[#ededed] hover:bg-[#1a1a1a] flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {isThisResuming ? (
+                    <RefreshCw className="h-3 w-3 animate-spin text-[#f54e00]" />
+                  ) : (
+                    <Terminal className="h-3 w-3 text-[#f54e00]" />
+                  )}
+                  <span>Resume</span>
+                </button>
+                <div className="h-3.5 w-[1px] bg-border" />
+                <button
+                  type="button"
+                  onClick={() => setFlagModalSession(sess)}
+                  className="h-7 px-1.5 text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#1a1a1a] transition-colors flex items-center justify-center cursor-pointer"
+                  title="Resume with flags"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </div>
             </div>
           );
         },
@@ -573,7 +575,7 @@ export function SessionsView({
 
       {/* TanStack Table Container */}
       <div className="rounded-geist border border-border bg-[#111111] overflow-hidden shadow-sm">
-        <Table>
+        <Table containerClassName="overflow-x-hidden" className="table-fixed w-full">
           <TableHeader className="bg-[#0a0a0a] border-b border-border">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="border-border hover:bg-transparent">

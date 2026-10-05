@@ -75,22 +75,6 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
               >
                 {selectedCount}
               </Badge>
-              {selectedCount <= 2 && (
-                <div className="hidden lg:flex gap-1 ml-1">
-                  {Array.from(selectedValues).map((val) => {
-                    const opt = options.find((o) => o.value === val);
-                    return (
-                      <Badge
-                        key={val}
-                        variant="secondary"
-                        className="h-4 px-1.5 text-[10px] font-mono bg-[#1c1c1c] text-[#a1a1a1] border border-border rounded-[4px]"
-                      >
-                        {opt ? opt.label : val}
-                      </Badge>
-                    );
-                  })}
-                </div>
-              )}
             </>
           )}
         </Button>

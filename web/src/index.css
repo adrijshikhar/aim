@@ -30,7 +30,7 @@
 
     --border: 0 0% 15%; /* #262626 Vercel hairline */
     --input: 0 0% 15%;
-    --ring: 212 100% 48%; /* #0070f3 Vercel blue */
+    --ring: 19 100% 48%; /* #f54e00 Cursor Orange */
 
     --radius: 0.375rem; /* 6px Vercel standard */
   }
@@ -59,9 +59,9 @@
     @apply inline-flex items-center justify-center font-mono text-[10px] font-medium px-1.5 py-0.5 rounded border border-[#2e2e2e] bg-[#171717] text-[#888888] shadow-sm;
   }
 
-  /* Impeccable Craft Floor: themed selection */
+  /* Cursor-Vercel Craft: Warm Orange selection */
   ::selection {
-    background-color: hsl(212 100% 48% / 0.3);
+    background-color: hsl(19 100% 48% / 0.28);
     color: #ffffff;
   }
 }

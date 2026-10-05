@@ -42,6 +42,25 @@ export default {
           warning: "#f5a623",
           error: "#ee0000",
         },
+        cursor: {
+          orange: "#f54e00",
+          orangeHover: "#d04200",
+          orangeMuted: "rgba(245, 78, 0, 0.15)",
+          peach: "#dfa88f",      // Thinking / Reasoning
+          mint: "#9fc9a2",       // Exec / Bash / Commands
+          blue: "#9fbbe0",       // Read / Inspection
+          lavender: "#c0a8dd",   // Edit / Mutation / Files
+          gold: "#c08532",       // Completion / Done / Fork
+          green: "#1f8a65",      // Success / Authenticated
+          crimson: "#cf2d56",    // Error / Destructive
+        },
+        timeline: {
+          thinking: "#dfa88f",
+          exec: "#9fc9a2",
+          read: "#9fbbe0",
+          edit: "#c0a8dd",
+          done: "#c08532",
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",

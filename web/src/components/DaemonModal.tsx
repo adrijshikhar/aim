@@ -166,7 +166,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 variant="outline"
                 className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 <span>Active (Every 15m)</span>
               </Badge>
             ) : isInstalled ? (
@@ -232,7 +232,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 onClick={() => handleCopy('config', daemonInfo.config_path)}
                 className="text-[10px] text-[#a1a1a1] hover:text-[#ededed] px-2 py-1 rounded-geist bg-[#111111] hover:bg-[#161616] border border-[#262626] inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
               >
-                {copiedKey === 'config' ? <Check className="h-3 w-3 text-[#0070f3]" /> : <Copy className="h-3 w-3" />}
+                {copiedKey === 'config' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                 {copiedKey === 'config' ? 'Copied' : 'Copy'}
               </button>
             </div>
@@ -249,7 +249,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 onClick={() => handleCopy('log', daemonInfo.log_path)}
                 className="text-[10px] text-[#a1a1a1] hover:text-[#ededed] px-2 py-1 rounded-geist bg-[#111111] hover:bg-[#161616] border border-[#262626] inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
               >
-                {copiedKey === 'log' ? <Check className="h-3 w-3 text-[#0070f3]" /> : <Copy className="h-3 w-3" />}
+                {copiedKey === 'log' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                 {copiedKey === 'log' ? 'Copied' : 'Copy'}
               </button>
             </div>

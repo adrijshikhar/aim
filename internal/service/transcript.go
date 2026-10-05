@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -206,6 +207,10 @@ func parseClaudeTranscript(sess *session.Session) ([]SessionTurnDTO, error) {
 		content := strings.Join(textParts, "\n\n")
 		thinking := strings.Join(thinkingParts, "\n\n")
 
+		if role == "user" {
+			content = cleanUserPrompt(content)
+		}
+
 		// If user turn has no text content and no tool calls, skip internal noise
 		if strings.TrimSpace(content) == "" && strings.TrimSpace(thinking) == "" && len(toolCalls) == 0 {
 			continue
@@ -294,12 +299,11 @@ func parseAgyTranscript(sess *session.Session) ([]SessionTurnDTO, error) {
 			})
 		}
 
-		// Filter out synthetic system prompts wrapped in <USER_REQUEST> if simple clean extraction possible
 		content := strings.TrimSpace(step.Content)
-		if strings.HasPrefix(content, "<USER_REQUEST>") && strings.HasSuffix(content, "</USER_REQUEST>") {
-			content = strings.TrimPrefix(content, "<USER_REQUEST>")
-			content = strings.TrimSuffix(content, "</USER_REQUEST>")
-			content = strings.TrimSpace(content)
+		if role == "user" {
+			content = cleanUserPrompt(content)
+		} else {
+			content = cleanAssistantResponse(content)
 		}
 
 		if content == "" && step.Thinking == "" && len(toolCalls) == 0 {
@@ -318,6 +322,41 @@ func parseAgyTranscript(sess *session.Session) ([]SessionTurnDTO, error) {
 	}
 
 	return turns, scanner.Err()
+}
+
+var (
+	userRequestPattern    = regexp.MustCompile(`(?s)<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>`)
+	contextSummaryPattern = regexp.MustCompile(`(?s)<CONTEXT_SUMMARY>.*?</CONTEXT_SUMMARY>`)
+	systemPromptPattern   = regexp.MustCompile(`(?s)<(identity|user_information|user_rules|skills|subagents|slash_commands|conversation_transcript|artifacts|guidelines|communication_style)>.*?</(identity|user_information|user_rules|skills|subagents|slash_commands|conversation_transcript|artifacts|guidelines|communication_style)>`)
+	claudeReminderPattern = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
+)
+
+func cleanUserPrompt(s string) string {
+	s = strings.TrimSpace(s)
+	if matches := userRequestPattern.FindStringSubmatch(s); len(matches) > 1 {
+		req := strings.TrimSpace(matches[1])
+		if req != "" {
+			return req
+		}
+	}
+	if strings.Contains(s, "<CONTEXT_SUMMARY>") {
+		cleaned := contextSummaryPattern.ReplaceAllString(s, "")
+		cleaned = systemPromptPattern.ReplaceAllString(cleaned, "")
+		cleaned = claudeReminderPattern.ReplaceAllString(cleaned, "")
+		cleaned = strings.TrimSpace(cleaned)
+		if cleaned != "" {
+			return cleaned
+		}
+		return "[Session Resumed — Context Summary Checkpoint]"
+	}
+	s = systemPromptPattern.ReplaceAllString(s, "")
+	s = claudeReminderPattern.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
+}
+
+func cleanAssistantResponse(s string) string {
+	s = strings.TrimSpace(s)
+	return s
 }
 
 func buildFallbackTurns(sess *session.Session, goal string) []SessionTurnDTO {

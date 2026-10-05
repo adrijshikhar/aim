@@ -208,86 +208,76 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist max-h-[90vh] overflow-y-auto">
-        <DialogHeader className="space-y-1.5 pb-2 border-b border-[#262626] pr-8">
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <DialogTitle className="text-base font-semibold text-[#ededed] flex items-center gap-2">
+      <DialogContent className="max-w-lg bg-[#111111] border-[#262626] text-[#ededed] p-5 shadow-2xl rounded-geist">
+        <DialogHeader className="space-y-1 pb-2 border-b border-[#262626] pr-8">
+          <div className="flex items-center gap-2 flex-wrap">
+            <DialogTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
               <Terminal className="h-4 w-4 text-[#ededed]" />
               <span>Resume Session with Flags</span>
             </DialogTitle>
             <Badge
               variant="outline"
-              className="text-[10px] font-mono bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] px-2 py-0.5 rounded-geist"
+              className="text-[10px] font-mono bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] px-1.5 py-0.2 rounded-geist"
             >
               {session.agent} / {session.profile || 'default'}
             </Badge>
           </div>
           <DialogDescription className="text-xs text-[#a1a1a1]">
-            Configure orchestrator switches and native {session.agent} CLI flags before launching terminal.
+            Select orchestrator switches and native {session.agent} CLI flags before launching terminal.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Session Metadata Recap */}
-        <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] p-3 text-xs space-y-1.5">
-          <div className="flex items-center justify-between text-[#a1a1a1]">
-            <span className="font-mono text-[11px] truncate max-w-[280px]" title={session.id}>
-              ID: <span className="text-[#ededed]">{session.id}</span>
-            </span>
-            <span className="flex items-center gap-1 font-mono text-[11px] text-[#a1a1a1]">
-              <MessageSquare className="h-3 w-3" />
-              {session.turns} turns
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 text-[#a1a1a1] font-mono text-[11px] truncate">
+        {/* Compact Session Metadata Strip */}
+        <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] px-3 py-1.5 text-xs flex items-center justify-between text-[#888888]">
+          <div className="flex items-center gap-2 min-w-0">
             <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
-            <span className="truncate" title={session.cwd}>{session.cwd}</span>
+            <span className="font-mono text-[#ededed] truncate max-w-[240px]" title={session.cwd}>
+              {session.cwd}
+            </span>
           </div>
-          {session.goal && (
-            <div className="text-[11px] text-[#a1a1a1] italic truncate pt-1 border-t border-[#262626]">
-              &ldquo;{session.goal}&rdquo;
-            </div>
-          )}
+          <span className="flex items-center gap-1 font-mono text-[11px] text-[#a1a1a1] shrink-0">
+            <MessageSquare className="h-3 w-3" />
+            {session.turns} turns
+          </span>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 pt-1">
+        <form onSubmit={handleSubmit} className="space-y-3 pt-0.5">
           {/* Section 1: AIM Direct Flags */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-[#ededed] uppercase tracking-wider font-mono">
+              <span className="text-[11px] font-semibold text-[#ededed] uppercase tracking-wider font-mono">
                 1. AIM Direct Flags (Orchestrator)
               </span>
               <span className="text-[10px] text-[#666666] font-mono">Profile &amp; Context</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-1.5">
               {AIM_DIRECT_FLAGS.map((f) => {
                 const isChecked = selectedAimFlags[f.key];
                 return (
                   <div
                     key={f.key}
                     onClick={() => toggleAimFlag(f.key)}
-                    className={`flex items-start gap-2.5 p-2.5 rounded-geist border cursor-pointer transition-colors ${
+                    className={`flex items-start gap-2 p-2 rounded-geist border cursor-pointer transition-colors ${
                       isChecked
-                        ? 'border-[#444444] bg-[#161616]'
+                        ? 'border-[#f54e00]/50 bg-[#f54e00]/10'
                         : 'border-[#262626] bg-[#0a0a0a] hover:border-[#333333] hover:bg-[#121212]'
                     }`}
                   >
-                    <div className="pt-0.5">
+                    <div className="pt-0.5 shrink-0">
                       <div
-                        className={`h-3.5 w-3.5 rounded-[3px] border flex items-center justify-center transition-colors ${
+                        className={`h-3 w-3 rounded-[3px] border flex items-center justify-center transition-colors ${
                           isChecked
-                            ? 'bg-[#ededed] border-[#ededed] text-[#000000]'
+                            ? 'bg-[#f54e00] border-[#f54e00] text-white'
                             : 'border-[#444444] bg-[#0a0a0a]'
                         }`}
                       >
-                        {isChecked && <Check className="h-2.5 w-2.5 stroke-[3]" />}
+                        {isChecked && <Check className="h-2 w-2 stroke-[3]" />}
                       </div>
                     </div>
-                    <div className="min-w-0 flex-1 space-y-0.5">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="font-mono text-[11px] font-bold text-[#ededed]">{f.flag}</span>
-                      </div>
-                      <p className="text-[10px] text-[#888888] leading-tight line-clamp-2">{f.description}</p>
+                    <div className="min-w-0 flex-1">
+                      <span className="font-mono text-[11px] font-bold text-[#ededed] block">{f.flag}</span>
+                      <p className="text-[10px] text-[#888888] leading-tight truncate">{f.name}</p>
                     </div>
                   </div>
                 );
@@ -297,56 +287,56 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
 
           {/* Section 2: Adapter Runnable Flags */}
           {runnableFlags.length > 0 && (
-            <div className="space-y-2 pt-1 border-t border-[#262626]">
+            <div className="space-y-1.5 pt-1 border-t border-[#262626]">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-[#ededed] uppercase tracking-wider font-mono">
-                  2. {session.agent} Runnable Flags (Passthrough via --)
+                <span className="text-[11px] font-semibold text-[#ededed] uppercase tracking-wider font-mono">
+                  2. {session.agent} Flags (Passthrough via --)
                 </span>
-                <span className="text-[10px] text-[#666666] font-mono">Agent CLI Flags</span>
+                <span className="text-[10px] text-[#666666] font-mono">Native CLI</span>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {runnableFlags.map((rf) => {
                   const isChecked = !!selectedAdapterFlags[rf.flag];
                   return (
                     <div
                       key={rf.flag}
                       onClick={() => toggleAdapterFlag(rf.flag)}
-                      className={`flex items-start gap-3 p-3 rounded-geist border cursor-pointer transition-colors ${
+                      className={`flex items-start gap-2.5 p-2 rounded-geist border cursor-pointer transition-colors ${
                         isChecked
                           ? rf.dangerous
                             ? 'border-amber-500/50 bg-amber-500/10'
-                            : 'border-[#444444] bg-[#161616]'
+                            : 'border-[#f54e00]/50 bg-[#f54e00]/10'
                           : 'border-[#262626] bg-[#0a0a0a] hover:border-[#333333] hover:bg-[#121212]'
                       }`}
                     >
-                      <div className="pt-0.5">
+                      <div className="pt-0.5 shrink-0">
                         <div
-                          className={`h-4 w-4 rounded-[3px] border flex items-center justify-center transition-colors ${
+                          className={`h-3.5 w-3.5 rounded-[3px] border flex items-center justify-center transition-colors ${
                             isChecked
                               ? rf.dangerous
                                 ? 'bg-amber-400 border-amber-400 text-black'
-                                : 'bg-[#ededed] border-[#ededed] text-[#000000]'
+                                : 'bg-[#f54e00] border-[#f54e00] text-white'
                               : 'border-[#444444] bg-[#0a0a0a]'
                           }`}
                         >
-                          {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
+                          {isChecked && <Check className="h-2.5 w-2.5 stroke-[3]" />}
                         </div>
                       </div>
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-mono text-xs font-bold text-[#ededed]">{rf.flag}</span>
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-mono text-[11px] font-bold text-[#ededed]">{rf.flag}</span>
                           {rf.dangerous && (
                             <Badge
                               variant="outline"
-                              className="text-[10px] font-mono border-amber-500/40 text-amber-300 bg-amber-500/10 px-1.5 py-0.5 flex items-center gap-1"
+                              className="text-[9px] font-mono border-amber-500/30 text-amber-300 bg-amber-500/10 px-1 py-0 flex items-center gap-1"
                             >
-                              <ShieldAlert className="h-3 w-3 text-amber-400" />
-                              High Velocity / Skip Prompts
+                              <ShieldAlert className="h-2.5 w-2.5 text-amber-400" />
+                              Skip Prompts
                             </Badge>
                           )}
                         </div>
-                        <p className="text-[11px] text-[#a1a1a1] leading-tight">{rf.description}</p>
+                        <p className="text-[10px] text-[#888888] leading-tight truncate">{rf.description}</p>
                       </div>
                     </div>
                   );
@@ -356,32 +346,32 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
           )}
 
           {/* Section 3: Custom Adapter Arguments */}
-          <div className="space-y-1.5 pt-1 border-t border-[#262626]">
-            <label htmlFor="custom-args" className="text-xs font-mono text-[#a1a1a1] flex items-center justify-between">
-              <span>Additional Adapter Arguments:</span>
-              <span className="text-[10px] text-[#666666]">Appended after --</span>
-            </label>
+          <div className="space-y-1 pt-1 border-t border-[#262626]">
+            <div className="flex items-center justify-between text-[11px] text-[#a1a1a1]">
+              <span className="font-sans">Additional Flags:</span>
+              <span className="text-[10px] text-[#666666] font-mono">Appended after --</span>
+            </div>
             <Input
               id="custom-args"
               placeholder="e.g. --model claude-3-5-sonnet"
-              className="h-8 text-xs font-mono rounded-geist border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
+              className="h-7 text-xs font-mono rounded-geist border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
               value={customArgs}
               onChange={(e) => setCustomArgs(e.target.value)}
             />
           </div>
 
           {/* Live Command Preview Box */}
-          <div className="space-y-1.5 pt-1">
-            <span className="text-[11px] font-mono text-[#a1a1a1]">Terminal Launch Command:</span>
-            <div className="relative rounded-geist border border-[#262626] bg-[#0a0a0a] p-2.5 font-mono text-xs text-[#ededed] flex items-center justify-between gap-2 overflow-x-auto">
-              <span className="select-all text-[11px] text-[#ededed]">{buildCommandString()}</span>
+          <div className="space-y-1 pt-1">
+            <span className="text-[10px] font-mono text-[#888888]">Terminal Command:</span>
+            <div className="relative rounded-geist border border-[#262626] bg-[#0a0a0a] px-2.5 py-1.5 font-mono text-[11px] text-[#ededed] flex items-center justify-between gap-2">
+              <span className="select-all text-[11px] text-[#ededed] truncate">{buildCommandString()}</span>
               <button
                 type="button"
                 onClick={handleCopyCommand}
                 className="shrink-0 p-1 rounded-geist hover:bg-[#1f1f1f] text-[#a1a1a1] hover:text-[#ededed] transition-colors"
                 title="Copy command to clipboard"
               >
-                {copied ? <Check className="h-3.5 w-3.5 text-[#0070f3]" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
               </button>
             </div>
           </div>
@@ -392,7 +382,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               variant="outline"
               size="sm"
               onClick={() => onOpenChange(false)}
-              className="rounded-geist h-8 border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
+              className="rounded-geist h-7 px-3 text-xs font-sans border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
             >
               Cancel
             </Button>
@@ -400,16 +390,16 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               type="submit"
               size="sm"
               disabled={isResuming}
-              className="rounded-geist h-8 bg-[#ededed] text-[#000000] hover:bg-[#ffffff] font-medium"
+              className="rounded-geist h-7 px-3.5 text-xs font-sans bg-[#f54e00] text-white hover:bg-[#d04200] font-medium shadow-sm transition-colors cursor-pointer"
             >
               {isResuming ? (
                 <>
-                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
                   Launching...
                 </>
               ) : (
                 <>
-                  <Terminal className="h-3.5 w-3.5 mr-1.5" />
+                  <Terminal className="h-3 w-3 mr-1" />
                   Resume in Terminal
                 </>
               )}

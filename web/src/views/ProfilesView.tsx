@@ -41,6 +41,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ChevronRight,
+  Boxes,
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AgentBadge } from '@/components/AgentBadge';
@@ -395,7 +396,7 @@ export function ProfilesView({
                     variant="outline"
                     className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     <span>Authenticated</span>
                   </Badge>
                 ) : (
@@ -612,7 +613,7 @@ export function ProfilesView({
                         variant="outline"
                         className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                       >
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                         <span>Authenticated</span>
                       </Badge>
                     ) : (
@@ -893,7 +894,7 @@ export function ProfilesView({
                           variant="outline"
                           className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3]" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                           <span>Authenticated</span>
                         </Badge>
                       ) : (
@@ -1030,11 +1031,19 @@ export function ProfilesView({
                 {/* Card Footer: MCP & Plugin configuration chips + Inspect Action */}
                 <CardFooter className="pt-2 pb-4 px-5 border-t border-[#262626] flex items-center justify-between text-[11px] font-mono text-[#a1a1a1]">
                   <div className="flex items-center gap-1.5">
-                    <span className="px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] text-[10px] font-mono">
-                      mcp: {isMcpOn ? 'on' : 'off'}
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-mono text-[#a1a1a1]">
+                      <Server className="h-3 w-3 text-[#666666]" />
+                      <span>MCP</span>
+                      <span className={isMcpOn ? 'text-emerald-400 font-semibold' : 'text-[#666666]'}>
+                        {isMcpOn ? 'on' : 'off'}
+                      </span>
                     </span>
-                    <span className="px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] text-[10px] font-mono">
-                      plugins: {isPluginsOn ? 'on' : 'off'}
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#262626] bg-[#0a0a0a] text-[10px] font-mono text-[#a1a1a1]">
+                      <Boxes className="h-3 w-3 text-[#666666]" />
+                      <span>Plugins</span>
+                      <span className={isPluginsOn ? 'text-emerald-400 font-semibold' : 'text-[#666666]'}>
+                        {isPluginsOn ? 'on' : 'off'}
+                      </span>
                     </span>
                   </div>
 
