@@ -381,7 +381,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                 className="shrink-0 p-1 rounded-geist hover:bg-[#1f1f1f] text-[#a1a1a1] hover:text-[#ededed] transition-colors"
                 title="Copy command to clipboard"
               >
-                {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? <Check className="h-3.5 w-3.5 text-[#0070f3]" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
             </div>
           </div>

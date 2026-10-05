@@ -35,28 +35,28 @@ export function Sidebar({
   const getProfileQuotaStatus = (p: ProfileDTO) => {
     if (!p.has_credentials) {
       return {
-        color: 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]',
-        text: 'text-amber-400',
+        color: 'bg-[#f5a623]',
+        text: 'text-[#f5a623]',
         label: 'Auth',
       };
     }
     const pct = p.quota?.bottleneck_pct ?? 100;
     if (p.quota?.is_exhausted || pct <= 0) {
       return {
-        color: 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.5)]',
-        text: 'text-rose-400',
+        color: 'bg-[#ee0000]',
+        text: 'text-[#ee0000]',
         label: '0%',
       };
     }
     if (pct <= 30) {
       return {
-        color: 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]',
-        text: 'text-amber-400',
+        color: 'bg-[#f5a623]',
+        text: 'text-[#f5a623]',
         label: `${pct}%`,
       };
     }
     return {
-      color: 'bg-[#00e599] shadow-[0_0_6px_rgba(0,229,153,0.5)]',
+      color: 'bg-[#ededed]',
       text: 'text-[#a1a1a1]',
       label: `${pct}%`,
     };
@@ -187,9 +187,9 @@ export function Sidebar({
           <div className="flex items-center gap-2">
             <span className="flex h-2 w-2 relative items-center justify-center">
               {daemonInfo?.active ? (
-                <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]" />
+                <span className="h-2 w-2 rounded-full bg-[#0070f3]" />
               ) : daemonInfo?.installed ? (
-                <span className="h-2 w-2 rounded-full bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]" />
+                <span className="h-2 w-2 rounded-full bg-[#f5a623]" />
               ) : (
                 <span className="h-2 w-2 rounded-full bg-[#555555]" />
               )}
@@ -205,12 +205,12 @@ export function Sidebar({
             <span className="relative flex h-1.5 w-1.5">
               <span
                 className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isOnline ? 'bg-[#00e599]' : 'bg-[#f5a623]'
+                  isOnline ? 'bg-[#0070f3]' : 'bg-[#f5a623]'
                 }`}
               />
               <span
                 className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
-                  isOnline ? 'bg-[#00e599]' : 'bg-[#f5a623]'
+                  isOnline ? 'bg-[#0070f3]' : 'bg-[#f5a623]'
                 }`}
               />
             </span>

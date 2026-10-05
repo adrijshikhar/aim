@@ -341,7 +341,7 @@ export function ProfilesView({
   const getProgressColor = (pct: number) => {
     if (pct <= 0) return 'bg-[#ee0000]';
     if (pct <= 30) return 'bg-[#f5a623]';
-    return 'bg-[#00e599]';
+    return 'bg-[#ededed]';
   };
 
   const getTextColor = (pct: number) => {
@@ -395,7 +395,7 @@ export function ProfilesView({
                     variant="outline"
                     className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#00e599]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3]" />
                     <span>Authenticated</span>
                   </Badge>
                 ) : (
@@ -612,7 +612,7 @@ export function ProfilesView({
                         variant="outline"
                         className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                       >
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#00e599]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3]" />
                         <span>Authenticated</span>
                       </Badge>
                     ) : (
@@ -893,7 +893,7 @@ export function ProfilesView({
                           variant="outline"
                           className="bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] text-[11px] font-mono tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#00e599]" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3]" />
                           <span>Authenticated</span>
                         </Badge>
                       ) : (

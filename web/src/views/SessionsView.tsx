@@ -303,7 +303,7 @@ export function SessionsView({
           <div className="flex items-center gap-1.5">
             <AgentBadge agent={row.original.agent} />
             {row.original.is_active && (
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" title="Active Process" />
+              <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3] animate-pulse" title="Active Process" />
             )}
           </div>
         ),

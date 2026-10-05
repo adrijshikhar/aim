@@ -215,7 +215,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                 {session.title || 'Untitled Session'}
               </h1>
               {session.is_active && (
-                <Badge className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-mono px-2 py-0.5 rounded-[4px]">
+                <Badge className="bg-[#0070f3]/10 text-[#0070f3] border border-[#0070f3]/30 text-[10px] font-mono px-2 py-0.5 rounded-[4px]">
                   ● Active Process
                 </Badge>
               )}
@@ -281,7 +281,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
               className="h-8 px-2 text-xs font-mono border-border bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] rounded-geist"
               title="Copy terminal command"
             >
-              {copiedCmd ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+              {copiedCmd ? <Check className="h-3.5 w-3.5 text-[#0070f3]" /> : <Copy className="h-3.5 w-3.5" />}
             </Button>
           </div>
         </div>
@@ -300,7 +300,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
           >
             <Folder className="h-3 w-3 text-[#666666]" />
             <span className="truncate max-w-[260px] text-[#ededed]">{session.cwd}</span>
-            {copiedCwd ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3 text-[#666666]" />}
+            {copiedCwd ? <Check className="h-3 w-3 text-[#0070f3]" /> : <Copy className="h-3 w-3 text-[#666666]" />}
           </div>
 
           <div className="flex items-center gap-1.5 bg-[#0a0a0a] px-2.5 py-1 rounded-[4px] border border-border">
@@ -364,7 +364,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                           <User className="h-3 w-3" />
                         </div>
                       ) : (
-                        <div className="h-5 w-5 rounded-[4px] bg-[#1a1a1a] border border-[#262626] flex items-center justify-center text-emerald-400">
+                        <div className="h-5 w-5 rounded-[4px] bg-[#1a1a1a] border border-[#262626] flex items-center justify-center text-[#ededed]">
                           <Bot className="h-3 w-3" />
                         </div>
                       )}
@@ -437,8 +437,8 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                     className={cn(
                                       'text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border',
                                       tool.status === 'error'
-                                        ? 'border-red-500/40 text-red-400 bg-red-500/10'
-                                        : 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
+                                        ? 'border-[#ee0000]/40 text-[#ee0000] bg-[#ee0000]/10'
+                                        : 'border-[#262626] text-[#a1a1a1] bg-[#111111]'
                                     )}
                                   >
                                     {tool.status || 'ok'}
