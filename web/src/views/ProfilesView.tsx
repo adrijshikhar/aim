@@ -27,7 +27,6 @@ import {
   Bot,
   Terminal,
   Server,
-  ArrowLeft,
   ArrowRight,
   ChevronRight,
   Boxes,
@@ -446,11 +445,11 @@ export function ProfilesView({
 
     return (
       <div className="space-y-6">
-        {/* Profile Header Card */}
-        <div className="rounded-geist border border-border bg-card p-5 space-y-4">
+        {/* Profile Page Header (Clean, uncarded page header) */}
+        <div className="space-y-4 pb-6 border-b border-border">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl font-semibold tracking-tight text-foreground font-sans">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground font-sans">
                 {currentProfile.name}
               </h1>
               {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
@@ -509,127 +508,148 @@ export function ProfilesView({
             </div>
           </div>
 
-          {/* Path and identity sub-bar */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-3 border-t border-border text-xs font-sans text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <Folder className="h-3.5 w-3.5 text-muted-foreground/70" />
-              <span className="text-foreground font-mono select-all">{currentProfile.path}</span>
-              <button
-                type="button"
-                onClick={() => handleCopyPath(currentProfile.path)}
-                title="Copy sandbox path"
-                className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-              >
-                {copiedPath ? (
-                  <Check className="h-3 w-3 text-status-success" />
-                ) : (
-                  <Copy className="h-3 w-3" />
-                )}
-              </button>
+          {/* Sandbox & Environment Sub-bar (Moved directly to the header itself) */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-y-3 gap-x-6 text-xs font-sans text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div className="flex items-center gap-1.5">
+                <Folder className="h-3.5 w-3.5 text-muted-foreground/70" />
+                <span className="text-muted-foreground">Sandbox:</span>
+                <span className="text-foreground font-mono select-all">{currentProfile.path}</span>
+                <button
+                  type="button"
+                  onClick={() => handleCopyPath(currentProfile.path)}
+                  title="Copy sandbox path"
+                  className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                >
+                  {copiedPath ? (
+                    <Check className="h-3 w-3 text-status-success" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </button>
+              </div>
+              {currentProfile.account?.email && (
+                <div className="flex items-center gap-1.5">
+                  <Mail className="h-3.5 w-3.5 text-muted-foreground/70" />
+                  <span className="text-foreground">{currentProfile.account.email}</span>
+                </div>
+              )}
+              {currentProfile.account?.auth_method && (
+                <div className="flex items-center gap-1.5">
+                  <Key className="h-3.5 w-3.5 text-muted-foreground/70" />
+                  <span>{currentProfile.account.auth_method}</span>
+                </div>
+              )}
             </div>
-            {currentProfile.account?.email && (
-              <div className="flex items-center gap-1.5">
-                <Mail className="h-3.5 w-3.5 text-muted-foreground/70" />
-                <span>{currentProfile.account.email}</span>
-              </div>
-            )}
-            {currentProfile.account?.auth_method && (
-              <div className="flex items-center gap-1.5">
-                <Key className="h-3.5 w-3.5 text-muted-foreground/70" />
-                <span>{currentProfile.account.auth_method}</span>
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* 2-Column Bento Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Column (7 cols, ~60%): Quota Telemetry & Recent Sessions */}
-          <div className="lg:col-span-7 space-y-6">
-            {/* Visual Live Quota Breakdown */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-sans font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <Gauge className="h-3.5 w-3.5" />
-                  Live Quota Telemetry & Rate Limits
-                </h3>
-                <span className="text-[11px] font-mono text-muted-foreground">
-                  {refreshing ? 'Updating live...' : 'Active live telemetry'}
+            {/* Global Sandbox Inheritance Toggles in Header */}
+            <div className="flex items-center gap-5 shrink-0 pt-1 lg:pt-0">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Global MCP:</span>
+                <Switch
+                  checked={isMcpGlobalOn}
+                  disabled={updatingConfig}
+                  onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
+                />
+                <span className="text-foreground font-mono text-[11px]">
+                  {isMcpGlobalOn ? 'on' : 'off'}
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
-                {(currentProfile.adapters && currentProfile.adapters.length > 0
-                  ? currentProfile.adapters
-                  : [
-                      {
-                        agent: currentProfile.agent,
-                        has_credentials: currentProfile.has_credentials,
-                        account: currentProfile.account,
-                        quota: currentProfile.quota,
-                      },
-                    ]
-                ).map((ad) => (
-                  <Card key={ad.agent} className="border border-border bg-card rounded-geist">
-                    <CardHeader className="pb-3 p-5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          {getAgentBadge(ad.agent)}
-                          <span className="text-xs font-sans text-muted-foreground">Engine</span>
-                        </div>
-                        {ad.has_credentials ? (
-                          <Badge
-                            variant="outline"
-                            className="badge-success text-xs font-sans"
-                          >
-                            <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                            <span>Authenticated</span>
-                          </Badge>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className="badge-warning text-xs font-sans"
-                          >
-                            <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                            <span>Needs Auth</span>
-                          </Badge>
-                        )}
-                      </div>
-                      <CardDescription className="text-xs text-muted-foreground pt-1">
-                        {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials detected' : 'No credentials detected')}
-                      </CardDescription>
-                    </CardHeader>
-
-                    <CardContent className="space-y-4 p-5 pt-0">
-                      {/* Visual Quota Meters */}
-                      <QuotaBreakdown
-                        summary={ad.quota?.summary}
-                        bottleneckPct={ad.quota?.bottleneck_pct ?? 100}
-                        isExhausted={ad.quota?.is_exhausted}
-                      />
-
-                      {/* Account detail chips */}
-                      <div className="p-3 rounded-geist bg-secondary/50 border border-border space-y-1.5 text-xs font-sans">
-                        <div className="flex justify-between items-center text-muted-foreground">
-                          <span>Account:</span>
-                          <span className="text-foreground font-medium truncate max-w-[220px]">
-                            {ad.account?.name || currentProfile.name}
-                          </span>
-                        </div>
-                        {ad.account?.auth_method && (
-                          <div className="flex justify-between items-center text-muted-foreground">
-                            <span>Auth Method:</span>
-                            <span className="text-foreground truncate max-w-[220px]">{ad.account.auth_method}</span>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Global Plugins:</span>
+                <Switch
+                  checked={isPluginsGlobalOn}
+                  disabled={updatingConfig}
+                  onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
+                />
+                <span className="text-foreground font-mono text-[11px]">
+                  {isPluginsGlobalOn ? 'on' : 'off'}
+                </span>
               </div>
             </div>
+          </div>
+        </div>
 
-            {/* Recent Interactive Sessions */}
+        {/* 2-Column Bento Grid: Everything inside Cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Column (7 cols, ~60%): Live Quota Telemetry Cards */}
+          <div className="lg:col-span-7 space-y-6">
+            {(currentProfile.adapters && currentProfile.adapters.length > 0
+              ? currentProfile.adapters
+              : [
+                  {
+                    agent: currentProfile.agent,
+                    has_credentials: currentProfile.has_credentials,
+                    account: currentProfile.account,
+                    quota: currentProfile.quota,
+                  },
+                ]
+            ).map((ad) => (
+              <Card key={ad.agent} className="border border-border bg-card rounded-geist">
+                <CardHeader className="pb-3 p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Gauge className="h-4 w-4 text-muted-foreground" />
+                      <CardTitle className="text-sm font-semibold text-foreground">
+                        Live Quota Telemetry & Rate Limits
+                      </CardTitle>
+                      {getAgentBadge(ad.agent)}
+                    </div>
+                    {ad.has_credentials ? (
+                      <Badge
+                        variant="outline"
+                        className="badge-success text-xs font-sans"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                        <span>Authenticated</span>
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="badge-warning text-xs font-sans"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                        <span>Needs Auth</span>
+                      </Badge>
+                    )}
+                  </div>
+                  <CardDescription className="text-xs text-muted-foreground pt-1">
+                    {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials detected' : 'No credentials detected')}
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-4 p-5 pt-0">
+                  {/* Visual Quota Meters */}
+                  <QuotaBreakdown
+                    summary={ad.quota?.summary}
+                    bottleneckPct={ad.quota?.bottleneck_pct ?? 100}
+                    isExhausted={ad.quota?.is_exhausted}
+                  />
+
+                  {/* Account detail chips */}
+                  <div className="p-3 rounded-geist bg-secondary/50 border border-border space-y-1.5 text-xs font-sans">
+                    <div className="flex justify-between items-center text-muted-foreground">
+                      <span>Account:</span>
+                      <span className="text-foreground font-medium truncate max-w-[220px]">
+                        {ad.account?.name || currentProfile.name}
+                      </span>
+                    </div>
+                    {ad.account?.auth_method && (
+                      <div className="flex justify-between items-center text-muted-foreground">
+                        <span>Auth Method:</span>
+                        <span className="text-foreground truncate max-w-[220px]">{ad.account.auth_method}</span>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Right Column (5 cols, ~40%): Recent Sessions & MCP Catalog Cards */}
+          <div className="lg:col-span-5 space-y-6">
+            {/* Recent Sessions Card */}
             <Card className="border border-border bg-card rounded-geist">
               <CardHeader className="p-5 pb-3">
                 <div className="flex items-center justify-between">
@@ -716,87 +736,8 @@ export function ProfilesView({
                 </Button>
               </CardFooter>
             </Card>
-          </div>
 
-          {/* Right Column (5 cols, ~40%): Sandbox & Environment, Inheritance, MCP Tools */}
-          <div className="lg:col-span-5 space-y-6">
-            {/* Profile Environment Sandbox Card */}
-            <Card className="border border-border bg-card rounded-geist">
-              <CardHeader className="pb-3 p-5">
-                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Folder className="h-4 w-4 text-muted-foreground" />
-                  Sandbox & Environment
-                </CardTitle>
-                <CardDescription className="text-xs text-muted-foreground">
-                  Filesystem sandbox isolation and global configuration inheritance.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-5 pt-0 space-y-4 text-xs font-sans">
-                <div>
-                  <div className="text-muted-foreground mb-1 text-[11px] uppercase tracking-wider font-semibold">
-                    Storage Sandbox
-                  </div>
-                  <div className="flex items-center gap-1.5 p-2 rounded-geist bg-secondary/60 border border-border">
-                    <span className="font-mono text-[11px] text-foreground truncate flex-1 select-all">
-                      {currentProfile.path}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyPath(currentProfile.path)}
-                      className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer"
-                      title="Copy path"
-                    >
-                      {copiedPath ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-muted-foreground mb-1.5 text-[11px] uppercase tracking-wider font-semibold">
-                    Connected Engines
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
-                      currentProfile.adapters.map((ad) => (
-                        <React.Fragment key={ad.agent}>
-                          {getAgentBadge(ad.agent)}
-                        </React.Fragment>
-                      ))
-                    ) : (
-                      getAgentBadge(currentProfile.agent)
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-border space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5 pr-2">
-                      <div className="font-medium text-foreground">Global MCP Inheritance</div>
-                      <div className="text-[11px] text-muted-foreground">Inherit host machine MCP servers</div>
-                    </div>
-                    <Switch
-                      checked={isMcpGlobalOn}
-                      disabled={updatingConfig}
-                      onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5 pr-2">
-                      <div className="font-medium text-foreground">Global Plugin Inheritance</div>
-                      <div className="text-[11px] text-muted-foreground">Inherit host machine plugins</div>
-                    </div>
-                    <Switch
-                      checked={isPluginsGlobalOn}
-                      disabled={updatingConfig}
-                      onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* MCP Tools & Catalog Preview */}
+            {/* MCP Tools & Catalog Card */}
             <Card className="border border-border bg-card rounded-geist">
               <CardHeader className="pb-3 p-5">
                 <div className="flex items-center justify-between">
