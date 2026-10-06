@@ -29,8 +29,9 @@ function parseCurrentRoute(): {
   sessionId: string | null;
 } {
   try {
+    const rawPath = window.location.pathname.replace(/\/+$/, '') || '/';
     const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get('session') || params.get('id');
+    const querySessionId = params.get('session') || params.get('id');
     const viewParam = params.get('view');
     const profileParam = params.get('profile');
     const tabParam = params.get('tab') || 'quota';
@@ -38,13 +39,66 @@ function parseCurrentRoute(): {
 
     const normalizedTab = tabParam === 'telemetry' ? 'quota' : tabParam;
 
-    if (sessionId) {
+    // 1. Path-based route: /sessions/:id (Session Detail)
+    if (rawPath.startsWith('/sessions/') && rawPath.length > '/sessions/'.length) {
+      const sid = decodeURIComponent(rawPath.slice('/sessions/'.length));
       return {
         view: 'session-detail',
         profile: profileParam || 'all',
         tab: normalizedTab,
         mcpScope: scopeParam,
-        sessionId,
+        sessionId: sid,
+      };
+    }
+
+    // 2. Path-based route: /sessions (Sessions Explorer)
+    if (rawPath === '/sessions') {
+      return {
+        view: 'sessions',
+        profile: profileParam || 'all',
+        tab: normalizedTab,
+        mcpScope: scopeParam,
+        sessionId: null,
+      };
+    }
+
+    // 3. Path-based route: /mcp (MCP Catalog)
+    if (rawPath === '/mcp') {
+      return {
+        view: 'mcp',
+        profile: profileParam || 'all',
+        tab: normalizedTab,
+        mcpScope: scopeParam !== 'all' ? scopeParam : (profileParam && profileParam !== 'all' ? profileParam : 'all'),
+        sessionId: null,
+      };
+    }
+
+    // 4. Path-based route: /profiles/:name or /profiles/:name/:tab
+    if (rawPath.startsWith('/profiles/') && rawPath.length > '/profiles/'.length) {
+      const segments = rawPath.slice('/profiles/'.length).split('/');
+      const profileName = decodeURIComponent(segments[0]);
+      let routeTab = normalizedTab;
+      if (segments[1]) {
+        const segTab = decodeURIComponent(segments[1]);
+        routeTab = segTab === 'telemetry' ? 'quota' : segTab;
+      }
+      return {
+        view: 'profile-detail',
+        profile: profileName,
+        tab: routeTab,
+        mcpScope: scopeParam,
+        sessionId: null,
+      };
+    }
+
+    // 5. Query param fallback (backward compatibility for existing bookmarks/links)
+    if (querySessionId) {
+      return {
+        view: 'session-detail',
+        profile: profileParam || 'all',
+        tab: normalizedTab,
+        mcpScope: scopeParam,
+        sessionId: querySessionId,
       };
     }
 
@@ -78,7 +132,7 @@ function parseCurrentRoute(): {
       };
     }
   } catch {
-    // Fallback if URLSearchParams fails
+    // Fallback if URL parsing fails
   }
 
   return {
@@ -115,7 +169,7 @@ export function App() {
   const [isDaemonOpen, setIsDaemonOpen] = React.useState(false);
   const [isAddProfileOpen, setIsAddProfileOpen] = React.useState(false);
 
-  // URL synchronization helper
+  // URL synchronization helper with clean path navigation
   const syncUrl = React.useCallback(
     (
       view: ViewType,
@@ -126,32 +180,37 @@ export function App() {
       replace = false
     ) => {
       try {
+        let targetPath = '/';
         const params = new URLSearchParams();
+
         if (view === 'session-detail' && sessionId) {
-          params.set('session', sessionId);
+          targetPath = `/sessions/${encodeURIComponent(sessionId)}`;
           if (profile && profile !== 'all') {
             params.set('profile', profile);
           }
-        } else if (view === 'profile-detail') {
-          params.set('profile', profile);
+        } else if (view === 'profile-detail' && profile && profile !== 'all') {
           if (tab && tab !== 'quota') {
-            params.set('tab', tab);
+            targetPath = `/profiles/${encodeURIComponent(profile)}/${encodeURIComponent(tab)}`;
+          } else {
+            targetPath = `/profiles/${encodeURIComponent(profile)}`;
           }
         } else if (view === 'sessions') {
-          params.set('view', 'sessions');
+          targetPath = '/sessions';
           if (profile && profile !== 'all') {
             params.set('profile', profile);
           }
         } else if (view === 'mcp') {
-          params.set('view', 'mcp');
+          targetPath = '/mcp';
           if (mcpScope && mcpScope !== 'all') {
             params.set('scope', mcpScope);
           }
         }
+
         const queryString = params.toString();
-        const targetUrl = queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname;
-        const currentSearch = window.location.search.replace(/^\?/, '');
-        if (queryString !== currentSearch) {
+        const targetUrl = queryString ? `${targetPath}?${queryString}` : targetPath;
+        const currentFull = `${window.location.pathname}${window.location.search}`;
+
+        if (targetUrl !== currentFull) {
           if (replace) {
             window.history.replaceState({ view, profile, tab, mcpScope, sessionId }, '', targetUrl);
           } else {
