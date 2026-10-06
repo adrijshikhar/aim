@@ -3,6 +3,7 @@ import {
   getStatus,
   getDaemonStatus,
   getProfiles,
+  getSessions,
   StatusDTO,
   DaemonDTO,
   ProfileDTO,
@@ -18,14 +19,87 @@ import { AddProfileModal } from '@/components/AddProfileModal';
 import { Toaster } from '@/components/ui/toaster';
 import { ChevronRight } from 'lucide-react';
 
+type ViewType = 'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail';
+
+function parseCurrentRoute(): {
+  view: ViewType;
+  profile: string;
+  tab: string;
+  mcpScope: string;
+  sessionId: string | null;
+} {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session') || params.get('id');
+    const viewParam = params.get('view');
+    const profileParam = params.get('profile');
+    const tabParam = params.get('tab') || 'quota';
+    const scopeParam = params.get('scope') || 'all';
+
+    const normalizedTab = tabParam === 'telemetry' ? 'quota' : tabParam;
+
+    if (sessionId) {
+      return {
+        view: 'session-detail',
+        profile: profileParam || 'all',
+        tab: normalizedTab,
+        mcpScope: scopeParam,
+        sessionId,
+      };
+    }
+
+    if (viewParam === 'sessions') {
+      return {
+        view: 'sessions',
+        profile: profileParam || 'all',
+        tab: normalizedTab,
+        mcpScope: scopeParam,
+        sessionId: null,
+      };
+    }
+
+    if (viewParam === 'mcp') {
+      return {
+        view: 'mcp',
+        profile: profileParam || 'all',
+        tab: normalizedTab,
+        mcpScope: scopeParam !== 'all' ? scopeParam : (profileParam && profileParam !== 'all' ? profileParam : 'all'),
+        sessionId: null,
+      };
+    }
+
+    if (profileParam && profileParam !== 'all') {
+      return {
+        view: 'profile-detail',
+        profile: profileParam,
+        tab: normalizedTab,
+        mcpScope: scopeParam,
+        sessionId: null,
+      };
+    }
+  } catch {
+    // Fallback if URLSearchParams fails
+  }
+
+  return {
+    view: 'overview',
+    profile: 'all',
+    tab: 'quota',
+    mcpScope: 'all',
+    sessionId: null,
+  };
+}
+
 export function App() {
-  const [currentView, setCurrentView] = React.useState<
-    'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail'
-  >('overview');
-  const [selectedProfile, setSelectedProfile] = React.useState<string>('all');
-  const [selectedMcpScope, setSelectedMcpScope] = React.useState<string>('all');
-  const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
+  const initialRoute = React.useMemo(() => parseCurrentRoute(), []);
+  const [currentView, setCurrentView] = React.useState<ViewType>(initialRoute.view);
+  const [selectedProfile, setSelectedProfile] = React.useState<string>(initialRoute.profile);
+  const [selectedMcpScope, setSelectedMcpScope] = React.useState<string>(initialRoute.mcpScope);
+  const [activeProfileTab, setActiveProfileTab] = React.useState<string>(initialRoute.tab);
   const [viewedSession, setViewedSession] = React.useState<SessionDTO | null>(null);
+  const [targetSessionId, setTargetSessionId] = React.useState<string | null>(initialRoute.sessionId);
+  const [previousView, setPreviousView] = React.useState<ViewType>('overview');
+  const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
 
   const [status, setStatus] = React.useState<StatusDTO>({
     version: 'v0.12.0',
@@ -40,6 +114,113 @@ export function App() {
   // Modals state
   const [isDaemonOpen, setIsDaemonOpen] = React.useState(false);
   const [isAddProfileOpen, setIsAddProfileOpen] = React.useState(false);
+
+  // URL synchronization helper
+  const syncUrl = React.useCallback(
+    (
+      view: ViewType,
+      profile: string,
+      tab: string,
+      mcpScope: string,
+      sessionId?: string | null,
+      replace = false
+    ) => {
+      try {
+        const params = new URLSearchParams();
+        if (view === 'session-detail' && sessionId) {
+          params.set('session', sessionId);
+          if (profile && profile !== 'all') {
+            params.set('profile', profile);
+          }
+        } else if (view === 'profile-detail') {
+          params.set('profile', profile);
+          if (tab && tab !== 'quota') {
+            params.set('tab', tab);
+          }
+        } else if (view === 'sessions') {
+          params.set('view', 'sessions');
+          if (profile && profile !== 'all') {
+            params.set('profile', profile);
+          }
+        } else if (view === 'mcp') {
+          params.set('view', 'mcp');
+          if (mcpScope && mcpScope !== 'all') {
+            params.set('scope', mcpScope);
+          }
+        }
+        const queryString = params.toString();
+        const targetUrl = queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname;
+        const currentSearch = window.location.search.replace(/^\?/, '');
+        if (queryString !== currentSearch) {
+          if (replace) {
+            window.history.replaceState({ view, profile, tab, mcpScope, sessionId }, '', targetUrl);
+          } else {
+            window.history.pushState({ view, profile, tab, mcpScope, sessionId }, '', targetUrl);
+          }
+        }
+      } catch {
+        // Ignore in environments where window.history is restricted
+      }
+    },
+    []
+  );
+
+  // Popstate listener for browser back/forward buttons
+  React.useEffect(() => {
+    const handlePopState = () => {
+      const route = parseCurrentRoute();
+      setCurrentView(route.view);
+      setSelectedProfile(route.profile);
+      setActiveProfileTab(route.tab);
+      setSelectedMcpScope(route.mcpScope);
+      if (route.sessionId) {
+        setTargetSessionId(route.sessionId);
+      } else {
+        setViewedSession(null);
+        setTargetSessionId(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Fetch session details if targeted by URL
+  React.useEffect(() => {
+    if (targetSessionId && !viewedSession) {
+      getSessions()
+        .then((allSessions) => {
+          const found = allSessions.find((s) => s.id === targetSessionId);
+          if (found) {
+            setViewedSession(found);
+          } else {
+            setViewedSession({
+              id: targetSessionId,
+              agent: 'claude',
+              profile: selectedProfile !== 'all' ? selectedProfile : 'work',
+              title: `Session ${targetSessionId.slice(0, 8)}`,
+              cwd: '',
+              goal: '',
+              turns: 0,
+              updated_at: new Date().toISOString(),
+              is_active: false,
+            });
+          }
+        })
+        .catch(() => {
+          setViewedSession({
+            id: targetSessionId,
+            agent: 'claude',
+            profile: selectedProfile !== 'all' ? selectedProfile : 'work',
+            title: `Session ${targetSessionId.slice(0, 8)}`,
+            cwd: '',
+            goal: '',
+            turns: 0,
+            updated_at: new Date().toISOString(),
+            is_active: false,
+          });
+        });
+    }
+  }, [targetSessionId, viewedSession, selectedProfile]);
 
   const fetchProfiles = React.useCallback(async () => {
     try {
@@ -83,49 +264,77 @@ export function App() {
   // Navigation handlers
   const handleSelectView = (view: 'overview' | 'sessions' | 'mcp') => {
     setViewedSession(null);
+    setTargetSessionId(null);
     if (view === 'overview') {
       setSelectedProfile('all');
       setCurrentView('overview');
+      syncUrl('overview', 'all', 'quota', 'all', null);
     } else if (view === 'sessions') {
       setSelectedProfile('all');
       setCurrentView('sessions');
+      syncUrl('sessions', 'all', 'quota', 'all', null);
     } else if (view === 'mcp') {
       setSelectedMcpScope('all');
       setCurrentView('mcp');
+      syncUrl('mcp', 'all', 'quota', 'all', null);
     }
   };
 
   const handleSelectProfile = (profileName: string) => {
     setViewedSession(null);
+    setTargetSessionId(null);
     if (profileName === 'all') {
       setSelectedProfile('all');
       setCurrentView('overview');
+      syncUrl('overview', 'all', 'quota', 'all', null);
     } else {
       setSelectedProfile(profileName);
       setCurrentView('profile-detail');
+      syncUrl('profile-detail', profileName, activeProfileTab, 'all', null);
     }
   };
 
   const handleNavigateToSessions = (profileName: string) => {
     setViewedSession(null);
+    setTargetSessionId(null);
     setSelectedProfile(profileName);
     setCurrentView('sessions');
+    syncUrl('sessions', profileName, 'quota', 'all', null);
   };
 
   const handleNavigateToMcp = (profileName: string) => {
     setViewedSession(null);
+    setTargetSessionId(null);
     setSelectedMcpScope(profileName);
     setCurrentView('mcp');
+    syncUrl('mcp', 'all', 'quota', profileName, null);
   };
 
   const handleViewSession = (session: SessionDTO) => {
+    setPreviousView(currentView);
     setViewedSession(session);
+    setTargetSessionId(session.id);
     setCurrentView('session-detail');
+    syncUrl('session-detail', session.profile || selectedProfile, activeProfileTab, selectedMcpScope, session.id);
   };
 
   const handleBackFromSession = () => {
     setViewedSession(null);
-    setCurrentView('sessions');
+    setTargetSessionId(null);
+    if (previousView === 'profile-detail' && selectedProfile && selectedProfile !== 'all') {
+      setCurrentView('profile-detail');
+      syncUrl('profile-detail', selectedProfile, activeProfileTab, 'all', null);
+    } else {
+      setCurrentView('sessions');
+      syncUrl('sessions', selectedProfile, 'quota', 'all', null);
+    }
+  };
+
+  const handleProfileTabChange = (tab: string) => {
+    setActiveProfileTab(tab);
+    if (currentView === 'profile-detail') {
+      syncUrl('profile-detail', selectedProfile, tab, 'all', null, true);
+    }
   };
 
   const getHeaderTitle = () => {
@@ -176,7 +385,7 @@ export function App() {
             <span className="text-[#a1a1a1]">{viewedSession?.agent}</span>
             <ChevronRight className="h-3.5 w-3.5 text-[#666666]" />
             <span className="text-[#ededed] font-semibold">
-              {viewedSession ? viewedSession.id.slice(0, 8) : 'Detail'}
+              {viewedSession ? viewedSession.id.slice(0, 8) : targetSessionId ? targetSessionId.slice(0, 8) : 'Detail'}
             </span>
           </div>
         );
@@ -271,6 +480,7 @@ export function App() {
             {currentView === 'overview' && (
               <ProfilesView
                 selectedProfile="all"
+                profiles={profiles}
                 onSelectProfile={handleSelectProfile}
                 onNavigateToSessions={handleNavigateToSessions}
                 onNavigateToMcp={handleNavigateToMcp}
@@ -280,6 +490,9 @@ export function App() {
             {currentView === 'profile-detail' && (
               <ProfilesView
                 selectedProfile={selectedProfile}
+                profiles={profiles}
+                activeTab={activeProfileTab}
+                onTabChange={handleProfileTabChange}
                 onSelectProfile={handleSelectProfile}
                 onNavigateToSessions={handleNavigateToSessions}
                 onNavigateToMcp={handleNavigateToMcp}
@@ -295,12 +508,21 @@ export function App() {
                 onViewSession={handleViewSession}
               />
             )}
-            {currentView === 'session-detail' && viewedSession && (
-              <SessionDetailView
-                key={viewedSession.id}
-                session={viewedSession}
-                onBack={handleBackFromSession}
-              />
+            {currentView === 'session-detail' && (
+              viewedSession ? (
+                <SessionDetailView
+                  key={viewedSession.id}
+                  session={viewedSession}
+                  onBack={handleBackFromSession}
+                />
+              ) : (
+                <div className="py-24 text-center">
+                  <div className="inline-flex items-center gap-2 text-xs font-mono text-[#888888]">
+                    <span className="h-3 w-3 rounded-full border-2 border-[#0070f3] border-t-transparent animate-spin" />
+                    <span>Loading session {targetSessionId?.slice(0, 8)}...</span>
+                  </div>
+                </div>
+              )
             )}
             {currentView === 'mcp' && (
               <McpView

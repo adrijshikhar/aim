@@ -52,7 +52,12 @@ interface ProfilesViewProps {
   onNavigateToMcp?: (profile: string) => void;
   onProfilesLoaded?: (profiles: ProfileDTO[]) => void;
   onViewSession?: (session: SessionDTO) => void;
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
+  profiles?: ProfileDTO[];
 }
+
+let profilesMemoryCache: ProfileDTO[] | null = null;
 
 export function ProfilesView({
   selectedProfile,
@@ -61,11 +66,28 @@ export function ProfilesView({
   onNavigateToMcp,
   onProfilesLoaded,
   onViewSession,
+  activeTab: controlledActiveTab,
+  onTabChange,
+  profiles: externalProfiles,
 }: ProfilesViewProps) {
-  const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [profiles, setProfiles] = React.useState<ProfileDTO[]>(() =>
+    externalProfiles && externalProfiles.length > 0
+      ? externalProfiles
+      : profilesMemoryCache || []
+  );
+  const [loading, setLoading] = React.useState(
+    () => !profilesMemoryCache && (!externalProfiles || externalProfiles.length === 0)
+  );
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (externalProfiles && externalProfiles.length > 0) {
+      setProfiles(externalProfiles);
+      profilesMemoryCache = externalProfiles;
+      setLoading(false);
+    }
+  }, [externalProfiles]);
 
   // Dialog State
   const [isAddOpen, setIsAddOpen] = React.useState(false);
@@ -92,6 +114,7 @@ export function ProfilesView({
         refresh: forceRefresh,
       });
       setProfiles(data);
+      profilesMemoryCache = data;
       onProfilesLoaded?.(data);
       if (forceRefresh) {
         toast({
@@ -331,17 +354,24 @@ export function ProfilesView({
   const [resumingId, setResumingId] = React.useState<string | null>(null);
 
   // View A multi-tab state
-  const [activeTab, setActiveTab] = React.useState('telemetry');
+  const [internalActiveTab, setInternalActiveTab] = React.useState('quota');
+  const activeTab = (controlledActiveTab === 'telemetry' ? 'quota' : controlledActiveTab) || internalActiveTab;
+  const handleTabChange = (newTab: string) => {
+    setInternalActiveTab(newTab);
+    onTabChange?.(newTab);
+  };
   const [selectedEngineTab, setSelectedEngineTab] = React.useState<string>('all');
   const [sessionSearch, setSessionSearch] = React.useState('');
   const [mcpSearch, setMcpSearch] = React.useState('');
 
   React.useEffect(() => {
-    setActiveTab('telemetry');
+    if (!controlledActiveTab) {
+      setInternalActiveTab('quota');
+    }
     setSelectedEngineTab('all');
     setSessionSearch('');
     setMcpSearch('');
-  }, [selectedProfile]);
+  }, [selectedProfile, controlledActiveTab]);
 
   // Derived adapters for current profile
   const profileAdapters = React.useMemo(() => {
@@ -504,7 +534,35 @@ export function ProfilesView({
   // ==========================================
   // VIEW A: SPECIFIC PROFILE WORKSPACE VIEW
   // ==========================================
-  if (selectedProfile !== 'all' && currentProfile) {
+  if (selectedProfile !== 'all') {
+    if (loading && !currentProfile) {
+      return (
+        <div className="py-24 text-center">
+          <div className="inline-flex items-center gap-2 text-xs font-mono text-[#888888]">
+            <span className="h-3 w-3 rounded-full border-2 border-[#0070f3] border-t-transparent animate-spin" />
+            <span>Loading profile "{selectedProfile}"...</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (!currentProfile) {
+      return (
+        <div className="py-16 text-center space-y-4">
+          <div className="text-sm font-semibold text-[#ededed]">Profile "{selectedProfile}" Not Found</div>
+          <p className="text-xs text-[#888888]">This profile may have been deleted or the name is incorrect.</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onSelectProfile('all')}
+            className="rounded-geist text-xs text-[#ededed] border-[#262626] bg-[#0e0e0e] hover:bg-[#1a1a1a]"
+          >
+            Return to Profiles Overview
+          </Button>
+        </div>
+      );
+    }
+
     const isMcpGlobalOn = currentProfile.mcp_global !== false;
     const isPluginsGlobalOn = currentProfile.plugins_global !== false;
 
@@ -614,37 +672,33 @@ export function ProfilesView({
               <div className="flex items-center gap-2">
                 <span className="text-[#666666]">Global MCP:</span>
                 <Switch
+                  size="sm"
                   checked={isMcpGlobalOn}
                   disabled={updatingConfig}
                   onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
                 />
-                <span className="text-[#ededed] font-mono text-[11px]">
-                  {isMcpGlobalOn ? 'on' : 'off'}
-                </span>
               </div>
 
               <div className="flex items-center gap-2">
                 <span className="text-[#666666]">Global Plugins:</span>
                 <Switch
+                  size="sm"
                   checked={isPluginsGlobalOn}
                   disabled={updatingConfig}
                   onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
                 />
-                <span className="text-[#ededed] font-mono text-[11px]">
-                  {isPluginsGlobalOn ? 'on' : 'off'}
-                </span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Multi-Tab Workspace Organization */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-6">
           <div className="flex items-center justify-between border-b border-[#222222] pb-3">
             <TabsList className="bg-[#0c0c0c] border border-[#222222] p-1 h-9 rounded-geist gap-1">
-              <TabsTrigger value="telemetry" className="gap-2 text-xs">
+              <TabsTrigger value="quota" className="gap-2 text-xs">
                 <Gauge className="h-3.5 w-3.5 text-[#666666]" />
-                <span>Telemetry & Quotas</span>
+                <span>Quota</span>
                 {profileAdapters.length > 1 && (
                   <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
                     {profileAdapters.length}
@@ -672,8 +726,8 @@ export function ProfilesView({
             </TabsList>
           </div>
 
-          {/* TAB 1: TELEMETRY & QUOTAS */}
-          <TabsContent value="telemetry" className="space-y-5 focus-visible:outline-none">
+          {/* TAB 1: QUOTA */}
+          <TabsContent value="quota" className="space-y-5 focus-visible:outline-none">
             {/* Multi-Engine Selector (when a profile runs >1 adapter, e.g. office with codex & claude) */}
             {profileAdapters.length > 1 && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-geist bg-[#0a0a0a] border border-[#222222]">
@@ -728,8 +782,8 @@ export function ProfilesView({
                 </div>
                 <span className="text-[11px] text-[#666666]">
                   {selectedEngineTab === 'all'
-                    ? `Viewing combined telemetry for ${profileAdapters.length} configured engines side-by-side.`
-                    : `Focused telemetry view for ${selectedEngineTab}.`}
+                    ? `Viewing combined quota for ${profileAdapters.length} configured engines side-by-side.`
+                    : `Focused quota view for ${selectedEngineTab}.`}
                 </span>
               </div>
             )}
@@ -750,7 +804,7 @@ export function ProfilesView({
                       <div className="flex items-center gap-2">
                         <Gauge className="h-4 w-4 text-[#666666]" />
                         <CardTitle className="text-sm font-semibold text-[#ededed]">
-                          Live Quota Telemetry
+                          Quota
                         </CardTitle>
                         {getAgentBadge(ad.agent)}
                       </div>
@@ -1039,15 +1093,13 @@ export function ProfilesView({
                           Inherit server definitions from ~/.aim/mcp.json
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center">
                         <Switch
+                          size="sm"
                           checked={isMcpGlobalOn}
                           disabled={updatingConfig}
                           onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
                         />
-                        <span className="text-xs font-mono text-[#ededed] min-w-[24px]">
-                          {isMcpGlobalOn ? 'on' : 'off'}
-                        </span>
                       </div>
                     </div>
 
@@ -1058,15 +1110,13 @@ export function ProfilesView({
                           Inherit global plugins from ~/.aim/plugins/
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center">
                         <Switch
+                          size="sm"
                           checked={isPluginsGlobalOn}
                           disabled={updatingConfig}
                           onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
                         />
-                        <span className="text-xs font-mono text-[#ededed] min-w-[24px]">
-                          {isPluginsGlobalOn ? 'on' : 'off'}
-                        </span>
                       </div>
                     </div>
                   </div>
@@ -1389,7 +1439,7 @@ export function ProfilesView({
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#666666] flex items-center gap-1">
-                            <Gauge className="h-3 w-3 text-[#555555]" /> Quota Telemetry
+                            <Gauge className="h-3 w-3 text-[#555555]" /> Quota
                           </span>
                         {(() => {
                           const pct = p.quota?.bottleneck_pct ?? 100;

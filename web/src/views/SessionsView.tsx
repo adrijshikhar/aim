@@ -54,14 +54,20 @@ interface SessionsViewProps {
   onViewSession?: (session: SessionDTO) => void;
 }
 
+// Module-level in-memory cache to ensure instant back-navigation from session detail with zero refresh flash
+let sessionsMemoryCache: SessionDTO[] | null = null;
+let lastSessionsFetchTimestamp = 0;
+const SESSIONS_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
+
 export function SessionsView({
   selectedProfile = 'all',
   onSelectProfile,
   profiles = [],
   onViewSession,
 }: SessionsViewProps) {
-  const [sessions, setSessions] = React.useState<SessionDTO[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [sessions, setSessions] = React.useState<SessionDTO[]>(() => sessionsMemoryCache || []);
+  const [loading, setLoading] = React.useState(!sessionsMemoryCache);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [selectedEngines, setSelectedEngines] = React.useState<Set<string>>(new Set());
   const [selectedProfiles, setSelectedProfiles] = React.useState<Set<string>>(
@@ -86,44 +92,58 @@ export function SessionsView({
     }
   }, [selectedProfile]);
 
-  const fetchSessions = React.useCallback(async () => {
-    setLoading(true);
+  const fetchSessions = React.useCallback(async (force = false) => {
+    if (sessionsMemoryCache && !force) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     try {
       const data = await getSessions();
+      sessionsMemoryCache = data;
+      lastSessionsFetchTimestamp = Date.now();
       setSessions(data);
     } catch {
-      // Fallback data if server unreachable
-      setSessions([
-        {
-          id: 'sess-89412e',
-          agent: 'claude',
-          profile: 'work',
-          title: 'Refactor auth middleware and token validation',
-          cwd: '/Users/developer/repos/enterprise-api',
-          goal: 'Migrate legacy token handlers to modern RS256 JWT checks and test coverage',
-          turns: 24,
-          updated_at: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
-          is_active: true,
-        },
-        {
-          id: 'sess-33921a',
-          agent: 'codex',
-          profile: 'personal',
-          title: 'Implement CLI flags and config loader',
-          cwd: '/Users/developer/Projects/my-cli-tool',
-          goal: 'Add viper support for ~/.config/mytool.yaml and env overrides',
-          turns: 12,
-          updated_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-          is_active: false,
-        },
-      ]);
+      // Fallback data if server unreachable and no cache exists
+      if (!sessionsMemoryCache) {
+        const fallback: SessionDTO[] = [
+          {
+            id: 'sess-89412e',
+            agent: 'claude',
+            profile: 'work',
+            title: 'Refactor auth middleware and token validation',
+            cwd: '/Users/developer/repos/enterprise-api',
+            goal: 'Migrate legacy token handlers to modern RS256 JWT checks and test coverage',
+            turns: 24,
+            updated_at: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
+            is_active: true,
+          },
+          {
+            id: 'sess-33921a',
+            agent: 'codex',
+            profile: 'personal',
+            title: 'Implement CLI flags and config loader',
+            cwd: '/Users/developer/Projects/my-cli-tool',
+            goal: 'Add viper support for ~/.config/mytool.yaml and env overrides',
+            turns: 12,
+            updated_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
+            is_active: false,
+          },
+        ];
+        sessionsMemoryCache = fallback;
+        setSessions(fallback);
+      }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   React.useEffect(() => {
-    fetchSessions();
+    const isStale = Date.now() - lastSessionsFetchTimestamp > SESSIONS_CACHE_TTL_MS;
+    if (!sessionsMemoryCache || isStale) {
+      fetchSessions();
+    }
   }, [fetchSessions]);
 
   // Global hotkey '/' focuses search
@@ -582,11 +602,11 @@ export function SessionsView({
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchSessions}
-            disabled={loading}
+            onClick={() => fetchSessions(true)}
+            disabled={loading || refreshing}
             className="rounded-geist h-8 border-border bg-[#111111] text-[#ededed] hover:bg-[#1a1a1a]"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5 mr-1.5', loading && 'animate-spin')} />
+            <RefreshCw className={cn('h-3.5 w-3.5 mr-1.5', (loading || refreshing) && 'animate-spin')} />
             Refresh
           </Button>
         </div>
