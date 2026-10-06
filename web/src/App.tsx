@@ -284,6 +284,7 @@ export function App() {
                 onNavigateToSessions={handleNavigateToSessions}
                 onNavigateToMcp={handleNavigateToMcp}
                 onProfilesLoaded={setProfiles}
+                onViewSession={handleViewSession}
               />
             )}
             {currentView === 'sessions' && (

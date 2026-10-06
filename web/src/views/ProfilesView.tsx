@@ -8,6 +8,7 @@ import {
   updateProfileConfig,
   getSessions,
   getMcpServers,
+  resumeSession,
 } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,8 @@ import {
   ArrowRight,
   ChevronRight,
   Boxes,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
@@ -42,6 +45,7 @@ interface ProfilesViewProps {
   onNavigateToSessions?: (profile: string) => void;
   onNavigateToMcp?: (profile: string) => void;
   onProfilesLoaded?: (profiles: ProfileDTO[]) => void;
+  onViewSession?: (session: SessionDTO) => void;
 }
 
 export function ProfilesView({
@@ -50,6 +54,7 @@ export function ProfilesView({
   onNavigateToSessions,
   onNavigateToMcp,
   onProfilesLoaded,
+  onViewSession,
 }: ProfilesViewProps) {
   const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -316,6 +321,94 @@ export function ProfilesView({
     return profiles.find((p) => p.name === selectedProfile) || null;
   }, [profiles, selectedProfile]);
 
+  const [copiedPath, setCopiedPath] = React.useState(false);
+  const [resumingId, setResumingId] = React.useState<string | null>(null);
+
+  const handleCopyPath = (path: string) => {
+    navigator.clipboard.writeText(path);
+    setCopiedPath(true);
+    setTimeout(() => setCopiedPath(false), 2000);
+  };
+
+  const handleQuickResume = async (sess: SessionDTO) => {
+    setResumingId(sess.id);
+    try {
+      const res = await resumeSession({
+        agent: sess.agent,
+        profile: sess.profile,
+        session_id: sess.id,
+      });
+      toast({
+        title: 'Terminal Launched',
+        description: `Resumed in ${res.terminal || 'terminal'} window.`,
+        variant: 'success',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not launch terminal';
+      toast({
+        title: 'Resume Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setResumingId(null);
+    }
+  };
+
+  const formatRelativeTime = (isoString?: string) => {
+    if (!isoString) return '';
+    try {
+      const d = new Date(isoString);
+      const now = new Date();
+      const diffSecs = Math.floor((now.getTime() - d.getTime()) / 1000);
+      if (diffSecs < 60) return 'just now';
+      const diffMins = Math.floor(diffSecs / 60);
+      if (diffMins < 60) return `${diffMins}m ago`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours}h ago`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays}d ago`;
+    } catch {
+      return isoString;
+    }
+  };
+
+  // Multi-dimensional Quota Health badge (prominently answers "what is the status?")
+  const quotaHealthBadge = React.useMemo(() => {
+    if (!currentProfile) return null;
+    const q = currentProfile.quota;
+    if (!q) {
+      return (
+        <Badge variant="outline" className="text-xs font-sans border-border bg-secondary text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+          <span>Quota: Uncached</span>
+        </Badge>
+      );
+    }
+    if (q.is_exhausted || q.bottleneck_pct <= 0) {
+      return (
+        <Badge variant="outline" className="badge-danger text-xs font-sans">
+          <span className="h-1.5 w-1.5 rounded-full bg-status-danger-solid" />
+          <span>Quota Exhausted (0%)</span>
+        </Badge>
+      );
+    }
+    if (q.bottleneck_pct <= 30) {
+      return (
+        <Badge variant="outline" className="badge-warning text-xs font-sans">
+          <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+          <span>Rate Limit Warning ({q.bottleneck_pct}%)</span>
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="badge-success text-xs font-sans">
+        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+        <span>Quota Healthy ({q.bottleneck_pct}%)</span>
+      </Badge>
+    );
+  }, [currentProfile]);
+
   const handleRefreshCurrentProfile = React.useCallback(async () => {
     if (!currentProfile) return;
     setRefreshing(true);
@@ -353,63 +446,55 @@ export function ProfilesView({
 
     return (
       <div className="space-y-6">
-        {/* Profile Header Banner */}
+        {/* Profile Header Card */}
         <div className="rounded-geist border border-border bg-card p-5 space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-xl font-semibold tracking-tight text-foreground font-sans">
+                {currentProfile.name}
+              </h1>
+              {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
+                currentProfile.adapters.map((ad) => (
+                  <React.Fragment key={ad.agent}>
+                    {getAgentBadge(ad.agent)}
+                  </React.Fragment>
+                ))
+              ) : (
+                getAgentBadge(currentProfile.agent)
+              )}
+              {currentProfile.has_credentials ? (
+                <Badge
+                  variant="outline"
+                  className="badge-success text-xs font-sans"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                  <span>Authenticated</span>
+                </Badge>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="badge-warning text-xs font-sans"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                  <span>Needs Auth</span>
+                </Badge>
+              )}
+              {quotaHealthBadge}
+              <span className="text-xs font-mono text-muted-foreground px-2 py-0.5 rounded-full border border-border bg-secondary">
+                {resourcesLoading ? '...' : `${profileSessions.length} sessions`}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onSelectProfile('all')}
-                className="h-8 rounded-geist text-xs font-sans font-medium text-muted-foreground hover:text-foreground border-border bg-secondary hover:bg-accent cursor-pointer"
-              >
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-                All Profiles
-              </Button>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg font-semibold tracking-tight text-foreground">
-                  {currentProfile.name}
-                </h1>
-                {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
-                  currentProfile.adapters.map((ad) => (
-                    <React.Fragment key={ad.agent}>
-                      {getAgentBadge(ad.agent)}
-                    </React.Fragment>
-                  ))
-                ) : (
-                  getAgentBadge(currentProfile.agent)
-                )}
-                {currentProfile.has_credentials ? (
-                  <Badge
-                    variant="outline"
-                    className="badge-success"
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                    <span>Authenticated</span>
-                  </Badge>
-                ) : (
-                  <Badge
-                    variant="outline"
-                    className="badge-warning"
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                    <span>Needs Auth</span>
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 self-end sm:self-auto">
-              <Button
-                variant="outline"
-                size="icon"
                 onClick={handleRefreshCurrentProfile}
                 disabled={loading || refreshing}
-                title="Refresh profile telemetry"
-                aria-label="Refresh profile telemetry"
-                className="h-8 w-8 rounded-geist border-border bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+                className="h-8 rounded-geist text-xs font-sans border-border bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer px-3"
               >
-                <RefreshCw className={`h-3.5 w-3.5 ${refreshing || loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshing || loading ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing...' : 'Refresh Quota'}
               </Button>
               <Button
                 variant="outline"
@@ -425,10 +510,22 @@ export function ProfilesView({
           </div>
 
           {/* Path and identity sub-bar */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-border text-xs font-sans text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-3 border-t border-border text-xs font-sans text-muted-foreground">
             <div className="flex items-center gap-1.5">
               <Folder className="h-3.5 w-3.5 text-muted-foreground/70" />
-              <span className="text-foreground font-mono">{currentProfile.path}</span>
+              <span className="text-foreground font-mono select-all">{currentProfile.path}</span>
+              <button
+                type="button"
+                onClick={() => handleCopyPath(currentProfile.path)}
+                title="Copy sandbox path"
+                className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+              >
+                {copiedPath ? (
+                  <Check className="h-3 w-3 text-status-success" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+              </button>
             </div>
             {currentProfile.account?.email && (
               <div className="flex items-center gap-1.5">
@@ -445,218 +542,325 @@ export function ProfilesView({
           </div>
         </div>
 
-        {/* Deep-link Action Cards: Single-View Navigation to Sessions & MCP */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Card 1: Sessions Deep Link */}
-          <Card className="border border-border bg-card rounded-geist hover:border-border/80 transition-colors">
-            <CardHeader className="p-5 pb-3">
+        {/* 2-Column Bento Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Column (7 cols, ~60%): Quota Telemetry & Recent Sessions */}
+          <div className="lg:col-span-7 space-y-6">
+            {/* Visual Live Quota Breakdown */}
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Terminal className="h-4 w-4 text-muted-foreground" />
-                  Agent Sessions
-                </CardTitle>
-                <Badge
-                  variant="outline"
-                  className="text-xs font-sans font-medium bg-secondary border-border text-foreground px-2 py-0.5"
-                >
-                  {resourcesLoading ? '...' : `${profileSessions.length} sessions`}
-                </Badge>
-              </div>
-              <CardDescription className="text-xs text-muted-foreground pt-1">
-                View, filter, and resume interactive CLI terminal sessions for <code className="text-foreground">{currentProfile.name}</code>.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-5 pt-0">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onNavigateToSessions && onNavigateToSessions(currentProfile.name)}
-                className="w-full justify-between h-9 rounded-geist border-border bg-secondary text-xs font-sans font-medium text-foreground hover:bg-accent hover:border-border/80 cursor-pointer"
-              >
-                <span>Open in All Sessions View ({currentProfile.name})</span>
-                <ArrowRight className="h-3.5 w-3.5 ml-1 text-muted-foreground" />
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Card 2: MCP Catalog Deep Link */}
-          <Card className="border border-border bg-card rounded-geist hover:border-border/80 transition-colors">
-            <CardHeader className="p-5 pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Server className="h-4 w-4 text-muted-foreground" />
-                  MCP Catalog & Tools
-                </CardTitle>
-                <Badge
-                  variant="outline"
-                  className="text-xs font-sans font-medium bg-secondary border-border text-foreground px-2 py-0.5"
-                >
-                  {resourcesLoading ? '...' : `${profileMcpServers.length} active`}
-                </Badge>
-              </div>
-              <CardDescription className="text-xs text-muted-foreground pt-1">
-                Explore connected MCP servers, global inheritance, and sandbox integrations.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-5 pt-0">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onNavigateToMcp && onNavigateToMcp(currentProfile.name)}
-                className="w-full justify-between h-9 rounded-geist border-border bg-secondary text-xs font-sans font-medium text-foreground hover:bg-accent hover:border-border/80 cursor-pointer"
-              >
-                <span>Open in MCP Catalog ({currentProfile.name})</span>
-                <ArrowRight className="h-3.5 w-3.5 ml-1 text-muted-foreground" />
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Compact Profile Environment Sandbox Card (No scattered layout or 800px void) */}
-        <Card className="border border-border bg-card rounded-geist">
-          <CardHeader className="pb-3 p-5">
-            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Folder className="h-4 w-4 text-muted-foreground" />
-              Profile Environment & Storage Sandbox
-            </CardTitle>
-            <CardDescription className="text-xs text-muted-foreground">
-              Filesystem sandbox isolation and global configuration inheritance.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-5 pt-0">
-            <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-6 gap-y-3.5 text-xs font-sans py-1">
-              <span className="text-muted-foreground">Storage Sandbox:</span>
-              <span className="text-foreground font-mono break-all select-all">
-                {currentProfile.path}
-              </span>
-
-              <span className="text-muted-foreground">Connected Engines:</span>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
-                  currentProfile.adapters.map((ad) => (
-                    <React.Fragment key={ad.agent}>
-                      {getAgentBadge(ad.agent)}
-                    </React.Fragment>
-                  ))
-                ) : (
-                  getAgentBadge(currentProfile.agent)
-                )}
-              </div>
-
-              <span className="text-muted-foreground">Global MCP Inheritance:</span>
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={isMcpGlobalOn}
-                  disabled={updatingConfig}
-                  onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
-                />
-                <span className="text-foreground">
-                  {isMcpGlobalOn ? 'Enabled (Inherit host MCP servers)' : 'Disabled (Strict sandbox isolation)'}
+                <h3 className="text-xs font-sans font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Gauge className="h-3.5 w-3.5" />
+                  Live Quota Telemetry & Rate Limits
+                </h3>
+                <span className="text-[11px] font-mono text-muted-foreground">
+                  {refreshing ? 'Updating live...' : 'Active live telemetry'}
                 </span>
               </div>
 
-              <span className="text-muted-foreground">Global Plugin Inheritance:</span>
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={isPluginsGlobalOn}
-                  disabled={updatingConfig}
-                  onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
-                />
-                <span className="text-foreground">
-                  {isPluginsGlobalOn ? 'Enabled (Inherit host plugins)' : 'Disabled (Strict sandbox isolation)'}
-                </span>
+              <div className="grid grid-cols-1 gap-4">
+                {(currentProfile.adapters && currentProfile.adapters.length > 0
+                  ? currentProfile.adapters
+                  : [
+                      {
+                        agent: currentProfile.agent,
+                        has_credentials: currentProfile.has_credentials,
+                        account: currentProfile.account,
+                        quota: currentProfile.quota,
+                      },
+                    ]
+                ).map((ad) => (
+                  <Card key={ad.agent} className="border border-border bg-card rounded-geist">
+                    <CardHeader className="pb-3 p-5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {getAgentBadge(ad.agent)}
+                          <span className="text-xs font-sans text-muted-foreground">Engine</span>
+                        </div>
+                        {ad.has_credentials ? (
+                          <Badge
+                            variant="outline"
+                            className="badge-success text-xs font-sans"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                            <span>Authenticated</span>
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="badge-warning text-xs font-sans"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                            <span>Needs Auth</span>
+                          </Badge>
+                        )}
+                      </div>
+                      <CardDescription className="text-xs text-muted-foreground pt-1">
+                        {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials detected' : 'No credentials detected')}
+                      </CardDescription>
+                    </CardHeader>
+
+                    <CardContent className="space-y-4 p-5 pt-0">
+                      {/* Visual Quota Meters */}
+                      <QuotaBreakdown
+                        summary={ad.quota?.summary}
+                        bottleneckPct={ad.quota?.bottleneck_pct ?? 100}
+                        isExhausted={ad.quota?.is_exhausted}
+                      />
+
+                      {/* Account detail chips */}
+                      <div className="p-3 rounded-geist bg-secondary/50 border border-border space-y-1.5 text-xs font-sans">
+                        <div className="flex justify-between items-center text-muted-foreground">
+                          <span>Account:</span>
+                          <span className="text-foreground font-medium truncate max-w-[220px]">
+                            {ad.account?.name || currentProfile.name}
+                          </span>
+                        </div>
+                        {ad.account?.auth_method && (
+                          <div className="flex justify-between items-center text-muted-foreground">
+                            <span>Auth Method:</span>
+                            <span className="text-foreground truncate max-w-[220px]">{ad.account.auth_method}</span>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Visual Live Quota Breakdown (Replaces raw monospace text) */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-sans font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Gauge className="h-3.5 w-3.5" />
-              Live Quota Telemetry & Rate Limits
-            </h3>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefreshCurrentProfile}
-              disabled={loading || refreshing}
-              className="h-7 text-xs font-sans rounded-geist border-border bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer px-2.5"
-            >
-              <RefreshCw className={`h-3 w-3 mr-1.5 ${refreshing ? 'animate-spin' : ''}`} />
-              {refreshing ? 'Refreshing...' : 'Refresh Quota'}
-            </Button>
+            {/* Recent Interactive Sessions */}
+            <Card className="border border-border bg-card rounded-geist">
+              <CardHeader className="p-5 pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <Terminal className="h-4 w-4 text-muted-foreground" />
+                    Recent Sessions
+                  </CardTitle>
+                  <Badge
+                    variant="outline"
+                    className="text-xs font-sans font-medium bg-secondary border-border text-foreground px-2 py-0.5"
+                  >
+                    {resourcesLoading ? '...' : `${profileSessions.length} total`}
+                  </Badge>
+                </div>
+                <CardDescription className="text-xs text-muted-foreground pt-1">
+                  Recent interactive terminal sessions for {currentProfile.name}.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 pt-0">
+                {resourcesLoading ? (
+                  <div className="py-8 text-center text-xs text-muted-foreground font-sans">
+                    Loading sessions...
+                  </div>
+                ) : profileSessions.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-muted-foreground font-sans border border-dashed border-border rounded-geist">
+                    No recorded sessions for this profile yet.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border border border-border rounded-geist overflow-hidden">
+                    {profileSessions.slice(0, 4).map((sess) => (
+                      <div
+                        key={sess.id}
+                        className="p-3.5 hover:bg-secondary/40 transition-colors flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => onViewSession?.(sess)}
+                              className="font-medium text-foreground hover:underline truncate cursor-pointer text-left font-sans"
+                            >
+                              {sess.title || sess.goal || sess.id.slice(0, 8)}
+                            </button>
+                            <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+                              {sess.turns} turns
+                            </span>
+                            {sess.is_active && (
+                              <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid shrink-0" title="Active" />
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-muted-foreground text-[11px] font-mono truncate">
+                            <span className="truncate">{sess.cwd}</span>
+                            <span>•</span>
+                            <span className="shrink-0">{formatRelativeTime(sess.updated_at)}</span>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleQuickResume(sess)}
+                          disabled={resumingId === sess.id}
+                          className="h-7 text-xs font-sans rounded-geist border-border bg-secondary hover:bg-accent text-foreground cursor-pointer px-2.5 shrink-0"
+                        >
+                          <Terminal className={`h-3 w-3 mr-1 ${resumingId === sess.id ? 'animate-spin' : ''}`} />
+                          {resumingId === sess.id ? 'Launching...' : 'Resume'}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+              <CardFooter className="p-5 pt-0 flex justify-between items-center text-xs">
+                <span className="text-muted-foreground font-sans">
+                  Showing {Math.min(4, profileSessions.length)} of {profileSessions.length} sessions
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onNavigateToSessions && onNavigateToSessions(currentProfile.name)}
+                  className="h-7 text-xs font-sans text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer px-2"
+                >
+                  <span>View all in Sessions Explorer</span>
+                  <ArrowRight className="h-3 w-3 ml-1" />
+                </Button>
+              </CardFooter>
+            </Card>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {(currentProfile.adapters && currentProfile.adapters.length > 0
-              ? currentProfile.adapters
-              : [
-                  {
-                    agent: currentProfile.agent,
-                    has_credentials: currentProfile.has_credentials,
-                    account: currentProfile.account,
-                    quota: currentProfile.quota,
-                  },
-                ]
-            ).map((ad) => (
-              <Card key={ad.agent} className="border border-border bg-card rounded-geist flex flex-col justify-between">
-                <CardHeader className="pb-3 p-5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {getAgentBadge(ad.agent)}
-                      <span className="text-xs font-sans text-muted-foreground">Engine</span>
-                    </div>
-                    {ad.has_credentials ? (
-                      <Badge
-                        variant="outline"
-                        className="badge-success"
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                        <span>Authenticated</span>
-                      </Badge>
+          {/* Right Column (5 cols, ~40%): Sandbox & Environment, Inheritance, MCP Tools */}
+          <div className="lg:col-span-5 space-y-6">
+            {/* Profile Environment Sandbox Card */}
+            <Card className="border border-border bg-card rounded-geist">
+              <CardHeader className="pb-3 p-5">
+                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Folder className="h-4 w-4 text-muted-foreground" />
+                  Sandbox & Environment
+                </CardTitle>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Filesystem sandbox isolation and global configuration inheritance.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 pt-0 space-y-4 text-xs font-sans">
+                <div>
+                  <div className="text-muted-foreground mb-1 text-[11px] uppercase tracking-wider font-semibold">
+                    Storage Sandbox
+                  </div>
+                  <div className="flex items-center gap-1.5 p-2 rounded-geist bg-secondary/60 border border-border">
+                    <span className="font-mono text-[11px] text-foreground truncate flex-1 select-all">
+                      {currentProfile.path}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPath(currentProfile.path)}
+                      className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer"
+                      title="Copy path"
+                    >
+                      {copiedPath ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-muted-foreground mb-1.5 text-[11px] uppercase tracking-wider font-semibold">
+                    Connected Engines
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
+                      currentProfile.adapters.map((ad) => (
+                        <React.Fragment key={ad.agent}>
+                          {getAgentBadge(ad.agent)}
+                        </React.Fragment>
+                      ))
                     ) : (
-                      <Badge
-                        variant="outline"
-                        className="badge-warning"
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                        <span>Needs Auth</span>
-                      </Badge>
+                      getAgentBadge(currentProfile.agent)
                     )}
                   </div>
-                  <CardDescription className="text-xs text-muted-foreground pt-1">
-                    {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials detected' : 'No credentials detected')}
-                  </CardDescription>
-                </CardHeader>
+                </div>
 
-                <CardContent className="space-y-4 p-5 pt-0">
-                  {/* Visual Quota Meters */}
-                  <QuotaBreakdown
-                    summary={ad.quota?.summary}
-                    bottleneckPct={ad.quota?.bottleneck_pct ?? 100}
-                    isExhausted={ad.quota?.is_exhausted}
-                  />
-
-                  {/* Account detail chips */}
-                  <div className="p-3 rounded-geist bg-secondary/50 border border-border space-y-1.5 text-xs font-sans">
-                    <div className="flex justify-between items-center text-muted-foreground">
-                      <span>Account:</span>
-                      <span className="text-foreground font-medium truncate max-w-[180px]">
-                        {ad.account?.name || currentProfile.name}
-                      </span>
+                <div className="pt-2 border-t border-border space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5 pr-2">
+                      <div className="font-medium text-foreground">Global MCP Inheritance</div>
+                      <div className="text-[11px] text-muted-foreground">Inherit host machine MCP servers</div>
                     </div>
-                    {ad.account?.auth_method && (
-                      <div className="flex justify-between items-center text-muted-foreground">
-                        <span>Auth Method:</span>
-                        <span className="text-foreground truncate max-w-[180px]">{ad.account.auth_method}</span>
-                      </div>
-                    )}
+                    <Switch
+                      checked={isMcpGlobalOn}
+                      disabled={updatingConfig}
+                      onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
+                    />
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5 pr-2">
+                      <div className="font-medium text-foreground">Global Plugin Inheritance</div>
+                      <div className="text-[11px] text-muted-foreground">Inherit host machine plugins</div>
+                    </div>
+                    <Switch
+                      checked={isPluginsGlobalOn}
+                      disabled={updatingConfig}
+                      onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* MCP Tools & Catalog Preview */}
+            <Card className="border border-border bg-card rounded-geist">
+              <CardHeader className="pb-3 p-5">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <Server className="h-4 w-4 text-muted-foreground" />
+                    MCP Tools & Catalog
+                  </CardTitle>
+                  <Badge
+                    variant="outline"
+                    className="text-xs font-sans font-medium bg-secondary border-border text-foreground px-2 py-0.5"
+                  >
+                    {resourcesLoading ? '...' : `${profileMcpServers.length} active`}
+                  </Badge>
+                </div>
+                <CardDescription className="text-xs text-muted-foreground pt-1">
+                  Configured MCP servers and tool capabilities for this profile.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 pt-0">
+                {resourcesLoading ? (
+                  <div className="py-6 text-center text-xs text-muted-foreground font-sans">
+                    Loading MCP servers...
+                  </div>
+                ) : profileMcpServers.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-muted-foreground font-sans border border-dashed border-border rounded-geist">
+                    No MCP servers configured for this profile.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {profileMcpServers.slice(0, 6).map((srv) => (
+                        <span
+                          key={srv.name}
+                          className="inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-secondary font-mono text-[11px] text-foreground"
+                        >
+                          {srv.name}
+                          {srv.scope && (
+                            <span className="ml-1 text-muted-foreground text-[10px]">
+                              ({srv.scope})
+                            </span>
+                          )}
+                        </span>
+                      ))}
+                      {profileMcpServers.length > 6 && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-secondary font-mono text-[11px] text-muted-foreground">
+                          +{profileMcpServers.length - 6} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+              <CardFooter className="p-5 pt-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onNavigateToMcp && onNavigateToMcp(currentProfile.name)}
+                  className="w-full justify-between h-8 rounded-geist border-border bg-secondary text-xs font-sans font-medium text-foreground hover:bg-accent cursor-pointer"
+                >
+                  <span>Open in MCP Catalog</span>
+                  <ArrowRight className="h-3.5 w-3.5 ml-1 text-muted-foreground" />
+                </Button>
+              </CardFooter>
+            </Card>
           </div>
         </div>
 
