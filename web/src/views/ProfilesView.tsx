@@ -1261,24 +1261,9 @@ export function ProfilesView({
                     </div>
 
                     <div className="pt-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-base font-semibold text-foreground group-hover:text-foreground transition-colors">
-                          {p.name}
-                        </CardTitle>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={`Delete profile ${p.name}`}
-                          aria-label={`Delete profile ${p.name}`}
-                          className="h-7 w-7 text-muted-foreground hover:text-status-danger hover:bg-status-danger-bg rounded-geist transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openDeleteDialog(p.agent, p.name);
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                      <CardTitle className="text-base font-semibold text-foreground group-hover:text-foreground transition-colors">
+                        {p.name}
+                      </CardTitle>
                       <CardDescription className="text-xs text-muted-foreground truncate pt-0.5 flex items-center gap-1">
                         <Folder className="h-3 w-3 shrink-0 text-muted-foreground/60" />
                         <span className="truncate font-mono">{p.path}</span>
