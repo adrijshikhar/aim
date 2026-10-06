@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import parseDiff from 'parse-diff';
 import { FileCode, Copy, Check, ChevronDown, ChevronRight, PlusCircle, MinusCircle } from 'lucide-react';
 import { Button } from './ui/button';
+import { cn } from '@/lib/utils';
 
 interface DiffViewerProps {
   diffText: string;
@@ -99,7 +100,7 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
           >
             {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
-          <FileCode className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+          <FileCode className="h-3.5 w-3.5 text-[#52a8ff] shrink-0" />
           <span className="text-[#ededed] font-medium text-[11px] truncate" title={fullDisplayPath || displayFileName}>
             {displayFileName}
           </span>
@@ -156,7 +157,7 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                 {/* File Sub-header if multi-file */}
                 {parsedFiles.length > 1 && (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-[#111111] border-b border-[#222222] text-[#888888] text-[10px]">
-                    <FileCode className="h-3 w-3 text-sky-400" />
+                    <FileCode className="h-3 w-3 text-[#52a8ff]" />
                     <span className="text-[#cccccc] font-medium">
                       {file.to?.replace(/^b\//, '') || file.from?.replace(/^a\//, '') || `File ${fileIdx + 1}`}
                     </span>
@@ -223,7 +224,12 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                             }`}
                           >
                             {/* Line numbers gutter (sticky left edge) */}
-                            <div className="sticky left-0 flex items-center bg-inherit z-10 shrink-0 select-none font-mono border-r border-[#222222]">
+                            <div
+                              className={cn(
+                                'sticky left-0 flex items-center z-10 shrink-0 select-none font-mono border-r border-[#222222]',
+                                isAdd ? 'bg-[#0f1a14]' : isDel ? 'bg-[#1c0f12]' : 'bg-[#0d0d0d]'
+                              )}
+                            >
                               <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
                                 {oldNum ?? ''}
                               </div>

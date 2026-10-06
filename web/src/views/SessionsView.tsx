@@ -93,7 +93,7 @@ export function SessionsView({
   }, [selectedProfile]);
 
   const fetchSessions = React.useCallback(async (force = false) => {
-    if (sessionsMemoryCache && !force) {
+    if (!force && (sessionsMemoryCache || sessions.length > 0)) {
       setRefreshing(true);
     } else {
       setLoading(true);
@@ -366,15 +366,16 @@ export function SessionsView({
         size: 160,
         cell: ({ row }) => {
           const rawCwd = row.original.cwd || '';
+          if (!rawCwd) return <span className="text-[#666666] font-mono text-xs">-</span>;
           const parts = rawCwd.split('/').filter(Boolean);
           const basename = parts.length > 0 ? parts[parts.length - 1] : rawCwd;
           const parent = parts.length > 1 ? `.../${parts[parts.length - 2]}/` : '';
           return (
-            <div className="flex items-center gap-1.5 font-mono text-xs text-[#a1a1a1] max-w-[155px]" title={rawCwd}>
-              <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
-              <div className="truncate">
-                <span className="text-[#666666]">{parent}</span>
-                <span className="text-[#ededed] font-medium">{basename}</span>
+            <div className="flex items-center gap-1.5 font-mono text-xs max-w-[155px]" title={rawCwd}>
+              <Folder className="h-3.5 w-3.5 shrink-0 text-[#666666]" />
+              <div className="truncate flex items-baseline gap-1">
+                <span className="text-[#ededed] font-medium shrink-0">{basename}</span>
+                {parent && <span className="text-[#555555] text-[11px] truncate">{parent}</span>}
               </div>
             </div>
           );
@@ -383,16 +384,27 @@ export function SessionsView({
       {
         id: 'goal_title',
         header: 'GOAL / TITLE',
-        cell: ({ row }) => (
-          <div className="space-y-0.5 min-w-0 pr-2">
-            <div className="text-xs font-sans font-medium text-[#ededed] truncate">
-              {row.original.title || 'Untitled Session'}
+        cell: ({ row }) => {
+          const title = row.original.title?.trim() || 'Untitled Session';
+          const goal = row.original.goal?.trim();
+          const isGoalDistinct = goal && goal.toLowerCase() !== title.toLowerCase();
+          return (
+            <div className="space-y-0.5 min-w-0 pr-2">
+              <div className="text-xs font-sans font-medium text-[#ededed] truncate" title={title}>
+                {title}
+              </div>
+              {isGoalDistinct ? (
+                <div className="text-[11px] font-sans text-[#888888] truncate" title={goal}>
+                  {goal}
+                </div>
+              ) : (
+                <div className="text-[10px] font-mono text-[#555555] truncate">
+                  sess-{row.original.id.slice(0, 8)}
+                </div>
+              )}
             </div>
-            {row.original.goal && (
-              <div className="text-[11px] font-sans text-[#888888] truncate">{row.original.goal}</div>
-            )}
-          </div>
-        ),
+          );
+        },
       },
       {
         accessorKey: 'turns',
@@ -614,8 +626,8 @@ export function SessionsView({
 
       {/* TanStack Table Container */}
       <div className="rounded-geist border border-border bg-[#111111] overflow-hidden shadow-sm">
-        <Table containerClassName="overflow-x-hidden" className="table-fixed w-full">
-          <TableHeader className="bg-[#0a0a0a] border-b border-border">
+        <Table containerClassName="overflow-x-auto max-h-[calc(100vh-240px)]" className="table-fixed w-full min-w-[760px]">
+          <TableHeader className="sticky top-0 z-10 bg-[#0a0a0a]/95 backdrop-blur-md border-b border-border">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="border-border hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
@@ -665,8 +677,31 @@ export function SessionsView({
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="text-center py-12 text-[#a1a1a1] font-mono text-xs">
-                  No sessions match the current search or filters.
+                <TableCell colSpan={columns.length} className="text-center py-16">
+                  <div className="flex flex-col items-center justify-center max-w-sm mx-auto space-y-3">
+                    <div className="w-10 h-10 rounded-full border border-border bg-[#161616] flex items-center justify-center text-[#666666]">
+                      <Search className="w-4 h-4" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-sans font-medium text-[#ededed]">No sessions found</p>
+                      <p className="text-xs text-[#888888] font-sans">
+                        {hasActiveFilters
+                          ? 'No sessions match your search query or selected filter criteria.'
+                          : 'No active or recorded agent sessions found for this environment.'}
+                      </p>
+                    </div>
+                    {hasActiveFilters && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={resetAllFilters}
+                        className="rounded-geist h-7 px-3 text-xs font-mono border-border bg-[#1a1a1a] text-[#ededed] hover:bg-[#222222] cursor-pointer"
+                      >
+                        <X className="mr-1.5 h-3 w-3" />
+                        Clear all filters
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (

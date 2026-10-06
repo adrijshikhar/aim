@@ -234,6 +234,9 @@ export function App() {
       setSelectedMcpScope(route.mcpScope);
       if (route.sessionId) {
         setTargetSessionId(route.sessionId);
+        if (viewedSession?.id !== route.sessionId) {
+          setViewedSession(null);
+        }
       } else {
         setViewedSession(null);
         setTargetSessionId(null);
@@ -241,11 +244,11 @@ export function App() {
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [viewedSession]);
 
   // Fetch session details if targeted by URL
   React.useEffect(() => {
-    if (targetSessionId && !viewedSession) {
+    if (targetSessionId && (!viewedSession || viewedSession.id !== targetSessionId)) {
       getSessions()
         .then((allSessions) => {
           const found = allSessions.find((s) => s.id === targetSessionId);
@@ -586,7 +589,10 @@ export function App() {
             {currentView === 'mcp' && (
               <McpView
                 selectedScope={selectedMcpScope}
-                onSelectScope={setSelectedMcpScope}
+                onSelectScope={(scope) => {
+                  setSelectedMcpScope(scope);
+                  syncUrl('mcp', 'all', 'quota', scope, null, true);
+                }}
                 profiles={profiles}
               />
             )}

@@ -36,6 +36,8 @@ import {
   GitFork,
   FileText,
   PenTool,
+  ArrowUpDown,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -143,9 +145,11 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
 
   // Search & Filter state for Conversation History
   const [turnSearch, setTurnSearch] = React.useState('');
-  const [roleFilter, setRoleFilter] = React.useState<'all' | 'user' | 'assistant'>('all');
+  const [roleFilter, setRoleFilter] = React.useState<'all' | 'user' | 'assistant' | 'tools'>('all');
+  const [sortOrder, setSortOrder] = React.useState<'newest' | 'chronological'>('newest');
   const [visibleCount, setVisibleCount] = React.useState(INITIAL_BATCH_SIZE);
   const [showScrollTop, setShowScrollTop] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   const { toast } = useToast();
   const topRef = React.useRef<HTMLDivElement>(null);
@@ -153,11 +157,13 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
 
   const fetchTranscript = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await getSessionTranscript(session.agent, session.id);
       setTranscript(data);
       setVisibleCount(INITIAL_BATCH_SIZE);
-    } catch {
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not load transcript replay from disk');
       // Fallback synthetic transcript from session metadata
       const fallbackData: SessionTranscriptDTO = {
         session_id: session.id,
@@ -334,9 +340,10 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
   const filteredTurns = React.useMemo(() => {
     return allTurns.filter((turn) => {
       // Role filter
-      if (roleFilter !== 'all' && turn.role !== roleFilter) {
-        return false;
-      }
+      if (roleFilter === 'user' && turn.role !== 'user') return false;
+      if (roleFilter === 'assistant' && turn.role !== 'assistant') return false;
+      if (roleFilter === 'tools' && (!turn.tool_calls || turn.tool_calls.length === 0)) return false;
+
       // Text search query
       if (turnSearch.trim()) {
         const query = turnSearch.toLowerCase();
@@ -356,20 +363,23 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
     });
   }, [allTurns, turnSearch, roleFilter]);
 
-  // Reverse chronological order: newest turns first at the top, traversing back in time down to Turn #1
-  const reversedTurns = React.useMemo(() => {
+  // Order turns: chronological vs newest first
+  const orderedTurns = React.useMemo(() => {
+    if (sortOrder === 'chronological') {
+      return [...filteredTurns];
+    }
     return [...filteredTurns].reverse();
-  }, [filteredTurns]);
+  }, [filteredTurns, sortOrder]);
 
-  // Reset visible turns count whenever query or role filter changes
+  // Reset visible turns count whenever query, role filter, or sort order changes
   React.useEffect(() => {
     setVisibleCount(INITIAL_BATCH_SIZE);
-  }, [turnSearch, roleFilter]);
+  }, [turnSearch, roleFilter, sortOrder]);
 
-  // Infinite scroll slice (top N newest turns)
+  // Infinite scroll slice
   const visibleTurns = React.useMemo(() => {
-    return reversedTurns.slice(0, visibleCount);
-  }, [reversedTurns, visibleCount]);
+    return orderedTurns.slice(0, visibleCount);
+  }, [orderedTurns, visibleCount]);
 
   // Infinite scroll intersection observer observing bottom sentinel
   React.useEffect(() => {
@@ -380,8 +390,8 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
       (entries) => {
         if (entries[0].isIntersecting) {
           setVisibleCount((prev) => {
-            if (prev < reversedTurns.length) {
-              return Math.min(prev + INITIAL_BATCH_SIZE, reversedTurns.length);
+            if (prev < orderedTurns.length) {
+              return Math.min(prev + INITIAL_BATCH_SIZE, orderedTurns.length);
             }
             return prev;
           });
@@ -392,49 +402,60 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [reversedTurns.length]);
+  }, [orderedTurns.length]);
 
   return (
     <div ref={topRef} className="space-y-4 pb-12">
-      {/* Navigation Breadcrumb & Back Action */}
+      {/* Back Action & Reload Replay Bar */}
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onBack}
-            className="h-8 px-2 text-xs font-sans text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#161616] rounded-geist"
-          >
-            <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-            Sessions
-          </Button>
-          <span className="text-[#333333] font-mono text-xs">/</span>
-          <AgentBadge agent={session.agent} />
-          <span className="text-[#333333] font-mono text-xs">/</span>
-          <span className="font-mono text-xs text-[#a1a1a1] truncate max-w-[200px]" title={session.id}>
-            {session.id.slice(0, 12)}
-          </span>
-        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onBack}
+          className="h-7 px-2.5 text-xs font-sans text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#161616] rounded-geist"
+        >
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
+          Back to Sessions
+        </Button>
 
-        <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={fetchTranscript}
+          disabled={loading}
+          className="h-7 px-2.5 text-xs font-sans border-border bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] rounded-geist"
+        >
+          <RefreshCw className={cn('h-3 w-3 mr-1.5', loading && 'animate-spin')} />
+          Reload Replay
+        </Button>
+      </div>
+
+      {/* Explicit Error / Fallback Banner if transcript loading failed */}
+      {loadError && (
+        <div className="rounded-geist border border-amber-500/40 bg-amber-500/10 p-3.5 flex items-center justify-between gap-3 text-xs text-amber-200">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>Transcript replay could not be loaded from disk ({loadError}). Displaying session overview.</span>
+          </div>
           <Button
             variant="outline"
             size="sm"
             onClick={fetchTranscript}
             disabled={loading}
-            className="h-8 px-2.5 text-xs font-sans border-border bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] rounded-geist"
+            className="rounded-geist h-7 px-3 text-xs font-mono border-amber-500/30 bg-[#161616] text-amber-200 hover:bg-[#202020] cursor-pointer"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5 mr-1.5', loading && 'animate-spin')} />
-            Reload Replay
+            <RefreshCw className={cn('h-3 w-3 mr-1.5', loading && 'animate-spin')} />
+            Retry
           </Button>
         </div>
-      </div>
+      )}
 
       {/* Sticky Header Card */}
-      <div className="rounded-geist border border-border bg-[#111111] p-5 shadow-lg space-y-4">
+      <div className="rounded-geist border border-border bg-[#111111]/95 backdrop-blur-md p-5 shadow-lg space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1.5 min-w-0">
             <div className="flex items-center gap-2.5 flex-wrap">
+              <AgentBadge agent={session.agent} />
               <h1 className="text-base font-semibold text-[#ededed] tracking-tight font-sans">
                 {session.title || 'Untitled Session'}
               </h1>
@@ -593,12 +614,22 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
               >
                 Responses
               </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter('tools')}
+                className={cn(
+                  'px-2 py-0.5 rounded transition-colors cursor-pointer',
+                  roleFilter === 'tools' ? 'bg-[#222222] text-[#ededed] font-medium' : 'text-[#888888] hover:text-[#ededed]'
+                )}
+              >
+                Tools Only
+              </button>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Search within conversation */}
-            <div className="relative min-w-[200px] max-w-xs flex-1">
+            <div className="relative min-w-[180px] max-w-xs flex-1">
               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-[#666666]" />
               <Input
                 placeholder="Search transcript..."
@@ -616,6 +647,18 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                 </button>
               )}
             </div>
+
+            {/* Sort Order Toggle */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSortOrder(sortOrder === 'newest' ? 'chronological' : 'newest')}
+              className="h-7 px-2 text-xs font-mono border-border bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] rounded-[4px] gap-1 cursor-pointer"
+              title={sortOrder === 'newest' ? 'Showing newest turns first' : 'Showing chronological (turn 1 to N)'}
+            >
+              <ArrowUpDown className="h-3 w-3 text-[#666666]" />
+              <span>{sortOrder === 'newest' ? 'Newest First' : 'Turn 1 → N'}</span>
+            </Button>
           </div>
         </div>
 
@@ -651,14 +694,16 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                 <span>
                   Showing{' '}
                   <strong className="text-[#ededed] font-medium font-mono">
-                    {Math.min(visibleCount, reversedTurns.length)}
+                    {Math.min(visibleCount, orderedTurns.length)}
                   </strong>{' '}
                   of{' '}
                   <strong className="text-[#ededed] font-medium font-mono">
-                    {reversedTurns.length}
+                    {orderedTurns.length}
                   </strong>{' '}
                   turns
-                  <span className="text-[#666666] ml-1.5 font-normal">(Newest first)</span>
+                  <span className="text-[#666666] ml-1.5 font-normal">
+                    {sortOrder === 'newest' ? '(Newest first)' : '(Turn 1 → N)'}
+                  </span>
                 </span>
                 {turnSearch && (
                   <Badge variant="outline" className="text-[10px] font-sans border-[#262626] text-[#ededed] bg-[#141414] px-1.5 py-0">
@@ -667,14 +712,14 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                 )}
               </div>
 
-              {reversedTurns.length > visibleCount && (
+              {orderedTurns.length > visibleCount && (
                 <span className="text-[11px] text-[#666666] font-sans">
-                  Scroll down to load older turns ({reversedTurns.length - visibleCount} remaining)
+                  Scroll down to load older turns ({orderedTurns.length - visibleCount} remaining)
                 </span>
               )}
             </div>
 
-            {/* Conversation Stream Items (Reverse Chronological: Latest at Top) */}
+            {/* Conversation Stream Items */}
             <div className="space-y-3">
               {visibleTurns.map((turn) => {
                 const isUser = turn.role === 'user';
@@ -689,7 +734,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                     className={cn(
                       'rounded-geist transition-colors border p-4',
                       isUser
-                        ? 'border-[#262626] bg-[#0c0c0c]'
+                        ? 'border-[#2e2e2e] bg-[#0c0c0c] ring-1 ring-white/5 shadow-sm'
                         : 'border-[#1f1f1f] bg-[#111111]'
                     )}
                   >
@@ -771,9 +816,17 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                               <span className="font-medium">Reasoning &amp; Thinking Process</span>
                             </span>
                             <span className="text-[10px] font-mono text-[#dfa88f]/80 px-1.5 py-0.5 rounded border border-[#dfa88f]/30 bg-[#dfa88f]/10">
-                              {isThinkingOpen ? 'collapse' : `${turn.thinking!.length} chars`}
+                              {isThinkingOpen ? 'collapse' : `~${Math.round(turn.thinking!.length / 4)} tok`}
                             </span>
                           </button>
+                          {!isThinkingOpen && (
+                            <div
+                              onClick={() => toggleThinking(turn.turn_index)}
+                              className="px-3 pb-2 pt-0.5 text-[11px] font-mono text-[#dfa88f]/70 truncate cursor-pointer hover:text-[#dfa88f]"
+                            >
+                              {turn.thinking!.trim().slice(0, 140)}...
+                            </div>
+                          )}
                           {isThinkingOpen && (
                             <div className="p-3 border-t border-[#dfa88f]/20 text-xs font-mono text-[#e4cec4] bg-[#0c0908] whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
                               {turn.thinking}
@@ -842,8 +895,14 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                         <span className="text-[10px] text-[#666666] uppercase tracking-wider">
                                           Arguments:
                                         </span>
-                                        <pre className="p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto whitespace-pre-wrap">
-                                          {tool.arguments}
+                                        <pre className="p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto whitespace-pre-wrap max-h-48">
+                                          {(() => {
+                                            try {
+                                              return JSON.stringify(JSON.parse(tool.arguments), null, 2);
+                                            } catch {
+                                              return tool.arguments;
+                                            }
+                                          })()}
                                         </pre>
                                       </div>
                                     )}
@@ -852,7 +911,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                         <span className="text-[10px] text-[#666666] uppercase tracking-wider">
                                           Output:
                                         </span>
-                                        <div className="p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto">
+                                        <div className="p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto max-h-60 overflow-y-auto">
                                           <TurnMessageRenderer content={tool.output} />
                                         </div>
                                       </div>
@@ -880,14 +939,14 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
             {/* Infinite scroll sentinel & status indicators */}
             <div ref={bottomSentinelRef} className="h-6 w-full pointer-events-none" />
 
-            {visibleCount < reversedTurns.length ? (
+            {visibleCount < orderedTurns.length ? (
               <div className="py-6 text-center text-xs font-sans text-[#777777] flex items-center justify-center gap-2">
                 <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#666666]" />
                 <span>Loading older conversation turns...</span>
               </div>
-            ) : reversedTurns.length > 0 ? (
+            ) : orderedTurns.length > 0 ? (
               <div className="py-8 text-center text-xs font-sans text-[#555555] border-t border-[#1c1c1c] flex items-center justify-center gap-2">
-                <span>Reached beginning of session transcript ({reversedTurns.length} total turns)</span>
+                <span>Reached beginning of session transcript ({orderedTurns.length} total turns)</span>
               </div>
             ) : null}
           </>

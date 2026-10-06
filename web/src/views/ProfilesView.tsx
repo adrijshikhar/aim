@@ -3,6 +3,7 @@ import {
   ProfileDTO,
   SessionDTO,
   MCPServerDTO,
+  ResumeRequest,
   getProfiles,
   deleteProfile,
   updateProfileConfig,
@@ -31,6 +32,8 @@ import {
   Server,
   ArrowRight,
   ChevronRight,
+  ChevronDown,
+  X,
   Boxes,
   Copy,
   Check,
@@ -48,6 +51,7 @@ import {
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
+import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
 import { QuotaBreakdown } from '@/components/QuotaBreakdown';
 import { cn } from '@/lib/utils';
@@ -343,7 +347,7 @@ export function ProfilesView({
   const getProgressColor = (pct: number) => {
     if (pct <= 0) return 'bg-status-danger-solid';
     if (pct <= 30) return 'bg-status-warning-solid';
-    return 'bg-status-meter';
+    return 'bg-status-success-solid';
   };
 
   const getTextColor = (pct: number) => {
@@ -359,6 +363,7 @@ export function ProfilesView({
 
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [resumingId, setResumingId] = React.useState<string | null>(null);
+  const [flagModalSession, setFlagModalSession] = React.useState<SessionDTO | null>(null);
 
   // View A multi-tab state
   const [internalActiveTab, setInternalActiveTab] = React.useState('quota');
@@ -477,6 +482,27 @@ export function ProfilesView({
         profile: sess.profile,
         session_id: sess.id,
       });
+      toast({
+        title: 'Terminal Launched',
+        description: `Resumed in ${res.terminal || 'terminal'} window.`,
+        variant: 'success',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not launch terminal';
+      toast({
+        title: 'Resume Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setResumingId(null);
+    }
+  };
+
+  const handleModalLaunch = async (req: ResumeRequest) => {
+    setResumingId(req.session_id);
+    try {
+      const res = await resumeSession(req);
       toast({
         title: 'Terminal Launched',
         description: `Resumed in ${res.terminal || 'terminal'} window.`,
@@ -647,7 +673,7 @@ export function ProfilesView({
                 </Badge>
               )}
               {quotaHealthBadge}
-              <span className="text-xs font-mono text-[#888888] px-2 py-0.5 rounded-full border border-[#222222] bg-[#0c0c0c]">
+              <span className="text-xs font-mono text-[#888888] px-2 py-0.5 rounded-geist border border-[#222222] bg-[#0c0c0c]">
                 {resourcesLoading ? '...' : `${profileSessions.length} sessions`}
               </span>
             </div>
@@ -668,18 +694,22 @@ export function ProfilesView({
 
           {/* Sandbox & Environment Sub-bar with low-contrast labels & high-contrast values */}
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs font-sans">
-            <div className="flex items-center gap-1.5">
-              <Folder className="h-3.5 w-3.5 text-[#555555]" />
-              <span className="text-[#666666]">Sandbox:</span>
-              <span className="text-[#ededed] font-mono select-all">{currentProfile.path}</span>
+            <div className="flex items-center gap-1.5 max-w-md">
+              <Folder className="h-3.5 w-3.5 text-[#666666] shrink-0" />
+              <span className="text-[#666666] shrink-0">Sandbox:</span>
+              <span className="text-[#ededed] font-mono truncate select-all" title={currentProfile.path}>
+                {currentProfile.path}
+              </span>
               <button
                 type="button"
                 onClick={() => handleCopyPath(currentProfile.path)}
-                title="Copy sandbox path"
-                className="p-1 rounded hover:bg-[#1a1a1a] text-[#666666] hover:text-[#ededed] cursor-pointer transition-colors"
+                title={copiedPath ? 'Copied to clipboard' : 'Copy sandbox path'}
+                className="p-1 rounded hover:bg-[#1a1a1a] text-[#666666] hover:text-[#ededed] cursor-pointer transition-colors shrink-0"
               >
                 {copiedPath ? (
-                  <Check className="h-3 w-3 text-status-success" />
+                  <span className="flex items-center gap-1 text-[10px] text-status-success font-sans font-medium">
+                    <Check className="h-3 w-3" /> Copied!
+                  </span>
                 ) : (
                   <Copy className="h-3 w-3" />
                 )}
@@ -710,7 +740,7 @@ export function ProfilesView({
                 <Gauge className="h-3.5 w-3.5 text-[#666666]" />
                 <span>Quota</span>
                 {profileAdapters.length > 1 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
                     {profileAdapters.length}
                   </span>
                 )}
@@ -718,14 +748,14 @@ export function ProfilesView({
               <TabsTrigger value="sessions" className="gap-2 text-xs">
                 <Terminal className="h-3.5 w-3.5 text-[#666666]" />
                 <span>Sessions</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
                   {profileSessions.length}
                 </span>
               </TabsTrigger>
               <TabsTrigger value="mcp" className="gap-2 text-xs">
                 <Server className="h-3.5 w-3.5 text-[#666666]" />
                 <span>MCP Tools</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
                   {profileMcpServers.length}
                 </span>
               </TabsTrigger>
@@ -897,9 +927,9 @@ export function ProfilesView({
                             </span>
                           </div>
                           <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
-                            <div className="h-full bg-status-meter transition-all duration-300" style={{ width: '88%' }} />
+                            <div className={`h-full transition-all duration-300 ${getProgressColor(pct)}`} style={{ width: `${Math.max(12, Math.min(100, isExhausted ? 0 : 92))}%` }} />
                           </div>
-                          <div className="text-[10px] text-[#555555] font-mono flex items-center justify-between">
+                          <div className="text-[10px] text-[#737373] font-mono flex items-center justify-between">
                             <span>7-day ceiling</span>
                             <span>Pro Tier</span>
                           </div>
@@ -914,11 +944,11 @@ export function ProfilesView({
                             </Badge>
                           </div>
                           <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
-                            <div className="h-full bg-status-meter transition-all duration-300" style={{ width: '96%' }} />
+                            <div className={`h-full transition-all duration-300 ${getProgressColor(isExhausted ? 0 : 95)}`} style={{ width: `${isExhausted ? 0 : 95}%` }} />
                           </div>
-                          <div className="text-[10px] text-[#555555] font-mono flex items-center justify-between">
+                          <div className="text-[10px] text-[#737373] font-mono flex items-center justify-between">
                             <span>Burst headroom</span>
-                            <span>0 queued</span>
+                            <span>Normal</span>
                           </div>
                         </div>
                       </div>
@@ -926,7 +956,7 @@ export function ProfilesView({
                       {/* RIGHT COLUMN: Deep Dive Panel (Modeled after Vercel Speed Insights Right Column) */}
                       <div className="lg:col-span-8 space-y-5">
                         <div className="p-6 rounded-geist border border-[#222222] bg-[#0a0a0a] space-y-5">
-                          {/* Category Overline & Time Horizon Radio Selector (Screenshot 2: • P75 ○ P90 ○ P95 ○ P99) */}
+                          {/* Category Overline & Time Horizon Radio Selector */}
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div className="text-xs uppercase font-mono tracking-wider text-[#666666]">
                               {ad.agent.toUpperCase()} TELEMETRY DEEP DIVE
@@ -948,7 +978,7 @@ export function ProfilesView({
                                         : 'text-[#666666] hover:text-[#ededed]'
                                     )}
                                   >
-                                    <span className={cn('h-1.5 w-1.5 rounded-full', isSelected ? 'bg-sky-400' : 'bg-transparent border border-[#555555]')} />
+                                    <span className={cn('h-1.5 w-1.5 rounded-full', isSelected ? 'bg-[#0070f3]' : 'bg-transparent border border-[#555555]')} />
                                     <span>{h}</span>
                                   </button>
                                 );
@@ -990,24 +1020,24 @@ export function ProfilesView({
                             </div>
                           </div>
 
-                          {/* Calibrated Semantic Alert Banner (Modeled directly after Vercel Speed Insights wine-crimson banner) */}
+                          {/* Calibrated Semantic Alert Banner */}
                           {isExhausted ? (
-                            <div className="rounded-geist border border-[#3b1219] bg-[#16080b] p-3 text-xs flex items-center gap-2.5 text-[#f87171] font-mono">
-                              <AlertCircle className="h-4 w-4 shrink-0 text-[#f87171]" />
-                              <span>Rate limit window exhausted. Quota resets in approximately 42 minutes.</span>
+                            <div className="rounded-geist border border-status-danger-border bg-status-danger-bg p-3 text-xs flex items-center gap-2.5 text-status-danger font-mono">
+                              <AlertCircle className="h-4 w-4 shrink-0 text-status-danger" />
+                              <span>Rate limit window exhausted. Quota resets in approximately {ad.quota?.summary?.match(/\[([^\]]+)\]/)?.[1] || '45m'}.</span>
                             </div>
                           ) : isWarning ? (
-                            <div className="rounded-geist border border-[#3b2a00] bg-[#1a1200] p-3 text-xs flex items-center gap-2.5 text-[#f5a623] font-mono">
-                              <AlertTriangle className="h-4 w-4 shrink-0 text-[#f5a623]" />
+                            <div className="rounded-geist border border-status-warning-border bg-status-warning-bg p-3 text-xs flex items-center gap-2.5 text-status-warning font-mono">
+                              <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" />
                               <span>High quota consumption detected ({pct}% remaining). Approaching window limit.</span>
                             </div>
                           ) : (
-                            <div className="rounded-geist border border-[#1b3b22] bg-[#0c1a10] p-3 text-xs flex items-center justify-between text-[#4ade80] font-mono">
+                            <div className="rounded-geist border border-status-success-border bg-status-success-bg p-3 text-xs flex items-center justify-between text-status-success font-mono">
                               <div className="flex items-center gap-2">
                                 <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
                                 <span>Telemetry stream active • All token quotas operating within normal limits</span>
                               </div>
-                              <span className="text-[11px] text-[#4ade80]/70">Checked just now</span>
+                              <span className="text-[11px] opacity-80">Checked just now</span>
                             </div>
                           )}
 
@@ -1149,16 +1179,27 @@ export function ProfilesView({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Button
-                        size="sm"
-                        onClick={() => handleQuickResume(sess)}
-                        disabled={resumingId === sess.id}
-                        className="h-7 text-xs font-sans font-medium rounded-geist border border-[#2a2a2a] bg-[#121212] hover:bg-[#181818] hover:border-[#383838] text-[#ededed] hover:text-white cursor-pointer px-3 shrink-0 shadow-sm transition-colors"
-                      >
-                        <Terminal className={`h-3 w-3 mr-1 text-[#888888] ${resumingId === sess.id ? 'animate-spin text-[#ededed]' : ''}`} />
-                        {resumingId === sess.id ? 'Launching...' : 'Resume'}
-                      </Button>
+                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <div className="inline-flex items-center rounded-geist border border-[#2a2a2a] bg-[#121212] hover:bg-[#181818] hover:border-[#383838] transition-colors shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickResume(sess)}
+                          disabled={resumingId === sess.id}
+                          className="h-7 pl-2.5 pr-2 text-xs font-sans font-medium text-[#ededed] hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <Terminal className={`h-3 w-3 text-[#888888] ${resumingId === sess.id ? 'animate-spin text-[#ededed]' : ''}`} />
+                          <span>{resumingId === sess.id ? 'Launching...' : 'Resume'}</span>
+                        </button>
+                        <div className="h-3.5 w-[1px] bg-[#2a2a2a]" />
+                        <button
+                          type="button"
+                          onClick={() => setFlagModalSession(sess)}
+                          className="h-7 px-1.5 text-[#888888] hover:text-[#ededed] hover:bg-[#202020] transition-colors flex items-center justify-center cursor-pointer"
+                          title="Resume with flags"
+                        >
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1373,6 +1414,16 @@ export function ProfilesView({
           isDeleting={isDeleting}
           onConfirm={handleConfirmDelete}
         />
+
+        <ResumeModal
+          open={!!flagModalSession}
+          onOpenChange={(open) => {
+            if (!open) setFlagModalSession(null);
+          }}
+          session={flagModalSession}
+          onLaunch={handleModalLaunch}
+          isResuming={resumingId === flagModalSession?.id}
+        />
       </div>
     );
   }
@@ -1413,10 +1464,10 @@ export function ProfilesView({
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
               title="Clear search"
             >
-              <Trash2 className="h-3 w-3" />
+              <X className="h-3.5 w-3.5" />
             </button>
           ) : (
-            <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-0.2 rounded text-[10px] font-mono text-muted-foreground pointer-events-none">
+            <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-[10px] font-mono text-muted-foreground pointer-events-none">
               /
             </kbd>
           )}
@@ -1638,7 +1689,7 @@ export function ProfilesView({
                       {p.has_credentials ? (
                         <Badge
                           variant="outline"
-                          className="bg-muted text-muted-foreground border-border text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                          className="badge-success text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
                           <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                           <span>Authenticated</span>
@@ -1646,7 +1697,7 @@ export function ProfilesView({
                       ) : (
                         <Badge
                           variant="outline"
-                          className="bg-muted text-muted-foreground border-border text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
+                          className="badge-warning text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2 py-0.5 rounded-geist"
                         >
                           <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
                           <span>Needs Auth</span>
@@ -1827,6 +1878,16 @@ export function ProfilesView({
         target={deleteTarget}
         isDeleting={isDeleting}
         onConfirm={handleConfirmDelete}
+      />
+
+      <ResumeModal
+        open={!!flagModalSession}
+        onOpenChange={(open) => {
+          if (!open) setFlagModalSession(null);
+        }}
+        session={flagModalSession}
+        onLaunch={handleModalLaunch}
+        isResuming={resumingId === flagModalSession?.id}
       />
     </div>
   );

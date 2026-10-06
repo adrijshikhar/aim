@@ -81,8 +81,8 @@ export function Sidebar({
       };
     }
     return {
-      color: 'bg-status-meter',
-      text: 'text-muted-foreground/60',
+      color: 'bg-status-success-solid',
+      text: 'text-status-success',
       label: `${pct}%`,
     };
   };
@@ -98,30 +98,36 @@ export function Sidebar({
     );
   }, [profiles, findQuery]);
 
+  const isProfilesActive = currentView === 'overview' || currentView === 'profile-detail';
+  const isSessionsActive = currentView === 'sessions' || currentView === 'session-detail';
+  const isMcpActive = currentView === 'mcp';
+
   return (
     <aside className="w-64 border-r border-border bg-background flex flex-col h-full shrink-0 select-none">
       {/* Vercel-style Top Workspace Switcher Header */}
-      <div className="h-14 px-3.5 border-b border-border flex items-center justify-between gap-2">
+      <div className="h-14 px-2 border-b border-border flex items-center">
         <button
           type="button"
           onClick={() => onSelectView('overview')}
-          className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-85 transition-opacity cursor-pointer group"
+          className="w-full flex items-center justify-between p-1.5 rounded-geist hover:bg-[#161616] transition-colors cursor-pointer group"
           title="Switch workspace / Home"
         >
-          {/* Avatar circle */}
-          <div className="h-7 w-7 rounded-full bg-gradient-to-tr from-[#7928ca] to-[#ff0080] flex items-center justify-center text-[10px] font-bold text-white shadow-sm shrink-0">
-            A
+          <div className="flex items-center gap-2.5 min-w-0">
+            {/* Avatar circle */}
+            <div className="h-7 w-7 rounded-full bg-gradient-to-tr from-[#7928ca] to-[#ff0080] flex items-center justify-center text-[10px] font-bold text-white shadow-sm shrink-0">
+              A
+            </div>
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="font-semibold text-xs tracking-tight text-foreground truncate">
+                AIM Workspace
+              </span>
+              <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border bg-muted text-muted-foreground shrink-0">
+                Sandbox
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 truncate">
-            <span className="font-semibold text-xs tracking-tight text-foreground truncate">
-              AIM Workspace
-            </span>
-            <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border bg-muted text-muted-foreground shrink-0">
-              Sandbox
-            </span>
-          </div>
+          <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0 group-hover:text-foreground" />
         </button>
-        <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
       </div>
 
       {/* Quick Find Row with <kbd>F</kbd> */}
@@ -136,7 +142,7 @@ export function Sidebar({
             placeholder="Find"
             className="w-full h-7 pl-8 pr-7 text-xs font-sans bg-[#0c0c0c] border border-border/80 focus:border-border text-foreground placeholder:text-muted-foreground/50 rounded-geist focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
           />
-          <kbd className="absolute right-2 top-1/2 -translate-y-1/2 border border-border bg-muted/60 px-1 py-0.2 rounded text-[10px] font-mono text-muted-foreground pointer-events-none">
+          <kbd className="absolute right-2 top-1/2 -translate-y-1/2 border border-border bg-muted/60 px-1 py-[1px] rounded text-[10px] font-mono text-muted-foreground pointer-events-none">
             F
           </kbd>
         </div>
@@ -150,12 +156,12 @@ export function Sidebar({
             type="button"
             onClick={() => onSelectView('overview')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-geist text-xs font-sans transition-colors cursor-pointer text-left ${
-              currentView === 'overview' || currentView === 'profile-detail'
+              isProfilesActive
                 ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
                 : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
             }`}
           >
-            <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+            <Layers className={`h-3.5 w-3.5 ${isProfilesActive ? 'text-foreground' : 'text-muted-foreground'}`} />
             <span>Profiles</span>
             <span className="ml-auto text-[10px] font-mono text-muted-foreground/70">
               {profiles.length}
@@ -166,12 +172,12 @@ export function Sidebar({
             type="button"
             onClick={() => onSelectView('sessions')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-geist text-xs font-sans transition-colors cursor-pointer text-left ${
-              currentView === 'sessions' || currentView === 'session-detail'
+              isSessionsActive
                 ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
                 : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
             }`}
           >
-            <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
+            <Terminal className={`h-3.5 w-3.5 ${isSessionsActive ? 'text-foreground' : 'text-muted-foreground'}`} />
             <span>Sessions</span>
           </button>
 
@@ -179,12 +185,12 @@ export function Sidebar({
             type="button"
             onClick={() => onSelectView('mcp')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-geist text-xs font-sans transition-colors cursor-pointer text-left ${
-              currentView === 'mcp'
+              isMcpActive
                 ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
                 : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
             }`}
           >
-            <Server className="h-3.5 w-3.5 text-muted-foreground" />
+            <Server className={`h-3.5 w-3.5 ${isMcpActive ? 'text-foreground' : 'text-muted-foreground'}`} />
             <span>MCP Catalog</span>
           </button>
         </div>

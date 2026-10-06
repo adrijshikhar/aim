@@ -101,9 +101,18 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
                 return (
                   <div
                     key={opt.value}
+                    role="checkbox"
+                    aria-checked={isSelected}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleOption(opt.value);
+                      }
+                    }}
                     onClick={() => toggleOption(opt.value)}
                     className={cn(
-                      'flex items-center justify-between px-2 py-1.5 rounded-[4px] text-xs cursor-pointer select-none transition-colors hover:bg-[#1a1a1a]',
+                      'flex items-center justify-between px-2 py-1.5 rounded-[4px] text-xs cursor-pointer select-none transition-colors hover:bg-[#1a1a1a] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#ededed]',
                       isSelected && 'bg-[#161616]'
                     )}
                   >

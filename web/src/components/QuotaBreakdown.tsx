@@ -94,7 +94,7 @@ export function QuotaBreakdown({
   const getStatusColor = (pct: number) => {
     if (pct <= 0) return 'bg-status-danger-solid';
     if (pct <= 30) return 'bg-status-warning-solid';
-    return 'bg-status-meter';
+    return 'bg-status-success-solid';
   };
 
   const getTextColor = (pct: number) => {

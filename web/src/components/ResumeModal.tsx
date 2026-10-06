@@ -213,8 +213,8 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg bg-[#111111] border-[#262626] text-[#ededed] p-5 shadow-2xl rounded-geist">
-        <DialogHeader className="space-y-1 pb-2 border-b border-[#262626] pr-8">
+      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col bg-[#111111] border-[#262626] text-[#ededed] p-5 shadow-2xl rounded-geist overflow-hidden">
+        <DialogHeader className="space-y-1 pb-2 border-b border-[#262626] pr-8 shrink-0">
           <div className="flex items-center gap-2 flex-wrap">
             <DialogTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
               <Terminal className="h-4 w-4 text-[#ededed]" />
@@ -241,7 +241,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
         </DialogHeader>
 
         {/* Compact Session Metadata Strip */}
-        <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] px-3 py-1.5 text-xs flex items-center justify-between text-[#888888]">
+        <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] px-3 py-1.5 text-xs flex items-center justify-between text-[#888888] shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <Folder className="h-3 w-3 shrink-0 text-[#666666]" />
             <span className="font-mono text-[#ededed] truncate max-w-[240px]" title={session.cwd}>
@@ -254,7 +254,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
           </span>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3 pt-0.5">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto space-y-3 pt-0.5 pr-1">
           {/* Section 1: AIM Direct Flags */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
@@ -403,13 +403,13 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
             </div>
           </div>
 
-          <DialogFooter className="pt-2 flex items-center justify-end gap-2 border-t border-[#262626]">
+          <DialogFooter className="pt-2 flex items-center justify-end gap-2 border-t border-[#262626] shrink-0">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => onOpenChange(false)}
-              className="rounded-geist h-7 px-3 text-xs font-sans border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
+              className="rounded-geist h-8 px-3.5 text-xs font-sans border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
             >
               Cancel
             </Button>
@@ -417,16 +417,16 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               type="submit"
               size="sm"
               disabled={isResuming}
-              className="rounded-geist h-7 px-3.5 text-xs font-sans bg-[#ffffff] text-black hover:bg-[#eaeaea] font-medium shadow-sm transition-colors cursor-pointer"
+              className="rounded-geist h-8 px-4 text-xs font-sans bg-[#ffffff] text-black hover:bg-[#eaeaea] font-medium shadow-sm transition-colors cursor-pointer"
             >
               {isResuming ? (
                 <>
-                  <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                   Launching...
                 </>
               ) : (
                 <>
-                  <Terminal className="h-3 w-3 mr-1" />
+                  <Terminal className="h-3.5 w-3.5 mr-1.5" />
                   Resume in Terminal
                 </>
               )}

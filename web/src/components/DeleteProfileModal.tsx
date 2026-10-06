@@ -8,8 +8,8 @@ import {
   DialogFooter,
 } from './ui/dialog';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
 import { AlertTriangle, Trash2, RefreshCw } from 'lucide-react';
+import { AgentBadge } from './AgentBadge';
 
 interface DeleteProfileModalProps {
   open: boolean;
@@ -38,12 +38,7 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
               <span>Delete Profile</span>
             </DialogTitle>
             {target.agent && target.agent.trim() !== '' && (
-              <Badge
-                variant="outline"
-                className="text-[10px] font-mono bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] px-2 py-0.5 rounded-geist"
-              >
-                {target.agent}
-              </Badge>
+              <AgentBadge agent={target.agent} size="sm" />
             )}
           </div>
           <DialogDescription className="text-xs text-[#a1a1a1]">
@@ -68,7 +63,7 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
           </p>
         </div>
 
-        <DialogFooter className="pt-2 border-t border-[#262626] flex items-center justify-between sm:justify-between w-full">
+        <DialogFooter className="pt-2 border-t border-[#262626] flex items-center justify-end gap-2 w-full">
           <Button
             type="button"
             variant="outline"

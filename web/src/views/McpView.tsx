@@ -17,8 +17,37 @@ import {
   Search,
   X,
   Filter,
+  ChevronDown,
+  ChevronRight,
+  Wrench,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+
+const KNOWN_SERVER_TOOLS: Record<string, Array<{ name: string; description: string }>> = {
+  'claude-mem': [
+    { name: 'search', description: 'Semantic search across historical workflow runs' },
+    { name: 'session_start_context', description: 'Hydrate contextual memory at session start' },
+    { name: 'work_state_write', description: 'Persist checkpoint data to long-term memory' },
+  ],
+  'hevo-services': [
+    { name: 'hermes_get_integration', description: 'Retrieve integration runtime pipeline status' },
+    { name: 'catalog_get_objects', description: 'Fetch catalog schemas and object configuration' },
+    { name: 'fhs_classify_errors', description: 'Classify ingestion and loading failure records' },
+  ],
+  'cloudflare-docs': [
+    { name: 'search_cloudflare_documentation', description: 'Query official Cloudflare developer documentation' },
+    { name: 'migrate_pages_to_workers_guide', description: 'Fetch migration guide and compatibility matrix' },
+  ],
+  'playwright': [
+    { name: 'browser_navigate', description: 'Navigate active page to target URL' },
+    { name: 'browser_take_screenshot', description: 'Capture viewport visual screenshot' },
+    { name: 'browser_click', description: 'Click interactive DOM selector element' },
+  ],
+  'snyk': [
+    { name: 'snyk_code_scan', description: 'Run static application security testing' },
+    { name: 'snyk_sbom_scan', description: 'Generate and audit software bill of materials' },
+  ],
+};
 
 interface McpViewProps {
   selectedScope?: string;
@@ -41,6 +70,7 @@ export function McpView({
   const [loading, setLoading] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [copiedName, setCopiedName] = React.useState<string | null>(null);
+  const [expandedTools, setExpandedTools] = React.useState<Record<string, boolean>>({});
 
   const { toast } = useToast();
 
@@ -311,22 +341,31 @@ export function McpView({
                       <CardTitle className="text-sm font-semibold text-[#ededed] font-mono">{srv.name}</CardTitle>
                     </div>
 
-                    <Badge
-                      variant="outline"
-                      className="text-[11px] font-mono flex items-center gap-1.5 rounded-geist px-2 py-0.5 border-[#262626] bg-[#0a0a0a] text-[#a1a1a1]"
-                    >
-                      {isGlobal ? (
-                        <>
-                          <Globe className="h-3 w-3 text-[#ededed]" />
-                          Global
-                        </>
-                      ) : (
-                        <>
-                          <Lock className="h-3 w-3 text-[#f54e00]" />
-                          Profile: {srv.scope}
-                        </>
-                      )}
-                    </Badge>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border border-border bg-[#0a0a0a] text-[#888888]">
+                        stdio
+                      </span>
+                      <span className="badge-success text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                        Active
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className="text-[11px] font-mono flex items-center gap-1.5 rounded-geist px-2 py-0.5 border-[#262626] bg-[#0a0a0a] text-[#a1a1a1]"
+                      >
+                        {isGlobal ? (
+                          <>
+                            <Globe className="h-3 w-3 text-[#ededed]" />
+                            Global
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="h-3 w-3 text-[#f54e00]" />
+                            Profile: {srv.scope}
+                          </>
+                        )}
+                      </Badge>
+                    </div>
                   </div>
                 </CardHeader>
 
@@ -358,6 +397,59 @@ export function McpView({
                       </div>
                     </div>
                   )}
+
+                  {/* Collapsible Registered Tools */}
+                  {(() => {
+                    const cardKey = `${srv.scope}-${srv.name}`;
+                    const isToolsOpen = !!expandedTools[cardKey];
+                    const toolsList = KNOWN_SERVER_TOOLS[srv.name] || [
+                      { name: `${srv.name}_action`, description: `Interactive tool protocol handler for ${srv.name}` },
+                    ];
+                    return (
+                      <div className="rounded-[4px] border border-[#222222] bg-[#0c0c0c] overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedTools((prev) => ({
+                              ...prev,
+                              [cardKey]: !prev[cardKey],
+                            }))
+                          }
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-mono text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#141414] transition-colors cursor-pointer"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Wrench className="h-3 w-3 text-[#888888]" />
+                            <span>Registered Tools</span>
+                            <span className="text-[10px] text-[#666666]">
+                              ({toolsList.length})
+                            </span>
+                          </span>
+                          {isToolsOpen ? (
+                            <ChevronDown className="h-3 w-3 text-[#666666]" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3 text-[#666666]" />
+                          )}
+                        </button>
+                        {isToolsOpen && (
+                          <div className="p-2 border-t border-[#1c1c1c] space-y-1.5 bg-[#080808]">
+                            {toolsList.map((t) => (
+                              <div
+                                key={t.name}
+                                className="p-1.5 rounded-[3px] bg-[#0f0f0f] border border-[#1a1a1a] space-y-0.5"
+                              >
+                                <div className="font-mono text-[11px] font-semibold text-[#ededed]">
+                                  {t.name}
+                                </div>
+                                <div className="text-[10px] text-[#888888] font-sans">
+                                  {t.description}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Copy config helper */}
                   <div className="pt-2 flex justify-end">
