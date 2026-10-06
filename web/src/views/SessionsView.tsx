@@ -457,28 +457,28 @@ export function SessionsView({
           const isThisResuming = resumingId === sess.id;
           return (
             <div className="flex items-center justify-end" onClick={(e) => e.stopPropagation()}>
-              <div className="inline-flex items-center rounded-geist border border-[#e5e5e5] bg-[#ffffff] overflow-hidden hover:bg-[#eaeaea] shadow-sm transition-colors">
+              <div className="inline-flex items-center rounded-geist border border-[#2a2a2a] bg-[#121212] hover:bg-[#181818] hover:border-[#383838] transition-colors shadow-sm group">
                 <button
                   type="button"
                   onClick={() => handleQuickResume(sess)}
                   disabled={isThisResuming}
-                  className="h-7 pl-2.5 pr-2 text-xs font-sans font-medium text-[#000000] flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="h-7 pl-2.5 pr-2 text-xs font-sans font-medium text-[#ededed] group-hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {isThisResuming ? (
-                    <RefreshCw className="h-3 w-3 animate-spin text-[#000000]" />
+                    <RefreshCw className="h-3 w-3 animate-spin text-[#ededed]" />
                   ) : (
-                    <Terminal className="h-3 w-3 text-[#000000]" />
+                    <Terminal className="h-3 w-3 text-[#888888] group-hover:text-[#ededed] transition-colors" />
                   )}
                   <span>Resume</span>
                 </button>
-                <div className="h-3.5 w-[1px] bg-[#000000]/15" />
+                <div className="h-3.5 w-[1px] bg-[#2a2a2a]" />
                 <button
                   type="button"
                   onClick={() => setFlagModalSession(sess)}
-                  className="h-7 px-1.5 text-[#000000] hover:bg-[#dcdcdc] transition-colors flex items-center justify-center cursor-pointer"
+                  className="h-7 px-1.5 text-[#888888] hover:text-[#ededed] hover:bg-[#202020] transition-colors flex items-center justify-center cursor-pointer"
                   title="Resume with flags"
                 >
-                  <ChevronDown className="h-3 w-3 text-[#000000]" />
+                  <ChevronDown className="h-3 w-3" />
                 </button>
               </div>
             </div>

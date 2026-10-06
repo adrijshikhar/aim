@@ -242,42 +242,7 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Vercel-style Bottom Callout Card: AIM Daemon */}
-      <div className="px-3 pb-3 pt-1">
-        <div className="rounded-geist border border-[#222222] bg-[#0c0c0c] p-3 text-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Cpu className="h-3.5 w-3.5 text-[#ededed]" />
-              <span className="font-medium text-xs text-[#ededed]">AIM Daemon</span>
-            </div>
-            <span className="flex h-2 w-2 relative items-center justify-center">
-              {daemonInfo?.active ? (
-                <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
-              ) : daemonInfo?.installed ? (
-                <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-              ) : (
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
-              )}
-            </span>
-          </div>
-
-          <p className="text-[11px] text-[#888888] font-sans leading-relaxed">
-            {daemonInfo?.active
-              ? 'Live background telemetry & session indexer running via launchd.'
-              : 'Background service ready for automated quota syncing.'}
-          </p>
-
-          <button
-            type="button"
-            onClick={onOpenDaemonModal}
-            className="w-full h-7 rounded-geist bg-[#ffffff] hover:bg-[#eaeaea] text-[#000000] font-sans font-medium text-xs flex items-center justify-center transition-colors shadow-sm cursor-pointer"
-          >
-            Manage Daemon
-          </button>
-        </div>
-      </div>
-
-      {/* Vercel-style Bottom User & Live Status Bar */}
+      {/* Bottom User & Live Status Bar */}
       <div className="px-3 py-2.5 border-t border-border flex items-center justify-between bg-muted/20 text-xs">
         <div className="flex items-center gap-2 min-w-0">
           <div className="h-6 w-6 rounded-full bg-[#1e1e1e] border border-[#2e2e2e] flex items-center justify-center text-[10px] font-medium text-[#ededed] shrink-0">
@@ -293,8 +258,19 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0" title={isOnline ? 'Backend server connected' : 'Backend reconnecting'}>
-          <div className="relative flex items-center justify-center h-6 w-6 rounded-[4px] hover:bg-secondary text-muted-foreground cursor-default">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Quick Daemon Status & Modal Trigger */}
+          <button
+            type="button"
+            onClick={onOpenDaemonModal}
+            className="flex items-center justify-center h-6 w-6 rounded-[4px] hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            title={`AIM Daemon: ${daemonInfo?.active ? 'Active' : daemonInfo?.installed ? 'Installed' : 'Inactive'} (Click to manage)`}
+          >
+            <Cpu className="h-3.5 w-3.5" />
+          </button>
+
+          {/* Backend Server Status & Notifications */}
+          <div className="relative flex items-center justify-center h-6 w-6 rounded-[4px] text-muted-foreground cursor-default" title={isOnline ? 'Backend server connected' : 'Backend reconnecting'}>
             <Bell className="h-3.5 w-3.5 text-muted-foreground" />
             <span
               className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${

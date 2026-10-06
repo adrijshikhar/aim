@@ -1154,9 +1154,9 @@ export function ProfilesView({
                         size="sm"
                         onClick={() => handleQuickResume(sess)}
                         disabled={resumingId === sess.id}
-                        className="h-7 text-xs font-sans font-medium rounded-geist bg-[#ffffff] hover:bg-[#eaeaea] text-[#000000] cursor-pointer px-3 shrink-0 shadow-sm transition-colors"
+                        className="h-7 text-xs font-sans font-medium rounded-geist border border-[#2a2a2a] bg-[#121212] hover:bg-[#181818] hover:border-[#383838] text-[#ededed] hover:text-white cursor-pointer px-3 shrink-0 shadow-sm transition-colors"
                       >
-                        <Terminal className={`h-3 w-3 mr-1 text-[#000000] ${resumingId === sess.id ? 'animate-spin' : ''}`} />
+                        <Terminal className={`h-3 w-3 mr-1 text-[#888888] ${resumingId === sess.id ? 'animate-spin text-[#ededed]' : ''}`} />
                         {resumingId === sess.id ? 'Launching...' : 'Resume'}
                       </Button>
                     </div>
