@@ -276,7 +276,7 @@ func parseAgyTranscript(sess *session.Session) ([]SessionTurnDTO, error) {
 
 		var role string
 		switch {
-		case step.Source == "USER_EXPLICIT" || step.Type == "USER_INPUT":
+		case step.Source == "USER_EXPLICIT" || step.Type == "USER_INPUT" || step.Type == "SYSTEM_MESSAGE":
 			role = "user"
 		case step.Type == "PLANNER_RESPONSE" || step.Source == "MODEL":
 			role = "assistant"
@@ -348,6 +348,18 @@ func cleanUserPrompt(s string) string {
 			return cleaned
 		}
 		return "[Session Resumed — Context Summary Checkpoint]"
+	}
+	if strings.Contains(s, "<SYSTEM_MESSAGE>") {
+		if idx := strings.Index(s, "content="); idx != -1 {
+			inner := s[idx+len("content="):]
+			if endIdx := strings.Index(inner, "</SYSTEM_MESSAGE>"); endIdx != -1 {
+				inner = inner[:endIdx]
+			}
+			inner = strings.TrimSpace(inner)
+			if inner != "" {
+				s = inner
+			}
+		}
 	}
 	s = systemPromptPattern.ReplaceAllString(s, "")
 	s = claudeReminderPattern.ReplaceAllString(s, "")

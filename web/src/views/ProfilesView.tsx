@@ -618,77 +618,42 @@ export function ProfilesView({
                 <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshing || loading ? 'animate-spin' : ''}`} />
                 {refreshing ? 'Refreshing...' : 'Refresh Quota'}
               </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
-                title="Delete profile"
-                aria-label="Delete profile"
-                className="h-8 w-8 rounded-geist border-[#262626] bg-[#0e0e0e] text-[#666666] hover:text-status-danger hover:bg-status-danger-bg hover:border-status-danger-border cursor-pointer"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
             </div>
           </div>
 
           {/* Sandbox & Environment Sub-bar with low-contrast labels & high-contrast values */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-y-3 gap-x-6 text-xs font-sans">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs font-sans">
+            <div className="flex items-center gap-1.5">
+              <Folder className="h-3.5 w-3.5 text-[#555555]" />
+              <span className="text-[#666666]">Sandbox:</span>
+              <span className="text-[#ededed] font-mono select-all">{currentProfile.path}</span>
+              <button
+                type="button"
+                onClick={() => handleCopyPath(currentProfile.path)}
+                title="Copy sandbox path"
+                className="p-1 rounded hover:bg-[#1a1a1a] text-[#666666] hover:text-[#ededed] cursor-pointer transition-colors"
+              >
+                {copiedPath ? (
+                  <Check className="h-3 w-3 text-status-success" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+              </button>
+            </div>
+            {currentProfile.account?.email && (
               <div className="flex items-center gap-1.5">
-                <Folder className="h-3.5 w-3.5 text-[#555555]" />
-                <span className="text-[#666666]">Sandbox:</span>
-                <span className="text-[#ededed] font-mono select-all">{currentProfile.path}</span>
-                <button
-                  type="button"
-                  onClick={() => handleCopyPath(currentProfile.path)}
-                  title="Copy sandbox path"
-                  className="p-1 rounded hover:bg-[#1a1a1a] text-[#666666] hover:text-[#ededed] cursor-pointer transition-colors"
-                >
-                  {copiedPath ? (
-                    <Check className="h-3 w-3 text-status-success" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
-                </button>
+                <Mail className="h-3.5 w-3.5 text-[#555555]" />
+                <span className="text-[#666666]">Email:</span>
+                <span className="text-[#ededed]">{currentProfile.account.email}</span>
               </div>
-              {currentProfile.account?.email && (
-                <div className="flex items-center gap-1.5">
-                  <Mail className="h-3.5 w-3.5 text-[#555555]" />
-                  <span className="text-[#666666]">Email:</span>
-                  <span className="text-[#ededed]">{currentProfile.account.email}</span>
-                </div>
-              )}
-              {currentProfile.account?.auth_method && (
-                <div className="flex items-center gap-1.5">
-                  <Key className="h-3.5 w-3.5 text-[#555555]" />
-                  <span className="text-[#666666]">Auth:</span>
-                  <span className="text-[#888888]">{currentProfile.account.auth_method}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Global Sandbox Inheritance Toggles */}
-            <div className="flex items-center gap-5 shrink-0 pt-1 lg:pt-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[#666666]">Global MCP:</span>
-                <Switch
-                  size="sm"
-                  checked={isMcpGlobalOn}
-                  disabled={updatingConfig}
-                  onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
-                />
+            )}
+            {currentProfile.account?.auth_method && (
+              <div className="flex items-center gap-1.5">
+                <Key className="h-3.5 w-3.5 text-[#555555]" />
+                <span className="text-[#666666]">Auth:</span>
+                <span className="text-[#888888]">{currentProfile.account.auth_method}</span>
               </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-[#666666]">Global Plugins:</span>
-                <Switch
-                  size="sm"
-                  checked={isPluginsGlobalOn}
-                  disabled={updatingConfig}
-                  onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
-                />
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -941,16 +906,6 @@ export function ProfilesView({
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      {onViewSession && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onViewSession(sess)}
-                          className="h-7 text-xs font-sans text-[#888888] hover:text-[#ededed] hover:bg-[#1f1f1f] cursor-pointer px-2.5"
-                        >
-                          View Transcript
-                        </Button>
-                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -1090,6 +1045,50 @@ export function ProfilesView({
                     )}
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+
+            {/* Global Workspace Inheritance Card */}
+            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+              <CardHeader className="p-5 pb-3">
+                <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 text-[#666666]" />
+                  Global Workspace Inheritance
+                </CardTitle>
+                <CardDescription className="text-xs text-[#888888] pt-1">
+                  Configure whether this profile inherits tools and plugins from global host settings.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 pt-0 space-y-3">
+                <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-semibold text-[#ededed]">Global MCP Servers</div>
+                    <div className="text-[11px] text-[#666666]">
+                      Inherit centrally installed MCP servers from host environment.
+                    </div>
+                  </div>
+                  <Switch
+                    size="sm"
+                    checked={isMcpGlobalOn}
+                    disabled={updatingConfig}
+                    onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
+                  />
+                </div>
+
+                <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-semibold text-[#ededed]">Global Plugins</div>
+                    <div className="text-[11px] text-[#666666]">
+                      Inherit global plugins from host environment into this profile.
+                    </div>
+                  </div>
+                  <Switch
+                    size="sm"
+                    checked={isPluginsGlobalOn}
+                    disabled={updatingConfig}
+                    onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
+                  />
+                </div>
               </CardContent>
             </Card>
 

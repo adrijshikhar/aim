@@ -82,6 +82,14 @@ func (s *sessionService) ListSessions(ctx context.Context, filter SessionFilter)
 			}
 		}
 
+		turns := sess.MessageCount
+		if turns == 0 && sess.Progress != "" {
+			var parsed int
+			if n, err := fmt.Sscanf(sess.Progress, "%d", &parsed); err == nil && n == 1 && parsed > 0 {
+				turns = parsed
+			}
+		}
+
 		dto := SessionDTO{
 			ID:        sess.ID,
 			Agent:     sess.Agent,
@@ -89,7 +97,7 @@ func (s *sessionService) ListSessions(ctx context.Context, filter SessionFilter)
 			Title:     sess.Title,
 			Cwd:       cwd,
 			Goal:      goal,
-			Turns:     sess.MessageCount,
+			Turns:     turns,
 			UpdatedAt: sess.LastActiveAt,
 			IsActive:  sess.Status == session.StatusActive,
 			PID:       sess.PID,

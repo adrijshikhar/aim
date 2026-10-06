@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,15 +60,19 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 		return nil, nil
 	}
 
-	query := "SELECT conversation_id, title, preview, last_modified_time, workspace_uris FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
+	query := "SELECT conversation_id, title, preview, last_modified_time, workspace_uris, step_count FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
 	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query, "-separator", "|||")
 	if err != nil {
-		// Fallback for older schemas where workspace_uris might not exist
-		fallback := "SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
+		// Fallback for older schemas where step_count might not exist
+		fallback := "SELECT conversation_id, title, preview, last_modified_time, workspace_uris FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
 		out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallback, "-separator", "|||")
 		if err != nil {
-			logger.Debug("[session/agy] query error on %s: %v", db, err)
-			return nil, fmt.Errorf("failed to query sqlite db at %s: %w", db, err)
+			fallbackLegacy := "SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
+			out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallbackLegacy, "-separator", "|||")
+			if err != nil {
+				logger.Debug("[session/agy] query error on %s: %v", db, err)
+				return nil, fmt.Errorf("failed to query sqlite db at %s: %w", db, err)
+			}
 		}
 	}
 
@@ -96,6 +101,10 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 		if len(parts) >= 5 {
 			rawWorkspace = strings.TrimSpace(parts[4])
 		}
+		var stepCount int
+		if len(parts) >= 6 {
+			stepCount, _ = strconv.Atoi(strings.TrimSpace(parts[5]))
+		}
 
 		brainDir := p.brainDir(profileDir, isHost, convID)
 		cwd := parseWorkspaceURIs(rawWorkspace)
@@ -108,6 +117,19 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 		s.StoragePath = brainDir
 		s.Cwd = cwd
 		s.Summary = preview
+		s.MessageCount = stepCount
+		if s.MessageCount == 0 && brainDir != "" {
+			tPath := filepath.Join(brainDir, ".system_generated", "logs", "transcript.jsonl")
+			if f, err := os.Open(tPath); err == nil {
+				if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
+					s.MessageCount = tc
+				}
+				_ = f.Close()
+			}
+		}
+		if s.MessageCount > 0 {
+			s.Progress = fmt.Sprintf("%d turns", s.MessageCount)
+		}
 
 		if sum, err := p.ResolveSummary(ctx, &s); err == nil {
 			s.Goal = sum.Goal
@@ -164,14 +186,18 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 	}
 
 	prefixLen := len(idOrPrefix)
-	query := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time, workspace_uris FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
+	query := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time, workspace_uris, step_count FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
 	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query, "-separator", "|||")
 	if err != nil {
-		// Fallback for older schemas where workspace_uris might not exist
-		fallback := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
+		// Fallback for older schemas where step_count might not exist
+		fallback := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time, workspace_uris FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
 		out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallback, "-separator", "|||")
 		if err != nil {
-			return nil, fmt.Errorf("failed to query session %s from %s: %w", idOrPrefix, db, err)
+			fallbackLegacy := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
+			out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallbackLegacy, "-separator", "|||")
+			if err != nil {
+				return nil, fmt.Errorf("failed to query session %s from %s: %w", idOrPrefix, db, err)
+			}
 		}
 	}
 
@@ -219,6 +245,10 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 	if len(parts) >= 5 {
 		rawWorkspace = strings.TrimSpace(parts[4])
 	}
+	var stepCount int
+	if len(parts) >= 6 {
+		stepCount, _ = strconv.Atoi(strings.TrimSpace(parts[5]))
+	}
 
 	brainDir := p.brainDir(profileDir, isHost, convID)
 	cwd := parseWorkspaceURIs(rawWorkspace)
@@ -231,6 +261,19 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 	s.StoragePath = brainDir
 	s.Cwd = cwd
 	s.Summary = preview
+	s.MessageCount = stepCount
+	if s.MessageCount == 0 && brainDir != "" {
+		tPath := filepath.Join(brainDir, ".system_generated", "logs", "transcript.jsonl")
+		if f, err := os.Open(tPath); err == nil {
+			if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
+				s.MessageCount = tc
+			}
+			_ = f.Close()
+		}
+	}
+	if s.MessageCount > 0 {
+		s.Progress = fmt.Sprintf("%d turns", s.MessageCount)
+	}
 
 	if sum, err := p.ResolveSummary(ctx, &s); err == nil {
 		s.Goal = sum.Goal

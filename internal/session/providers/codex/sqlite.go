@@ -309,6 +309,7 @@ func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profil
 		}
 		if turnCount > 0 {
 			s.Progress = fmt.Sprintf("%d turns", turnCount)
+			s.MessageCount = turnCount
 		}
 		s.StoragePath = row.RolloutPath
 		s.Cwd = row.Cwd

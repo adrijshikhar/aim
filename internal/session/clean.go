@@ -76,6 +76,25 @@ func CleanPromptText(raw string) string {
 		raw = userRequestCloseRegex.ReplaceAllString(raw, "")
 	}
 
+	// 3b. Extract content from subagent <SYSTEM_MESSAGE> if present
+	if strings.Contains(raw, "<SYSTEM_MESSAGE>") {
+		if idx := strings.Index(raw, "content="); idx != -1 {
+			inner := raw[idx+len("content="):]
+			if endIdx := strings.Index(inner, "</SYSTEM_MESSAGE>"); endIdx != -1 {
+				inner = inner[:endIdx]
+			}
+			inner = strings.TrimSpace(inner)
+			if inner != "" {
+				raw = inner
+			}
+		} else {
+			raw = strings.ReplaceAll(raw, "<SYSTEM_MESSAGE>", "")
+			raw = strings.ReplaceAll(raw, "</SYSTEM_MESSAGE>", "")
+		}
+		raw = strings.ReplaceAll(raw, "The following is a not actually sent by the user. It is provided by the system as important information to pay attention to.", "")
+		raw = strings.ReplaceAll(raw, "The following is a <SYSTEM_MESSAGE> not actually sent by the user. It is provided by the system as important information to pay attention to.", "")
+	}
+
 	// 4. Strip screenshot file paths and image markers
 	raw = screenshotPathRegex.ReplaceAllString(raw, " ")
 
