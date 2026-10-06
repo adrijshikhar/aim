@@ -5,8 +5,6 @@ import {
   Server,
   Plus,
   Search,
-  ChevronsUpDown,
-  Bell,
   Cpu,
 } from 'lucide-react';
 import { ProfileDTO, DaemonDTO } from '@/lib/api';
@@ -104,29 +102,23 @@ export function Sidebar({
 
   return (
     <aside className="w-64 border-r border-border bg-background flex flex-col h-full shrink-0 select-none">
-      {/* Vercel-style Top Workspace Switcher Header */}
-      <div className="h-14 px-2 border-b border-border flex items-center">
+      {/* AIM Brand Header */}
+      <div className="h-14 px-4 border-b border-border flex items-center justify-between">
         <button
           type="button"
           onClick={() => onSelectView('overview')}
-          className="w-full flex items-center justify-between p-1.5 rounded-geist hover:bg-[#161616] transition-colors cursor-pointer group"
-          title="Switch workspace / Home"
+          className="flex items-center gap-2.5 text-left hover:opacity-85 transition-opacity cursor-pointer group"
+          title="AIM Home"
         >
-          <div className="flex items-center gap-2.5 min-w-0">
-            {/* Avatar circle */}
-            <div className="h-7 w-7 rounded-full bg-gradient-to-tr from-[#7928ca] to-[#ff0080] flex items-center justify-center text-[10px] font-bold text-white shadow-sm shrink-0">
-              A
-            </div>
-            <div className="flex items-center gap-1.5 truncate">
-              <span className="font-semibold text-xs tracking-tight text-foreground truncate">
-                AIM Workspace
-              </span>
-              <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border bg-muted text-muted-foreground shrink-0">
-                Sandbox
-              </span>
-            </div>
+          <div className="h-7 w-7 rounded-[6px] bg-card border border-border flex items-center justify-center shadow-xs">
+            <Cpu className="h-3.5 w-3.5 text-foreground" />
           </div>
-          <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0 group-hover:text-foreground" />
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-sm tracking-tight text-foreground">AIM</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground">
+              {version}
+            </span>
+          </div>
         </button>
       </div>
 
@@ -248,42 +240,48 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Bottom User & Live Status Bar */}
-      <div className="px-3 py-2.5 border-t border-border flex items-center justify-between bg-muted/20 text-xs">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="h-6 w-6 rounded-full bg-[#1e1e1e] border border-[#2e2e2e] flex items-center justify-center text-[10px] font-medium text-[#ededed] shrink-0">
-            D
+      {/* Footer System Status */}
+      <div className="p-3 border-t border-border space-y-2 bg-muted/20">
+        <button
+          type="button"
+          onClick={onOpenDaemonModal}
+          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-geist border border-border bg-card hover:bg-secondary hover:border-border/80 transition-colors cursor-pointer text-xs group"
+          title="Manage OS Background Daemon"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 relative items-center justify-center">
+              {daemonInfo?.active ? (
+                <span className="h-2 w-2 rounded-full bg-status-success-solid" />
+              ) : daemonInfo?.installed ? (
+                <span className="h-2 w-2 rounded-full bg-status-warning-solid" />
+              ) : (
+                <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
+              )}
+            </span>
+            <span className="font-mono text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
+              Daemon: {daemonInfo?.active ? 'Active' : daemonInfo?.installed ? 'Inactive' : 'Off'}
+            </span>
           </div>
-          <div className="truncate font-sans">
-            <div className="text-[11px] font-medium text-foreground truncate leading-tight">
-              Local Developer
-            </div>
-            <div className="text-[10px] font-mono text-muted-foreground/70 truncate">
-              AIM {version}
-            </div>
-          </div>
-        </div>
+          <Cpu className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
+        </button>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Quick Daemon Status & Modal Trigger */}
-          <button
-            type="button"
-            onClick={onOpenDaemonModal}
-            className="flex items-center justify-center h-6 w-6 rounded-[4px] hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title={`AIM Daemon: ${daemonInfo?.active ? 'Active' : daemonInfo?.installed ? 'Installed' : 'Inactive'} (Click to manage)`}
-          >
-            <Cpu className="h-3.5 w-3.5" />
-          </button>
-
-          {/* Backend Server Status & Notifications */}
-          <div className="relative flex items-center justify-center h-6 w-6 rounded-[4px] text-muted-foreground cursor-default" title={isOnline ? 'Backend server connected' : 'Backend reconnecting'}>
-            <Bell className="h-3.5 w-3.5 text-muted-foreground" />
-            <span
-              className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${
-                isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
-              }`}
-            />
+        <div className="flex items-center justify-between px-2.5 py-1 rounded-geist border border-border/60 bg-muted/40 text-[11px] font-mono text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-1.5 w-1.5">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+                  isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
+                }`}
+              />
+            </span>
+            <span>{isOnline ? 'Server: 8080' : 'Reconnecting'}</span>
           </div>
+          <span className="text-[10px] text-muted-foreground/60">AIM {version}</span>
         </div>
       </div>
     </aside>

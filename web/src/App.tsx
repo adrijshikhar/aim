@@ -490,33 +490,9 @@ export function App() {
             {getHeaderTitle()}
           </div>
 
-          {/* Right Header Status Pills */}
+          {/* Right Header Status Pill */}
           <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => setIsDaemonOpen(true)}
-              title="Manage OS Background Daemon (15m Quota Pre-Warm)"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-card hover:bg-secondary hover:border-border/80 transition-colors cursor-pointer text-xs group"
-            >
-              <span className="flex h-2 w-2 relative items-center justify-center">
-                {daemonInfo?.active ? (
-                  <span className="h-2 w-2 rounded-full bg-status-success-solid" />
-                ) : daemonInfo?.installed ? (
-                  <span className="h-2 w-2 rounded-full bg-status-warning-solid" />
-                ) : (
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
-                )}
-              </span>
-              <span className="font-mono text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
-                {daemonInfo?.active
-                  ? 'Daemon: Active'
-                  : daemonInfo?.installed
-                  ? 'Daemon: Inactive'
-                  : 'Daemon: Off'}
-              </span>
-            </button>
-
-            <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-card text-xs">
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-card text-xs">
               <span className="relative flex h-2 w-2">
                 <span
                   className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
