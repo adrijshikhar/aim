@@ -196,7 +196,7 @@ export function AddProfileModal({
             <Button
               type="submit"
               disabled={submitting}
-              className="bg-[#ededed] text-[#000000] hover:bg-white rounded-geist text-xs h-8 font-medium"
+              className="bg-[#ffffff] text-[#000000] hover:bg-[#eaeaea] rounded-geist text-xs h-8 font-medium shadow-sm transition-colors cursor-pointer"
             >
               {submitting ? 'Creating...' : 'Create Profile'}
             </Button>

@@ -457,28 +457,28 @@ export function SessionsView({
           const isThisResuming = resumingId === sess.id;
           return (
             <div className="flex items-center justify-end" onClick={(e) => e.stopPropagation()}>
-              <div className="inline-flex items-center rounded-geist border border-border bg-[#111111] overflow-hidden hover:border-[#383838] transition-colors">
+              <div className="inline-flex items-center rounded-geist border border-[#e5e5e5] bg-[#ffffff] overflow-hidden hover:bg-[#eaeaea] shadow-sm transition-colors">
                 <button
                   type="button"
                   onClick={() => handleQuickResume(sess)}
                   disabled={isThisResuming}
-                  className="h-7 pl-2.5 pr-2 text-xs font-sans font-medium text-[#ededed] hover:bg-[#1a1a1a] flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="h-7 pl-2.5 pr-2 text-xs font-sans font-medium text-[#000000] flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   {isThisResuming ? (
-                    <RefreshCw className="h-3 w-3 animate-spin text-[#ededed]" />
+                    <RefreshCw className="h-3 w-3 animate-spin text-[#000000]" />
                   ) : (
-                    <Terminal className="h-3 w-3 text-[#ededed]" />
+                    <Terminal className="h-3 w-3 text-[#000000]" />
                   )}
                   <span>Resume</span>
                 </button>
-                <div className="h-3.5 w-[1px] bg-border" />
+                <div className="h-3.5 w-[1px] bg-[#000000]/15" />
                 <button
                   type="button"
                   onClick={() => setFlagModalSession(sess)}
-                  className="h-7 px-1.5 text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#1a1a1a] transition-colors flex items-center justify-center cursor-pointer"
+                  className="h-7 px-1.5 text-[#000000] hover:bg-[#dcdcdc] transition-colors flex items-center justify-center cursor-pointer"
                   title="Resume with flags"
                 >
-                  <ChevronDown className="h-3 w-3" />
+                  <ChevronDown className="h-3 w-3 text-[#000000]" />
                 </button>
               </div>
             </div>

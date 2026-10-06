@@ -417,7 +417,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               type="submit"
               size="sm"
               disabled={isResuming}
-              className="rounded-geist h-7 px-3.5 text-xs font-sans bg-[#ededed] text-black hover:bg-white font-medium shadow-sm transition-colors cursor-pointer"
+              className="rounded-geist h-7 px-3.5 text-xs font-sans bg-[#ffffff] text-black hover:bg-[#eaeaea] font-medium shadow-sm transition-colors cursor-pointer"
             >
               {isResuming ? (
                 <>

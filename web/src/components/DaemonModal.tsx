@@ -297,7 +297,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 size="sm"
                 disabled={running || uninstalling}
                 onClick={handleRunNow}
-                className="bg-[#ededed] hover:bg-white text-[#000000] text-xs font-mono font-medium shadow-sm transition-all cursor-pointer rounded-geist"
+                className="bg-[#ffffff] hover:bg-[#eaeaea] text-[#000000] text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist"
               >
                 {running ? (
                   <>
@@ -317,7 +317,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 size="sm"
                 disabled={installing}
                 onClick={handleInstall}
-                className="bg-[#ededed] hover:bg-white text-[#000000] text-xs font-mono font-medium shadow-sm transition-all cursor-pointer rounded-geist"
+                className="bg-[#ffffff] hover:bg-[#eaeaea] text-[#000000] text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist"
               >
                 {installing ? (
                   <>
