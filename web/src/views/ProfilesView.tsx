@@ -14,6 +14,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Plus,
@@ -32,11 +34,16 @@ import {
   Boxes,
   Copy,
   Check,
+  Settings,
+  Search,
+  SlidersHorizontal,
+  ShieldAlert,
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
 import { AgentBadge } from '@/components/AgentBadge';
 import { QuotaBreakdown } from '@/components/QuotaBreakdown';
+import { cn } from '@/lib/utils';
 
 interface ProfilesViewProps {
   selectedProfile: string;
@@ -323,6 +330,64 @@ export function ProfilesView({
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [resumingId, setResumingId] = React.useState<string | null>(null);
 
+  // View A multi-tab state
+  const [activeTab, setActiveTab] = React.useState('telemetry');
+  const [selectedEngineTab, setSelectedEngineTab] = React.useState<string>('all');
+  const [sessionSearch, setSessionSearch] = React.useState('');
+  const [mcpSearch, setMcpSearch] = React.useState('');
+
+  React.useEffect(() => {
+    setActiveTab('telemetry');
+    setSelectedEngineTab('all');
+    setSessionSearch('');
+    setMcpSearch('');
+  }, [selectedProfile]);
+
+  // Derived adapters for current profile
+  const profileAdapters = React.useMemo(() => {
+    if (!currentProfile) return [];
+    if (currentProfile.adapters && currentProfile.adapters.length > 0) {
+      return currentProfile.adapters;
+    }
+    return [
+      {
+        agent: currentProfile.agent,
+        has_credentials: currentProfile.has_credentials,
+        account: currentProfile.account,
+        quota: currentProfile.quota,
+      },
+    ];
+  }, [currentProfile]);
+
+  const displayedAdapters = React.useMemo(() => {
+    if (selectedEngineTab === 'all') return profileAdapters;
+    return profileAdapters.filter((ad) => ad.agent === selectedEngineTab);
+  }, [profileAdapters, selectedEngineTab]);
+
+  const filteredSessions = React.useMemo(() => {
+    if (!sessionSearch.trim()) return profileSessions;
+    const q = sessionSearch.toLowerCase().trim();
+    return profileSessions.filter(
+      (s) =>
+        s.title?.toLowerCase().includes(q) ||
+        s.goal?.toLowerCase().includes(q) ||
+        s.cwd?.toLowerCase().includes(q) ||
+        s.id?.toLowerCase().includes(q) ||
+        s.agent?.toLowerCase().includes(q)
+    );
+  }, [profileSessions, sessionSearch]);
+
+  const filteredMcpServers = React.useMemo(() => {
+    if (!mcpSearch.trim()) return profileMcpServers;
+    const q = mcpSearch.toLowerCase().trim();
+    return profileMcpServers.filter(
+      (srv) =>
+        srv.name.toLowerCase().includes(q) ||
+        srv.command?.toLowerCase().includes(q) ||
+        srv.scope?.toLowerCase().includes(q)
+    );
+  }, [profileMcpServers, mcpSearch]);
+
   const handleCopyPath = (path: string) => {
     navigator.clipboard.writeText(path);
     setCopiedPath(true);
@@ -445,15 +510,15 @@ export function ProfilesView({
 
     return (
       <div className="space-y-6">
-        {/* Profile Page Header (Clean, uncarded page header) */}
-        <div className="space-y-4 pb-6 border-b border-border">
+        {/* Profile Page Header (Clean, uncarded page header with high/low contrast hierarchy) */}
+        <div className="space-y-4 pb-6 border-b border-[#222222]">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground font-sans">
+              <h1 className="text-2xl font-semibold tracking-tight text-[#ededed] font-sans">
                 {currentProfile.name}
               </h1>
-              {currentProfile.adapters && currentProfile.adapters.length > 0 ? (
-                currentProfile.adapters.map((ad) => (
+              {profileAdapters.length > 0 ? (
+                profileAdapters.map((ad) => (
                   <React.Fragment key={ad.agent}>
                     {getAgentBadge(ad.agent)}
                   </React.Fragment>
@@ -479,7 +544,7 @@ export function ProfilesView({
                 </Badge>
               )}
               {quotaHealthBadge}
-              <span className="text-xs font-mono text-muted-foreground px-2 py-0.5 rounded-full border border-border bg-secondary">
+              <span className="text-xs font-mono text-[#888888] px-2 py-0.5 rounded-full border border-[#222222] bg-[#0c0c0c]">
                 {resourcesLoading ? '...' : `${profileSessions.length} sessions`}
               </span>
             </div>
@@ -490,7 +555,7 @@ export function ProfilesView({
                 size="sm"
                 onClick={handleRefreshCurrentProfile}
                 disabled={loading || refreshing}
-                className="h-8 rounded-geist text-xs font-sans border-border bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer px-3"
+                className="h-8 rounded-geist text-xs font-sans border-[#262626] bg-[#0e0e0e] text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a] cursor-pointer px-3"
               >
                 <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshing || loading ? 'animate-spin' : ''}`} />
                 {refreshing ? 'Refreshing...' : 'Refresh Quota'}
@@ -501,25 +566,25 @@ export function ProfilesView({
                 onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
                 title="Delete profile"
                 aria-label="Delete profile"
-                className="h-8 w-8 rounded-geist border-border bg-secondary text-muted-foreground hover:text-status-danger hover:bg-status-danger-bg hover:border-status-danger-border cursor-pointer"
+                className="h-8 w-8 rounded-geist border-[#262626] bg-[#0e0e0e] text-[#666666] hover:text-status-danger hover:bg-status-danger-bg hover:border-status-danger-border cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
 
-          {/* Sandbox & Environment Sub-bar (Moved directly to the header itself) */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-y-3 gap-x-6 text-xs font-sans text-muted-foreground">
+          {/* Sandbox & Environment Sub-bar with low-contrast labels & high-contrast values */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-y-3 gap-x-6 text-xs font-sans">
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <div className="flex items-center gap-1.5">
-                <Folder className="h-3.5 w-3.5 text-muted-foreground/70" />
-                <span className="text-muted-foreground">Sandbox:</span>
-                <span className="text-foreground font-mono select-all">{currentProfile.path}</span>
+                <Folder className="h-3.5 w-3.5 text-[#555555]" />
+                <span className="text-[#666666]">Sandbox:</span>
+                <span className="text-[#ededed] font-mono select-all">{currentProfile.path}</span>
                 <button
                   type="button"
                   onClick={() => handleCopyPath(currentProfile.path)}
                   title="Copy sandbox path"
-                  className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                  className="p-1 rounded hover:bg-[#1a1a1a] text-[#666666] hover:text-[#ededed] cursor-pointer transition-colors"
                 >
                   {copiedPath ? (
                     <Check className="h-3 w-3 text-status-success" />
@@ -530,40 +595,42 @@ export function ProfilesView({
               </div>
               {currentProfile.account?.email && (
                 <div className="flex items-center gap-1.5">
-                  <Mail className="h-3.5 w-3.5 text-muted-foreground/70" />
-                  <span className="text-foreground">{currentProfile.account.email}</span>
+                  <Mail className="h-3.5 w-3.5 text-[#555555]" />
+                  <span className="text-[#666666]">Email:</span>
+                  <span className="text-[#ededed]">{currentProfile.account.email}</span>
                 </div>
               )}
               {currentProfile.account?.auth_method && (
                 <div className="flex items-center gap-1.5">
-                  <Key className="h-3.5 w-3.5 text-muted-foreground/70" />
-                  <span>{currentProfile.account.auth_method}</span>
+                  <Key className="h-3.5 w-3.5 text-[#555555]" />
+                  <span className="text-[#666666]">Auth:</span>
+                  <span className="text-[#888888]">{currentProfile.account.auth_method}</span>
                 </div>
               )}
             </div>
 
-            {/* Global Sandbox Inheritance Toggles in Header */}
+            {/* Global Sandbox Inheritance Toggles */}
             <div className="flex items-center gap-5 shrink-0 pt-1 lg:pt-0">
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Global MCP:</span>
+                <span className="text-[#666666]">Global MCP:</span>
                 <Switch
                   checked={isMcpGlobalOn}
                   disabled={updatingConfig}
                   onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
                 />
-                <span className="text-foreground font-mono text-[11px]">
+                <span className="text-[#ededed] font-mono text-[11px]">
                   {isMcpGlobalOn ? 'on' : 'off'}
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Global Plugins:</span>
+                <span className="text-[#666666]">Global Plugins:</span>
                 <Switch
                   checked={isPluginsGlobalOn}
                   disabled={updatingConfig}
                   onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
                 />
-                <span className="text-foreground font-mono text-[11px]">
+                <span className="text-[#ededed] font-mono text-[11px]">
                   {isPluginsGlobalOn ? 'on' : 'off'}
                 </span>
               </div>
@@ -571,239 +638,516 @@ export function ProfilesView({
           </div>
         </div>
 
-        {/* 2-Column Bento Grid: Everything inside Cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Column (7 cols, ~60%): Live Quota Telemetry Cards */}
-          <div className="lg:col-span-7 space-y-6">
-            {(currentProfile.adapters && currentProfile.adapters.length > 0
-              ? currentProfile.adapters
-              : [
-                  {
-                    agent: currentProfile.agent,
-                    has_credentials: currentProfile.has_credentials,
-                    account: currentProfile.account,
-                    quota: currentProfile.quota,
-                  },
-                ]
-            ).map((ad) => (
-              <Card key={ad.agent} className="border border-border bg-card rounded-geist">
-                <CardHeader className="pb-3 p-5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Gauge className="h-4 w-4 text-muted-foreground" />
-                      <CardTitle className="text-sm font-semibold text-foreground">
-                        Live Quota Telemetry & Rate Limits
-                      </CardTitle>
-                      {getAgentBadge(ad.agent)}
-                    </div>
-                    {ad.has_credentials ? (
-                      <Badge
-                        variant="outline"
-                        className="badge-success text-xs font-sans"
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                        <span>Authenticated</span>
-                      </Badge>
-                    ) : (
-                      <Badge
-                        variant="outline"
-                        className="badge-warning text-xs font-sans"
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                        <span>Needs Auth</span>
-                      </Badge>
-                    )}
-                  </div>
-                  <CardDescription className="text-xs text-muted-foreground pt-1">
-                    {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials detected' : 'No credentials detected')}
-                  </CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-4 p-5 pt-0">
-                  {/* Visual Quota Meters */}
-                  <QuotaBreakdown
-                    summary={ad.quota?.summary}
-                    bottleneckPct={ad.quota?.bottleneck_pct ?? 100}
-                    isExhausted={ad.quota?.is_exhausted}
-                  />
-
-                  {/* Account detail chips */}
-                  <div className="p-3 rounded-geist bg-secondary/50 border border-border space-y-1.5 text-xs font-sans">
-                    <div className="flex justify-between items-center text-muted-foreground">
-                      <span>Account:</span>
-                      <span className="text-foreground font-medium truncate max-w-[220px]">
-                        {ad.account?.name || currentProfile.name}
-                      </span>
-                    </div>
-                    {ad.account?.auth_method && (
-                      <div className="flex justify-between items-center text-muted-foreground">
-                        <span>Auth Method:</span>
-                        <span className="text-foreground truncate max-w-[220px]">{ad.account.auth_method}</span>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+        {/* Multi-Tab Workspace Organization */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
+          <div className="flex items-center justify-between border-b border-[#222222] pb-3">
+            <TabsList className="bg-[#0c0c0c] border border-[#222222] p-1 h-9 rounded-geist gap-1">
+              <TabsTrigger value="telemetry" className="gap-2 text-xs">
+                <Gauge className="h-3.5 w-3.5 text-[#666666]" />
+                <span>Telemetry & Quotas</span>
+                {profileAdapters.length > 1 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                    {profileAdapters.length}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="sessions" className="gap-2 text-xs">
+                <Terminal className="h-3.5 w-3.5 text-[#666666]" />
+                <span>Sessions</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                  {profileSessions.length}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger value="mcp" className="gap-2 text-xs">
+                <Server className="h-3.5 w-3.5 text-[#666666]" />
+                <span>MCP Tools</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                  {profileMcpServers.length}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="gap-2 text-xs">
+                <Settings className="h-3.5 w-3.5 text-[#666666]" />
+                <span>Settings & Sandbox</span>
+              </TabsTrigger>
+            </TabsList>
           </div>
 
-          {/* Right Column (5 cols, ~40%): Recent Sessions & MCP Catalog Cards */}
-          <div className="lg:col-span-5 space-y-6">
-            {/* Recent Sessions Card */}
-            <Card className="border border-border bg-card rounded-geist">
-              <CardHeader className="p-5 pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Terminal className="h-4 w-4 text-muted-foreground" />
-                    Recent Sessions
-                  </CardTitle>
-                  <Badge
-                    variant="outline"
-                    className="text-xs font-sans font-medium bg-secondary border-border text-foreground px-2 py-0.5"
-                  >
-                    {resourcesLoading ? '...' : `${profileSessions.length} total`}
-                  </Badge>
-                </div>
-                <CardDescription className="text-xs text-muted-foreground pt-1">
-                  Recent interactive terminal sessions for {currentProfile.name}.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-5 pt-0">
-                {resourcesLoading ? (
-                  <div className="py-8 text-center text-xs text-muted-foreground font-sans">
-                    Loading sessions...
-                  </div>
-                ) : profileSessions.length === 0 ? (
-                  <div className="py-8 text-center text-xs text-muted-foreground font-sans border border-dashed border-border rounded-geist">
-                    No recorded sessions for this profile yet.
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border border border-border rounded-geist overflow-hidden">
-                    {profileSessions.slice(0, 4).map((sess) => (
-                      <div
-                        key={sess.id}
-                        className="p-3.5 hover:bg-secondary/40 transition-colors flex items-center justify-between gap-3 text-xs"
+          {/* TAB 1: TELEMETRY & QUOTAS */}
+          <TabsContent value="telemetry" className="space-y-5 focus-visible:outline-none">
+            {/* Multi-Engine Selector (when a profile runs >1 adapter, e.g. office with codex & claude) */}
+            {profileAdapters.length > 1 && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-geist bg-[#0a0a0a] border border-[#222222]">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#666666] font-medium">Engine Switcher:</span>
+                  <div className="inline-flex items-center rounded-geist border border-[#262626] bg-[#000000] p-0.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEngineTab('all')}
+                      className={cn(
+                        'px-3 py-1 rounded-[4px] font-medium transition-colors cursor-pointer text-xs flex items-center gap-1.5',
+                        selectedEngineTab === 'all'
+                          ? 'bg-[#1f1f1f] text-[#ededed] border border-[#333333]'
+                          : 'text-[#888888] hover:text-[#ededed]'
+                      )}
+                    >
+                      <span>All Engines</span>
+                      <span className="text-[10px] font-mono px-1 rounded bg-[#262626] text-[#888888]">
+                        {profileAdapters.length}
+                      </span>
+                    </button>
+                    {profileAdapters.map((ad) => (
+                      <button
+                        key={ad.agent}
+                        type="button"
+                        onClick={() => setSelectedEngineTab(ad.agent)}
+                        className={cn(
+                          'px-3 py-1 rounded-[4px] font-medium transition-colors cursor-pointer text-xs capitalize flex items-center gap-1.5',
+                          selectedEngineTab === ad.agent
+                            ? 'bg-[#1f1f1f] text-[#ededed] border border-[#333333]'
+                            : 'text-[#888888] hover:text-[#ededed]'
+                        )}
                       >
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => onViewSession?.(sess)}
-                              className="font-medium text-foreground hover:underline truncate cursor-pointer text-left font-sans"
-                            >
-                              {sess.title || sess.goal || sess.id.slice(0, 8)}
-                            </button>
-                            <span className="font-mono text-[10px] text-muted-foreground shrink-0">
-                              {sess.turns} turns
-                            </span>
-                            {sess.is_active && (
-                              <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid shrink-0" title="Active" />
+                        <span>{ad.agent}</span>
+                        {ad.quota && (
+                          <span
+                            className={cn(
+                              'text-[10px] tabular-nums font-mono',
+                              ad.quota.bottleneck_pct <= 0
+                                ? 'text-status-danger'
+                                : ad.quota.bottleneck_pct <= 30
+                                ? 'text-status-warning'
+                                : 'text-[#888888]'
                             )}
-                          </div>
-                          <div className="flex items-center gap-2 text-muted-foreground text-[11px] font-mono truncate">
-                            <span className="truncate">{sess.cwd}</span>
-                            <span>•</span>
-                            <span className="shrink-0">{formatRelativeTime(sess.updated_at)}</span>
-                          </div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleQuickResume(sess)}
-                          disabled={resumingId === sess.id}
-                          className="h-7 text-xs font-sans rounded-geist border-border bg-secondary hover:bg-accent text-foreground cursor-pointer px-2.5 shrink-0"
-                        >
-                          <Terminal className={`h-3 w-3 mr-1 ${resumingId === sess.id ? 'animate-spin' : ''}`} />
-                          {resumingId === sess.id ? 'Launching...' : 'Resume'}
-                        </Button>
-                      </div>
+                          >
+                            {ad.quota.bottleneck_pct}%
+                          </span>
+                        )}
+                      </button>
                     ))}
                   </div>
-                )}
-              </CardContent>
-              <CardFooter className="p-5 pt-0 flex justify-between items-center text-xs">
-                <span className="text-muted-foreground font-sans">
-                  Showing {Math.min(4, profileSessions.length)} of {profileSessions.length} sessions
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onNavigateToSessions && onNavigateToSessions(currentProfile.name)}
-                  className="h-7 text-xs font-sans text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer px-2"
-                >
-                  <span>View all in Sessions Explorer</span>
-                  <ArrowRight className="h-3 w-3 ml-1" />
-                </Button>
-              </CardFooter>
-            </Card>
-
-            {/* MCP Tools & Catalog Card */}
-            <Card className="border border-border bg-card rounded-geist">
-              <CardHeader className="pb-3 p-5">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Server className="h-4 w-4 text-muted-foreground" />
-                    MCP Tools & Catalog
-                  </CardTitle>
-                  <Badge
-                    variant="outline"
-                    className="text-xs font-sans font-medium bg-secondary border-border text-foreground px-2 py-0.5"
-                  >
-                    {resourcesLoading ? '...' : `${profileMcpServers.length} active`}
-                  </Badge>
                 </div>
-                <CardDescription className="text-xs text-muted-foreground pt-1">
-                  Configured MCP servers and tool capabilities for this profile.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-5 pt-0">
-                {resourcesLoading ? (
-                  <div className="py-6 text-center text-xs text-muted-foreground font-sans">
-                    Loading MCP servers...
-                  </div>
-                ) : profileMcpServers.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-muted-foreground font-sans border border-dashed border-border rounded-geist">
-                    No MCP servers configured for this profile.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {profileMcpServers.slice(0, 6).map((srv) => (
-                        <span
-                          key={srv.name}
-                          className="inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-secondary font-mono text-[11px] text-foreground"
-                        >
-                          {srv.name}
-                          {srv.scope && (
-                            <span className="ml-1 text-muted-foreground text-[10px]">
-                              ({srv.scope})
-                            </span>
-                          )}
-                        </span>
-                      ))}
-                      {profileMcpServers.length > 6 && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-secondary font-mono text-[11px] text-muted-foreground">
-                          +{profileMcpServers.length - 6} more
-                        </span>
+                <span className="text-[11px] text-[#666666]">
+                  {selectedEngineTab === 'all'
+                    ? `Viewing combined telemetry for ${profileAdapters.length} configured engines side-by-side.`
+                    : `Focused telemetry view for ${selectedEngineTab}.`}
+                </span>
+              </div>
+            )}
+
+            {/* Side-by-side adapter cards grid (2-column layout prevents vertical stacking of multi-adapters) */}
+            <div
+              className={cn(
+                'grid gap-5 items-start',
+                displayedAdapters.length > 1
+                  ? 'grid-cols-1 lg:grid-cols-2'
+                  : 'grid-cols-1 max-w-3xl'
+              )}
+            >
+              {displayedAdapters.map((ad) => (
+                <Card key={ad.agent} className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                  <CardHeader className="pb-3 p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Gauge className="h-4 w-4 text-[#666666]" />
+                        <CardTitle className="text-sm font-semibold text-[#ededed]">
+                          Live Quota Telemetry
+                        </CardTitle>
+                        {getAgentBadge(ad.agent)}
+                      </div>
+                      {ad.has_credentials ? (
+                        <Badge variant="outline" className="badge-success text-xs font-sans">
+                          <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                          <span>Authenticated</span>
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="badge-warning text-xs font-sans">
+                          <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                          <span>Needs Auth</span>
+                        </Badge>
                       )}
                     </div>
+                    <CardDescription className="text-xs text-[#888888] pt-1">
+                      {ad.account?.email ||
+                        (ad.has_credentials ? 'Active CLI credentials detected' : 'No credentials detected')}
+                    </CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="space-y-4 p-5 pt-0">
+                    {/* Visual Quota Meters */}
+                    <QuotaBreakdown
+                      summary={ad.quota?.summary}
+                      bottleneckPct={ad.quota?.bottleneck_pct ?? 100}
+                      isExhausted={ad.quota?.is_exhausted}
+                    />
+
+                    {/* Account detail chips with low-contrast labels and crisp white values */}
+                    <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1.5 text-xs font-sans">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[#666666]">Account:</span>
+                        <span className="text-[#ededed] font-medium truncate max-w-[220px]">
+                          {ad.account?.name || currentProfile.name}
+                        </span>
+                      </div>
+                      {ad.account?.email && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[#666666]">Email:</span>
+                          <span className="text-[#ededed] truncate max-w-[220px]">
+                            {ad.account.email}
+                          </span>
+                        </div>
+                      )}
+                      {ad.account?.auth_method && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[#666666]">Auth Method:</span>
+                          <span className="text-[#ededed] truncate max-w-[220px]">
+                            {ad.account.auth_method}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* TAB 2: SESSIONS */}
+          <TabsContent value="sessions" className="space-y-4 focus-visible:outline-none">
+            {/* Filter toolbar */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-geist bg-[#0a0a0a] border border-[#222222]">
+              <div className="relative flex-1 max-w-md w-full">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#666666]" />
+                <Input
+                  placeholder="Filter sessions by title, directory, or ID..."
+                  value={sessionSearch}
+                  onChange={(e) => setSessionSearch(e.target.value)}
+                  className="pl-8 h-8 text-xs font-sans bg-[#000000] border-[#262626] text-[#ededed] placeholder:text-[#555555] rounded-geist"
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-[#666666] font-sans">
+                  {filteredSessions.length} session{filteredSessions.length === 1 ? '' : 's'}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onNavigateToSessions && onNavigateToSessions(currentProfile.name)}
+                  className="h-8 text-xs font-sans text-[#888888] hover:text-[#ededed] border-[#262626] bg-[#0e0e0e] hover:bg-[#1a1a1a] cursor-pointer px-3"
+                >
+                  <span>Open Full Explorer</span>
+                  <ArrowRight className="h-3 w-3 ml-1 text-[#666666]" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Sessions List */}
+            {resourcesLoading ? (
+              <div className="py-12 text-center text-xs text-[#666666] font-sans">
+                Loading sessions...
+              </div>
+            ) : filteredSessions.length === 0 ? (
+              <div className="py-12 text-center text-xs text-[#666666] font-sans border border-dashed border-[#222222] rounded-geist bg-[#0a0a0a]">
+                {sessionSearch ? 'No sessions match your search query.' : 'No recorded sessions for this profile yet.'}
+              </div>
+            ) : (
+              <div className="divide-y divide-[#222222] border border-[#222222] rounded-geist overflow-hidden bg-[#0a0a0a]">
+                {filteredSessions.map((sess) => (
+                  <div
+                    key={sess.id}
+                    className="p-3.5 hover:bg-[#111111] transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => onViewSession?.(sess)}
+                          className="font-medium text-[#ededed] hover:underline truncate cursor-pointer text-left font-sans text-sm"
+                        >
+                          {sess.title || sess.goal || sess.id.slice(0, 8)}
+                        </button>
+                        {getAgentBadge(sess.agent)}
+                        <span className="font-mono text-[10px] text-[#888888] px-1.5 py-0.5 rounded border border-[#222222] bg-[#050505] shrink-0">
+                          {sess.turns} turns
+                        </span>
+                        {sess.is_active && (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-status-success font-medium">
+                            <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                            active
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] font-mono truncate">
+                        <span className="text-[#666666] shrink-0">CWD:</span>
+                        <span className="text-[#888888] truncate select-all">{sess.cwd}</span>
+                        <span className="text-[#444444]">•</span>
+                        <span className="text-[#666666] shrink-0">Updated:</span>
+                        <span className="text-[#888888] shrink-0">{formatRelativeTime(sess.updated_at)}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {onViewSession && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onViewSession(sess)}
+                          className="h-7 text-xs font-sans text-[#888888] hover:text-[#ededed] hover:bg-[#1f1f1f] cursor-pointer px-2.5"
+                        >
+                          View Transcript
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleQuickResume(sess)}
+                        disabled={resumingId === sess.id}
+                        className="h-7 text-xs font-sans rounded-geist border-[#262626] bg-[#0e0e0e] hover:bg-[#1a1a1a] text-[#ededed] cursor-pointer px-2.5 shrink-0"
+                      >
+                        <Terminal className={`h-3 w-3 mr-1 ${resumingId === sess.id ? 'animate-spin' : ''}`} />
+                        {resumingId === sess.id ? 'Launching...' : 'Resume'}
+                      </Button>
+                    </div>
                   </div>
-                )}
-              </CardContent>
-              <CardFooter className="p-5 pt-0">
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* TAB 3: MCP TOOLS */}
+          <TabsContent value="mcp" className="space-y-4 focus-visible:outline-none">
+            {/* Filter toolbar */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-geist bg-[#0a0a0a] border border-[#222222]">
+              <div className="relative flex-1 max-w-md w-full">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#666666]" />
+                <Input
+                  placeholder="Filter MCP servers..."
+                  value={mcpSearch}
+                  onChange={(e) => setMcpSearch(e.target.value)}
+                  className="pl-8 h-8 text-xs font-sans bg-[#000000] border-[#262626] text-[#ededed] placeholder:text-[#555555] rounded-geist"
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-[#666666] font-sans">
+                  {filteredMcpServers.length} server{filteredMcpServers.length === 1 ? '' : 's'}
+                </span>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => onNavigateToMcp && onNavigateToMcp(currentProfile.name)}
-                  className="w-full justify-between h-8 rounded-geist border-border bg-secondary text-xs font-sans font-medium text-foreground hover:bg-accent cursor-pointer"
+                  className="h-8 text-xs font-sans text-[#888888] hover:text-[#ededed] border-[#262626] bg-[#0e0e0e] hover:bg-[#1a1a1a] cursor-pointer px-3"
                 >
-                  <span>Open in MCP Catalog</span>
-                  <ArrowRight className="h-3.5 w-3.5 ml-1 text-muted-foreground" />
+                  <span>Open Full MCP Catalog</span>
+                  <ArrowRight className="h-3 w-3 ml-1 text-[#666666]" />
                 </Button>
-              </CardFooter>
-            </Card>
-          </div>
-        </div>
+              </div>
+            </div>
+
+            {/* Servers Grid */}
+            {resourcesLoading ? (
+              <div className="py-12 text-center text-xs text-[#666666] font-sans">
+                Loading MCP servers...
+              </div>
+            ) : filteredMcpServers.length === 0 ? (
+              <div className="py-12 text-center text-xs text-[#666666] font-sans border border-dashed border-[#222222] rounded-geist bg-[#0a0a0a]">
+                {mcpSearch ? 'No MCP servers match your search.' : 'No MCP servers configured for this profile.'}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredMcpServers.map((srv) => (
+                  <Card key={srv.name} className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                    <CardHeader className="p-4 pb-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <CardTitle className="font-mono text-sm font-semibold text-[#ededed] truncate">
+                          {srv.name}
+                        </CardTitle>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-[10px] font-mono px-2 py-0.5 rounded-full',
+                            srv.scope === 'global'
+                              ? 'border-[#333333] bg-[#1a1a1a] text-[#888888]'
+                              : 'border-[#262626] bg-[#0e0e0e] text-[#ededed]'
+                          )}
+                        >
+                          {srv.scope || 'profile'}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-1 space-y-2">
+                      <div className="space-y-1">
+                        <span className="text-[11px] text-[#666666]">Command:</span>
+                        <div className="bg-[#050505] border border-[#222222] p-2 rounded text-xs font-mono text-[#888888] select-all truncate">
+                          {srv.command} {srv.args?.join(' ')}
+                        </div>
+                      </div>
+                      {srv.args && srv.args.length > 0 && (
+                        <div className="flex items-center gap-1.5 text-[11px]">
+                          <span className="text-[#666666]">Args:</span>
+                          <span className="text-[#888888] font-mono">{srv.args.length} argument(s)</span>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* TAB 4: SETTINGS & SANDBOX */}
+          <TabsContent value="settings" className="space-y-5 focus-visible:outline-none">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+              {/* Sandbox & Inheritance Card */}
+              <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                <CardHeader className="p-5 pb-3">
+                  <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                    <Folder className="h-4 w-4 text-[#666666]" />
+                    Sandbox & File Isolation
+                  </CardTitle>
+                  <CardDescription className="text-xs text-[#888888] pt-1">
+                    Isolated storage path and inheritance policies for this profile.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-5 pt-0 space-y-4">
+                  <div className="space-y-1.5">
+                    <span className="text-xs text-[#666666]">Sandbox Directory:</span>
+                    <div className="flex items-center gap-2 bg-[#050505] border border-[#222222] p-2 rounded-geist">
+                      <span className="font-mono text-xs text-[#ededed] select-all flex-1 truncate">
+                        {currentProfile.path}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyPath(currentProfile.path)}
+                        className="p-1 rounded hover:bg-[#1a1a1a] text-[#666666] hover:text-[#ededed] cursor-pointer"
+                        title="Copy path"
+                      >
+                        {copiedPath ? (
+                          <Check className="h-3.5 w-3.5 text-status-success" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 pt-2 border-t border-[#222222]">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-medium text-[#ededed]">Global MCP Inheritance</div>
+                        <div className="text-[11px] text-[#666666]">
+                          Inherit server definitions from ~/.aim/mcp.json
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={isMcpGlobalOn}
+                          disabled={updatingConfig}
+                          onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
+                        />
+                        <span className="text-xs font-mono text-[#ededed] min-w-[24px]">
+                          {isMcpGlobalOn ? 'on' : 'off'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-[#222222]">
+                      <div>
+                        <div className="text-xs font-medium text-[#ededed]">Global Plugins Inheritance</div>
+                        <div className="text-[11px] text-[#666666]">
+                          Inherit global plugins from ~/.aim/plugins/
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={isPluginsGlobalOn}
+                          disabled={updatingConfig}
+                          onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
+                        />
+                        <span className="text-xs font-mono text-[#ededed] min-w-[24px]">
+                          {isPluginsGlobalOn ? 'on' : 'off'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Configured Engines & Danger Zone Column */}
+              <div className="space-y-5">
+                <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                  <CardHeader className="p-5 pb-3">
+                    <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                      <SlidersHorizontal className="h-4 w-4 text-[#666666]" />
+                      Configured Agent Engines
+                    </CardTitle>
+                    <CardDescription className="text-xs text-[#888888] pt-1">
+                      Engines sharing this sandbox workspace profile.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5 pt-0 space-y-3">
+                    {profileAdapters.map((ad) => (
+                      <div
+                        key={ad.agent}
+                        className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            {getAgentBadge(ad.agent)}
+                            <span className="font-semibold text-[#ededed] capitalize">{ad.agent}</span>
+                          </div>
+                          <div className="text-[#666666] text-[11px]">
+                            {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials' : 'No credentials')}
+                          </div>
+                        </div>
+                        {ad.has_credentials ? (
+                          <Badge variant="outline" className="badge-success text-[11px]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                            <span>Auth OK</span>
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="badge-warning text-[11px]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                            <span>Needs Auth</span>
+                          </Badge>
+                        )}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                {/* Danger Zone */}
+                <Card className="border border-status-danger-border bg-status-danger-bg rounded-geist">
+                  <CardHeader className="p-5 pb-3">
+                    <CardTitle className="text-sm font-semibold text-status-danger flex items-center gap-2">
+                      <ShieldAlert className="h-4 w-4 text-status-danger" />
+                      Danger Zone
+                    </CardTitle>
+                    <CardDescription className="text-xs text-[#888888] pt-1">
+                      Permanent actions that cannot be undone.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5 pt-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="text-xs text-[#888888]">
+                        Deleting this profile permanently removes its sandbox directory and configuration.
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
+                        className="h-8 rounded-geist text-xs font-sans border-status-danger-border bg-status-danger-bg text-status-danger hover:bg-status-danger-solid hover:text-white cursor-pointer px-3 shrink-0"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                        Delete Profile
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
 
         <DeleteProfileModal
           open={!!deleteTarget}
@@ -969,31 +1313,31 @@ export function ProfilesView({
 
                   <CardContent className="space-y-3 pb-4 p-5 pt-0">
                     {/* Account Info Box */}
-                    <div className="rounded-geist border border-border bg-muted p-3 text-xs space-y-1.5 font-sans">
-                      <div className="flex items-center justify-between text-muted-foreground">
-                        <span className="flex items-center gap-1.5">
-                          <User className="h-3 w-3 text-muted-foreground/60" /> Account
+                    <div className="rounded-geist border border-[#222222] bg-[#0c0c0c] p-3 text-xs space-y-1.5 font-sans">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[#666666]">
+                          <User className="h-3 w-3 text-[#555555]" /> Account
                         </span>
-                        <span className="text-foreground font-medium truncate max-w-[140px]">
+                        <span className="text-[#ededed] font-medium truncate max-w-[140px]">
                           {p.account?.name || p.name}
                         </span>
                       </div>
                       {p.account?.email && (
-                        <div className="flex items-center justify-between text-muted-foreground">
-                          <span className="flex items-center gap-1.5">
-                            <Mail className="h-3 w-3 text-muted-foreground/60" /> Email
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1.5 text-[#666666]">
+                            <Mail className="h-3 w-3 text-[#555555]" /> Email
                           </span>
-                          <span className="text-foreground truncate max-w-[160px]">
+                          <span className="text-[#ededed] truncate max-w-[160px]">
                             {p.account.email}
                           </span>
                         </div>
                       )}
                       {p.account?.auth_method && (
-                        <div className="flex items-center justify-between text-muted-foreground">
-                          <span className="flex items-center gap-1.5">
-                            <Key className="h-3 w-3 text-muted-foreground/60" /> Auth
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1.5 text-[#666666]">
+                            <Key className="h-3 w-3 text-[#555555]" /> Auth
                           </span>
-                          <span className="text-foreground truncate max-w-[140px]">
+                          <span className="text-[#888888] truncate max-w-[140px]">
                             {p.account.auth_method}
                           </span>
                         </div>
@@ -1002,19 +1346,19 @@ export function ProfilesView({
 
                     {/* Standardized Quota Telemetry (Strict h-1.5 across multi- and single-engine) */}
                     {p.adapters && p.adapters.length > 1 ? (
-                      <div className="space-y-2 pt-1 border-t border-border">
-                        <div className="flex items-center justify-between text-[11px] font-sans font-medium uppercase tracking-wider text-muted-foreground">
+                      <div className="space-y-2 pt-1 border-t border-[#222222]">
+                        <div className="flex items-center justify-between text-[11px] font-sans font-medium uppercase tracking-wider text-[#666666]">
                           <span className="flex items-center gap-1">
-                            <Gauge className="h-3 w-3" /> Engine Quotas
+                            <Gauge className="h-3 w-3 text-[#555555]" /> Engine Quotas
                           </span>
-                          <span>{p.adapters.length} Engines</span>
+                          <span className="text-[#555555]">{p.adapters.length} Engines</span>
                         </div>
                         {p.adapters.map((ad) => {
                           const pct = ad.quota?.bottleneck_pct ?? 100;
                           return (
                             <div key={ad.agent} className="space-y-1">
                               <div className="flex items-center justify-between text-[11px] font-sans">
-                                <span className="text-muted-foreground">{ad.agent}</span>
+                                <span className="text-[#666666] capitalize">{ad.agent}</span>
                                 <span className={`tabular-nums ${getTextColor(pct)}`}>
                                   {pct}%
                                 </span>
@@ -1025,7 +1369,7 @@ export function ProfilesView({
                                 aria-valuemin={0}
                                 aria-valuemax={100}
                                 aria-label={`${ad.agent} quota`}
-                                className="w-full bg-secondary h-1.5 rounded-full overflow-hidden"
+                                className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
                               >
                                 <div
                                   className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
@@ -1044,8 +1388,8 @@ export function ProfilesView({
                     ) : (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                            <Gauge className="h-3 w-3" /> Quota Telemetry
+                          <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#666666] flex items-center gap-1">
+                            <Gauge className="h-3 w-3 text-[#555555]" /> Quota Telemetry
                           </span>
                         {(() => {
                           const pct = p.quota?.bottleneck_pct ?? 100;
@@ -1053,10 +1397,10 @@ export function ProfilesView({
                             <span
                               className={`font-sans text-xs font-medium tabular-nums ${
                                 pct <= 0
-                                  ? 'badge-danger'
+                                  ? 'text-status-danger'
                                   : pct <= 30
-                                  ? 'badge-warning'
-                                  : 'text-muted-foreground'
+                                  ? 'text-status-warning'
+                                  : 'text-[#888888]'
                               }`}
                             >
                               {p.quota ? `${pct}% remaining` : '100% remaining'}
@@ -1070,7 +1414,7 @@ export function ProfilesView({
                           aria-valuemin={0}
                           aria-valuemax={100}
                           aria-label="Profile quota"
-                          className="w-full bg-secondary h-1.5 rounded-full overflow-hidden"
+                          className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
                         >
                           <div
                             className={`h-full transition-all duration-300 ${getProgressColor(
@@ -1085,7 +1429,7 @@ export function ProfilesView({
                           />
                         </div>
                         {p.quota?.summary && (
-                          <p className="text-[11px] text-muted-foreground/70 font-sans truncate" title={p.quota.summary}>
+                          <p className="text-[11px] text-[#666666] font-sans truncate" title={p.quota.summary}>
                             {p.quota.summary}
                           </p>
                         )}

@@ -100,21 +100,21 @@ export function QuotaBreakdown({
   const getTextColor = (pct: number) => {
     if (pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
-    return 'text-muted-foreground';
+    return 'text-[#ededed]';
   };
 
   const renderMeter = (win: QuotaWindow) => {
     const isEx = win.pct <= 0;
     return (
-      <div key={win.key} className="space-y-1.5 p-2 rounded-[6px] bg-secondary border border-border">
+      <div key={win.key} className="space-y-1.5 p-2.5 rounded-[6px] bg-[#0f0f0f] border border-[#222222]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-muted-foreground flex items-center gap-1.5 font-medium">
+          <span className="text-[#737373] flex items-center gap-1.5 font-normal">
             {win.label}
           </span>
           <div className="flex items-center gap-2">
             {win.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-border bg-card text-muted-foreground">
-                <Clock className="h-2.5 w-2.5 text-muted-foreground/70" />
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-[#222222] bg-[#050505] text-[#737373]">
+                <Clock className="h-2.5 w-2.5 text-[#555555]" />
                 <span>resets in {win.reset}</span>
               </span>
             )}
@@ -131,7 +131,7 @@ export function QuotaBreakdown({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label={`${win.label} quota`}
-          className="w-full bg-muted h-1.5 rounded-full overflow-hidden border border-border/40"
+          className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
         >
           <div
             className={`h-full transition-all duration-300 ${getStatusColor(win.pct)}`}
@@ -145,10 +145,10 @@ export function QuotaBreakdown({
   if (!parsed || parsed.type === 'fallback') {
     const isEx = isExhausted || effectiveBottleneckPct <= 0;
     return (
-      <div className="space-y-2 p-3 rounded-[6px] bg-secondary/30 border border-border">
+      <div className="space-y-2 p-3 rounded-[6px] bg-[#0a0a0a] border border-[#222222]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 font-medium">
-            <Gauge className="h-3 w-3 text-muted-foreground/70" />
+          <span className="text-[#737373] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px]">
+            <Gauge className="h-3 w-3 text-[#555555]" />
             Live Quota Telemetry
           </span>
           <span className={`font-semibold tabular-nums ${getTextColor(effectiveBottleneckPct)}`}>
@@ -161,7 +161,7 @@ export function QuotaBreakdown({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label="Live quota telemetry"
-          className="w-full bg-muted h-1.5 rounded-full overflow-hidden border border-border/40"
+          className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
         >
           <div
             className={`h-full transition-all duration-300 ${getStatusColor(effectiveBottleneckPct)}`}
@@ -169,7 +169,7 @@ export function QuotaBreakdown({
           />
         </div>
         {summary && (
-          <p className="text-[11px] font-sans text-muted-foreground pt-1">
+          <p className="text-[11px] font-sans text-[#737373] pt-1">
             {summary}
           </p>
         )}
@@ -180,16 +180,16 @@ export function QuotaBreakdown({
   if (parsed.type === 'single' && parsed.single) {
     const isEx = isExhausted || parsed.single.pct <= 0;
     return (
-      <div className="space-y-2 p-3.5 rounded-[6px] bg-secondary/30 border border-border">
+      <div className="space-y-2 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#222222]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 font-medium">
-            <Gauge className="h-3.5 w-3.5 text-muted-foreground/70" />
+          <span className="text-[#737373] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px]">
+            <Gauge className="h-3.5 w-3.5 text-[#555555]" />
             {parsed.single.label}
           </span>
           <div className="flex items-center gap-2">
             {parsed.single.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-border bg-card text-muted-foreground">
-                <Clock className="h-2.5 w-2.5 text-muted-foreground/70" />
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-[#222222] bg-[#050505] text-[#737373]">
+                <Clock className="h-2.5 w-2.5 text-[#555555]" />
                 <span>resets in {parsed.single.reset}</span>
               </span>
             )}
@@ -204,7 +204,7 @@ export function QuotaBreakdown({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label={`${parsed.single.label} quota`}
-          className="w-full bg-muted h-1.5 rounded-full overflow-hidden border border-border/40"
+          className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
         >
           <div
             className={`h-full transition-all duration-300 ${getStatusColor(parsed.single.pct)}`}
@@ -217,13 +217,13 @@ export function QuotaBreakdown({
 
   // Multi-model layout (e.g. Gemini + Claude)
   return (
-    <div className="space-y-3 p-3.5 rounded-[6px] bg-secondary/30 border border-border">
-      <div className="flex items-center justify-between border-b border-border pb-2 text-xs font-sans">
-        <span className="text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 font-medium">
-          <Gauge className="h-3.5 w-3.5 text-muted-foreground/70" />
+    <div className="space-y-3 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#222222]">
+      <div className="flex items-center justify-between border-b border-[#222222] pb-2 text-xs font-sans">
+        <span className="text-[#737373] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px]">
+          <Gauge className="h-3.5 w-3.5 text-[#555555]" />
           Visual Quota Breakdown
         </span>
-        <span className="text-[11px] text-muted-foreground/70">
+        <span className="text-[11px] text-[#555555]">
           {parsed.models?.length || 1} Engine Models Monitored
         </span>
       </div>
@@ -232,11 +232,11 @@ export function QuotaBreakdown({
         {parsed.models?.map((m) => (
           <div key={m.name} className="space-y-2">
             <div className="flex items-center justify-between text-xs font-sans">
-              <span className="text-foreground font-medium flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+              <span className="text-[#ededed] font-medium flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#555555]" />
                 {m.name} Engine
               </span>
-              <span className="text-[11px] text-muted-foreground/70">
+              <span className="text-[11px] text-[#555555]">
                 {m.windows.length} Time Windows
               </span>
             </div>
