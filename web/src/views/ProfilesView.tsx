@@ -694,7 +694,7 @@ export function ProfilesView({
 
         {/* Multi-Tab Workspace Organization */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-6">
-          <div className="flex items-center justify-between border-b border-[#222222] pb-3">
+          <div className="flex items-center justify-between">
             <TabsList className="bg-[#0c0c0c] border border-[#222222] p-1 h-9 rounded-geist gap-1">
               <TabsTrigger value="quota" className="gap-2 text-xs">
                 <Gauge className="h-3.5 w-3.5 text-[#666666]" />
@@ -721,7 +721,7 @@ export function ProfilesView({
               </TabsTrigger>
               <TabsTrigger value="settings" className="gap-2 text-xs">
                 <Settings className="h-3.5 w-3.5 text-[#666666]" />
-                <span>Settings & Sandbox</span>
+                <span>Settings</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1049,153 +1049,78 @@ export function ProfilesView({
             )}
           </TabsContent>
 
-          {/* TAB 4: SETTINGS & SANDBOX */}
-          <TabsContent value="settings" className="space-y-5 focus-visible:outline-none">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-              {/* Sandbox & Inheritance Card */}
-              <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-                <CardHeader className="p-5 pb-3">
-                  <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                    <Folder className="h-4 w-4 text-[#666666]" />
-                    Sandbox & File Isolation
-                  </CardTitle>
-                  <CardDescription className="text-xs text-[#888888] pt-1">
-                    Isolated storage path and inheritance policies for this profile.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-5 pt-0 space-y-4">
-                  <div className="space-y-1.5">
-                    <span className="text-xs text-[#666666]">Sandbox Directory:</span>
-                    <div className="flex items-center gap-2 bg-[#050505] border border-[#222222] p-2 rounded-geist">
-                      <span className="font-mono text-xs text-[#ededed] select-all flex-1 truncate">
-                        {currentProfile.path}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyPath(currentProfile.path)}
-                        className="p-1 rounded hover:bg-[#1a1a1a] text-[#666666] hover:text-[#ededed] cursor-pointer"
-                        title="Copy path"
-                      >
-                        {copiedPath ? (
-                          <Check className="h-3.5 w-3.5 text-status-success" />
-                        ) : (
-                          <Copy className="h-3.5 w-3.5" />
-                        )}
-                      </button>
+          {/* TAB 4: SETTINGS */}
+          <TabsContent value="settings" className="space-y-5 max-w-3xl focus-visible:outline-none">
+            {/* Configured Engines Card */}
+            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+              <CardHeader className="p-5 pb-3">
+                <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 text-[#666666]" />
+                  Configured Agent Engines
+                </CardTitle>
+                <CardDescription className="text-xs text-[#888888] pt-1">
+                  Engines sharing this sandbox workspace profile.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 pt-0 space-y-3">
+                {profileAdapters.map((ad) => (
+                  <div
+                    key={ad.agent}
+                    className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        {getAgentBadge(ad.agent)}
+                        <span className="font-semibold text-[#ededed] capitalize">{ad.agent}</span>
+                      </div>
+                      <div className="text-[#666666] text-[11px]">
+                        {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials' : 'No credentials')}
+                      </div>
                     </div>
+                    {ad.has_credentials ? (
+                      <Badge variant="outline" className="badge-success text-[11px]">
+                        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                        <span>Auth OK</span>
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="badge-warning text-[11px]">
+                        <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                        <span>Needs Auth</span>
+                      </Badge>
+                    )}
                   </div>
+                ))}
+              </CardContent>
+            </Card>
 
-                  <div className="space-y-3 pt-2 border-t border-[#222222]">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-xs font-medium text-[#ededed]">Global MCP Inheritance</div>
-                        <div className="text-[11px] text-[#666666]">
-                          Inherit server definitions from ~/.aim/mcp.json
-                        </div>
-                      </div>
-                      <div className="flex items-center">
-                        <Switch
-                          size="sm"
-                          checked={isMcpGlobalOn}
-                          disabled={updatingConfig}
-                          onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-[#222222]">
-                      <div>
-                        <div className="text-xs font-medium text-[#ededed]">Global Plugins Inheritance</div>
-                        <div className="text-[11px] text-[#666666]">
-                          Inherit global plugins from ~/.aim/plugins/
-                        </div>
-                      </div>
-                      <div className="flex items-center">
-                        <Switch
-                          size="sm"
-                          checked={isPluginsGlobalOn}
-                          disabled={updatingConfig}
-                          onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
-                        />
-                      </div>
-                    </div>
+            {/* Danger Zone */}
+            <Card className="border border-status-danger-border bg-status-danger-bg rounded-geist">
+              <CardHeader className="p-5 pb-3">
+                <CardTitle className="text-sm font-semibold text-status-danger flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-status-danger" />
+                  Danger Zone
+                </CardTitle>
+                <CardDescription className="text-xs text-[#888888] pt-1">
+                  Permanent actions that cannot be undone.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 pt-0">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="text-xs text-[#888888]">
+                    Deleting this profile permanently removes its sandbox directory and configuration.
                   </div>
-                </CardContent>
-              </Card>
-
-              {/* Configured Engines & Danger Zone Column */}
-              <div className="space-y-5">
-                <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-                  <CardHeader className="p-5 pb-3">
-                    <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                      <SlidersHorizontal className="h-4 w-4 text-[#666666]" />
-                      Configured Agent Engines
-                    </CardTitle>
-                    <CardDescription className="text-xs text-[#888888] pt-1">
-                      Engines sharing this sandbox workspace profile.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-5 pt-0 space-y-3">
-                    {profileAdapters.map((ad) => (
-                      <div
-                        key={ad.agent}
-                        className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            {getAgentBadge(ad.agent)}
-                            <span className="font-semibold text-[#ededed] capitalize">{ad.agent}</span>
-                          </div>
-                          <div className="text-[#666666] text-[11px]">
-                            {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials' : 'No credentials')}
-                          </div>
-                        </div>
-                        {ad.has_credentials ? (
-                          <Badge variant="outline" className="badge-success text-[11px]">
-                            <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                            <span>Auth OK</span>
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="badge-warning text-[11px]">
-                            <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                            <span>Needs Auth</span>
-                          </Badge>
-                        )}
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-
-                {/* Danger Zone */}
-                <Card className="border border-status-danger-border bg-status-danger-bg rounded-geist">
-                  <CardHeader className="p-5 pb-3">
-                    <CardTitle className="text-sm font-semibold text-status-danger flex items-center gap-2">
-                      <ShieldAlert className="h-4 w-4 text-status-danger" />
-                      Danger Zone
-                    </CardTitle>
-                    <CardDescription className="text-xs text-[#888888] pt-1">
-                      Permanent actions that cannot be undone.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-5 pt-0">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="text-xs text-[#888888]">
-                        Deleting this profile permanently removes its sandbox directory and configuration.
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
-                        className="h-8 rounded-geist text-xs font-sans border-status-danger-border bg-status-danger-bg text-status-danger hover:bg-status-danger-solid hover:text-white cursor-pointer px-3 shrink-0"
-                      >
-                        <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                        Delete Profile
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
+                    className="h-8 rounded-geist text-xs font-sans border-status-danger-border bg-status-danger-bg text-status-danger hover:bg-status-danger-solid hover:text-white cursor-pointer px-3 shrink-0"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                    Delete Profile
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
 
