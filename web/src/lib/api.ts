@@ -157,9 +157,61 @@ export async function getStatus(): Promise<StatusDTO> {
   return handleResponse<StatusDTO>(res);
 }
 
-export async function getProfiles(agent?: string): Promise<ProfileDTO[]> {
-  const url = agent ? `${BASE_URL}/profiles?agent=${encodeURIComponent(agent)}` : `${BASE_URL}/profiles`;
+export interface GetProfilesOptions {
+  agent?: string;
+  profile?: string;
+  refresh?: boolean;
+}
+
+export async function getProfiles(
+  agentOrOptions?: string | GetProfilesOptions,
+  legacyRefresh?: boolean
+): Promise<ProfileDTO[]> {
+  let agent: string | undefined;
+  let profile: string | undefined;
+  let refresh = false;
+
+  if (typeof agentOrOptions === 'object' && agentOrOptions !== null) {
+    agent = agentOrOptions.agent;
+    profile = agentOrOptions.profile;
+    refresh = !!agentOrOptions.refresh;
+  } else {
+    agent = agentOrOptions;
+    refresh = !!legacyRefresh;
+  }
+
+  const params = new URLSearchParams();
+  if (agent && agent !== 'all') params.set('agent', agent);
+  if (profile && profile !== 'all') params.set('profile', profile);
+  if (refresh) params.set('refresh', 'true');
+
+  const queryString = params.toString();
+  const url = queryString ? `${BASE_URL}/profiles?${queryString}` : `${BASE_URL}/profiles`;
   const res = await fetch(url);
+  return handleResponse<ProfileDTO[]>(res);
+}
+
+export async function refreshProfiles(agent?: string, profile?: string): Promise<ProfileDTO[]> {
+  const res = await fetch(`${BASE_URL}/profiles/refresh`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ agent, profile }),
+  });
+  return handleResponse<ProfileDTO[]>(res);
+}
+
+export async function refreshSingleProfile(name: string, agent?: string): Promise<ProfileDTO[]> {
+  const url = agent
+    ? `${BASE_URL}/profiles/${encodeURIComponent(name)}/refresh?agent=${encodeURIComponent(agent)}`
+    : `${BASE_URL}/profiles/${encodeURIComponent(name)}/refresh`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
   return handleResponse<ProfileDTO[]>(res);
 }
 

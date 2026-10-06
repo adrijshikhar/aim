@@ -53,6 +53,7 @@ export function ProfilesView({
 }: ProfilesViewProps) {
   const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   // Dialog State
@@ -68,16 +69,36 @@ export function ProfilesView({
 
   const { toast } = useToast();
 
-  const fetchProfiles = React.useCallback(async () => {
-    setLoading(true);
+  const fetchProfiles = React.useCallback(async (forceRefresh = false) => {
+    if (forceRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const data = await getProfiles();
+      const data = await getProfiles({
+        refresh: forceRefresh,
+      });
       setProfiles(data);
       onProfilesLoaded?.(data);
+      if (forceRefresh) {
+        toast({
+          title: 'Quota Telemetry Refreshed',
+          description: `Updated live quota telemetry for ${data.length} profile(s).`,
+          variant: 'success',
+        });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch profiles';
       setError(msg);
+      if (forceRefresh) {
+        toast({
+          title: 'Refresh Failed',
+          description: msg,
+          variant: 'destructive',
+        });
+      }
       // Fallback sample data in dev if backend server isn't reachable yet
       const fallbackData: ProfileDTO[] = [
         {
@@ -157,8 +178,9 @@ export function ProfilesView({
       onProfilesLoaded?.(fallbackData);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [onProfilesLoaded]);
+  }, [onProfilesLoaded, toast]);
 
   React.useEffect(() => {
     fetchProfiles();
@@ -294,6 +316,34 @@ export function ProfilesView({
     return profiles.find((p) => p.name === selectedProfile) || null;
   }, [profiles, selectedProfile]);
 
+  const handleRefreshCurrentProfile = React.useCallback(async () => {
+    if (!currentProfile) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const data = await getProfiles({
+        profile: currentProfile.name,
+        refresh: true,
+      });
+      setProfiles(data);
+      onProfilesLoaded?.(data);
+      toast({
+        title: 'Quota Telemetry Refreshed',
+        description: `Updated live telemetry for "${currentProfile.name}".`,
+        variant: 'success',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to refresh telemetry';
+      toast({
+        title: 'Refresh Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [currentProfile, onProfilesLoaded, toast]);
+
   // ==========================================
   // VIEW A: SPECIFIC PROFILE WORKSPACE VIEW
   // ==========================================
@@ -353,13 +403,13 @@ export function ProfilesView({
               <Button
                 variant="outline"
                 size="icon"
-                onClick={fetchProfiles}
-                disabled={loading}
-                title="Refresh profile"
-                aria-label="Refresh profile"
+                onClick={handleRefreshCurrentProfile}
+                disabled={loading || refreshing}
+                title="Refresh profile telemetry"
+                aria-label="Refresh profile telemetry"
                 className="h-8 w-8 rounded-geist border-border bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
               >
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-3.5 w-3.5 ${refreshing || loading ? 'animate-spin' : ''}`} />
               </Button>
               <Button
                 variant="outline"
@@ -522,10 +572,22 @@ export function ProfilesView({
 
         {/* Visual Live Quota Breakdown (Replaces raw monospace text) */}
         <div className="space-y-3">
-          <h3 className="text-xs font-sans font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Gauge className="h-3.5 w-3.5" />
-            Live Quota Telemetry & Rate Limits
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-sans font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Gauge className="h-3.5 w-3.5" />
+              Live Quota Telemetry & Rate Limits
+            </h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshCurrentProfile}
+              disabled={loading || refreshing}
+              className="h-7 text-xs font-sans rounded-geist border-border bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer px-2.5"
+            >
+              <RefreshCw className={`h-3 w-3 mr-1.5 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing...' : 'Refresh Quota'}
+            </Button>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(currentProfile.adapters && currentProfile.adapters.length > 0
@@ -641,12 +703,12 @@ export function ProfilesView({
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchProfiles}
-            disabled={loading}
-            className="rounded-geist h-8 border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
+            onClick={() => fetchProfiles(true)}
+            disabled={loading || refreshing}
+            className="rounded-geist h-8 border-border bg-secondary text-foreground hover:bg-accent cursor-pointer"
           >
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshing || loading ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
           </Button>
 
           <Button

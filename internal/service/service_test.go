@@ -47,6 +47,18 @@ func (m *mockAdapterWithFlags) RunnableFlags() []agents.RunnableFlag {
 	return m.flags
 }
 
+type mockUsageAdapter struct {
+	mockAdapter
+	usageFn func(ctx context.Context, profileName, profileDir string) (*usage.Report, error)
+}
+
+func (m *mockUsageAdapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	if m.usageFn != nil {
+		return m.usageFn(ctx, profileName, profileDir)
+	}
+	return &usage.Report{Agent: m.name, Profile: profileName}, nil
+}
+
 // mockSessionProvider implements session.SessionProvider for testing.
 type mockSessionProvider struct {
 	agent    string
@@ -859,5 +871,70 @@ func TestProfileService_PathTraversalAndValidation(t *testing.T) {
 	// RenameProfile: path traversal in target
 	if err := svc.RenameProfile(ctx, "claude", "source", "../evil"); err == nil {
 		t.Errorf("expected path traversal error for RenameProfile target")
+	}
+}
+
+func TestProfileService_RefreshUsage(t *testing.T) {
+	ctx := context.Background()
+	_, pm, reg, cache := setupTestEnv(t)
+
+	usageCalled := false
+	usageAd := &mockUsageAdapter{
+		mockAdapter: mockAdapter{
+			name:    "mock-provider",
+			aliases: []string{"mock"},
+			hasCredsMap: map[string]bool{
+				"gamma": true,
+			},
+		},
+		usageFn: func(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+			usageCalled = true
+			return &usage.Report{
+				Agent:     "mock-provider",
+				Profile:   profileName,
+				Status:    usage.StatusOK,
+				Summary:   "5h: 92% remaining",
+				FetchedAt: time.Now(),
+				Windows: []usage.LimitWindow{
+					{Category: "mock", Name: "5-hour window", RemainingPct: 92},
+				},
+			}, nil
+		},
+	}
+	reg.Register(usageAd)
+
+	_, err := pm.EnsureProfile("gamma")
+	if err != nil {
+		t.Fatalf("failed to ensure gamma: %v", err)
+	}
+	cfg, _ := config.LoadConfig()
+	if cfg == nil {
+		cfg = config.NewDefaultConfig()
+	}
+	cfg.AddProfileAgent("gamma", "mock-provider")
+	_ = config.SaveConfig(cfg)
+
+	svc := service.NewProfileService(pm, reg, cache)
+
+	// Refresh usage for gamma
+	profs, err := svc.RefreshUsage(ctx, "mock-provider", "gamma")
+	if err != nil {
+		t.Fatalf("RefreshUsage failed: %v", err)
+	}
+	if !usageCalled {
+		t.Fatal("expected adapter GetUsage to be called")
+	}
+	if len(profs) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(profs))
+	}
+	p := profs[0]
+	if p.Name != "gamma" || p.Quota == nil || p.Quota.BottleneckPct != 92 {
+		t.Fatalf("unexpected profile quota after refresh: %+v", p.Quota)
+	}
+
+	// Verify cache was updated
+	cachedRep, ok := cache.Get("mock-provider", "gamma")
+	if !ok || cachedRep.BottleneckPct() != 92 {
+		t.Fatalf("cache was not updated properly: %+v", cachedRep)
 	}
 }

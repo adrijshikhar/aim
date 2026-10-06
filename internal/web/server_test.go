@@ -22,9 +22,20 @@ type mockProfileService struct {
 	createProfileFn func(ctx context.Context, req service.CreateProfileRequest) (*service.ProfileDTO, error)
 	removeProfileFn func(ctx context.Context, agent, name string) error
 	renameProfileFn func(ctx context.Context, agent, oldName, newName string) error
+	refreshUsageFn  func(ctx context.Context, agent, profileName string) ([]service.ProfileDTO, error)
 }
 
 func (m *mockProfileService) ListProfiles(ctx context.Context, agent string) ([]service.ProfileDTO, error) {
+	if m.listProfilesFn != nil {
+		return m.listProfilesFn(ctx, agent)
+	}
+	return []service.ProfileDTO{}, nil
+}
+
+func (m *mockProfileService) RefreshUsage(ctx context.Context, agent, profileName string) ([]service.ProfileDTO, error) {
+	if m.refreshUsageFn != nil {
+		return m.refreshUsageFn(ctx, agent, profileName)
+	}
 	if m.listProfilesFn != nil {
 		return m.listProfilesFn(ctx, agent)
 	}
@@ -235,6 +246,70 @@ func TestGetProfiles_EmptyAndError(t *testing.T) {
 
 	if respErr.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", respErr.StatusCode)
+	}
+}
+
+func TestGetProfiles_Refresh(t *testing.T) {
+	refreshCalled := false
+	var passedAgent, passedProfile string
+	profs := &mockProfileService{
+		refreshUsageFn: func(ctx context.Context, agent, profileName string) ([]service.ProfileDTO, error) {
+			refreshCalled = true
+			passedAgent = agent
+			passedProfile = profileName
+			return []service.ProfileDTO{
+				{
+					Name:  "refreshed-prof",
+					Agent: "agy",
+					Quota: &service.QuotaDTO{BottleneckPct: 95, Summary: "Refreshed"},
+				},
+			}, nil
+		},
+	}
+	ts, _ := setupTestServer(t, profs, nil, nil, false)
+
+	// Call GET /api/profiles?refresh=true&profile=bby&agent=agy
+	resp, err := http.Get(ts.URL + "/api/profiles?refresh=true&profile=bby&agent=agy")
+	if err != nil {
+		t.Fatalf("GET /api/profiles?refresh=true failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if !refreshCalled {
+		t.Fatal("expected refreshUsageFn to be called when refresh=true")
+	}
+	if passedAgent != "agy" || passedProfile != "bby" {
+		t.Fatalf("unexpected agent/profile passed: agent=%q profile=%q", passedAgent, passedProfile)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var list []service.ProfileDTO
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(list) != 1 || list[0].Name != "refreshed-prof" || list[0].Quota == nil || list[0].Quota.BottleneckPct != 95 {
+		t.Fatalf("unexpected refreshed profile data: %+v", list)
+	}
+
+	// Also test POST /api/profiles/refresh
+	refreshCalled = false
+	postBody := bytes.NewBufferString(`{"agent":"codex","profile":"office"}`)
+	postResp, err := http.Post(ts.URL+"/api/profiles/refresh", "application/json", postBody)
+	if err != nil {
+		t.Fatalf("POST /api/profiles/refresh failed: %v", err)
+	}
+	defer postResp.Body.Close()
+
+	if !refreshCalled {
+		t.Fatal("expected refreshUsageFn to be called on POST /api/profiles/refresh")
+	}
+	if passedAgent != "codex" || passedProfile != "office" {
+		t.Fatalf("unexpected agent/profile passed to POST: agent=%q profile=%q", passedAgent, passedProfile)
+	}
+	if postResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", postResp.StatusCode)
 	}
 }
 

@@ -129,6 +129,8 @@ func (s *Server) setupRoutes() {
 	// REST API Handlers
 	mux.HandleFunc("GET /api/profiles", s.handleGetProfiles)
 	mux.HandleFunc("POST /api/profiles", s.handleCreateProfile)
+	mux.HandleFunc("POST /api/profiles/refresh", s.handleRefreshProfiles)
+	mux.HandleFunc("POST /api/profiles/{name}/refresh", s.handleRefreshSingleProfile)
 	mux.HandleFunc("PATCH /api/profiles/{name}/config", s.handleUpdateProfileConfig)
 	mux.HandleFunc("DELETE /api/profiles/{agent}/{name}", s.handleDeleteProfile)
 	mux.HandleFunc("GET /api/adapters", s.handleGetAdapters)

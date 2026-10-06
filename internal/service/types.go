@@ -131,6 +131,7 @@ type ProfileService interface {
 	RemoveProfile(ctx context.Context, agent, name string) error
 	RenameProfile(ctx context.Context, agent, oldName, newName string) error
 	UpdateProfileConfig(ctx context.Context, name string, mcpGlobal, pluginsGlobal *bool) error
+	RefreshUsage(ctx context.Context, agent, profileName string) ([]ProfileDTO, error)
 }
 
 // SessionService encapsulates session discovery and resumption.

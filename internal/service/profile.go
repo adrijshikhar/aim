@@ -440,3 +440,80 @@ func (s *profileService) ListAdapters(ctx context.Context) ([]AdapterDTO, error)
 	}
 	return dtos, nil
 }
+
+// RefreshUsage actively queries quota telemetry providers for matching profiles,
+// stores updated reports into the cache, and returns the refreshed profile list.
+func (s *profileService) RefreshUsage(ctx context.Context, agent, profileName string) ([]ProfileDTO, error) {
+	if s.pm == nil {
+		return []ProfileDTO{}, nil
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg == nil {
+		cfg = config.NewDefaultConfig()
+	}
+
+	agent = strings.TrimSpace(agent)
+	profileName = strings.TrimSpace(profileName)
+
+	var adapters []agents.AgentAdapter
+	if agent != "" && agent != "all" {
+		if s.reg != nil {
+			if ad, err := s.reg.Get(agent); err == nil {
+				adapters = []agents.AgentAdapter{ad}
+			}
+		}
+	} else if s.reg != nil {
+		adapters = s.reg.All()
+	}
+
+	var targets []usage.TargetProfile
+	for _, ad := range adapters {
+		var usageFn func(context.Context, string, string) (*usage.Report, error)
+		if up, ok := ad.(agents.UsageProvider); ok {
+			usageFn = up.GetUsage
+		} else {
+			continue
+		}
+
+		var profs []string
+		if profileName != "" && profileName != "all" {
+			if s.pm.ProfileExists(profileName) {
+				pDir := s.pm.ProfileDir(profileName)
+				agentsList := cfg.GetProfileAgents(profileName)
+				isAssociated := false
+				if len(agentsList) > 0 {
+					for _, ag := range agentsList {
+						if ag == ad.Name() {
+							isAssociated = true
+							break
+						}
+					}
+				}
+				if isAssociated || ad.HasCredentials(pDir) || len(agentsList) == 0 {
+					profs = []string{profileName}
+				}
+			}
+		} else {
+			profs, _ = s.pm.ListProfilesForAgent(ad.Name(), cfg, s.reg)
+		}
+
+		for _, p := range profs {
+			targets = append(targets, usage.TargetProfile{
+				Agent:      ad.Name(),
+				Profile:    p,
+				ProfileDir: s.pm.ProfileDir(p),
+				GetUsageFn: usageFn,
+			})
+		}
+	}
+
+	if len(targets) > 0 && s.cache != nil {
+		reportsChan := usage.RefreshAsync(ctx, targets, s.cache, true)
+		for range reportsChan {
+			// drain channel to complete all async fetches and cache writes
+		}
+	}
+
+	return s.ListProfiles(ctx, agent)
+}
