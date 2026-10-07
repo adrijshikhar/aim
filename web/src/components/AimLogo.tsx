@@ -3,10 +3,12 @@ import { cn } from '@/lib/utils';
 
 export interface AimLogoProps extends React.SVGProps<SVGSVGElement> {
   className?: string;
-  variant?: 'monochrome' | 'laser' | 'filled';
+  variant?: 'monochrome' | 'laser';
 }
 
-export function AimLogo({ className, variant = 'monochrome', ...props }: AimLogoProps) {
+export function AimLogo({ className, variant = 'laser', ...props }: AimLogoProps) {
+  const accentColor = variant === 'laser' ? '#00f0ff' : 'currentColor';
+
   return (
     <svg
       viewBox="0 0 24 24"
@@ -16,45 +18,40 @@ export function AimLogo({ className, variant = 'monochrome', ...props }: AimLogo
       aria-label="AIM Logo"
       {...props}
     >
-      {/* Precision Reticle Ring */}
-      <circle
-        cx="12"
-        cy="12"
-        r="7.5"
-        stroke={variant === 'laser' ? '#00f0ff' : 'currentColor'}
-        strokeWidth="1.25"
-        strokeOpacity={variant === 'laser' ? 0.9 : 0.65}
-      />
-
-      {/* Crosshair Alignment Ticks */}
+      {/* 90-degree Navigational Compass Arc */}
       <path
-        d="M12 1.5V4M12 20V22.5M1.5 12H4M20 12H22.5"
-        stroke={variant === 'laser' ? '#00f0ff' : 'currentColor'}
-        strokeWidth="1.5"
+        d="M4 20A16 16 0 0 1 20 4"
+        stroke="currentColor"
+        strokeWidth="1.8"
         strokeLinecap="round"
       />
 
-      {/* Precision Reticle Center Pinpoint */}
+      {/* Trajectory Vector Arrow pointing Northeast */}
+      <path
+        d="M12 4H20V12"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+
+      {/* Trajectory Vector Ray */}
+      <line
+        x1="8"
+        y1="16"
+        x2="19"
+        y2="5"
+        stroke={accentColor}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+
+      {/* Pivot Origin Dot */}
       <circle
-        cx="12"
-        cy="11.5"
-        r="0.75"
-        fill={variant === 'laser' ? '#00f0ff' : 'currentColor'}
-      />
-
-      {/* Faceted Geometric 'A' Mark with Transparent Aperture */}
-      <path
-        d="M12 3.2L19.2 19.8H14.8L13.2 16H10.8L9.2 19.8H4.8L12 3.2ZM12 8.2L13.6 13H10.4L12 8.2Z"
-        fill="currentColor"
-        fillRule="evenodd"
-        clipRule="evenodd"
-      />
-
-      {/* Facet Detail (Prism Chevron) */}
-      <path
-        d="M10.4 14.5L12 17L13.6 14.5L12 15.4L10.4 14.5Z"
-        fill={variant === 'laser' ? '#00f0ff' : 'currentColor'}
-        fillOpacity={variant === 'laser' ? 1 : 0.45}
+        cx="8"
+        cy="16"
+        r="1.8"
+        fill={accentColor}
       />
     </svg>
   );
