@@ -5,8 +5,9 @@ import {
   Server,
   Plus,
   Search,
-  Cpu,
+  Radio,
 } from 'lucide-react';
+import { AimLogo } from '@/components/AimLogo';
 import { ProfileDTO, DaemonDTO } from '@/lib/api';
 
 interface SidebarProps {
@@ -109,7 +110,7 @@ export function Sidebar({
           title="AIM Home"
         >
           <div className="h-7 w-7 rounded-[6px] bg-card border border-border flex items-center justify-center shadow-xs">
-            <Cpu className="h-3.5 w-3.5 text-foreground" />
+            <AimLogo className="h-4 w-4 text-foreground" />
           </div>
           <div className="flex items-center gap-1.5">
             <span className="font-semibold text-sm tracking-tight text-foreground">AIM</span>
@@ -260,7 +261,7 @@ export function Sidebar({
               Daemon: {daemonInfo?.active ? 'Active' : daemonInfo?.installed ? 'Inactive' : 'Off'}
             </span>
           </div>
-          <Cpu className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
+          <Radio className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
         </button>
       </div>
     </aside>
