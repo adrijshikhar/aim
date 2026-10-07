@@ -48,6 +48,7 @@ import {
   CheckCircle2,
   LayoutGrid,
   List,
+  Clock,
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
@@ -55,6 +56,80 @@ import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
 import { QuotaBreakdown } from '@/components/QuotaBreakdown';
 import { cn } from '@/lib/utils';
+
+interface ParsedQuotaDetails {
+  resetTime: string | null;
+  shortReset: string | null;
+  weeklyReset: string | null;
+  headline: string;
+  subtext: string;
+}
+
+function parseQuotaDetails(summary?: string, isExhausted?: boolean, pct: number = 100): ParsedQuotaDetails {
+  if (!summary || !summary.trim()) {
+    return {
+      resetTime: null,
+      shortReset: null,
+      weeklyReset: null,
+      headline: isExhausted ? 'Exhausted' : 'Healthy',
+      subtext: isExhausted ? 'Usage ceiling reached' : 'Standard capacity',
+    };
+  }
+
+  // 1. Extract reset times:
+  // Check 5h window reset: e.g. "5h: 0% [1h 29m]" or "5h limit: 68% remaining [2h 15m]"
+  const fiveHMatch = summary.match(/5h[^\]]*?\[([^\]]+)\]/i);
+  // Check weekly reset: e.g. "wk: 0% [1d 19h]" or "Weekly Limit: 100% [4d 2h]"
+  const wkMatch = summary.match(/(?:wk|week|weekly)[^\]]*?\[([^\]]+)\]/i);
+  // Any bracket fallback:
+  const anyBracket = summary.match(/\[([^\]]+)\]/);
+
+  const shortReset = fiveHMatch ? fiveHMatch[1].trim() : null;
+  const weeklyReset = wkMatch ? wkMatch[1].trim() : null;
+  const resetTime = shortReset || weeklyReset || (anyBracket ? anyBracket[1].trim() : null);
+
+  // 2. Identify bottleneck model if multi-model: e.g. "Gemini (5h: 0%, wk: 0% ...)"
+  let bottleneckModel: string | null = null;
+  const modelMatch = summary.match(/([A-Za-z0-9_-]+)\s*\([^)]*?(?:0%|1\d%|2\d%)[^)]*?\)/);
+  if (modelMatch) {
+    bottleneckModel = modelMatch[1];
+  }
+
+  let headline = '';
+  let subtext = '';
+
+  if (resetTime) {
+    headline = `Resets in ${resetTime}`;
+    if (bottleneckModel) {
+      subtext = `${bottleneckModel} capacity bottleneck`;
+    } else if (shortReset) {
+      subtext = '5-hour sliding window reset';
+    } else if (weeklyReset) {
+      subtext = 'Weekly allowance reset';
+    } else {
+      subtext = 'Next auto-renewal window';
+    }
+  } else {
+    if (isExhausted || pct <= 0) {
+      headline = 'Quota Exhausted';
+      subtext = bottleneckModel ? `${bottleneckModel} limit reached` : 'Usage ceiling reached';
+    } else if (pct <= 30) {
+      headline = `${pct}% Headroom`;
+      subtext = bottleneckModel ? `${bottleneckModel} throttled` : 'Approaching rolling limit';
+    } else {
+      headline = 'Standard Capacity';
+      subtext = 'All models operating normally';
+    }
+  }
+
+  return {
+    resetTime,
+    shortReset,
+    weeklyReset,
+    headline,
+    subtext,
+  };
+}
 
 interface ProfilesViewProps {
   selectedProfile: string;
@@ -849,91 +924,122 @@ export function ProfilesView({
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                       {/* LEFT COLUMN: Metric Scorecards (~280px / 4 cols) */}
                       <div className="lg:col-span-4 space-y-3">
-                        {/* Scorecard 1: Capacity Index (Hero Card like Real Experience Score in Screenshot 2) */}
-                        <div className="p-4 rounded-geist border border-[#2a2a2a] bg-[#0c0c0c] space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-[#888888]">Overall Capacity</span>
-                            <div className="h-6 w-6 rounded-full bg-[#181818] border border-[#2e2e2e] flex items-center justify-center text-[#ededed]">
-                              <Activity className="h-3 w-3" />
-                            </div>
-                          </div>
+                        {(() => {
+                          const qDetails = parseQuotaDetails(ad.quota?.summary, isExhausted, pct);
+                          const wkMatch = ad.quota?.summary?.match(/(?:wk|week|weekly)\s*(?:limit)?\s*:\s*(\d+)%/i);
+                          const parsedWkPct = wkMatch ? parseInt(wkMatch[1], 10) : null;
+                          const isWkExhausted = parsedWkPct !== null ? parsedWkPct <= 0 : isExhausted;
+                          const wkDisplayPct = parsedWkPct !== null ? parsedWkPct : (isExhausted ? 0 : 92);
+                          const wkStatusLabel = parsedWkPct !== null
+                            ? (parsedWkPct <= 0 ? '0%' : `${parsedWkPct}%`)
+                            : (isExhausted ? '0%' : (ad.account?.auth_method?.includes('ChatGPT') || ad.agent === 'codex' ? '100%' : 'Healthy'));
+                          const wkColor = getProgressColor(wkDisplayPct);
 
-                          <div>
-                            <div className="text-2xl font-bold font-mono tracking-tight text-[#ededed]">
-                              {pct}%
-                            </div>
-                            <div className="text-[11px] text-[#666666] font-sans truncate" title={ad.quota?.summary || 'Standard capacity'}>
-                              {ad.quota?.summary || 'Calculated bottleneck'}
-                            </div>
-                          </div>
+                          return (
+                            <>
+                              {/* Scorecard 1: Capacity Index (Hero Card) */}
+                              <div className="p-4 rounded-geist border border-[#2a2a2a] bg-[#0c0c0c] space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-[#888888]">Overall Capacity</span>
+                                  <div className="h-6 w-6 rounded-full bg-[#181818] border border-[#2e2e2e] flex items-center justify-center text-[#ededed]">
+                                    <Activity className="h-3 w-3" />
+                                  </div>
+                                </div>
 
-                          {/* Micro-bar */}
-                          <div className="space-y-1">
-                            <div className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50">
-                              <div
-                                className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
-                                style={{ width: `${Math.max(isExhausted ? 6 : 0, Math.min(100, pct))}%` }}
-                              />
-                            </div>
-                          </div>
+                                <div>
+                                  <div className="flex items-baseline justify-between gap-2">
+                                    <div className="text-2xl font-bold font-mono tracking-tight text-[#ededed]">
+                                      {pct}%
+                                    </div>
+                                    {qDetails.resetTime && (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] border border-amber-500/25 bg-amber-500/10 text-amber-400 font-mono text-[11px] font-medium shrink-0">
+                                        <Clock className="h-3 w-3 text-amber-400 shrink-0" />
+                                        <span>Resets in {qDetails.resetTime}</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-[#888888] font-sans truncate pt-0.5" title={ad.quota?.summary || 'Standard capacity'}>
+                                    {qDetails.subtext}
+                                  </div>
+                                </div>
 
-                          <div className="pt-2 border-t border-[#1a1a1a] flex items-center justify-between text-[11px]">
-                            <span className="text-[#666666]">Status</span>
-                            {isExhausted ? (
-                              <span className="font-mono text-status-danger font-medium flex items-center gap-1">
-                                <span className="h-1.5 w-1.5 rounded-full bg-status-danger-solid" />
-                                Exhausted
-                              </span>
-                            ) : isWarning ? (
-                              <span className="font-mono text-status-warning font-medium flex items-center gap-1">
-                                <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                                Throttled / Low
-                              </span>
-                            ) : (
-                              <span className="font-mono text-status-success font-medium flex items-center gap-1">
-                                <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                                Healthy
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                                {/* Micro-bar */}
+                                <div className="space-y-1">
+                                  <div className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50">
+                                    <div
+                                      className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
+                                      style={{ width: `${isExhausted || pct <= 0 ? 0 : Math.min(100, pct)}%` }}
+                                    />
+                                  </div>
+                                </div>
 
-                        {/* Scorecard 2: 5-Hour Rolling Limit (Modeled after FCP/LCP cards in Screenshot 2) */}
-                        <div className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0a0a0a] space-y-2 hover:border-[#2a2a2a] transition-colors">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[#888888] font-medium">5-Hour Sliding Window</span>
-                            <span className={cn("font-mono text-xs font-semibold tabular-nums", getTextColor(pct))}>
-                              {isExhausted ? '0%' : `${pct}%`}
-                            </span>
-                          </div>
-                          <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
-                            <div
-                              className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
-                              style={{ width: `${Math.max(isExhausted ? 6 : 0, Math.min(100, pct))}%` }}
-                            />
-                          </div>
-                          <div className="text-[10px] text-[#555555] font-mono flex items-center justify-between">
-                            <span>Sliding turn budget</span>
-                            <span>{isExhausted ? 'Reset pending' : 'Auto-renewing'}</span>
-                          </div>
-                        </div>
+                                <div className="pt-2 border-t border-[#1a1a1a] flex items-center justify-between text-[11px]">
+                                  <span className="text-[#666666]">Status</span>
+                                  {isExhausted ? (
+                                    <span className="font-mono text-status-danger font-medium flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-status-danger-solid" />
+                                      Exhausted
+                                    </span>
+                                  ) : isWarning ? (
+                                    <span className="font-mono text-status-warning font-medium flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                                      Throttled / Low
+                                    </span>
+                                  ) : (
+                                    <span className="font-mono text-status-success font-medium flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                                      Healthy
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
 
-                        {/* Scorecard 3: Weekly Allowance */}
-                        <div className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0a0a0a] space-y-2 hover:border-[#2a2a2a] transition-colors">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[#888888] font-medium">Weekly Cap</span>
-                            <span className="font-mono text-xs font-semibold text-[#ededed] tabular-nums">
-                              {ad.account?.auth_method?.includes('ChatGPT') || ad.agent === 'codex' ? '100%' : 'Healthy'}
-                            </span>
-                          </div>
-                          <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
-                            <div className={`h-full transition-all duration-300 ${getProgressColor(pct)}`} style={{ width: `${Math.max(12, Math.min(100, isExhausted ? 0 : 92))}%` }} />
-                          </div>
-                          <div className="text-[10px] text-[#737373] font-mono flex items-center justify-between">
-                            <span>7-day ceiling</span>
-                            <span>Pro Tier</span>
-                          </div>
-                        </div>
+                              {/* Scorecard 2: 5-Hour Rolling Limit */}
+                              <div className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0a0a0a] space-y-2 hover:border-[#2a2a2a] transition-colors">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-[#888888] font-medium">5-Hour Sliding Window</span>
+                                  <span className={cn("font-mono text-xs font-semibold tabular-nums", getTextColor(pct))}>
+                                    {isExhausted ? '0%' : `${pct}%`}
+                                  </span>
+                                </div>
+                                <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
+                                  <div
+                                    className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
+                                    style={{ width: `${isExhausted || pct <= 0 ? 0 : Math.min(100, pct)}%` }}
+                                  />
+                                </div>
+                                <div className="text-[10px] font-mono flex items-center justify-between">
+                                  <span className="text-[#555555]">Sliding turn budget</span>
+                                  <span className={cn(qDetails.shortReset ? "text-amber-400 font-medium" : isExhausted ? "text-status-danger" : "text-[#555555]")}>
+                                    {qDetails.shortReset ? `Resets in ${qDetails.shortReset}` : isExhausted ? 'Reset pending' : 'Auto-renewing'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Scorecard 3: Weekly Allowance */}
+                              <div className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0a0a0a] space-y-2 hover:border-[#2a2a2a] transition-colors">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-[#888888] font-medium">Weekly Cap</span>
+                                  <span className={cn("font-mono text-xs font-semibold tabular-nums", getTextColor(wkDisplayPct))}>
+                                    {wkStatusLabel}
+                                  </span>
+                                </div>
+                                <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
+                                  <div
+                                    className={`h-full transition-all duration-300 ${wkColor}`}
+                                    style={{ width: `${Math.max(0, Math.min(100, wkDisplayPct))}%` }}
+                                  />
+                                </div>
+                                <div className="text-[10px] font-mono flex items-center justify-between">
+                                  <span className="text-[#737373]">7-day ceiling</span>
+                                  <span className={cn(qDetails.weeklyReset ? "text-amber-400 font-medium" : isWkExhausted ? "text-status-danger" : "text-[#737373]")}>
+                                    {qDetails.weeklyReset ? `Resets in ${qDetails.weeklyReset}` : isWkExhausted ? 'Reset pending' : 'Pro Tier'}
+                                  </span>
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
 
                         {/* Scorecard 4: Rate Limit Headroom */}
                         <div className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0a0a0a] space-y-2 hover:border-[#2a2a2a] transition-colors">
@@ -1024,7 +1130,7 @@ export function ProfilesView({
                           {isExhausted ? (
                             <div className="rounded-geist border border-status-danger-border bg-status-danger-bg p-3 text-xs flex items-center gap-2.5 text-status-danger font-mono">
                               <AlertCircle className="h-4 w-4 shrink-0 text-status-danger" />
-                              <span>Rate limit window exhausted. Quota resets in approximately {ad.quota?.summary?.match(/\[([^\]]+)\]/)?.[1] || '45m'}.</span>
+                              <span>Rate limit window exhausted. Quota resets in approximately {parseQuotaDetails(ad.quota?.summary).resetTime || '45m'}.</span>
                             </div>
                           ) : isWarning ? (
                             <div className="rounded-geist border border-status-warning-border bg-status-warning-bg p-3 text-xs flex items-center gap-2.5 text-status-warning font-mono">
@@ -1631,10 +1737,9 @@ export function ProfilesView({
                           <div
                             className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
                             style={{
-                              width: `${Math.max(
-                                p.quota?.is_exhausted || pct <= 0 ? 6 : 0,
-                                Math.min(100, pct)
-                              )}%`,
+                              width: `${
+                                p.quota?.is_exhausted || pct <= 0 ? 0 : Math.min(100, pct)
+                              }%`,
                             }}
                           />
                         </div>
@@ -1764,9 +1869,20 @@ export function ProfilesView({
                             <div key={ad.agent} className="space-y-1">
                               <div className="flex items-center justify-between text-[11px] font-sans">
                                 <span className="text-[#666666] capitalize">{ad.agent}</span>
-                                <span className={`tabular-nums ${getTextColor(pct)}`}>
-                                  {pct}%
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {(() => {
+                                    const adDetails = parseQuotaDetails(ad.quota?.summary, ad.quota?.is_exhausted || pct <= 0, pct);
+                                    return adDetails.resetTime ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono text-amber-400">
+                                        <Clock className="h-2.5 w-2.5 text-amber-400 shrink-0" />
+                                        <span>{adDetails.resetTime}</span>
+                                      </span>
+                                    ) : null;
+                                  })()}
+                                  <span className={`tabular-nums ${getTextColor(pct)}`}>
+                                    {pct}%
+                                  </span>
+                                </div>
                               </div>
                               <div
                                 role="progressbar"
@@ -1779,10 +1895,9 @@ export function ProfilesView({
                                 <div
                                   className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
                                   style={{
-                                    width: `${Math.max(
-                                      ad.quota?.is_exhausted || pct <= 0 ? 6 : 0,
-                                      Math.min(100, pct)
-                                    )}%`,
+                                    width: `${
+                                      ad.quota?.is_exhausted || pct <= 0 ? 0 : Math.min(100, pct)
+                                    }%`,
                                   }}
                                 />
                               </div>
@@ -1826,18 +1941,38 @@ export function ProfilesView({
                               p.quota?.bottleneck_pct ?? 100
                             )}`}
                             style={{
-                              width: `${Math.max(
-                                p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0 ? 6 : 0,
-                                Math.min(100, p.quota?.bottleneck_pct ?? 100)
-                              )}%`,
+                              width: `${
+                                p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0
+                                  ? 0
+                                  : Math.min(100, p.quota?.bottleneck_pct ?? 100)
+                              }%`,
                             }}
                           />
                         </div>
-                        {p.quota?.summary && (
-                          <p className="text-[11px] text-[#666666] font-sans truncate" title={p.quota.summary}>
-                            {p.quota.summary}
-                          </p>
-                        )}
+                        {p.quota && (() => {
+                          const qDetails = parseQuotaDetails(
+                            p.quota.summary,
+                            p.quota.is_exhausted || (p.quota.bottleneck_pct ?? 100) <= 0,
+                            p.quota.bottleneck_pct ?? 100
+                          );
+                          return (
+                            <div className="pt-0.5 flex items-center justify-between text-[11px] font-sans" title={p.quota.summary}>
+                              {qDetails.resetTime ? (
+                                <span className="inline-flex items-center gap-1 font-mono text-amber-400 font-medium text-[10.5px]">
+                                  <Clock className="h-3 w-3 text-amber-400 shrink-0" />
+                                  <span>Resets in {qDetails.resetTime}</span>
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground/70 truncate">{qDetails.subtext}</span>
+                              )}
+                              {qDetails.resetTime && (
+                                <span className="text-[10px] text-muted-foreground/60 truncate font-mono max-w-[130px] text-right">
+                                  {qDetails.subtext}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </CardContent>

@@ -135,7 +135,7 @@ export function QuotaBreakdown({
         >
           <div
             className={`h-full transition-all duration-300 ${getStatusColor(win.pct)}`}
-            style={{ width: `${Math.max(isEx ? 6 : 0, Math.min(100, win.pct))}%` }}
+            style={{ width: `${isEx || win.pct <= 0 ? 0 : Math.min(100, win.pct)}%` }}
           />
         </div>
       </div>
@@ -165,7 +165,7 @@ export function QuotaBreakdown({
         >
           <div
             className={`h-full transition-all duration-300 ${getStatusColor(effectiveBottleneckPct)}`}
-            style={{ width: `${Math.max(isEx ? 6 : 0, Math.min(100, effectiveBottleneckPct))}%` }}
+            style={{ width: `${isEx || effectiveBottleneckPct <= 0 ? 0 : Math.min(100, effectiveBottleneckPct)}%` }}
           />
         </div>
         {summary && (
@@ -208,7 +208,7 @@ export function QuotaBreakdown({
         >
           <div
             className={`h-full transition-all duration-300 ${getStatusColor(parsed.single.pct)}`}
-            style={{ width: `${Math.max(isEx ? 6 : 0, Math.min(100, parsed.single.pct))}%` }}
+            style={{ width: `${isEx || parsed.single.pct <= 0 ? 0 : Math.min(100, parsed.single.pct)}%` }}
           />
         </div>
       </div>
