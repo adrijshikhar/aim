@@ -113,8 +113,8 @@ export function QuotaBreakdown({
           </span>
           <div className="flex items-center gap-2">
             {win.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-[#222222] bg-[#050505] text-[#737373]">
-                <Clock className="h-2.5 w-2.5 text-[#555555]" />
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono border border-amber-500/25 bg-amber-500/10 text-amber-400 font-medium">
+                <Clock className="h-2.5 w-2.5 text-amber-400 shrink-0" />
                 <span>resets in {win.reset}</span>
               </span>
             )}
@@ -180,20 +180,20 @@ export function QuotaBreakdown({
   if (parsed.type === 'single' && parsed.single) {
     const isEx = isExhausted || parsed.single.pct <= 0;
     return (
-      <div className="space-y-2 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#222222]">
+      <div className="space-y-2 p-4 rounded-geist bg-[#0c0c0c] border border-[#2a2a2a]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-[#737373] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px]">
+          <span className="text-[#737373] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px] font-mono">
             <Gauge className="h-3.5 w-3.5 text-[#555555]" />
             {parsed.single.label}
           </span>
           <div className="flex items-center gap-2">
             {parsed.single.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans border border-[#222222] bg-[#050505] text-[#737373]">
-                <Clock className="h-2.5 w-2.5 text-[#555555]" />
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono border border-amber-500/25 bg-amber-500/10 text-amber-400 font-medium">
+                <Clock className="h-2.5 w-2.5 text-amber-400 shrink-0" />
                 <span>resets in {parsed.single.reset}</span>
               </span>
             )}
-            <span className={`font-semibold tabular-nums ${getTextColor(parsed.single.pct)}`}>
+            <span className={`font-semibold tabular-nums text-xs ${getTextColor(parsed.single.pct)}`}>
               {parsed.single.pct}% remaining
             </span>
           </div>
@@ -217,13 +217,13 @@ export function QuotaBreakdown({
 
   // Multi-model layout (e.g. Gemini + Claude)
   return (
-    <div className="space-y-3 p-3.5 rounded-[6px] bg-[#0a0a0a] border border-[#222222]">
-      <div className="flex items-center justify-between border-b border-[#222222] pb-2 text-xs font-sans">
-        <span className="text-[#737373] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px]">
-          <Gauge className="h-3.5 w-3.5 text-[#555555]" />
+    <div className="space-y-4 p-4 rounded-geist bg-[#0c0c0c] border border-[#2a2a2a]">
+      <div className="flex items-center justify-between border-b border-[#1f1f1f] pb-3 text-xs font-sans">
+        <span className="text-[#888888] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px] font-mono">
+          <Gauge className="h-3.5 w-3.5 text-[#666666]" />
           Visual Quota Breakdown
         </span>
-        <span className="text-[11px] text-[#555555]">
+        <span className="text-[11px] text-[#666666] font-mono">
           {parsed.models?.length || 1} Engine Models Monitored
         </span>
       </div>

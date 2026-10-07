@@ -43,9 +43,7 @@ import {
   ShieldAlert,
   AlertCircle,
   AlertTriangle,
-  ExternalLink,
   Activity,
-  CheckCircle2,
   LayoutGrid,
   List,
   Clock,
@@ -921,22 +919,14 @@ export function ProfilesView({
                     )}
 
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                      {/* LEFT COLUMN: Metric Scorecards (~280px / 4 cols) */}
-                      <div className="lg:col-span-4 space-y-3">
+                      {/* LEFT COLUMN: Metric Capacity & Status (~320px / 4 cols) */}
+                      <div className="lg:col-span-4 space-y-4">
                         {(() => {
                           const qDetails = parseQuotaDetails(ad.quota?.summary, isExhausted, pct);
-                          const wkMatch = ad.quota?.summary?.match(/(?:wk|week|weekly)\s*(?:limit)?\s*:\s*(\d+)%/i);
-                          const parsedWkPct = wkMatch ? parseInt(wkMatch[1], 10) : null;
-                          const isWkExhausted = parsedWkPct !== null ? parsedWkPct <= 0 : isExhausted;
-                          const wkDisplayPct = parsedWkPct !== null ? parsedWkPct : (isExhausted ? 0 : 92);
-                          const wkStatusLabel = parsedWkPct !== null
-                            ? (parsedWkPct <= 0 ? '0%' : `${parsedWkPct}%`)
-                            : (isExhausted ? '0%' : (ad.account?.auth_method?.includes('ChatGPT') || ad.agent === 'codex' ? '100%' : 'Healthy'));
-                          const wkColor = getProgressColor(wkDisplayPct);
 
                           return (
                             <>
-                              {/* Scorecard 1: Capacity Index (Hero Card) */}
+                              {/* Hero Capacity Index Card */}
                               <div className="p-4 rounded-geist border border-[#2a2a2a] bg-[#0c0c0c] space-y-3">
                                 <div className="flex items-center justify-between">
                                   <span className="text-xs font-medium text-[#888888]">Overall Capacity</span>
@@ -993,191 +983,37 @@ export function ProfilesView({
                                 </div>
                               </div>
 
-                              {/* Scorecard 2: 5-Hour Rolling Limit */}
-                              <div className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0a0a0a] space-y-2 hover:border-[#2a2a2a] transition-colors">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="text-[#888888] font-medium">5-Hour Sliding Window</span>
-                                  <span className={cn("font-mono text-xs font-semibold tabular-nums", getTextColor(pct))}>
-                                    {isExhausted ? '0%' : `${pct}%`}
-                                  </span>
+                              {/* Semantic Alert / Live Status Card */}
+                              {isExhausted ? (
+                                <div className="rounded-geist border border-status-danger-border bg-status-danger-bg p-3 text-xs flex items-center gap-2.5 text-status-danger font-mono">
+                                  <AlertCircle className="h-4 w-4 shrink-0 text-status-danger" />
+                                  <span>Rate limit window exhausted. Quota resets in approximately {qDetails.resetTime || '45m'}.</span>
                                 </div>
-                                <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
-                                  <div
-                                    className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
-                                    style={{ width: `${isExhausted || pct <= 0 ? 0 : Math.min(100, pct)}%` }}
-                                  />
+                              ) : isWarning ? (
+                                <div className="rounded-geist border border-status-warning-border bg-status-warning-bg p-3 text-xs flex items-center gap-2.5 text-status-warning font-mono">
+                                  <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" />
+                                  <span>High quota consumption detected ({pct}% remaining). Approaching window limit.</span>
                                 </div>
-                                <div className="text-[10px] font-mono flex items-center justify-between">
-                                  <span className="text-[#555555]">Sliding turn budget</span>
-                                  <span className={cn(qDetails.shortReset ? "text-amber-400 font-medium" : isExhausted ? "text-status-danger" : "text-[#555555]")}>
-                                    {qDetails.shortReset ? `Resets in ${qDetails.shortReset}` : isExhausted ? 'Reset pending' : 'Auto-renewing'}
-                                  </span>
+                              ) : (
+                                <div className="rounded-geist border border-status-success-border bg-status-success-bg p-3 text-xs flex items-center justify-between text-status-success font-mono">
+                                  <div className="flex items-center gap-2">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                                    <span>All quota windows operating within normal limits</span>
+                                  </div>
                                 </div>
-                              </div>
-
-                              {/* Scorecard 3: Weekly Allowance */}
-                              <div className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0a0a0a] space-y-2 hover:border-[#2a2a2a] transition-colors">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="text-[#888888] font-medium">Weekly Cap</span>
-                                  <span className={cn("font-mono text-xs font-semibold tabular-nums", getTextColor(wkDisplayPct))}>
-                                    {wkStatusLabel}
-                                  </span>
-                                </div>
-                                <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
-                                  <div
-                                    className={`h-full transition-all duration-300 ${wkColor}`}
-                                    style={{ width: `${Math.max(0, Math.min(100, wkDisplayPct))}%` }}
-                                  />
-                                </div>
-                                <div className="text-[10px] font-mono flex items-center justify-between">
-                                  <span className="text-[#737373]">7-day ceiling</span>
-                                  <span className={cn(qDetails.weeklyReset ? "text-amber-400 font-medium" : isWkExhausted ? "text-status-danger" : "text-[#737373]")}>
-                                    {qDetails.weeklyReset ? `Resets in ${qDetails.weeklyReset}` : isWkExhausted ? 'Reset pending' : 'Pro Tier'}
-                                  </span>
-                                </div>
-                              </div>
+                              )}
                             </>
                           );
                         })()}
-
-                        {/* Scorecard 4: Rate Limit Headroom */}
-                        <div className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0a0a0a] space-y-2 hover:border-[#2a2a2a] transition-colors">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[#888888] font-medium">Token Burst Velocity</span>
-                            <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 border-[#2a2a2a] bg-[#141414] text-[#a1a1a1]">
-                              Nominal
-                            </Badge>
-                          </div>
-                          <div className="w-full bg-[#181818] h-1 rounded-full overflow-hidden border border-[#262626]/40">
-                            <div className={`h-full transition-all duration-300 ${getProgressColor(isExhausted ? 0 : 95)}`} style={{ width: `${isExhausted ? 0 : 95}%` }} />
-                          </div>
-                          <div className="text-[10px] text-[#737373] font-mono flex items-center justify-between">
-                            <span>Burst headroom</span>
-                            <span>Normal</span>
-                          </div>
-                        </div>
                       </div>
 
-                      {/* RIGHT COLUMN: Deep Dive Panel (Modeled after Vercel Speed Insights Right Column) */}
-                      <div className="lg:col-span-8 space-y-5">
-                        <div className="p-6 rounded-geist border border-[#222222] bg-[#0a0a0a] space-y-5">
-                          {/* Category Overline */}
-                          <div className="flex items-center justify-between">
-                            <div className="text-xs uppercase font-mono tracking-wider text-[#666666]">
-                              {ad.agent.toUpperCase()} TELEMETRY DEEP DIVE
-                            </div>
-                          </div>
-
-                          {/* Title & Icon Header */}
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-full bg-[#141414] border border-[#262626] flex items-center justify-center text-[#ededed] shrink-0">
-                              <Gauge className="h-5 w-5" />
-                            </div>
-                            <div>
-                              <h3 className="text-lg font-semibold text-[#ededed] tracking-tight">
-                                Quota & Rate Limit Headroom
-                              </h3>
-                              <p className="text-xs text-[#888888] pt-0.5">
-                                Live telemetry across active CLI sessions, rolling windows, and provider allowance caps.
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Explanatory description & docs link */}
-                          <div className="text-xs text-[#888888] space-y-1 leading-relaxed">
-                            <p>
-                              Measures overall quota consumption across 5-hour rolling windows and weekly allowance pools for{' '}
-                              <span className="text-[#ededed] font-medium">{ad.agent}</span>. Telemetry syncs continuously with the AIM background daemon to ensure zero terminal interruptions.
-                            </p>
-                            <div className="pt-1">
-                              <a
-                                href="https://github.com/adrijshikhar/catalyst"
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-xs text-[#ededed] hover:underline cursor-pointer"
-                              >
-                                <span>Learn more about adapter quotas</span>
-                                <ExternalLink className="h-3 w-3 text-[#666666]" />
-                              </a>
-                            </div>
-                          </div>
-
-                          {/* Calibrated Semantic Alert Banner */}
-                          {isExhausted ? (
-                            <div className="rounded-geist border border-status-danger-border bg-status-danger-bg p-3 text-xs flex items-center gap-2.5 text-status-danger font-mono">
-                              <AlertCircle className="h-4 w-4 shrink-0 text-status-danger" />
-                              <span>Rate limit window exhausted. Quota resets in approximately {parseQuotaDetails(ad.quota?.summary).resetTime || '45m'}.</span>
-                            </div>
-                          ) : isWarning ? (
-                            <div className="rounded-geist border border-status-warning-border bg-status-warning-bg p-3 text-xs flex items-center gap-2.5 text-status-warning font-mono">
-                              <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" />
-                              <span>High quota consumption detected ({pct}% remaining). Approaching window limit.</span>
-                            </div>
-                          ) : (
-                            <div className="rounded-geist border border-status-success-border bg-status-success-bg p-3 text-xs flex items-center justify-between text-status-success font-mono">
-                              <div className="flex items-center gap-2">
-                                <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
-                                <span>Telemetry stream active • All token quotas operating within normal limits</span>
-                              </div>
-                              <span className="text-[11px] opacity-80">Checked just now</span>
-                            </div>
-                          )}
-
-                          {/* Interactive Quota Breakdown component */}
-                          <div className="pt-2">
-                            <QuotaBreakdown
-                              summary={ad.quota?.summary}
-                              bottleneckPct={pct}
-                              isExhausted={isExhausted}
-                            />
-                          </div>
-
-                          {/* Account Credentials & Auth Box (modeled after Vercel Routes/Paths table) */}
-                          <div className="space-y-2 pt-2 border-t border-[#1f1f1f]">
-                            <div className="text-xs font-semibold text-[#888888] uppercase tracking-wider font-mono">
-                              Account Credentials & Authentication
-                            </div>
-
-                            <div className="rounded-geist border border-[#222222] bg-[#0f0f0f] p-3 space-y-2 text-xs font-sans">
-                              <div className="flex justify-between items-center">
-                                <span className="text-[#666666]">Account Identifier:</span>
-                                <span className="text-[#ededed] font-medium truncate max-w-[260px]">
-                                  {ad.account?.name || currentProfile.name}
-                                </span>
-                              </div>
-                              {ad.account?.email && (
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[#666666]">Email / Identity:</span>
-                                  <span className="text-[#ededed] truncate max-w-[260px]">
-                                    {ad.account.email}
-                                  </span>
-                                </div>
-                              )}
-                              {ad.account?.auth_method && (
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[#666666]">Authentication Provider:</span>
-                                  <span className="text-[#ededed] truncate max-w-[260px]">
-                                    {ad.account.auth_method}
-                                  </span>
-                                </div>
-                              )}
-                              <div className="flex justify-between items-center">
-                                <span className="text-[#666666]">Status:</span>
-                                <span className="text-[#ededed]">
-                                  {ad.has_credentials ? (
-                                    <span className="inline-flex items-center gap-1.5 text-status-success font-medium">
-                                      <CheckCircle2 className="h-3.5 w-3.5" /> Authenticated
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1.5 text-status-warning font-medium">
-                                      <AlertCircle className="h-3.5 w-3.5" /> Needs Credentials
-                                    </span>
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+                      {/* RIGHT COLUMN: Engine Quotas Breakdown (8 cols) */}
+                      <div className="lg:col-span-8">
+                        <QuotaBreakdown
+                          summary={ad.quota?.summary}
+                          bottleneckPct={pct}
+                          isExhausted={isExhausted}
+                        />
                       </div>
                     </div>
                   </div>
