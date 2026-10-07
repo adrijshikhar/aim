@@ -113,8 +113,8 @@ export function QuotaBreakdown({
           </span>
           <div className="flex items-center gap-2">
             {win.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono border border-amber-500/25 bg-amber-500/10 text-amber-400 font-medium">
-                <Clock className="h-2.5 w-2.5 text-amber-400 shrink-0" />
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground font-normal">
+                <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
                 <span>resets in {win.reset}</span>
               </span>
             )}
@@ -188,8 +188,8 @@ export function QuotaBreakdown({
           </span>
           <div className="flex items-center gap-2">
             {parsed.single.reset && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono border border-amber-500/25 bg-amber-500/10 text-amber-400 font-medium">
-                <Clock className="h-2.5 w-2.5 text-amber-400 shrink-0" />
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground font-normal">
+                <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
                 <span>resets in {parsed.single.reset}</span>
               </span>
             )}

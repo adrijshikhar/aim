@@ -941,8 +941,8 @@ export function ProfilesView({
                                       {pct}%
                                     </div>
                                     {qDetails.resetTime && (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] border border-amber-500/25 bg-amber-500/10 text-amber-400 font-mono text-[11px] font-medium shrink-0">
-                                        <Clock className="h-3 w-3 text-amber-400 shrink-0" />
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] border border-[#262626] bg-[#141414] text-muted-foreground font-mono text-[11px] font-medium shrink-0">
+                                        <Clock className="h-3 w-3 text-muted-foreground/80 shrink-0" />
                                         <span>Resets in {qDetails.resetTime}</span>
                                       </span>
                                     )}
@@ -1685,8 +1685,8 @@ export function ProfilesView({
                                   {(() => {
                                     const adDetails = parseQuotaDetails(ad.quota?.summary, ad.quota?.is_exhausted || pct <= 0, pct);
                                     return adDetails.resetTime ? (
-                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono text-amber-400">
-                                        <Clock className="h-2.5 w-2.5 text-amber-400 shrink-0" />
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono text-muted-foreground">
+                                        <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
                                         <span>{adDetails.resetTime}</span>
                                       </span>
                                     ) : null;
@@ -1770,8 +1770,8 @@ export function ProfilesView({
                           return (
                             <div className="pt-0.5 flex items-center justify-between text-[11px] font-sans" title={p.quota.summary}>
                               {qDetails.resetTime ? (
-                                <span className="inline-flex items-center gap-1 font-mono text-amber-400 font-medium text-[10.5px]">
-                                  <Clock className="h-3 w-3 text-amber-400 shrink-0" />
+                                <span className="inline-flex items-center gap-1 font-mono text-muted-foreground font-normal text-[10.5px]">
+                                  <Clock className="h-3 w-3 text-muted-foreground/80 shrink-0" />
                                   <span>Resets in {qDetails.resetTime}</span>
                                 </span>
                               ) : (
