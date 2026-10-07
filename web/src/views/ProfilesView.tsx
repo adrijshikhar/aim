@@ -450,7 +450,6 @@ export function ProfilesView({
   const [selectedEngineTab, setSelectedEngineTab] = React.useState<string>('all');
   const [sessionSearch, setSessionSearch] = React.useState('');
   const [mcpSearch, setMcpSearch] = React.useState('');
-  const [timeHorizon, setTimeHorizon] = React.useState<'1h' | '24h' | '7d' | '30d'>('24h');
   const [profileSearchQuery, setProfileSearchQuery] = React.useState('');
   const [profilesViewMode, setProfilesViewMode] = React.useState<'grid' | 'list'>('grid');
   const profileSearchInputRef = React.useRef<HTMLInputElement>(null);
@@ -1062,33 +1061,10 @@ export function ProfilesView({
                       {/* RIGHT COLUMN: Deep Dive Panel (Modeled after Vercel Speed Insights Right Column) */}
                       <div className="lg:col-span-8 space-y-5">
                         <div className="p-6 rounded-geist border border-[#222222] bg-[#0a0a0a] space-y-5">
-                          {/* Category Overline & Time Horizon Radio Selector */}
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          {/* Category Overline */}
+                          <div className="flex items-center justify-between">
                             <div className="text-xs uppercase font-mono tracking-wider text-[#666666]">
                               {ad.agent.toUpperCase()} TELEMETRY DEEP DIVE
-                            </div>
-
-                            {/* Vercel Horizon Radio Pills */}
-                            <div className="inline-flex items-center rounded-geist border border-[#262626] bg-[#000000] p-0.5 text-xs font-mono">
-                              {(['1h', '24h', '7d', '30d'] as const).map((h) => {
-                                const isSelected = timeHorizon === h;
-                                return (
-                                  <button
-                                    key={h}
-                                    type="button"
-                                    onClick={() => setTimeHorizon(h)}
-                                    className={cn(
-                                      'px-2.5 py-0.5 rounded-[4px] text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5',
-                                      isSelected
-                                        ? 'bg-[#1f1f1f] text-[#ededed] shadow-xs'
-                                        : 'text-[#666666] hover:text-[#ededed]'
-                                    )}
-                                  >
-                                    <span className={cn('h-1.5 w-1.5 rounded-full', isSelected ? 'bg-[#0070f3]' : 'bg-transparent border border-[#555555]')} />
-                                    <span>{h}</span>
-                                  </button>
-                                );
-                              })}
                             </div>
                           </div>
 
