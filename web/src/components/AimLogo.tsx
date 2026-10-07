@@ -8,7 +8,7 @@ export interface AimLogoProps extends React.SVGProps<SVGSVGElement> {
   variant?: AimLogoVariant;
 }
 
-export function AimLogo({ className, variant = 'core-void', ...props }: AimLogoProps) {
+export function AimLogo({ className, variant = 'dart', ...props }: AimLogoProps) {
   const maskId = React.useId();
 
   switch (variant) {
