@@ -14,7 +14,6 @@ interface SidebarProps {
   selectedProfile: string;
   profiles: ProfileDTO[];
   daemonInfo: DaemonDTO | null;
-  isOnline: boolean;
   version?: string;
   onSelectView: (view: 'overview' | 'sessions' | 'mcp') => void;
   onSelectProfile: (profileName: string) => void;
@@ -27,7 +26,6 @@ export function Sidebar({
   selectedProfile,
   profiles,
   daemonInfo,
-  isOnline,
   version = 'v0.12.0',
   onSelectView,
   onSelectProfile,
@@ -241,7 +239,7 @@ export function Sidebar({
       </div>
 
       {/* Footer System Status */}
-      <div className="p-3 border-t border-border space-y-2 bg-muted/20">
+      <div className="p-3 border-t border-border bg-muted/20">
         <button
           type="button"
           onClick={onOpenDaemonModal}
@@ -264,25 +262,6 @@ export function Sidebar({
           </div>
           <Cpu className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
         </button>
-
-        <div className="flex items-center justify-between px-2.5 py-1 rounded-geist border border-border/60 bg-muted/40 text-[11px] font-mono text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-1.5 w-1.5">
-              <span
-                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
-                }`}
-              />
-              <span
-                className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
-                  isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
-                }`}
-              />
-            </span>
-            <span>{isOnline ? 'Server: 8080' : 'Reconnecting'}</span>
-          </div>
-          <span className="text-[10px] text-muted-foreground/60">AIM {version}</span>
-        </div>
       </div>
     </aside>
   );

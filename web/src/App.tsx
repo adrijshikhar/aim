@@ -474,7 +474,6 @@ export function App() {
         selectedProfile={selectedProfile}
         profiles={profiles}
         daemonInfo={daemonInfo}
-        isOnline={isOnline}
         version={status.version}
         onSelectView={handleSelectView}
         onSelectProfile={handleSelectProfile}
