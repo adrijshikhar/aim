@@ -8,11 +8,23 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 )
 
+// QuotaWindowDTO represents an individual rate limit window (e.g. 5-Hour or Weekly).
+type QuotaWindowDTO struct {
+	Category     string     `json:"category,omitempty"`
+	Name         string     `json:"name"`
+	RemainingPct int        `json:"remaining_pct"`
+	ResetsAt     *time.Time `json:"resets_at,omitempty"`
+	ResetsInSec  int64      `json:"resets_in_sec,omitempty"`
+}
+
 // QuotaDTO represents the current quota state for a profile.
 type QuotaDTO struct {
-	BottleneckPct int    `json:"bottleneck_pct"`
-	Summary       string `json:"summary"`
-	IsExhausted   bool   `json:"is_exhausted"`
+	BottleneckPct int              `json:"bottleneck_pct"`
+	Summary       string           `json:"summary"`
+	IsExhausted   bool             `json:"is_exhausted"`
+	Windows       []QuotaWindowDTO `json:"windows,omitempty"`
+	Credits       string           `json:"credits,omitempty"`
+	FetchedAt     *time.Time       `json:"fetched_at,omitempty"`
 }
 
 // AdapterInfo represents adapter-specific identity, credentials, and quota within a profile.

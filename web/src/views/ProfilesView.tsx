@@ -41,9 +41,6 @@ import {
   Search,
   SlidersHorizontal,
   ShieldAlert,
-  AlertCircle,
-  AlertTriangle,
-  Activity,
   LayoutGrid,
   List,
   Clock,
@@ -52,7 +49,7 @@ import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
 import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
-import { QuotaBreakdown } from '@/components/QuotaBreakdown';
+import { QuotaBreakdown, cleanAuthMethod } from '@/components/QuotaBreakdown';
 import { cn } from '@/lib/utils';
 
 interface ParsedQuotaDetails {
@@ -801,7 +798,7 @@ export function ProfilesView({
               <div className="flex items-center gap-1.5">
                 <Key className="h-3.5 w-3.5 text-[#555555]" />
                 <span className="text-[#666666]">Auth:</span>
-                <span className="text-[#888888]">{currentProfile.account.auth_method}</span>
+                <span className="text-[#888888]">{cleanAuthMethod(currentProfile.account.auth_method)}</span>
               </div>
             )}
           </div>
@@ -903,159 +900,23 @@ export function ProfilesView({
               </div>
             )}
 
-            {/* Vercel Speed Insights 2-Column Master-Detail Layout */}
+            {/* Unified Engine Quota Cards with CodexBar Intelligence */}
             <div className="space-y-6">
               {displayedAdapters.map((ad) => {
                 const pct = ad.quota?.bottleneck_pct ?? 100;
                 const isExhausted = ad.quota?.is_exhausted || pct <= 0;
-                const isWarning = !isExhausted && pct <= 30;
 
                 return (
-                  <div key={ad.agent} className="space-y-4">
-                    {profileAdapters.length > 1 && selectedEngineTab === 'all' && (
-                      <div className="flex items-center gap-2 pt-2 border-t border-[#222222]">
-                        <span className="text-xs font-semibold text-[#ededed] uppercase tracking-wider font-mono">
-                          Engine: {ad.agent}
-                        </span>
-                        {getAgentBadge(ad.agent)}
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                      {/* LEFT COLUMN: Metric Capacity & Status (~320px / 4 cols) */}
-                      <div className="lg:col-span-4 space-y-4">
-                        {(() => {
-                          const qDetails = parseQuotaDetails(ad.quota?.summary, isExhausted, pct);
-
-                          return (
-                            <>
-                              {/* Hero Capacity Index Card */}
-                              <div className="p-4 rounded-geist border border-[#2a2a2a] bg-[#0c0c0c] space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs font-medium text-[#888888]">Overall Capacity</span>
-                                  <div className="h-6 w-6 rounded-full bg-[#181818] border border-[#2e2e2e] flex items-center justify-center text-[#ededed]">
-                                    <Activity className="h-3 w-3" />
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <div className="flex items-baseline justify-between gap-2">
-                                    <div className="text-2xl font-bold font-mono tracking-tight text-[#ededed]">
-                                      {pct}%
-                                    </div>
-                                    {qDetails.resetTime && (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] border border-[#262626] bg-[#141414] text-muted-foreground font-mono text-[11px] font-medium shrink-0">
-                                        <Clock className="h-3 w-3 text-muted-foreground/80 shrink-0" />
-                                        <span>Resets in {qDetails.resetTime}</span>
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-[11px] text-[#888888] font-sans truncate pt-0.5" title={ad.quota?.summary || 'Standard capacity'}>
-                                    {qDetails.subtext}
-                                  </div>
-                                </div>
-
-                                {/* Micro-bar */}
-                                <div className="space-y-1">
-                                  <div
-                                    role="progressbar"
-                                    aria-valuenow={pct}
-                                    aria-valuemin={0}
-                                    aria-valuemax={100}
-                                    aria-label="Quota headroom"
-                                    className={cn(
-                                      "w-full h-1.5 rounded-full overflow-hidden border",
-                                      isExhausted || pct <= 0
-                                        ? "bg-status-danger-bg border-status-danger-border"
-                                        : "bg-[#181818] border-[#262626]/50"
-                                    )}
-                                  >
-                                    <div
-                                      className={cn(
-                                        "h-full transition-all duration-300",
-                                        isExhausted || pct <= 0 ? "w-full bg-status-danger-solid/40" : getProgressColor(pct)
-                                      )}
-                                      style={{ width: isExhausted || pct <= 0 ? '100%' : `${Math.min(100, pct)}%` }}
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="pt-2 border-t border-[#1a1a1a] flex items-center justify-between text-[11px]">
-                                  <span className="text-[#666666]">Status</span>
-                                  {isExhausted ? (
-                                    <span className="font-mono text-status-danger font-medium flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 rounded-full bg-status-danger-solid" />
-                                      Exhausted
-                                    </span>
-                                  ) : isWarning ? (
-                                    <span className="font-mono text-status-warning font-medium flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                                      Throttled / Low
-                                    </span>
-                                  ) : (
-                                    <span className="font-mono text-status-success font-medium flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                                      Healthy
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Semantic Alert / Live Status Card */}
-                              {isExhausted ? (
-                                <div className="rounded-geist border border-status-danger-border bg-status-danger-bg p-3 text-xs flex items-start gap-2.5">
-                                  <AlertCircle className="h-4 w-4 shrink-0 text-status-danger mt-0.5" />
-                                  <div className="space-y-0.5 min-w-0">
-                                    <div className="text-xs font-medium text-status-danger font-sans leading-none">
-                                      Rate limit window exhausted
-                                    </div>
-                                    <div className="text-[11px] text-muted-foreground font-sans leading-relaxed pt-0.5">
-                                      {qDetails.resetTime ? (
-                                        <>
-                                          Quota resets in <span className="font-mono tabular-nums text-foreground font-medium">{qDetails.resetTime}</span>
-                                        </>
-                                      ) : (
-                                        'Awaiting rate limit window reset cycle.'
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : isWarning ? (
-                                <div className="rounded-geist border border-status-warning-border bg-status-warning-bg p-3 text-xs flex items-start gap-2.5">
-                                  <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning mt-0.5" />
-                                  <div className="space-y-0.5 min-w-0">
-                                    <div className="text-xs font-medium text-status-warning font-sans leading-none">
-                                      High quota consumption detected
-                                    </div>
-                                    <div className="text-[11px] text-muted-foreground font-sans leading-relaxed pt-0.5">
-                                      Approaching window limit with <span className="font-mono tabular-nums text-foreground font-medium">{pct}%</span> headroom remaining.
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="rounded-geist border border-border/60 bg-secondary/30 p-2.5 px-3 text-xs flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                                    <span className="text-xs font-sans text-muted-foreground">All quota windows operating within normal limits</span>
-                                  </div>
-                                  <span className="font-mono text-[10px] text-status-success font-medium uppercase tracking-wider">Optimal</span>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
-
-                      {/* RIGHT COLUMN: Engine Quotas Breakdown (8 cols) */}
-                      <div className="lg:col-span-8">
-                        <QuotaBreakdown
-                          summary={ad.quota?.summary}
-                          bottleneckPct={pct}
-                          isExhausted={isExhausted}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                  <QuotaBreakdown
+                    key={ad.agent}
+                    agent={ad.agent}
+                    account={ad.account}
+                    quota={ad.quota}
+                    summary={ad.quota?.summary}
+                    bottleneckPct={pct}
+                    isExhausted={isExhausted}
+                    sessionCount={filteredSessions.length}
+                  />
                 );
               })}
             </div>
@@ -1623,7 +1484,7 @@ export function ProfilesView({
                       <td className="px-4 py-3 min-w-[160px]">
                         <div className="flex items-center justify-between text-[11px] mb-1">
                           <span className="text-muted-foreground font-mono">Headroom</span>
-                          <span className={cn('font-mono font-medium tabular-nums', getTextColor(pct))}>
+                          <span className={cn('font-mono font-semibold tabular-nums text-xs', getTextColor(pct))}>
                             {pct}%
                           </span>
                         </div>
@@ -1774,19 +1635,19 @@ export function ProfilesView({
                           const pct = ad.quota?.bottleneck_pct ?? 100;
                           return (
                             <div key={ad.agent} className="space-y-1">
-                              <div className="flex items-center justify-between text-[11px] font-sans">
-                                <span className="text-[#666666] capitalize">{ad.agent}</span>
+                              <div className="flex items-center justify-between text-xs font-sans">
+                                <span className="text-muted-foreground capitalize text-[11px] font-medium">{ad.agent}</span>
                                 <div className="flex items-center gap-1.5">
                                   {(() => {
                                     const adDetails = parseQuotaDetails(ad.quota?.summary, ad.quota?.is_exhausted || pct <= 0, pct);
                                     return adDetails.resetTime ? (
-                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono text-muted-foreground">
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
                                         <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
                                         <span>{adDetails.resetTime}</span>
                                       </span>
                                     ) : null;
                                   })()}
-                                  <span className={cn('tabular-nums font-mono', getTextColor(pct))}>
+                                  <span className={cn('tabular-nums font-mono text-xs font-semibold', getTextColor(pct))}>
                                     {pct}%
                                   </span>
                                 </div>
@@ -1820,27 +1681,33 @@ export function ProfilesView({
                       </div>
                     ) : (
                       <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center justify-between text-xs font-sans">
                           <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <Gauge className="h-3 w-3 text-muted-foreground/60" /> Quota
                           </span>
-                        {(() => {
-                          const pct = p.quota?.bottleneck_pct ?? 100;
-                          return (
+                          <div className="flex items-center gap-1.5">
+                            {(() => {
+                              const qDetails = parseQuotaDetails(
+                                p.quota?.summary,
+                                p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0,
+                                p.quota?.bottleneck_pct ?? 100
+                              );
+                              return qDetails.resetTime ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
+                                  <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
+                                  <span>{qDetails.resetTime}</span>
+                                </span>
+                              ) : null;
+                            })()}
                             <span
                               className={cn(
-                                'font-mono text-xs font-medium tabular-nums',
-                                pct <= 0
-                                  ? 'text-status-danger'
-                                  : pct <= 30
-                                  ? 'text-status-warning'
-                                  : 'text-muted-foreground'
+                                'tabular-nums font-mono text-xs font-semibold',
+                                getTextColor(p.quota?.bottleneck_pct ?? 100)
                               )}
                             >
-                              {p.quota ? `${pct}% remaining` : '100% remaining'}
+                              {p.quota?.bottleneck_pct ?? 100}%
                             </span>
-                          );
-                        })()}
+                          </div>
                         </div>
                         <div
                           role="progressbar"
@@ -1870,22 +1737,6 @@ export function ProfilesView({
                             }}
                           />
                         </div>
-                        {p.quota && (() => {
-                          const qDetails = parseQuotaDetails(
-                            p.quota.summary,
-                            p.quota.is_exhausted || (p.quota.bottleneck_pct ?? 100) <= 0,
-                            p.quota.bottleneck_pct ?? 100
-                          );
-                          if (!qDetails.resetTime) return null;
-                          return (
-                            <div className="pt-0.5 flex items-center justify-between text-[11px] font-sans">
-                              <span className="inline-flex items-center gap-1 font-mono text-muted-foreground font-normal text-[10.5px]">
-                                <Clock className="h-3 w-3 text-muted-foreground/80 shrink-0" />
-                                <span>Resets in {qDetails.resetTime}</span>
-                              </span>
-                            </div>
-                          );
-                        })()}
                       </div>
                     )}
                   </CardContent>

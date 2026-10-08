@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -200,10 +201,39 @@ func reportToQuotaDTO(rep usage.Report) *QuotaDTO {
 	if summary == "" && rep.Error != "" {
 		summary = rep.Error
 	}
+
+	var windows []QuotaWindowDTO
+	if len(rep.Windows) > 0 {
+		windows = make([]QuotaWindowDTO, len(rep.Windows))
+		for i, w := range rep.Windows {
+			var resetsAtPtr *time.Time
+			if !w.ResetsAt.IsZero() {
+				t := w.ResetsAt
+				resetsAtPtr = &t
+			}
+			windows[i] = QuotaWindowDTO{
+				Category:     w.Category,
+				Name:         w.Name,
+				RemainingPct: w.RemainingPct,
+				ResetsAt:     resetsAtPtr,
+				ResetsInSec:  int64(w.ResetsIn.Seconds()),
+			}
+		}
+	}
+
+	var fetchedAtPtr *time.Time
+	if !rep.FetchedAt.IsZero() {
+		t := rep.FetchedAt
+		fetchedAtPtr = &t
+	}
+
 	return &QuotaDTO{
 		BottleneckPct: rep.BottleneckPct(),
 		Summary:       summary,
 		IsExhausted:   isExhausted,
+		Windows:       windows,
+		Credits:       rep.Credits,
+		FetchedAt:     fetchedAtPtr,
 	}
 }
 

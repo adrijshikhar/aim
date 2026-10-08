@@ -1,7 +1,18 @@
+export interface QuotaWindowDTO {
+  category?: string;
+  name: string;
+  remaining_pct: number;
+  resets_at?: string;
+  resets_in_sec?: number;
+}
+
 export interface QuotaDTO {
   bottleneck_pct: number;
   summary: string;
   is_exhausted: boolean;
+  windows?: QuotaWindowDTO[];
+  credits?: string;
+  fetched_at?: string;
 }
 
 export interface AccountInfo {
