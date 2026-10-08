@@ -1876,21 +1876,13 @@ export function ProfilesView({
                             p.quota.is_exhausted || (p.quota.bottleneck_pct ?? 100) <= 0,
                             p.quota.bottleneck_pct ?? 100
                           );
+                          if (!qDetails.resetTime) return null;
                           return (
-                            <div className="pt-0.5 flex items-center justify-between text-[11px] font-sans" title={p.quota.summary}>
-                              {qDetails.resetTime ? (
-                                <span className="inline-flex items-center gap-1 font-mono text-muted-foreground font-normal text-[10.5px]">
-                                  <Clock className="h-3 w-3 text-muted-foreground/80 shrink-0" />
-                                  <span>Resets in {qDetails.resetTime}</span>
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground/70 truncate">{qDetails.subtext}</span>
-                              )}
-                              {qDetails.resetTime && (
-                                <span className="text-[10px] text-muted-foreground/60 truncate font-mono max-w-[130px] text-right">
-                                  {qDetails.subtext}
-                                </span>
-                              )}
+                            <div className="pt-0.5 flex items-center justify-between text-[11px] font-sans">
+                              <span className="inline-flex items-center gap-1 font-mono text-muted-foreground font-normal text-[10.5px]">
+                                <Clock className="h-3 w-3 text-muted-foreground/80 shrink-0" />
+                                <span>Resets in {qDetails.resetTime}</span>
+                              </span>
                             </div>
                           );
                         })()}
