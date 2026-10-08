@@ -421,7 +421,7 @@ export function ProfilesView({
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-status-danger';
+    if (pct <= 0) return 'text-muted-foreground';
     if (pct <= 30) return 'text-status-warning';
     return 'text-muted-foreground';
   };
@@ -621,9 +621,9 @@ export function ProfilesView({
     }
     if (q.is_exhausted || q.bottleneck_pct <= 0) {
       return (
-        <Badge variant="outline" className="badge-danger text-[11px] font-sans px-2.5 py-0.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-status-danger-solid" />
-          <span>Quota Exhausted <span className="font-mono tabular-nums">(0%)</span></span>
+        <Badge variant="outline" className="flex items-center gap-1.5 border-[#332022] bg-[#160b0c] text-[#f87171] text-[11px] font-sans px-2.5 py-0.5 rounded-full">
+          <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+          <span>Quota Exhausted <span className="font-mono tabular-nums text-muted-foreground">(0%)</span></span>
         </Badge>
       );
     }
@@ -1488,29 +1488,26 @@ export function ProfilesView({
                             {pct}%
                           </span>
                         </div>
-                        <div
-                          role="progressbar"
-                          aria-valuenow={pct}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-label="Profile quota"
-                          className={cn(
-                            "w-full h-1.5 rounded-full overflow-hidden border",
-                            p.quota?.is_exhausted || pct <= 0
-                              ? "bg-status-danger-bg border-status-danger-border"
-                              : "bg-[#181818] border-[#262626]/50"
-                          )}
-                        >
                           <div
-                            className={cn(
-                              "h-full transition-all duration-300",
-                              p.quota?.is_exhausted || pct <= 0 ? "w-full bg-status-danger-solid/40" : getProgressColor(pct)
+                            role="progressbar"
+                            aria-valuenow={pct}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-label="Profile quota"
+                            className="w-full h-1.5 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
+                          >
+                            {(pct > 0 && !p.quota?.is_exhausted) && (
+                              <div
+                                className={cn(
+                                  "h-full transition-all duration-300",
+                                  getProgressColor(pct)
+                                )}
+                                style={{
+                                  width: `${Math.min(100, pct)}%`,
+                                }}
+                              />
                             )}
-                            style={{
-                              width: p.quota?.is_exhausted || pct <= 0 ? '100%' : `${Math.min(100, pct)}%`,
-                            }}
-                          />
-                        </div>
+                          </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="inline-flex items-center text-[#ededed] group-hover:translate-x-0.5 transition-transform font-medium">
@@ -1658,22 +1655,19 @@ export function ProfilesView({
                                 aria-valuemin={0}
                                 aria-valuemax={100}
                                 aria-label={`${ad.agent} quota`}
-                                className={cn(
-                                  "w-full h-1.5 rounded-full overflow-hidden border",
-                                  ad.quota?.is_exhausted || pct <= 0
-                                    ? "bg-status-danger-bg border-status-danger-border"
-                                    : "bg-[#181818] border-[#262626]/50"
-                                )}
+                                className="w-full h-1.5 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
                               >
-                                <div
-                                  className={cn(
-                                    "h-full transition-all duration-300",
-                                    ad.quota?.is_exhausted || pct <= 0 ? "w-full bg-status-danger-solid/40" : getProgressColor(pct)
-                                  )}
-                                  style={{
-                                    width: ad.quota?.is_exhausted || pct <= 0 ? '100%' : `${Math.min(100, pct)}%`,
-                                  }}
-                                />
+                                {(pct > 0 && !ad.quota?.is_exhausted) && (
+                                  <div
+                                    className={cn(
+                                      "h-full transition-all duration-300",
+                                      getProgressColor(pct)
+                                    )}
+                                    style={{
+                                      width: `${Math.min(100, pct)}%`,
+                                    }}
+                                  />
+                                )}
                               </div>
                             </div>
                           );
@@ -1715,27 +1709,19 @@ export function ProfilesView({
                           aria-valuemin={0}
                           aria-valuemax={100}
                           aria-label="Profile quota"
-                          className={cn(
-                            "w-full h-1.5 rounded-full overflow-hidden border",
-                            p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0
-                              ? "bg-status-danger-bg border-status-danger-border"
-                              : "bg-[#181818] border-[#262626]/50"
-                          )}
+                          className="w-full h-1.5 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
                         >
-                          <div
-                            className={cn(
-                              "h-full transition-all duration-300",
-                              p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0
-                                ? "w-full bg-status-danger-solid/40"
-                                : getProgressColor(p.quota?.bottleneck_pct ?? 100)
-                            )}
-                            style={{
-                              width:
-                                p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0
-                                  ? '100%'
-                                  : `${Math.min(100, p.quota?.bottleneck_pct ?? 100)}%`,
-                            }}
-                          />
+                          {((p.quota?.bottleneck_pct ?? 100) > 0 && !p.quota?.is_exhausted) && (
+                            <div
+                              className={cn(
+                                "h-full transition-all duration-300",
+                                getProgressColor(p.quota?.bottleneck_pct ?? 100)
+                              )}
+                              style={{
+                                width: `${Math.min(100, p.quota?.bottleneck_pct ?? 100)}%`,
+                              }}
+                            />
+                          )}
                         </div>
                       </div>
                     )}

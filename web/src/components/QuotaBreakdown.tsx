@@ -4,7 +4,6 @@ import {
   TrendingUp,
   TrendingDown,
   CheckCircle2,
-  AlertCircle,
   AlertTriangle,
   Mail,
   ShieldCheck,
@@ -193,7 +192,7 @@ export function QuotaBreakdown({
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-status-danger';
+    if (pct <= 0) return 'text-muted-foreground';
     if (pct <= 30) return 'text-status-warning';
     return 'text-[#ededed]';
   };
@@ -213,7 +212,6 @@ export function QuotaBreakdown({
   }, [parsed, activeSummary]);
 
   const renderMeter = (win: QuotaWindowItem) => {
-    const isWinEx = isEffectiveExhausted && win.pct <= 0;
     const pacing: WindowPacing = calculateWindowPacing({
       remainingPct: win.pct,
       resetTimeStr: win.reset,
@@ -249,24 +247,21 @@ export function QuotaBreakdown({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label={`${win.label} quota`}
-          className={cn(
-            "relative w-full h-2 rounded-full overflow-hidden border",
-            isWinEx
-              ? "bg-status-danger-bg border-status-danger-border"
-              : "bg-[#181818] border-[#262626]/50"
-          )}
+          className="relative w-full h-2 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
         >
-          {/* Actual Remaining Capacity Fill */}
-          <div
-            className={cn(
-              "h-full transition-all duration-300 rounded-full",
-              isWinEx ? "w-full bg-status-danger-solid/40" : getStatusColor(win.pct)
-            )}
-            style={{ width: isWinEx ? '100%' : `${Math.min(100, Math.max(0, win.pct))}%` }}
-          />
+          {/* Actual Remaining Capacity Fill - cleanly empty when remaining is 0% */}
+          {win.pct > 0 && (
+            <div
+              className={cn(
+                "h-full transition-all duration-300 rounded-full",
+                getStatusColor(win.pct)
+              )}
+              style={{ width: `${Math.min(100, Math.max(0, win.pct))}%` }}
+            />
+          )}
 
           {/* Expected Pace Marker Tick (CodexBar visual parity) */}
-          {!isWinEx &&
+          {win.pct > 0 &&
             pacing.timeUntilResetSeconds &&
             pacing.expectedRemainingPercent > 0 &&
             pacing.expectedRemainingPercent < 100 && (
@@ -287,7 +282,7 @@ export function QuotaBreakdown({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] pt-0.5">
           <div className="flex items-center gap-1.5 font-mono">
             {pacing.stage === 'exhausted' ? (
-              <AlertCircle className="h-3 w-3 text-status-danger shrink-0" />
+              <Clock className="h-3 w-3 text-muted-foreground/60 shrink-0" />
             ) : pacing.stage === 'deficit' ? (
               <TrendingDown className="h-3 w-3 text-status-warning shrink-0" />
             ) : pacing.stage === 'reserve' ? (
@@ -300,7 +295,7 @@ export function QuotaBreakdown({
               className={cn(
                 'font-medium whitespace-nowrap',
                 pacing.stage === 'exhausted'
-                  ? 'text-status-danger'
+                  ? 'text-muted-foreground'
                   : pacing.stage === 'deficit'
                   ? 'text-status-warning'
                   : pacing.stage === 'reserve'
@@ -308,11 +303,13 @@ export function QuotaBreakdown({
                   : 'text-foreground'
               )}
             >
-              {pacing.paceLabel}
+              {pacing.stage === 'exhausted' ? 'Window exhausted' : pacing.paceLabel}
             </span>
             <span className="text-muted-foreground/40">·</span>
             <span className="text-muted-foreground font-normal whitespace-nowrap">
-              {pacing.projectionLabel}
+              {pacing.stage === 'exhausted'
+                ? (win.reset ? `Resets in ${win.reset}` : 'Awaiting reset')
+                : pacing.projectionLabel}
             </span>
           </div>
 
@@ -340,7 +337,7 @@ export function QuotaBreakdown({
             className={cn(
               'text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2.5 py-0.5 rounded-full',
               isEffectiveExhausted
-                ? 'badge-danger border-status-danger-border bg-status-danger-bg text-status-danger'
+                ? 'border-[#332022] bg-[#160b0c] text-[#f87171]'
                 : isWarning
                 ? 'badge-warning border-status-warning-border bg-status-warning-bg text-status-warning'
                 : 'badge-success border-status-success-border bg-status-success-bg text-status-success'
@@ -350,7 +347,7 @@ export function QuotaBreakdown({
               className={cn(
                 'h-1.5 w-1.5 rounded-full',
                 isEffectiveExhausted
-                  ? 'bg-status-danger-solid animate-pulse'
+                  ? 'bg-rose-500'
                   : isWarning
                   ? 'bg-status-warning-solid'
                   : 'bg-status-success-solid'
@@ -445,8 +442,8 @@ export function QuotaBreakdown({
         <div className="flex items-center gap-2 min-w-0">
           {isEffectiveExhausted ? (
             <>
-              <AlertCircle className="h-3.5 w-3.5 text-status-danger shrink-0" />
-              <span className="text-status-danger font-medium font-sans truncate">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+              <span className="text-muted-foreground font-sans truncate">
                 Rate limit window exhausted {cardResetTime ? `· Quota resets in ${cardResetTime}` : ''}
               </span>
             </>
@@ -479,13 +476,18 @@ export function QuotaBreakdown({
             className={cn(
               'font-mono text-[10px] font-medium tracking-wider uppercase px-2 py-0.5 rounded-[4px]',
               isEffectiveExhausted
-                ? 'border-status-danger-border text-status-danger bg-status-danger-bg'
+                ? 'border-[#262626] text-muted-foreground bg-[#141414]'
                 : isWarning
                 ? 'border-status-warning-border text-status-warning bg-status-warning-bg'
                 : 'border-status-success-border text-status-success bg-status-success-bg'
             )}
           >
-            {isEffectiveExhausted ? 'Exhausted' : isWarning ? 'Throttled' : 'Optimal'}
+            {isEffectiveExhausted ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-rose-500/80" />
+                <span>Exhausted</span>
+              </span>
+            ) : isWarning ? 'Throttled' : 'Optimal'}
           </Badge>
         </div>
       </div>

@@ -169,9 +169,9 @@ export function calculateWindowPacing({
         expectedUsedPercent: 100,
         actualUsedPercent: 100,
         expectedRemainingPercent: 0,
-        paceLabel: 'Rate limit reached',
-        projectionLabel: resetTimeStr ? `Resets in ${resetTimeStr}` : 'Exhausted',
-        combinedSummary: resetTimeStr ? `Rate limit reached · Resets in ${resetTimeStr}` : 'Rate limit reached',
+        paceLabel: 'Window exhausted',
+        projectionLabel: resetTimeStr ? `Resets in ${resetTimeStr}` : 'Awaiting reset',
+        combinedSummary: resetTimeStr ? `Window exhausted · Resets in ${resetTimeStr}` : 'Window exhausted',
         willLastToReset: false,
         expectedMarkerPct: 0,
       };
@@ -208,7 +208,7 @@ export function calculateWindowPacing({
 
   if (clampedRemaining <= 0) {
     stage = 'exhausted';
-    paceLabel = 'Rate limit reached';
+    paceLabel = 'Window exhausted';
   } else if (deltaValue <= 2) {
     stage = 'onTrack';
     paceLabel = 'On pace';
