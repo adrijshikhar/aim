@@ -413,8 +413,8 @@ export function ProfilesView({
     }
   };
 
-  const getAgentBadge = (agent: string) => {
-    return <AgentBadge agent={agent} />;
+  const getAgentBadge = (agent: string, size?: 'sm' | 'default') => {
+    return <AgentBadge agent={agent} size={size} />;
   };
 
   const getProgressColor = (pct: number) => {
@@ -616,7 +616,7 @@ export function ProfilesView({
     const q = currentProfile.quota;
     if (!q) {
       return (
-        <Badge variant="outline" className="text-xs font-sans border-border bg-secondary text-muted-foreground">
+        <Badge variant="outline" className="text-[11px] font-sans border-border bg-secondary text-muted-foreground px-2.5 py-0.5">
           <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
           <span>Quota: Uncached</span>
         </Badge>
@@ -624,24 +624,24 @@ export function ProfilesView({
     }
     if (q.is_exhausted || q.bottleneck_pct <= 0) {
       return (
-        <Badge variant="outline" className="badge-danger text-xs font-sans">
+        <Badge variant="outline" className="badge-danger text-[11px] font-sans px-2.5 py-0.5">
           <span className="h-1.5 w-1.5 rounded-full bg-status-danger-solid" />
-          <span>Quota Exhausted (0%)</span>
+          <span>Quota Exhausted <span className="font-mono tabular-nums">(0%)</span></span>
         </Badge>
       );
     }
     if (q.bottleneck_pct <= 30) {
       return (
-        <Badge variant="outline" className="badge-warning text-xs font-sans">
+        <Badge variant="outline" className="badge-warning text-[11px] font-sans px-2.5 py-0.5">
           <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-          <span>Rate Limit Warning ({q.bottleneck_pct}%)</span>
+          <span>Rate Limit Warning <span className="font-mono tabular-nums">({q.bottleneck_pct}%)</span></span>
         </Badge>
       );
     }
     return (
-      <Badge variant="outline" className="badge-success text-xs font-sans">
+      <Badge variant="outline" className="badge-success text-[11px] font-sans px-2.5 py-0.5">
         <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-        <span>Quota Healthy ({q.bottleneck_pct}%)</span>
+        <span>Quota Healthy <span className="font-mono tabular-nums">({q.bottleneck_pct}%)</span></span>
       </Badge>
     );
   }, [currentProfile]);
@@ -730,7 +730,7 @@ export function ProfilesView({
               {currentProfile.has_credentials ? (
                 <Badge
                   variant="outline"
-                  className="badge-success text-xs font-sans"
+                  className="badge-success text-[11px] font-sans px-2.5 py-0.5"
                 >
                   <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                   <span>Authenticated</span>
@@ -738,15 +738,18 @@ export function ProfilesView({
               ) : (
                 <Badge
                   variant="outline"
-                  className="badge-warning text-xs font-sans"
+                  className="badge-warning text-[11px] font-sans px-2.5 py-0.5"
                 >
                   <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
                   <span>Needs Auth</span>
                 </Badge>
               )}
               {quotaHealthBadge}
-              <span className="text-xs font-mono text-[#888888] px-2 py-0.5 rounded-geist border border-[#222222] bg-[#0c0c0c]">
-                {resourcesLoading ? '...' : `${profileSessions.length} sessions`}
+              <span className="inline-flex items-center gap-1 text-[11px] font-sans text-muted-foreground px-2.5 py-0.5 rounded-full border border-border bg-secondary">
+                <span className="font-mono tabular-nums text-foreground font-medium">
+                  {resourcesLoading ? '...' : profileSessions.length}
+                </span>
+                <span>sessions</span>
               </span>
             </div>
 
@@ -1000,24 +1003,42 @@ export function ProfilesView({
 
                               {/* Semantic Alert / Live Status Card */}
                               {isExhausted ? (
-                                <div className="rounded-geist border border-status-danger-border bg-status-danger-bg p-3 text-xs flex items-center gap-2.5 text-status-danger font-mono">
-                                  <AlertCircle className="h-4 w-4 shrink-0 text-status-danger" />
-                                  <span>
-                                    Rate limit window exhausted.
-                                    {qDetails.resetTime ? ` Quota resets in approximately ${qDetails.resetTime}.` : ' Awaiting window reset.'}
-                                  </span>
+                                <div className="rounded-geist border border-status-danger-border bg-status-danger-bg p-3 text-xs flex items-start gap-2.5">
+                                  <AlertCircle className="h-4 w-4 shrink-0 text-status-danger mt-0.5" />
+                                  <div className="space-y-0.5 min-w-0">
+                                    <div className="text-xs font-medium text-status-danger font-sans leading-none">
+                                      Rate limit window exhausted
+                                    </div>
+                                    <div className="text-[11px] text-muted-foreground font-sans leading-relaxed pt-0.5">
+                                      {qDetails.resetTime ? (
+                                        <>
+                                          Quota resets in <span className="font-mono tabular-nums text-foreground font-medium">{qDetails.resetTime}</span>
+                                        </>
+                                      ) : (
+                                        'Awaiting rate limit window reset cycle.'
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
                               ) : isWarning ? (
-                                <div className="rounded-geist border border-status-warning-border bg-status-warning-bg p-3 text-xs flex items-center gap-2.5 text-status-warning font-mono">
-                                  <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" />
-                                  <span>High quota consumption detected ({pct}% remaining). Approaching window limit.</span>
+                                <div className="rounded-geist border border-status-warning-border bg-status-warning-bg p-3 text-xs flex items-start gap-2.5">
+                                  <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning mt-0.5" />
+                                  <div className="space-y-0.5 min-w-0">
+                                    <div className="text-xs font-medium text-status-warning font-sans leading-none">
+                                      High quota consumption detected
+                                    </div>
+                                    <div className="text-[11px] text-muted-foreground font-sans leading-relaxed pt-0.5">
+                                      Approaching window limit with <span className="font-mono tabular-nums text-foreground font-medium">{pct}%</span> headroom remaining.
+                                    </div>
+                                  </div>
                                 </div>
                               ) : (
-                                <div className="rounded-geist border border-status-success-border bg-status-success-bg p-3 text-xs flex items-center justify-between text-status-success font-mono">
+                                <div className="rounded-geist border border-border/60 bg-secondary/30 p-2.5 px-3 text-xs flex items-center justify-between">
                                   <div className="flex items-center gap-2">
                                     <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                                    <span>All quota windows operating within normal limits</span>
+                                    <span className="text-xs font-sans text-muted-foreground">All quota windows operating within normal limits</span>
                                   </div>
+                                  <span className="font-mono text-[10px] text-status-success font-medium uppercase tracking-wider">Optimal</span>
                                 </div>
                               )}
                             </>
@@ -1081,39 +1102,81 @@ export function ProfilesView({
               </div>
             ) : (
               <div className="divide-y divide-[#222222] border border-[#222222] rounded-geist overflow-hidden bg-[#0a0a0a]">
-                {filteredSessions.map((sess) => (
-                  <div
-                    key={sess.id}
-                    className="p-3.5 hover:bg-[#111111] transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => onViewSession?.(sess)}
-                          className="font-medium text-[#ededed] hover:underline truncate cursor-pointer text-left font-sans text-sm"
-                        >
-                          {sess.title || sess.goal || sess.id.slice(0, 8)}
-                        </button>
-                        {getAgentBadge(sess.agent)}
-                        <span className="font-mono text-[10px] text-[#888888] px-1.5 py-0.5 rounded border border-[#222222] bg-[#050505] shrink-0">
-                          {sess.turns} turns
-                        </span>
-                        {sess.is_active && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-status-success font-medium">
-                            <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
-                            active
-                          </span>
+                {filteredSessions.map((sess) => {
+                  const rawTitle = sess.title?.trim();
+                  const rawGoal = sess.goal?.trim();
+                  const hasSpecificTitle = Boolean(rawTitle && rawTitle.toLowerCase() !== 'untitled session');
+                  const primaryTitle = hasSpecificTitle ? rawTitle : (rawGoal || `Session ${sess.id.slice(0, 8)}`);
+                  const hasDistinctGoal = Boolean(hasSpecificTitle && rawGoal && rawTitle?.toLowerCase() !== rawGoal.toLowerCase());
+
+                  return (
+                    <div
+                      key={sess.id}
+                      className="p-3.5 hover:bg-[#111111] transition-colors flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-xs"
+                    >
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        {/* Top Line: Session ID Chip & Session Title */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(sess.id);
+                              toast({
+                                title: 'Session ID copied',
+                                description: sess.id,
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground bg-[#141414] hover:bg-[#1a1a1a] hover:text-[#ededed] px-1.5 py-0.5 rounded border border-[#242424] transition-colors cursor-pointer select-all shrink-0"
+                            title={`Click to copy full ID: ${sess.id}`}
+                          >
+                            <span className="text-[#666666]">id:</span>
+                            <span className="text-[#ededed] font-medium">{sess.id.slice(0, 8)}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onViewSession?.(sess)}
+                            className="font-medium text-[#ededed] hover:underline hover:text-white truncate cursor-pointer text-left font-sans text-sm"
+                            title={primaryTitle}
+                          >
+                            {primaryTitle}
+                          </button>
+                        </div>
+
+                        {/* Optional Subtitle: Goal / Prompt if distinct from Title */}
+                        {hasDistinctGoal && (
+                          <div className="text-[11px] font-sans text-muted-foreground truncate" title={rawGoal}>
+                            {rawGoal}
+                          </div>
                         )}
+
+                        {/* Metadata Row: Agent Badge, Turns, Active status, CWD, Updated */}
+                        <div className="flex items-center gap-2 flex-wrap text-[11px] font-mono">
+                          {getAgentBadge(sess.agent, 'sm')}
+
+                          <span className="font-mono text-[10px] text-[#888888] px-1.5 py-0.5 rounded border border-[#222222] bg-[#050505] shrink-0">
+                            {sess.turns} turns
+                          </span>
+
+                          {sess.is_active && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-status-success font-medium font-sans">
+                              <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                              active
+                            </span>
+                          )}
+
+                          <span className="text-[#444444]">•</span>
+                          <span className="text-[#666666] shrink-0 font-sans">CWD:</span>
+                          <span className="text-[#888888] truncate select-all max-w-[260px] sm:max-w-[360px]" title={sess.cwd}>
+                            {sess.cwd}
+                          </span>
+
+                          <span className="text-[#444444]">•</span>
+                          <span className="text-[#666666] shrink-0 font-sans">Updated:</span>
+                          <span className="text-[#888888] shrink-0">{formatRelativeTime(sess.updated_at)}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-[11px] font-mono truncate">
-                        <span className="text-[#666666] shrink-0">CWD:</span>
-                        <span className="text-[#888888] truncate select-all">{sess.cwd}</span>
-                        <span className="text-[#444444]">•</span>
-                        <span className="text-[#666666] shrink-0">Updated:</span>
-                        <span className="text-[#888888] shrink-0">{formatRelativeTime(sess.updated_at)}</span>
-                      </div>
-                    </div>
 
                     <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                       <div className="inline-flex items-center rounded-geist border border-[#2a2a2a] bg-[#121212] hover:bg-[#181818] hover:border-[#383838] transition-colors shadow-sm">
@@ -1138,7 +1201,8 @@ export function ProfilesView({
                       </div>
                     </div>
                   </div>
-                ))}
+                );
+              })}
               </div>
             )}
           </TabsContent>

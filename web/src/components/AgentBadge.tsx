@@ -26,13 +26,13 @@ const getAgentDotColor = (agent: string) => {
 
 export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent, className = '', size = 'default' }) => {
   const name = agent?.toLowerCase() || 'agent';
-  const sizeClasses = size === 'sm' ? 'text-[10px] px-2 py-0.5' : 'text-[11px] px-2.5 py-1';
-  const dotSize = size === 'sm' ? 'h-1.5 w-1.5' : 'h-2 w-2';
+  const sizeClasses = size === 'sm' ? 'text-[10px] px-1.5 py-0.5' : 'text-[11px] px-2 py-0.5';
+  const dotSize = 'h-1.5 w-1.5';
 
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 font-mono font-medium tracking-tight rounded-geist border border-border bg-secondary text-foreground select-none transition-colors hover:border-border/80',
+        'inline-flex items-center gap-1.5 font-mono font-medium tracking-tight rounded-full border border-border bg-secondary text-foreground select-none transition-colors hover:border-border/80',
         sizeClasses,
         className
       )}

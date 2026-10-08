@@ -404,8 +404,16 @@ export function SessionsView({
 
           return (
             <div className="space-y-0.5 min-w-0 pr-2">
-              <div className="text-xs font-sans font-medium text-foreground truncate" title={primary}>
-                {primary}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span
+                  className="font-mono text-[10px] text-muted-foreground bg-[#141414] px-1.5 py-0.5 rounded border border-[#242424] shrink-0 select-all"
+                  title={`ID: ${row.original.id}`}
+                >
+                  {row.original.id.slice(0, 8)}
+                </span>
+                <span className="text-xs font-sans font-medium text-foreground truncate" title={primary}>
+                  {primary}
+                </span>
               </div>
               {secondary && (
                 <div className="text-[11px] font-sans text-muted-foreground truncate" title={secondary}>
