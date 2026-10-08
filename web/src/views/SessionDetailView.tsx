@@ -39,6 +39,7 @@ import {
   ArrowUpDown,
   AlertTriangle,
 } from 'lucide-react';
+import { GeistSpinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 interface SessionDetailViewProps {
@@ -479,6 +480,54 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
     return () => observer.disconnect();
   }, [orderedTurns.length]);
 
+  // Format clean headline and eliminate duplicate description text
+  const { headline, description } = React.useMemo(() => {
+    const rawTitle = (session.title || '').trim();
+    const rawGoal = (session.goal || '').trim();
+
+    if (!rawTitle && !rawGoal) {
+      return {
+        headline: `Session ${session.id.slice(0, 8)}`,
+        description: null,
+      };
+    }
+
+    const isDuplicate =
+      !rawTitle ||
+      !rawGoal ||
+      rawTitle.toLowerCase() === rawGoal.toLowerCase() ||
+      rawGoal.toLowerCase().startsWith(rawTitle.toLowerCase()) ||
+      rawTitle.toLowerCase().startsWith(rawGoal.toLowerCase());
+
+    let mainHeadline = rawTitle || rawGoal;
+    let mainDesc: string | null = rawGoal || null;
+
+    if (mainHeadline.length > 85 || mainHeadline.includes('\n')) {
+      const firstLine = mainHeadline.split('\n')[0].trim();
+      const firstSentenceMatch = firstLine.match(/^([^.?!]+[.?!])/);
+      if (firstSentenceMatch && firstSentenceMatch[1].length <= 85) {
+        mainHeadline = firstSentenceMatch[1].trim();
+      } else if (firstLine.length <= 85) {
+        mainHeadline = firstLine;
+      } else {
+        const truncated = firstLine.slice(0, 80);
+        const lastSpace = truncated.lastIndexOf(' ');
+        mainHeadline = (lastSpace > 40 ? truncated.slice(0, lastSpace) : truncated) + '…';
+      }
+    }
+
+    if (isDuplicate) {
+      const fullText = rawGoal || rawTitle;
+      if (fullText.trim() === mainHeadline.trim() || fullText.length <= 85) {
+        mainDesc = null;
+      } else {
+        mainDesc = fullText;
+      }
+    }
+
+    return { headline: mainHeadline, description: mainDesc };
+  }, [session.title, session.goal, session.id]);
+
   return (
     <div ref={topRef} className="space-y-4 pb-12">
       {/* Back Action & Reload Replay Bar */}
@@ -531,8 +580,11 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
           <div className="space-y-1.5 min-w-0">
             <div className="flex items-center gap-2.5 flex-wrap">
               <AgentBadge agent={session.agent} />
-              <h1 className="text-base font-semibold text-[#ededed] tracking-tight font-sans">
-                {session.title || 'Untitled Session'}
+              <h1
+                className="text-base font-semibold text-[#ededed] tracking-tight font-sans"
+                title={session.title || session.goal || headline}
+              >
+                {headline}
               </h1>
               {session.is_active && (
                 <Badge className="badge-success text-[10px] font-mono px-2 py-0.5 rounded-[4px] flex items-center gap-1.5">
@@ -542,9 +594,11 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
               )}
             </div>
 
-            <p className="text-xs text-[#a1a1a1] font-sans leading-relaxed max-w-3xl">
-              {session.goal || 'No explicit goal specified for this session.'}
-            </p>
+            {description && (
+              <p className="text-xs text-[#a1a1a1] font-sans leading-relaxed max-w-3xl">
+                {description}
+              </p>
+            )}
           </div>
 
           {/* Action Toolbar — Uniform h-8 sizing, font-sans, aligned */}
@@ -751,9 +805,9 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
 
         {/* Loading & Empty States */}
         {loading ? (
-          <div className="rounded-geist border border-border bg-[#111111] p-12 text-center space-y-3">
-            <RefreshCw className="h-6 w-6 animate-spin mx-auto text-[#666666]" />
-            <p className="text-xs font-sans text-[#a1a1a1]">Loading conversation transcript from disk...</p>
+          <div className="rounded-geist border border-border bg-[#0d0d0d] p-12 text-center space-y-3">
+            <GeistSpinner size={22} className="mx-auto text-[#a1a1a1]" />
+            <p className="text-xs font-sans text-muted-foreground/80">Loading conversation transcript from disk…</p>
           </div>
         ) : filteredTurns.length === 0 ? (
           <div className="rounded-geist border border-border bg-[#111111] p-8 text-center space-y-2">
@@ -1077,8 +1131,8 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
             <div ref={bottomSentinelRef} className="h-6 w-full pointer-events-none" />
 
             {visibleCount < orderedTurns.length ? (
-              <div className="py-6 text-center text-xs font-sans text-[#777777] flex items-center justify-center gap-2">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#666666]" />
+              <div className="py-6 text-center text-xs font-sans text-muted-foreground/80 flex items-center justify-center gap-2">
+                <GeistSpinner size={14} className="text-[#888888]" />
                 <span>
                   {sortOrder === 'chronological'
                     ? 'Loading later conversation turns...'

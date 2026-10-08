@@ -45,6 +45,7 @@ import {
 import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
 import { DataTableFacetedFilter } from '@/components/DataTableFacetedFilter';
+import { GeistSpinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 interface SessionsViewProps {
@@ -498,7 +499,7 @@ export function SessionsView({
                   className="h-7 pl-2.5 pr-2 text-xs font-sans font-medium text-[#ededed] group-hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {isThisResuming ? (
-                    <RefreshCw className="h-3 w-3 animate-spin text-[#ededed]" />
+                    <GeistSpinner size={12} className="text-[#ededed]" />
                   ) : (
                     <Terminal className="h-3 w-3 text-[#888888] group-hover:text-[#ededed] transition-colors" />
                   )}

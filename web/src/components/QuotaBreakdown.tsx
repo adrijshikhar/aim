@@ -310,8 +310,8 @@ export function QuotaBreakdown({
         </div>
 
         {/* Intelligence Line: CodexBar Deficit/Reserve Pacing & Runout Projection */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] pt-0.5">
-          <div className="flex items-center gap-1.5 font-mono">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] pt-0.5 font-sans">
+          <div className="flex items-center gap-1.5 font-sans">
             {pacing.stage === 'exhausted' ? (
               <Clock className="h-3 w-3 text-muted-foreground/60 shrink-0" />
             ) : pacing.stage === 'deficit' ? (
@@ -346,7 +346,7 @@ export function QuotaBreakdown({
 
           {pacing.windowDateRange && (
             <span
-              className="text-[10px] font-mono text-muted-foreground/60 truncate whitespace-nowrap"
+              className="text-[11px] font-sans text-muted-foreground/75 truncate whitespace-nowrap tracking-normal"
               title={pacing.windowDateRange}
             >
               {pacing.windowDateRange}

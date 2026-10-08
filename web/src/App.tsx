@@ -17,6 +17,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { DaemonModal } from '@/components/DaemonModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
 import { Toaster } from '@/components/ui/toaster';
+import { SessionDetailSkeleton } from '@/components/Skeletons';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -600,12 +601,10 @@ export function App() {
                   onBack={handleBackFromSession}
                 />
               ) : (
-                <div className="py-24 text-center">
-                  <div className="inline-flex items-center gap-2 text-xs font-mono text-[#888888]">
-                    <span className="h-3 w-3 rounded-full border-2 border-[#0070f3] border-t-transparent animate-spin" />
-                    <span>Loading session {targetSessionId?.slice(0, 8)}...</span>
-                  </div>
-                </div>
+                <SessionDetailSkeleton
+                  targetSessionId={targetSessionId}
+                  onBack={handleBackFromSession}
+                />
               )
             )}
             {currentView === 'mcp' && (

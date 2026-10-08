@@ -50,6 +50,7 @@ import { AddProfileModal } from '@/components/AddProfileModal';
 import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
 import { QuotaBreakdown, cleanAuthMethod } from '@/components/QuotaBreakdown';
+import { ProfileDetailSkeleton } from '@/components/Skeletons';
 import { cn } from '@/lib/utils';
 
 interface ParsedQuotaDetails {
@@ -676,14 +677,7 @@ export function ProfilesView({
   // ==========================================
   if (selectedProfile !== 'all') {
     if (loading && !currentProfile) {
-      return (
-        <div className="py-24 text-center">
-          <div className="inline-flex items-center gap-2 text-xs font-mono text-[#888888]">
-            <span className="h-3 w-3 rounded-full border-2 border-[#0070f3] border-t-transparent animate-spin" />
-            <span>Loading profile "{selectedProfile}"...</span>
-          </div>
-        </div>
-      );
+      return <ProfileDetailSkeleton profileName={selectedProfile} />;
     }
 
     if (!currentProfile) {

@@ -149,5 +149,25 @@
     border-bottom: 1px solid var(--ds-blue-border);
     user-select: none;
   }
+  /* Official Vercel Geist Spinner */
+  .geist-spinner {
+    display: inline-block;
+    position: relative;
+  }
+  .geist-spinner-bar {
+    position: absolute;
+    top: 38%;
+    left: 45%;
+    width: 9%;
+    height: 24%;
+    background-color: currentColor;
+    border-radius: 9999px;
+    opacity: 0.15;
+    animation: geist-spinner-fade 1.2s linear infinite;
+  }
+  @keyframes geist-spinner-fade {
+    0% { opacity: 1; }
+    100% { opacity: 0.15; }
+  }
 }
 
