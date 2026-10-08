@@ -28,6 +28,7 @@ function parseCurrentRoute(): {
   tab: string;
   mcpScope: string;
   sessionId: string | null;
+  agentHint?: string | null;
 } {
   try {
     const rawPath = window.location.pathname.replace(/\/+$/, '') || '/';
@@ -40,15 +41,23 @@ function parseCurrentRoute(): {
 
     const normalizedTab = tabParam === 'telemetry' ? 'quota' : tabParam;
 
-    // 1. Path-based route: /sessions/:id (Session Detail)
+    // 1. Path-based route: /sessions/:agent/:id or /sessions/:id (Session Detail)
     if (rawPath.startsWith('/sessions/') && rawPath.length > '/sessions/'.length) {
-      const sid = decodeURIComponent(rawPath.slice('/sessions/'.length));
+      const rest = rawPath.slice('/sessions/'.length);
+      const segments = rest.split('/');
+      let sid = decodeURIComponent(segments[segments.length - 1]);
+      let agentHint: string | undefined = undefined;
+      if (segments.length >= 2) {
+        agentHint = decodeURIComponent(segments[0]);
+        sid = decodeURIComponent(segments.slice(1).join('/'));
+      }
       return {
         view: 'session-detail',
         profile: profileParam || 'all',
         tab: normalizedTab,
         mcpScope: scopeParam,
         sessionId: sid,
+        agentHint,
       };
     }
 
@@ -153,6 +162,7 @@ export function App() {
   const [activeProfileTab, setActiveProfileTab] = React.useState<string>(initialRoute.tab);
   const [viewedSession, setViewedSession] = React.useState<SessionDTO | null>(null);
   const [targetSessionId, setTargetSessionId] = React.useState<string | null>(initialRoute.sessionId);
+  const [targetAgentHint, setTargetAgentHint] = React.useState<string | null>(initialRoute.agentHint || null);
   const [previousView, setPreviousView] = React.useState<ViewType>('overview');
   const [profiles, setProfiles] = React.useState<ProfileDTO[]>([]);
 
@@ -235,12 +245,14 @@ export function App() {
       setSelectedMcpScope(route.mcpScope);
       if (route.sessionId) {
         setTargetSessionId(route.sessionId);
+        setTargetAgentHint(route.agentHint || null);
         if (viewedSession?.id !== route.sessionId) {
           setViewedSession(null);
         }
       } else {
         setViewedSession(null);
         setTargetSessionId(null);
+        setTargetAgentHint(null);
       }
     };
     window.addEventListener('popstate', handlePopState);
@@ -252,13 +264,18 @@ export function App() {
     if (targetSessionId && (!viewedSession || viewedSession.id !== targetSessionId)) {
       getSessions()
         .then((allSessions) => {
-          const found = allSessions.find((s) => s.id === targetSessionId);
+          const found = allSessions.find(
+            (s) =>
+              s.id === targetSessionId ||
+              (targetAgentHint ? s.agent === targetAgentHint && s.id.startsWith(targetSessionId) : false) ||
+              s.id.startsWith(targetSessionId)
+          );
           if (found) {
             setViewedSession(found);
           } else {
             setViewedSession({
               id: targetSessionId,
-              agent: 'claude',
+              agent: targetAgentHint || 'claude',
               profile: selectedProfile !== 'all' ? selectedProfile : 'work',
               title: `Session ${targetSessionId.slice(0, 8)}`,
               cwd: '',
@@ -272,7 +289,7 @@ export function App() {
         .catch(() => {
           setViewedSession({
             id: targetSessionId,
-            agent: 'claude',
+            agent: targetAgentHint || 'claude',
             profile: selectedProfile !== 'all' ? selectedProfile : 'work',
             title: `Session ${targetSessionId.slice(0, 8)}`,
             cwd: '',
@@ -283,7 +300,7 @@ export function App() {
           });
         });
     }
-  }, [targetSessionId, viewedSession, selectedProfile]);
+  }, [targetSessionId, targetAgentHint, viewedSession, selectedProfile]);
 
   const fetchProfiles = React.useCallback(async () => {
     try {

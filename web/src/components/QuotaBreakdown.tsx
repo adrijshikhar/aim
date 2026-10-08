@@ -35,6 +35,35 @@ interface ParsedQuota {
   single?: QuotaWindowItem;
 }
 
+export function getWindowSortWeight(label: string): number {
+  const l = label.toLowerCase();
+  // 1: 5-Hour / sliding session / sub-day window
+  if (
+    l.includes('5h') ||
+    l.includes('five') ||
+    l.includes('5-hour') ||
+    l.includes('session') ||
+    l.includes('sliding') ||
+    l.includes('hourly')
+  ) {
+    return 1;
+  }
+  // 2: Daily / 24-hour window
+  if (l.includes('day') || l.includes('daily') || l.includes('24h')) {
+    return 2;
+  }
+  // 3: Weekly / 7-day window
+  if (l.includes('week') || l.includes('weekly') || l.includes('wk') || l.includes('7d')) {
+    return 3;
+  }
+  // 4: Monthly / 30-day window
+  if (l.includes('month') || l.includes('monthly') || l.includes('30d')) {
+    return 4;
+  }
+  // 5: Fallback
+  return 5;
+}
+
 function parseQuotaSummary(summary?: string): ParsedQuota | null {
   if (!summary || !summary.trim()) return null;
 
@@ -67,6 +96,8 @@ function parseQuotaSummary(summary?: string): ParsedQuota | null {
       }
     }
     if (windows.length > 0) {
+      // Sort windows chronologically: 5-Hour first, then daily, weekly, monthly
+      windows.sort((a, b) => getWindowSortWeight(a.label) - getWindowSortWeight(b.label));
       models.push({ name: modelName, windows });
     }
   }
@@ -174,7 +205,7 @@ export function QuotaBreakdown({
 
     return Array.from(groupMap.entries()).map(([name, windows]) => ({
       name,
-      windows,
+      windows: windows.sort((a, b) => getWindowSortWeight(a.label) - getWindowSortWeight(b.label)),
     }));
   }, [quota?.windows, agent]);
 
@@ -429,7 +460,10 @@ export function QuotaBreakdown({
                     m.windows.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'
                   )}
                 >
-                  {m.windows.map((w) => renderMeter(w))}
+                  {m.windows
+                    .slice()
+                    .sort((a, b) => getWindowSortWeight(a.label) - getWindowSortWeight(b.label))
+                    .map((w) => renderMeter(w))}
                 </div>
               </div>
             ))}
