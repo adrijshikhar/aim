@@ -151,115 +151,117 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
       {/* Diff body */}
       {!isCollapsed && (
         <div className="overflow-x-auto max-h-[500px] overflow-y-auto text-[11px] leading-5 divide-y divide-[#181818]/60">
-          {parsedFiles.length > 0 ? (
-            parsedFiles.map((file, fileIdx) => (
-              <div key={fileIdx} className="divide-y divide-[#181818]/40">
-                {/* File Sub-header if multi-file */}
-                {parsedFiles.length > 1 && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[#111111] border-b border-[#222222] text-[#888888] text-[10px]">
-                    <FileCode className="h-3 w-3 text-[#52a8ff]" />
-                    <span className="text-[#cccccc] font-medium">
-                      {file.to?.replace(/^b\//, '') || file.from?.replace(/^a\//, '') || `File ${fileIdx + 1}`}
-                    </span>
-                    {file.new && (
-                      <span className="badge-success text-[9px] px-1 py-0.5 rounded">
-                        <PlusCircle className="h-2.5 w-2.5" /> new file
+          <div className="min-w-fit w-full">
+            {parsedFiles.length > 0 ? (
+              parsedFiles.map((file, fileIdx) => (
+                <div key={fileIdx} className="divide-y divide-[#181818]/40">
+                  {/* File Sub-header if multi-file */}
+                  {parsedFiles.length > 1 && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-[#111111] border-b border-[#222222] text-[#888888] text-[10px]">
+                      <FileCode className="h-3 w-3 text-[#52a8ff]" />
+                      <span className="text-[#cccccc] font-medium">
+                        {file.to?.replace(/^b\//, '') || file.from?.replace(/^a\//, '') || `File ${fileIdx + 1}`}
                       </span>
-                    )}
-                    {file.deleted && (
-                      <span className="badge-danger text-[9px] px-1 py-0.5 rounded">
-                        <MinusCircle className="h-2.5 w-2.5" /> deleted
+                      {file.new && (
+                        <span className="badge-success text-[9px] px-1 py-0.5 rounded">
+                          <PlusCircle className="h-2.5 w-2.5" /> new file
+                        </span>
+                      )}
+                      {file.deleted && (
+                        <span className="badge-danger text-[9px] px-1 py-0.5 rounded">
+                          <MinusCircle className="h-2.5 w-2.5" /> deleted
+                        </span>
+                      )}
+                      <span className="ml-auto font-sans">
+                        <span className="text-status-success">+{file.additions}</span>{' '}
+                        <span className="text-status-danger">-{file.deletions}</span>
                       </span>
-                    )}
-                    <span className="ml-auto font-sans">
-                      <span className="text-status-success">+{file.additions}</span>{' '}
-                      <span className="text-status-danger">-{file.deletions}</span>
-                    </span>
-                  </div>
-                )}
-
-                {/* Chunks */}
-                {file.chunks.map((chunk, chunkIdx) => (
-                  <div key={chunkIdx}>
-                    {/* Hunk Header */}
-                    <div className="diff-hunk-header px-3 py-1 font-mono text-[10px] tracking-tight">
-                      {chunk.content}
                     </div>
+                  )}
 
-                    {/* Chunk Changes */}
-                    <div>
-                      {chunk.changes.map((change, changeIdx) => {
-                        const isAdd = change.type === 'add';
-                        const isDel = change.type === 'del';
-                        const isNormal = change.type === 'normal';
+                  {/* Chunks */}
+                  {file.chunks.map((chunk, chunkIdx) => (
+                    <div key={chunkIdx}>
+                      {/* Hunk Header */}
+                      <div className="diff-hunk-header px-3 py-1 font-mono text-[10px] tracking-tight">
+                        {chunk.content}
+                      </div>
 
-                        // Line numbers
-                        let oldNum: number | undefined;
-                        let newNum: number | undefined;
+                      {/* Chunk Changes */}
+                      <div>
+                        {chunk.changes.map((change, changeIdx) => {
+                          const isAdd = change.type === 'add';
+                          const isDel = change.type === 'del';
+                          const isNormal = change.type === 'normal';
 
-                        if (isNormal) {
-                          oldNum = change.ln1;
-                          newNum = change.ln2;
-                        } else if (isDel) {
-                          oldNum = change.ln;
-                        } else if (isAdd) {
-                          newNum = change.ln;
-                        }
+                          // Line numbers
+                          let oldNum: number | undefined;
+                          let newNum: number | undefined;
 
-                        // Strip leading '+', '-', or ' ' from change content
-                        let lineText = change.content;
-                        if (lineText.startsWith('+') || lineText.startsWith('-') || lineText.startsWith(' ')) {
-                          lineText = lineText.slice(1);
-                        }
+                          if (isNormal) {
+                            oldNum = change.ln1;
+                            newNum = change.ln2;
+                          } else if (isDel) {
+                            oldNum = change.ln;
+                          } else if (isAdd) {
+                            newNum = change.ln;
+                          }
 
-                        return (
-                          <div
-                            key={changeIdx}
-                            className={`flex items-start transition-colors min-h-[20px] ${
-                              isAdd
-                                ? 'diff-line-add'
-                                : isDel
-                                ? 'diff-line-del'
-                                : 'text-[#a1a1a1] hover:bg-white/[0.02] bg-[#0d0d0d]'
-                            }`}
-                          >
-                            {/* Line numbers gutter (sticky left edge) */}
+                          // Strip leading '+', '-', or ' ' from change content
+                          let lineText = change.content;
+                          if (lineText.startsWith('+') || lineText.startsWith('-') || lineText.startsWith(' ')) {
+                            lineText = lineText.slice(1);
+                          }
+
+                          return (
                             <div
-                              className={cn(
-                                'sticky left-0 flex items-center z-10 shrink-0 select-none font-mono border-r border-[#222222]',
-                                isAdd ? 'bg-[#0f1a14]' : isDel ? 'bg-[#1c0f12]' : 'bg-[#0d0d0d]'
-                              )}
+                              key={changeIdx}
+                              className={`flex items-start transition-colors min-h-[20px] ${
+                                isAdd
+                                  ? 'diff-line-add'
+                                  : isDel
+                                  ? 'diff-line-del'
+                                  : 'text-[#a1a1a1] hover:bg-white/[0.02] bg-[#0d0d0d]'
+                              }`}
                             >
-                              <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
-                                {oldNum ?? ''}
+                              {/* Line numbers gutter (sticky left edge) */}
+                              <div
+                                className={cn(
+                                  'sticky left-0 flex items-center z-10 shrink-0 select-none font-mono border-r border-[#222222]',
+                                  isAdd ? 'bg-[#0f1a14]' : isDel ? 'bg-[#1c0f12]' : 'bg-[#0d0d0d]'
+                                )}
+                              >
+                                <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
+                                  {oldNum ?? ''}
+                                </div>
+                                <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
+                                  {newNum ?? ''}
+                                </div>
+                                {/* Sign indicator */}
+                                <div className="w-5 shrink-0 text-center py-0.5 font-bold text-[11px]">
+                                  {isAdd ? '+' : isDel ? '-' : ' '}
+                                </div>
                               </div>
-                              <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
-                                {newNum ?? ''}
-                              </div>
-                              {/* Sign indicator */}
-                              <div className="w-5 shrink-0 text-center py-0.5 font-bold text-[11px]">
-                                {isAdd ? '+' : isDel ? '-' : ' '}
-                              </div>
-                            </div>
 
-                            {/* Line content */}
-                            <div className="flex-1 py-0.5 px-3 whitespace-pre font-mono">
-                              {lineText || '\u00A0'}
+                              {/* Line content */}
+                              <div className="flex-1 py-0.5 px-3 whitespace-pre font-mono">
+                                {lineText || '\u00A0'}
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              ))
+            ) : (
+              // Fallback for unparseable diffs: render raw lines
+              <div className="p-3 font-mono text-[11px] text-[#a1a1a1] whitespace-pre overflow-x-auto">
+                {cleanedDiff}
               </div>
-            ))
-          ) : (
-            // Fallback for unparseable diffs: render raw lines
-            <div className="p-3 font-mono text-[11px] text-[#a1a1a1] whitespace-pre overflow-x-auto">
-              {cleanedDiff}
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>

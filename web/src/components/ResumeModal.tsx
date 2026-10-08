@@ -78,6 +78,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
   });
   const [selectedAdapterFlags, setSelectedAdapterFlags] = React.useState<Record<string, boolean>>({});
   const [customArgs, setCustomArgs] = React.useState('');
+  const [selectedTerminal, setSelectedTerminal] = React.useState<string>('default');
   const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
@@ -254,9 +255,32 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
           </span>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto space-y-3 pt-0.5 pr-1">
-          {/* Section 1: AIM Direct Flags */}
+        <form id="resume-flags-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto space-y-3 pt-0.5 pr-1 min-h-0">
+          {/* Section 0: Terminal Launcher Target */}
           <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label htmlFor="terminal-select" className="text-[11px] font-semibold text-[#ededed] uppercase tracking-wider font-mono">
+                Terminal Target
+              </label>
+              <span className="text-[10px] text-[#666666] font-mono">Environment Target</span>
+            </div>
+            <select
+              id="terminal-select"
+              value={selectedTerminal}
+              onChange={(e) => setSelectedTerminal(e.target.value)}
+              className="w-full h-8 px-2.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] focus:border-[#444444] focus:outline-none cursor-pointer"
+            >
+              <option value="default">Default System Terminal</option>
+              <option value="Ghostty">Ghostty</option>
+              <option value="iTerm">iTerm2</option>
+              <option value="Terminal">Terminal.app</option>
+              <option value="Kitty">Kitty</option>
+              <option value="Alacritty">Alacritty</option>
+            </select>
+          </div>
+
+          {/* Section 1: AIM Direct Flags */}
+          <div className="space-y-1.5 pt-1 border-t border-[#262626]">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-[#ededed] uppercase tracking-wider font-mono">
                 1. AIM Direct Flags (Orchestrator)
@@ -402,37 +426,38 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               </button>
             </div>
           </div>
-
-          <DialogFooter className="pt-2 flex items-center justify-end gap-2 border-t border-[#262626] shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-              className="rounded-geist h-8 px-3.5 text-xs font-sans border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={isResuming}
-              className="rounded-geist h-8 px-4 text-xs font-sans bg-[#ffffff] text-black hover:bg-[#eaeaea] font-medium shadow-sm transition-colors cursor-pointer"
-            >
-              {isResuming ? (
-                <>
-                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                  Launching...
-                </>
-              ) : (
-                <>
-                  <Terminal className="h-3.5 w-3.5 mr-1.5" />
-                  Resume in Terminal
-                </>
-              )}
-            </Button>
-          </DialogFooter>
         </form>
+
+        <DialogFooter className="pt-3 flex items-center justify-end gap-2 border-t border-[#262626] shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            className="rounded-geist h-8 px-3.5 text-xs font-sans border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
+          >
+            Cancel
+          </Button>
+          <Button
+            form="resume-flags-form"
+            type="submit"
+            size="sm"
+            disabled={isResuming}
+            className="rounded-geist h-8 px-4 text-xs font-sans bg-[#ffffff] text-black hover:bg-[#eaeaea] font-medium shadow-sm transition-colors cursor-pointer"
+          >
+            {isResuming ? (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Launching...
+              </>
+            ) : (
+              <>
+                <Terminal className="h-3.5 w-3.5 mr-1.5" />
+                Resume in {selectedTerminal === 'default' ? 'Terminal' : selectedTerminal}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

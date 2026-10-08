@@ -130,6 +130,49 @@ const getToolConfig = (toolName: string) => {
   };
 };
 
+const extractToolParamSnippet = (argsStr?: string): string | null => {
+  if (!argsStr) return null;
+  try {
+    const parsed = JSON.parse(argsStr);
+    if (typeof parsed === 'object' && parsed !== null) {
+      if (parsed.CommandLine) return `$ ${parsed.CommandLine}`;
+      if (parsed.command) return `$ ${parsed.command}`;
+      if (parsed.cmd) return `$ ${parsed.cmd}`;
+      if (parsed.AbsolutePath) {
+        const p = String(parsed.AbsolutePath);
+        const parts = p.split('/');
+        return parts.length > 2 ? `.../${parts.slice(-2).join('/')}` : p;
+      }
+      if (parsed.path) {
+        const p = String(parsed.path);
+        const parts = p.split('/');
+        return parts.length > 2 ? `.../${parts.slice(-2).join('/')}` : p;
+      }
+      if (parsed.file) return String(parsed.file);
+      if (parsed.TargetFile) {
+        const p = String(parsed.TargetFile);
+        const parts = p.split('/');
+        return parts.length > 2 ? `.../${parts.slice(-2).join('/')}` : p;
+      }
+      if (parsed.query) return `"${parsed.query}"`;
+      if (parsed.q) return `"${parsed.q}"`;
+      if (parsed.url) return String(parsed.url);
+      if (parsed.Url) return String(parsed.Url);
+      for (const key of Object.keys(parsed)) {
+        const val = parsed[key];
+        if (typeof val === 'string' && val.length > 0 && val.length < 80) {
+          return `${key}: ${val}`;
+        }
+      }
+    }
+  } catch {
+    if (argsStr.length > 0 && argsStr.length < 60) {
+      return argsStr;
+    }
+  }
+  return null;
+};
+
 export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, onBack }) => {
   const [transcript, setTranscript] = React.useState<SessionTranscriptDTO | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -139,9 +182,12 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
   const [isResuming, setIsResuming] = React.useState(false);
   const [copiedCmd, setCopiedCmd] = React.useState(false);
   const [copiedCwd, setCopiedCwd] = React.useState(false);
+  const [copiedId, setCopiedId] = React.useState(false);
   const [copiedTurn, setCopiedTurn] = React.useState<number | null>(null);
   const [expandedThinking, setExpandedThinking] = React.useState<Record<number, boolean>>({});
   const [expandedTools, setExpandedTools] = React.useState<Record<string, boolean>>({});
+  const [expandedOutputs, setExpandedOutputs] = React.useState<Record<string, boolean>>({});
+  const [copiedOutputs, setCopiedOutputs] = React.useState<Record<string, boolean>>({});
 
   // Search & Filter state for Conversation History
   const [turnSearch, setTurnSearch] = React.useState('');
@@ -233,6 +279,35 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
     navigator.clipboard.writeText(session.cwd);
     setCopiedCwd(true);
     setTimeout(() => setCopiedCwd(false), 2000);
+  };
+
+  const copySessionId = () => {
+    navigator.clipboard.writeText(session.id);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
+    toast({
+      title: 'Session ID copied',
+      description: session.id,
+    });
+  };
+
+  const toggleOutputExpand = (toolKey: string) => {
+    setExpandedOutputs((prev) => ({
+      ...prev,
+      [toolKey]: !prev[toolKey],
+    }));
+  };
+
+  const copyToolOutput = (toolKey: string, output: string) => {
+    navigator.clipboard.writeText(output);
+    setCopiedOutputs((prev) => ({ ...prev, [toolKey]: true }));
+    setTimeout(() => {
+      setCopiedOutputs((prev) => ({ ...prev, [toolKey]: false }));
+    }, 2000);
+    toast({
+      title: 'Output copied',
+      description: 'Tool execution output copied to clipboard',
+    });
   };
 
   const copyTurnContent = (turn: SessionTurnDTO) => {
@@ -544,6 +619,18 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
 
           <button
             type="button"
+            onClick={copySessionId}
+            className="flex items-center gap-1.5 bg-[#0a0a0a] px-2.5 py-1 rounded-[4px] border border-border cursor-pointer hover:border-[#333333] hover:text-[#ededed] transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
+            title="Click to copy full Session ID"
+            aria-label={`Copy Session ID: ${session.id}`}
+          >
+            <span className="text-[#666666]">ID:</span>
+            <span className="truncate max-w-[130px] text-[#ededed] font-mono text-[11px]">{session.id}</span>
+            {copiedId ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3 text-[#666666]" />}
+          </button>
+
+          <button
+            type="button"
             onClick={copyCwd}
             className="flex items-center gap-1.5 bg-[#0a0a0a] px-2.5 py-1 rounded-[4px] border border-border cursor-pointer hover:border-[#333333] hover:text-[#ededed] transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
             title="Click to copy path"
@@ -714,7 +801,9 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
 
               {orderedTurns.length > visibleCount && (
                 <span className="text-[11px] text-[#666666] font-sans">
-                  Scroll down to load older turns ({orderedTurns.length - visibleCount} remaining)
+                  {sortOrder === 'chronological'
+                    ? `Scroll down to load later turns (${orderedTurns.length - visibleCount} remaining)`
+                    : `Scroll down to load earlier turns (${orderedTurns.length - visibleCount} remaining)`}
                 </span>
               )}
             </div>
@@ -734,15 +823,20 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                     className={cn(
                       'rounded-geist transition-colors border p-4',
                       isUser
-                        ? 'border-[#2e2e2e] bg-[#0c0c0c] ring-1 ring-white/5 shadow-sm'
+                        ? 'border-[#0070f3]/30 bg-[#0a0d14] ring-1 ring-[#0070f3]/10 shadow-sm'
                         : 'border-[#1f1f1f] bg-[#111111]'
                     )}
                   >
                     {/* Stream Entry Header */}
-                    <div className="flex items-center justify-between pb-2 border-b border-[#1c1c1c] text-xs font-sans mb-3">
+                    <div
+                      className={cn(
+                        'flex items-center justify-between pb-2 border-b text-xs font-sans mb-3',
+                        isUser ? 'border-[#0070f3]/15' : 'border-[#1c1c1c]'
+                      )}
+                    >
                       <div className="flex items-center gap-2">
                         {isUser ? (
-                          <div className="h-5 w-5 rounded-[4px] bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center text-[#ededed]">
+                          <div className="h-5 w-5 rounded-[4px] bg-[#0070f3]/15 border border-[#0070f3]/30 flex items-center justify-center text-[#52a8ff]">
                             <User className="h-3 w-3" />
                           </div>
                         ) : (
@@ -750,7 +844,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                             <Bot className="h-3 w-3" />
                           </div>
                         )}
-                        <span className="font-semibold text-[#ededed]">
+                        <span className={cn('font-semibold', isUser ? 'text-[#e6f1fe]' : 'text-[#ededed]')}>
                           {isUser ? 'User Prompt' : `${session.agent} Response`}
                         </span>
                         <span className="text-[10px] font-mono text-[#666666]">
@@ -843,6 +937,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                             const isToolOpen = expandedTools[toolKey] === true; // Default collapsed for clean stream
                             const cfg = getToolConfig(tool.tool_name);
                             const ToolIcon = cfg.Icon;
+                            const paramSnippet = extractToolParamSnippet(tool.arguments);
 
                             return (
                               <div
@@ -859,21 +954,29 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                   aria-expanded={isToolOpen}
                                   aria-controls={`tool-panel-${toolKey}`}
                                   className={cn(
-                                    'w-full flex items-center justify-between px-3 py-1.5 text-xs font-mono cursor-pointer transition-colors select-none text-left focus:outline-none focus:ring-1 focus:ring-ring',
+                                    'w-full flex items-center justify-between px-3 py-1.5 text-xs font-mono cursor-pointer transition-colors select-none text-left focus:outline-none focus:ring-1 focus:ring-ring gap-2',
                                     cfg.headerHoverClass
                                   )}
                                 >
-                                  <div className="flex items-center gap-2 min-w-0">
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
                                     <ToolIcon className={cn('h-3.5 w-3.5 shrink-0', cfg.iconClass)} />
-                                    <span className="text-[#ededed] font-medium">{tool.tool_name}</span>
+                                    <span className="text-[#ededed] font-medium shrink-0">{tool.tool_name}</span>
                                     <Badge
                                       variant="outline"
-                                      className={cn('text-[9px] font-mono px-1 py-0 rounded-[2px] uppercase tracking-wider', cfg.tagClass)}
+                                      className={cn('text-[9px] font-mono px-1 py-0 rounded-[2px] uppercase tracking-wider shrink-0', cfg.tagClass)}
                                     >
                                       {cfg.category}
                                     </Badge>
+                                    {paramSnippet && (
+                                      <span
+                                        className="text-[11px] font-mono text-muted-foreground truncate max-w-[220px] sm:max-w-[380px] border-l border-border/60 pl-2 select-text"
+                                        title={tool.arguments}
+                                      >
+                                        {paramSnippet}
+                                      </span>
+                                    )}
                                   </div>
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 shrink-0">
                                     <Badge
                                       variant={tool.status === 'error' ? 'destructive' : 'success'}
                                       className="text-[9px] font-mono px-1.5 py-0 rounded-[3px]"
@@ -907,11 +1010,45 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                       </div>
                                     )}
                                     {tool.output && (
-                                      <div className="space-y-1">
-                                        <span className="text-[10px] text-[#666666] uppercase tracking-wider">
-                                          Output:
-                                        </span>
-                                        <div className="p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto max-h-60 overflow-y-auto">
+                                      <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] text-[#666666] uppercase tracking-wider font-mono">
+                                            Output:
+                                          </span>
+                                          <div className="flex items-center gap-1.5">
+                                            <button
+                                              type="button"
+                                              onClick={() => copyToolOutput(toolKey, tool.output!)}
+                                              className="text-[10px] text-muted-foreground hover:text-[#ededed] px-1.5 py-0.5 rounded border border-border/50 hover:bg-[#161616] transition-colors flex items-center gap-1 cursor-pointer"
+                                              title="Copy output"
+                                            >
+                                              {copiedOutputs[toolKey] ? (
+                                                <>
+                                                  <Check className="h-2.5 w-2.5 text-emerald-400" />
+                                                  <span>Copied</span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Copy className="h-2.5 w-2.5" />
+                                                  <span>Copy output</span>
+                                                </>
+                                              )}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleOutputExpand(toolKey)}
+                                              className="text-[10px] text-muted-foreground hover:text-[#ededed] px-1.5 py-0.5 rounded border border-border/50 hover:bg-[#161616] transition-colors cursor-pointer"
+                                            >
+                                              {expandedOutputs[toolKey] ? 'Collapse height' : 'Expand full output'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                        <div
+                                          className={cn(
+                                            'p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto',
+                                            expandedOutputs[toolKey] ? 'max-h-none' : 'max-h-60 overflow-y-auto'
+                                          )}
+                                        >
                                           <TurnMessageRenderer content={tool.output} />
                                         </div>
                                       </div>
@@ -942,11 +1079,19 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
             {visibleCount < orderedTurns.length ? (
               <div className="py-6 text-center text-xs font-sans text-[#777777] flex items-center justify-center gap-2">
                 <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#666666]" />
-                <span>Loading older conversation turns...</span>
+                <span>
+                  {sortOrder === 'chronological'
+                    ? 'Loading later conversation turns...'
+                    : 'Loading earlier conversation turns...'}
+                </span>
               </div>
             ) : orderedTurns.length > 0 ? (
               <div className="py-8 text-center text-xs font-sans text-[#555555] border-t border-[#1c1c1c] flex items-center justify-center gap-2">
-                <span>Reached beginning of session transcript ({orderedTurns.length} total turns)</span>
+                <span>
+                  {sortOrder === 'chronological'
+                    ? `Reached latest turn in session transcript (${orderedTurns.length} total turns)`
+                    : `Reached beginning of session transcript (${orderedTurns.length} total turns)`}
+                </span>
               </div>
             ) : null}
           </>

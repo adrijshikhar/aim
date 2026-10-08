@@ -954,10 +954,25 @@ export function ProfilesView({
 
                                 {/* Micro-bar */}
                                 <div className="space-y-1">
-                                  <div className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50">
+                                  <div
+                                    role="progressbar"
+                                    aria-valuenow={pct}
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    aria-label="Quota headroom"
+                                    className={cn(
+                                      "w-full h-1.5 rounded-full overflow-hidden border",
+                                      isExhausted || pct <= 0
+                                        ? "bg-status-danger-bg border-status-danger-border"
+                                        : "bg-[#181818] border-[#262626]/50"
+                                    )}
+                                  >
                                     <div
-                                      className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
-                                      style={{ width: `${isExhausted || pct <= 0 ? 0 : Math.min(100, pct)}%` }}
+                                      className={cn(
+                                        "h-full transition-all duration-300",
+                                        isExhausted || pct <= 0 ? "w-full bg-status-danger-solid/40" : getProgressColor(pct)
+                                      )}
+                                      style={{ width: isExhausted || pct <= 0 ? '100%' : `${Math.min(100, pct)}%` }}
                                     />
                                   </div>
                                 </div>
@@ -987,7 +1002,10 @@ export function ProfilesView({
                               {isExhausted ? (
                                 <div className="rounded-geist border border-status-danger-border bg-status-danger-bg p-3 text-xs flex items-center gap-2.5 text-status-danger font-mono">
                                   <AlertCircle className="h-4 w-4 shrink-0 text-status-danger" />
-                                  <span>Rate limit window exhausted. Quota resets in approximately {qDetails.resetTime || '45m'}.</span>
+                                  <span>
+                                    Rate limit window exhausted.
+                                    {qDetails.resetTime ? ` Quota resets in approximately ${qDetails.resetTime}.` : ' Awaiting window reset.'}
+                                  </span>
                                 </div>
                               ) : isWarning ? (
                                 <div className="rounded-geist border border-status-warning-border bg-status-warning-bg p-3 text-xs flex items-center gap-2.5 text-status-warning font-mono">
@@ -997,7 +1015,7 @@ export function ProfilesView({
                               ) : (
                                 <div className="rounded-geist border border-status-success-border bg-status-success-bg p-3 text-xs flex items-center justify-between text-status-success font-mono">
                                   <div className="flex items-center gap-2">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                                    <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                                     <span>All quota windows operating within normal limits</span>
                                   </div>
                                 </div>
@@ -1529,29 +1547,42 @@ export function ProfilesView({
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="text-[#ededed] font-medium truncate max-w-[160px]">
+                        <div className="text-[#ededed] font-medium truncate max-w-[160px]" title={p.account?.name || p.name}>
                           {p.account?.name || p.name}
                         </div>
                         {p.account?.email && (
-                          <div className="text-[11px] text-[#888888] truncate max-w-[160px]">
+                          <div className="text-[11px] text-[#888888] truncate max-w-[160px]" title={p.account.email}>
                             {p.account.email}
                           </div>
                         )}
                       </td>
                       <td className="px-4 py-3 min-w-[160px]">
                         <div className="flex items-center justify-between text-[11px] mb-1">
-                          <span className="text-[#666666] font-mono">Headroom</span>
-                          <span className={cn('font-mono font-medium', getTextColor(pct))}>
+                          <span className="text-muted-foreground font-mono">Headroom</span>
+                          <span className={cn('font-mono font-medium tabular-nums', getTextColor(pct))}>
                             {pct}%
                           </span>
                         </div>
-                        <div className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50">
+                        <div
+                          role="progressbar"
+                          aria-valuenow={pct}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-label="Profile quota"
+                          className={cn(
+                            "w-full h-1.5 rounded-full overflow-hidden border",
+                            p.quota?.is_exhausted || pct <= 0
+                              ? "bg-status-danger-bg border-status-danger-border"
+                              : "bg-[#181818] border-[#262626]/50"
+                          )}
+                        >
                           <div
-                            className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
+                            className={cn(
+                              "h-full transition-all duration-300",
+                              p.quota?.is_exhausted || pct <= 0 ? "w-full bg-status-danger-solid/40" : getProgressColor(pct)
+                            )}
                             style={{
-                              width: `${
-                                p.quota?.is_exhausted || pct <= 0 ? 0 : Math.min(100, pct)
-                              }%`,
+                              width: p.quota?.is_exhausted || pct <= 0 ? '100%' : `${Math.min(100, pct)}%`,
                             }}
                           />
                         </div>
@@ -1628,7 +1659,7 @@ export function ProfilesView({
                       </CardTitle>
                       <CardDescription className="text-xs text-muted-foreground truncate pt-0.5 flex items-center gap-1">
                         <Folder className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-                        <span className="truncate font-mono">{p.path}</span>
+                        <span className="truncate font-mono" title={p.path}>{p.path}</span>
                       </CardDescription>
                     </div>
                   </CardHeader>
@@ -1637,29 +1668,29 @@ export function ProfilesView({
                     {/* Account Info Box */}
                     <div className="rounded-geist border border-[#222222] bg-[#0c0c0c] p-3 text-xs space-y-1.5 font-sans">
                       <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-1.5 text-[#666666]">
-                          <User className="h-3 w-3 text-[#555555]" /> Account
+                        <span className="flex items-center gap-1.5 text-muted-foreground">
+                          <User className="h-3 w-3 text-muted-foreground/60" /> Account
                         </span>
-                        <span className="text-[#ededed] font-medium truncate max-w-[140px]">
+                        <span className="text-[#ededed] font-medium truncate max-w-[140px]" title={p.account?.name || p.name}>
                           {p.account?.name || p.name}
                         </span>
                       </div>
                       {p.account?.email && (
                         <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5 text-[#666666]">
-                            <Mail className="h-3 w-3 text-[#555555]" /> Email
+                          <span className="flex items-center gap-1.5 text-muted-foreground">
+                            <Mail className="h-3 w-3 text-muted-foreground/60" /> Email
                           </span>
-                          <span className="text-[#ededed] truncate max-w-[160px]">
+                          <span className="text-[#ededed] truncate max-w-[160px]" title={p.account.email}>
                             {p.account.email}
                           </span>
                         </div>
                       )}
                       {p.account?.auth_method && (
                         <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5 text-[#666666]">
-                            <Key className="h-3 w-3 text-[#555555]" /> Auth
+                          <span className="flex items-center gap-1.5 text-muted-foreground">
+                            <Key className="h-3 w-3 text-muted-foreground/60" /> Auth
                           </span>
-                          <span className="text-[#888888] truncate max-w-[140px]">
+                          <span className="text-muted-foreground truncate max-w-[140px]" title={p.account.auth_method}>
                             {p.account.auth_method}
                           </span>
                         </div>
@@ -1691,7 +1722,7 @@ export function ProfilesView({
                                       </span>
                                     ) : null;
                                   })()}
-                                  <span className={`tabular-nums ${getTextColor(pct)}`}>
+                                  <span className={cn('tabular-nums font-mono', getTextColor(pct))}>
                                     {pct}%
                                   </span>
                                 </div>
@@ -1702,14 +1733,20 @@ export function ProfilesView({
                                 aria-valuemin={0}
                                 aria-valuemax={100}
                                 aria-label={`${ad.agent} quota`}
-                                className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
+                                className={cn(
+                                  "w-full h-1.5 rounded-full overflow-hidden border",
+                                  ad.quota?.is_exhausted || pct <= 0
+                                    ? "bg-status-danger-bg border-status-danger-border"
+                                    : "bg-[#181818] border-[#262626]/50"
+                                )}
                               >
                                 <div
-                                  className={`h-full transition-all duration-300 ${getProgressColor(pct)}`}
+                                  className={cn(
+                                    "h-full transition-all duration-300",
+                                    ad.quota?.is_exhausted || pct <= 0 ? "w-full bg-status-danger-solid/40" : getProgressColor(pct)
+                                  )}
                                   style={{
-                                    width: `${
-                                      ad.quota?.is_exhausted || pct <= 0 ? 0 : Math.min(100, pct)
-                                    }%`,
+                                    width: ad.quota?.is_exhausted || pct <= 0 ? '100%' : `${Math.min(100, pct)}%`,
                                   }}
                                 />
                               </div>
@@ -1720,20 +1757,21 @@ export function ProfilesView({
                     ) : (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-[#666666] flex items-center gap-1">
-                            <Gauge className="h-3 w-3 text-[#555555]" /> Quota
+                          <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Gauge className="h-3 w-3 text-muted-foreground/60" /> Quota
                           </span>
                         {(() => {
                           const pct = p.quota?.bottleneck_pct ?? 100;
                           return (
                             <span
-                              className={`font-sans text-xs font-medium tabular-nums ${
+                              className={cn(
+                                'font-mono text-xs font-medium tabular-nums',
                                 pct <= 0
                                   ? 'text-status-danger'
                                   : pct <= 30
                                   ? 'text-status-warning'
-                                  : 'text-[#888888]'
-                              }`}
+                                  : 'text-muted-foreground'
+                              )}
                             >
                               {p.quota ? `${pct}% remaining` : '100% remaining'}
                             </span>
@@ -1746,18 +1784,25 @@ export function ProfilesView({
                           aria-valuemin={0}
                           aria-valuemax={100}
                           aria-label="Profile quota"
-                          className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
+                          className={cn(
+                            "w-full h-1.5 rounded-full overflow-hidden border",
+                            p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0
+                              ? "bg-status-danger-bg border-status-danger-border"
+                              : "bg-[#181818] border-[#262626]/50"
+                          )}
                         >
                           <div
-                            className={`h-full transition-all duration-300 ${getProgressColor(
-                              p.quota?.bottleneck_pct ?? 100
-                            )}`}
+                            className={cn(
+                              "h-full transition-all duration-300",
+                              p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0
+                                ? "w-full bg-status-danger-solid/40"
+                                : getProgressColor(p.quota?.bottleneck_pct ?? 100)
+                            )}
                             style={{
-                              width: `${
+                              width:
                                 p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0
-                                  ? 0
-                                  : Math.min(100, p.quota?.bottleneck_pct ?? 100)
-                              }%`,
+                                  ? '100%'
+                                  : `${Math.min(100, p.quota?.bottleneck_pct ?? 100)}%`,
                             }}
                           />
                         </div>

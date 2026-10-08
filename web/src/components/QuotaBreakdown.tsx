@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Clock, Gauge } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface QuotaWindow {
   key: string;
@@ -108,7 +109,7 @@ export function QuotaBreakdown({
     return (
       <div key={win.key} className="space-y-1.5 p-2.5 rounded-[6px] bg-[#0f0f0f] border border-[#222222]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-[#737373] flex items-center gap-1.5 font-normal">
+          <span className="text-muted-foreground flex items-center gap-1.5 font-normal">
             {win.label}
           </span>
           <div className="flex items-center gap-2">
@@ -118,7 +119,7 @@ export function QuotaBreakdown({
                 <span>resets in {win.reset}</span>
               </span>
             )}
-            <span className={`font-semibold tabular-nums text-xs ${getTextColor(win.pct)}`}>
+            <span className={`font-semibold font-mono tabular-nums text-xs ${getTextColor(win.pct)}`}>
               {win.pct}%
             </span>
           </div>
@@ -131,11 +132,19 @@ export function QuotaBreakdown({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label={`${win.label} quota`}
-          className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
+          className={cn(
+            "w-full h-1.5 rounded-full overflow-hidden border",
+            isEx
+              ? "bg-status-danger-bg border-status-danger-border"
+              : "bg-[#181818] border-[#262626]/50"
+          )}
         >
           <div
-            className={`h-full transition-all duration-300 ${getStatusColor(win.pct)}`}
-            style={{ width: `${isEx || win.pct <= 0 ? 0 : Math.min(100, win.pct)}%` }}
+            className={cn(
+              "h-full transition-all duration-300",
+              isEx ? "w-full bg-status-danger-solid/40" : getStatusColor(win.pct)
+            )}
+            style={{ width: isEx ? '100%' : `${Math.min(100, win.pct)}%` }}
           />
         </div>
       </div>
@@ -147,11 +156,11 @@ export function QuotaBreakdown({
     return (
       <div className="space-y-2 p-3 rounded-[6px] bg-[#0a0a0a] border border-[#222222]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-[#737373] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px]">
-            <Gauge className="h-3 w-3 text-[#555555]" />
+          <span className="text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px]">
+            <Gauge className="h-3 w-3 text-muted-foreground/60" />
             Live Quota Telemetry
           </span>
-          <span className={`font-semibold tabular-nums ${getTextColor(effectiveBottleneckPct)}`}>
+          <span className={`font-semibold font-mono tabular-nums ${getTextColor(effectiveBottleneckPct)}`}>
             {effectiveBottleneckPct}% remaining
           </span>
         </div>
@@ -161,15 +170,23 @@ export function QuotaBreakdown({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label="Live quota telemetry"
-          className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
+          className={cn(
+            "w-full h-1.5 rounded-full overflow-hidden border",
+            isEx
+              ? "bg-status-danger-bg border-status-danger-border"
+              : "bg-[#181818] border-[#262626]/50"
+          )}
         >
           <div
-            className={`h-full transition-all duration-300 ${getStatusColor(effectiveBottleneckPct)}`}
-            style={{ width: `${isEx || effectiveBottleneckPct <= 0 ? 0 : Math.min(100, effectiveBottleneckPct)}%` }}
+            className={cn(
+              "h-full transition-all duration-300",
+              isEx ? "w-full bg-status-danger-solid/40" : getStatusColor(effectiveBottleneckPct)
+            )}
+            style={{ width: isEx ? '100%' : `${Math.min(100, effectiveBottleneckPct)}%` }}
           />
         </div>
         {summary && (
-          <p className="text-[11px] font-sans text-[#737373] pt-1">
+          <p className="text-[11px] font-sans text-muted-foreground/70 pt-1">
             {summary}
           </p>
         )}
@@ -182,8 +199,8 @@ export function QuotaBreakdown({
     return (
       <div className="space-y-2 p-4 rounded-geist bg-[#0c0c0c] border border-[#2a2a2a]">
         <div className="flex items-center justify-between text-xs font-sans">
-          <span className="text-[#737373] uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px] font-mono">
-            <Gauge className="h-3.5 w-3.5 text-[#555555]" />
+          <span className="text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 font-medium text-[11px] font-mono">
+            <Gauge className="h-3.5 w-3.5 text-muted-foreground/60" />
             {parsed.single.label}
           </span>
           <div className="flex items-center gap-2">
@@ -193,7 +210,7 @@ export function QuotaBreakdown({
                 <span>resets in {parsed.single.reset}</span>
               </span>
             )}
-            <span className={`font-semibold tabular-nums text-xs ${getTextColor(parsed.single.pct)}`}>
+            <span className={`font-semibold font-mono tabular-nums text-xs ${getTextColor(parsed.single.pct)}`}>
               {parsed.single.pct}% remaining
             </span>
           </div>
@@ -204,11 +221,19 @@ export function QuotaBreakdown({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label={`${parsed.single.label} quota`}
-          className="w-full bg-[#181818] h-1.5 rounded-full overflow-hidden border border-[#262626]/50"
+          className={cn(
+            "w-full h-1.5 rounded-full overflow-hidden border",
+            isEx
+              ? "bg-status-danger-bg border-status-danger-border"
+              : "bg-[#181818] border-[#262626]/50"
+          )}
         >
           <div
-            className={`h-full transition-all duration-300 ${getStatusColor(parsed.single.pct)}`}
-            style={{ width: `${isEx || parsed.single.pct <= 0 ? 0 : Math.min(100, parsed.single.pct)}%` }}
+            className={cn(
+              "h-full transition-all duration-300",
+              isEx ? "w-full bg-status-danger-solid/40" : getStatusColor(parsed.single.pct)
+            )}
+            style={{ width: isEx ? '100%' : `${Math.min(100, parsed.single.pct)}%` }}
           />
         </div>
       </div>

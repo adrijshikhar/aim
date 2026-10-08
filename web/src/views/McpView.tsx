@@ -23,29 +23,29 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
-const KNOWN_SERVER_TOOLS: Record<string, Array<{ name: string; description: string }>> = {
+const KNOWN_SERVER_TOOLS: Record<string, Array<{ name: string; description: string; params?: string[] }>> = {
   'claude-mem': [
-    { name: 'search', description: 'Semantic search across historical workflow runs' },
-    { name: 'session_start_context', description: 'Hydrate contextual memory at session start' },
-    { name: 'work_state_write', description: 'Persist checkpoint data to long-term memory' },
+    { name: 'search', description: 'Semantic search across historical workflow runs', params: ['query', 'limit'] },
+    { name: 'session_start_context', description: 'Hydrate contextual memory at session start', params: ['session_id'] },
+    { name: 'work_state_write', description: 'Persist checkpoint data to long-term memory', params: ['key', 'state'] },
   ],
   'hevo-services': [
-    { name: 'hermes_get_integration', description: 'Retrieve integration runtime pipeline status' },
-    { name: 'catalog_get_objects', description: 'Fetch catalog schemas and object configuration' },
-    { name: 'fhs_classify_errors', description: 'Classify ingestion and loading failure records' },
+    { name: 'hermes_get_integration', description: 'Retrieve integration runtime pipeline status', params: ['integration_id'] },
+    { name: 'catalog_get_objects', description: 'Fetch catalog schemas and object configuration', params: ['source_id'] },
+    { name: 'fhs_classify_errors', description: 'Classify ingestion and loading failure records', params: ['error_message'] },
   ],
   'cloudflare-docs': [
-    { name: 'search_cloudflare_documentation', description: 'Query official Cloudflare developer documentation' },
-    { name: 'migrate_pages_to_workers_guide', description: 'Fetch migration guide and compatibility matrix' },
+    { name: 'search_cloudflare_documentation', description: 'Query official Cloudflare developer documentation', params: ['query', 'product'] },
+    { name: 'migrate_pages_to_workers_guide', description: 'Fetch migration guide and compatibility matrix', params: ['framework'] },
   ],
   'playwright': [
-    { name: 'browser_navigate', description: 'Navigate active page to target URL' },
-    { name: 'browser_take_screenshot', description: 'Capture viewport visual screenshot' },
-    { name: 'browser_click', description: 'Click interactive DOM selector element' },
+    { name: 'browser_navigate', description: 'Navigate active page to target URL', params: ['url'] },
+    { name: 'browser_take_screenshot', description: 'Capture viewport visual screenshot', params: ['full_page'] },
+    { name: 'browser_click', description: 'Click interactive DOM selector element', params: ['selector'] },
   ],
   'snyk': [
-    { name: 'snyk_code_scan', description: 'Run static application security testing' },
-    { name: 'snyk_sbom_scan', description: 'Generate and audit software bill of materials' },
+    { name: 'snyk_code_scan', description: 'Run static application security testing', params: ['path', 'severity'] },
+    { name: 'snyk_sbom_scan', description: 'Generate and audit software bill of materials', params: ['target_file'] },
   ],
 };
 
@@ -247,7 +247,7 @@ export function McpView({
           <select
             value={selectedScope}
             onChange={(e) => onSelectScope && onSelectScope(e.target.value)}
-            className="h-8 px-2.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:border-[#333333] focus:outline-none focus:border-[#333333] cursor-pointer"
+            className="h-8 px-2.5 text-xs font-mono rounded-geist border border-border bg-card text-foreground hover:border-border/80 focus:outline-none focus:border-border/80 cursor-pointer"
             title="Filter by Scope"
           >
             <option value="all">All Scopes</option>
@@ -264,17 +264,17 @@ export function McpView({
       {/* Active Filter Chips */}
       {hasActiveFilters && (
         <div className="flex flex-wrap items-center gap-2 pt-0.5 text-xs">
-          <span className="flex items-center gap-1 text-[#666666] text-[11px] font-mono">
+          <span className="flex items-center gap-1 text-muted-foreground text-[11px] font-mono">
             <Filter className="h-3 w-3" /> Filters:
           </span>
 
           {selectedScope && selectedScope !== 'all' && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] font-mono text-[11px]">
-              scope: <strong className="text-[#ededed]">{selectedScope}</strong>
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-border bg-secondary/50 text-muted-foreground font-mono text-[11px]">
+              scope: <strong className="text-foreground">{selectedScope}</strong>
               <button
                 type="button"
                 onClick={() => onSelectScope && onSelectScope('all')}
-                className="hover:text-[#ededed] cursor-pointer"
+                className="hover:text-foreground cursor-pointer"
                 title="Clear scope filter"
               >
                 <X className="h-3 w-3" />
@@ -283,12 +283,12 @@ export function McpView({
           )}
 
           {searchQuery && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] font-mono text-[11px]">
-              query: &ldquo;<strong className="text-[#ededed]">{searchQuery}</strong>&rdquo;
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-border bg-secondary/50 text-muted-foreground font-mono text-[11px]">
+              query: &ldquo;<strong className="text-foreground">{searchQuery}</strong>&rdquo;
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="hover:text-[#ededed] cursor-pointer"
+                className="hover:text-foreground cursor-pointer"
                 title="Clear query filter"
               >
                 <X className="h-3 w-3" />
@@ -299,7 +299,7 @@ export function McpView({
           <button
             type="button"
             onClick={resetFilters}
-            className="text-[11px] font-mono text-[#a1a1a1] hover:text-[#ededed] underline ml-1 cursor-pointer"
+            className="text-[11px] font-mono text-muted-foreground hover:text-foreground underline ml-1 cursor-pointer"
           >
             Reset all
           </button>
@@ -310,14 +310,14 @@ export function McpView({
       {loading && servers.length === 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-44 rounded-geist border border-[#262626] bg-[#111111]/40 animate-pulse p-6" />
+            <div key={i} className="h-44 rounded-geist border border-border bg-card/40 animate-pulse p-6" />
           ))}
         </div>
       ) : filteredServers.length === 0 ? (
-        <div className="rounded-geist border border-dashed border-[#262626] p-12 text-center bg-[#0a0a0a]/50">
-          <Server className="h-10 w-10 text-[#666666] mx-auto mb-3 opacity-60" />
-          <h3 className="text-sm font-semibold text-[#ededed]">No MCP servers found</h3>
-          <p className="text-xs text-[#a1a1a1] mt-1 max-w-sm mx-auto">
+        <div className="rounded-geist border border-dashed border-border p-12 text-center bg-card/50">
+          <Server className="h-10 w-10 text-muted-foreground mx-auto mb-3 opacity-60" />
+          <h3 className="text-sm font-semibold text-foreground">No MCP servers found</h3>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
             {hasActiveFilters
               ? 'Try modifying your filter or search criteria.'
               : 'Configured MCP servers from global settings and profile manifests will appear here.'}
@@ -330,19 +330,19 @@ export function McpView({
             return (
               <Card
                 key={`${srv.scope}-${srv.name}`}
-                className="group relative overflow-hidden transition-all duration-150 border border-[#262626] bg-[#111111] hover:border-[#333333] rounded-geist flex flex-col justify-between"
+                className="group relative overflow-hidden transition-all duration-150 border border-border bg-card hover:border-border/80 rounded-geist flex flex-col justify-between"
               >
                 <CardHeader className="pb-3 p-5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-geist bg-[#0a0a0a] border border-[#262626] text-[#ededed]">
+                      <div className="p-1.5 rounded-geist bg-secondary/50 border border-border text-foreground">
                         <Server className="h-3.5 w-3.5" />
                       </div>
-                      <CardTitle className="text-sm font-semibold text-[#ededed] font-mono">{srv.name}</CardTitle>
+                      <CardTitle className="text-sm font-semibold text-foreground font-mono">{srv.name}</CardTitle>
                     </div>
 
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border border-border bg-[#0a0a0a] text-[#888888]">
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border border-border bg-secondary/40 text-muted-foreground">
                         stdio
                       </span>
                       <span className="badge-success text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] flex items-center gap-1">
@@ -351,11 +351,11 @@ export function McpView({
                       </span>
                       <Badge
                         variant="outline"
-                        className="text-[11px] font-mono flex items-center gap-1.5 rounded-geist px-2 py-0.5 border-[#262626] bg-[#0a0a0a] text-[#a1a1a1]"
+                        className="text-[11px] font-mono flex items-center gap-1.5 rounded-geist px-2 py-0.5 border-border bg-secondary/40 text-muted-foreground"
                       >
                         {isGlobal ? (
                           <>
-                            <Globe className="h-3 w-3 text-[#ededed]" />
+                            <Globe className="h-3 w-3 text-foreground" />
                             Global
                           </>
                         ) : (
@@ -372,26 +372,26 @@ export function McpView({
                 <CardContent className="space-y-3 pb-4 p-5 pt-0">
                   {/* Command & Args */}
                   <div className="space-y-1">
-                    <span className="text-[11px] font-mono uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1">
-                      <Terminal className="h-3 w-3 text-[#666666]" /> Command
+                    <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                      <Terminal className="h-3 w-3 text-muted-foreground/70" /> Command
                     </span>
-                    <div className="font-mono text-xs p-2 rounded-geist bg-[#0a0a0a] border border-[#262626] text-[#ededed] overflow-x-auto whitespace-pre">
-                      <span className="text-[#ededed] font-medium">{srv.command}</span>{' '}
-                      <span className="text-[#a1a1a1]">{srv.args.join(' ')}</span>
+                    <div className="font-mono text-xs p-2 rounded-geist bg-background border border-border text-foreground overflow-x-auto whitespace-pre">
+                      <span className="text-foreground font-medium">{srv.command}</span>{' '}
+                      <span className="text-muted-foreground">{srv.args.join(' ')}</span>
                     </div>
                   </div>
 
                   {/* Environment Variables if present */}
                   {srv.env && Object.keys(srv.env).length > 0 && (
                     <div className="space-y-1">
-                      <span className="text-[11px] font-mono uppercase tracking-wider text-[#a1a1a1] flex items-center gap-1">
-                        <Layers className="h-3 w-3 text-[#666666]" /> Environment
+                      <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                        <Layers className="h-3 w-3 text-muted-foreground/70" /> Environment
                       </span>
-                      <div className="space-y-1 font-mono text-[11px] bg-[#0a0a0a] p-2 rounded-geist border border-[#262626]">
+                      <div className="space-y-1 font-mono text-[11px] bg-background p-2 rounded-geist border border-border">
                         {Object.entries(srv.env).map(([k, v]) => (
-                          <div key={k} className="flex justify-between text-[#a1a1a1]">
-                            <span className="text-[#ededed] font-medium">{k}:</span>
-                            <span className="truncate max-w-[160px] text-[#a1a1a1]">{v}</span>
+                          <div key={k} className="flex justify-between text-muted-foreground">
+                            <span className="text-foreground font-medium">{k}:</span>
+                            <span className="truncate max-w-[160px] text-muted-foreground">{v}</span>
                           </div>
                         ))}
                       </div>
@@ -406,7 +406,7 @@ export function McpView({
                       { name: `${srv.name}_action`, description: `Interactive tool protocol handler for ${srv.name}` },
                     ];
                     return (
-                      <div className="rounded-[4px] border border-[#222222] bg-[#0c0c0c] overflow-hidden">
+                      <div className="rounded-[4px] border border-border bg-card overflow-hidden">
                         <button
                           type="button"
                           onClick={() =>
@@ -415,32 +415,46 @@ export function McpView({
                               [cardKey]: !prev[cardKey],
                             }))
                           }
-                          className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-mono text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#141414] transition-colors cursor-pointer"
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"
                         >
                           <span className="flex items-center gap-1.5">
-                            <Wrench className="h-3 w-3 text-[#888888]" />
+                            <Wrench className="h-3 w-3 text-muted-foreground" />
                             <span>Registered Tools</span>
-                            <span className="text-[10px] text-[#666666]">
+                            <span className="text-[10px] text-muted-foreground/70">
                               ({toolsList.length})
                             </span>
                           </span>
                           {isToolsOpen ? (
-                            <ChevronDown className="h-3 w-3 text-[#666666]" />
+                            <ChevronDown className="h-3 w-3 text-muted-foreground/70" />
                           ) : (
-                            <ChevronRight className="h-3 w-3 text-[#666666]" />
+                            <ChevronRight className="h-3 w-3 text-muted-foreground/70" />
                           )}
                         </button>
                         {isToolsOpen && (
-                          <div className="p-2 border-t border-[#1c1c1c] space-y-1.5 bg-[#080808]">
+                          <div className="p-2 border-t border-border space-y-1.5 bg-background">
                             {toolsList.map((t) => (
                               <div
                                 key={t.name}
-                                className="p-1.5 rounded-[3px] bg-[#0f0f0f] border border-[#1a1a1a] space-y-0.5"
+                                className="p-2 rounded-[3px] bg-secondary/30 border border-border/60 space-y-1"
                               >
-                                <div className="font-mono text-[11px] font-semibold text-[#ededed]">
-                                  {t.name}
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="font-mono text-[11px] font-semibold text-foreground">
+                                    {t.name}
+                                  </div>
+                                  {t.params && t.params.length > 0 && (
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      {t.params.map((p) => (
+                                        <span
+                                          key={p}
+                                          className="text-[9px] font-mono px-1 py-0 rounded bg-secondary text-muted-foreground border border-border"
+                                        >
+                                          {p}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="text-[10px] text-[#888888] font-sans">
+                                <div className="text-[10px] text-muted-foreground font-sans leading-relaxed">
                                   {t.description}
                                 </div>
                               </div>
@@ -456,13 +470,13 @@ export function McpView({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 text-xs font-mono text-[#a1a1a1] hover:text-[#ededed] hover:bg-[#161616] rounded-geist cursor-pointer"
+                      className="h-7 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-secondary rounded-geist cursor-pointer"
                       onClick={() => copyConfig(srv)}
                     >
                       {copiedName === srv.name ? (
-                        <Check className="h-3.5 w-3.5 mr-1 text-emerald-400" />
+                        <Check className="h-3.5 w-3.5 mr-1 text-status-success" />
                       ) : (
-                        <Copy className="h-3.5 w-3.5 mr-1 text-[#666666]" />
+                        <Copy className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                       )}
                       {copiedName === srv.name ? 'Copied' : 'Copy JSON'}
                     </Button>

@@ -26,7 +26,17 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
   onConfirm,
   isDeleting = false,
 }) => {
+  const [confirmInput, setConfirmInput] = React.useState('');
+
+  React.useEffect(() => {
+    if (open) {
+      setConfirmInput('');
+    }
+  }, [open, target]);
+
   if (!target) return null;
+
+  const isMatched = confirmInput.trim() === target.name;
 
   return (
     <Dialog open={open} onOpenChange={(val) => !isDeleting && onOpenChange(val)}>
@@ -63,6 +73,22 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
           </p>
         </div>
 
+        <div className="space-y-1.5 pt-1">
+          <label htmlFor="confirm-delete-input" className="text-xs text-[#a1a1a1] font-sans">
+            Please type <span className="font-mono text-[#ededed] font-medium">{target.name}</span> to confirm:
+          </label>
+          <input
+            id="confirm-delete-input"
+            type="text"
+            value={confirmInput}
+            onChange={(e) => setConfirmInput(e.target.value)}
+            placeholder={target.name}
+            className="w-full h-8 px-2.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-[#555555] focus:border-[#444444] focus:outline-none"
+            autoComplete="off"
+            disabled={isDeleting}
+          />
+        </div>
+
         <DialogFooter className="pt-2 border-t border-[#262626] flex items-center justify-end gap-2 w-full">
           <Button
             type="button"
@@ -78,9 +104,9 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
             type="button"
             variant="destructive"
             size="sm"
-            disabled={isDeleting}
+            disabled={!isMatched || isDeleting}
             onClick={onConfirm}
-            className="text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist"
+            className="text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isDeleting ? (
               <>

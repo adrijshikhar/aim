@@ -18,6 +18,7 @@ import { DaemonModal } from '@/components/DaemonModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
 import { Toaster } from '@/components/ui/toaster';
 import { ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 type ViewType = 'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail';
 
@@ -467,7 +468,7 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
+    <div className="flex h-[100dvh] w-full bg-background text-foreground overflow-hidden font-sans">
       {/* Desktop Left Sidebar */}
       <Sidebar
         currentView={currentView}
@@ -484,35 +485,64 @@ export function App() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
         {/* Top Header Bar */}
-        <header className="h-14 border-b border-border bg-background/90 backdrop-blur-md px-6 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
+        <header className="h-14 border-b border-border bg-background/90 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
             {getHeaderTitle()}
+            <div className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] border border-border bg-card/60 text-[10px] font-mono text-muted-foreground">
+              <span className="text-[#666666]">ws:</span>
+              <span className="text-foreground font-medium">default</span>
+            </div>
           </div>
 
-          {/* Right Header Status Pill */}
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-card text-xs">
-              <span className="relative flex h-2 w-2">
+          {/* Right Header Status Pills */}
+          <div className="flex items-center gap-2">
+            {/* Live Daemon Status Pill */}
+            <button
+              type="button"
+              onClick={() => setIsDaemonOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-card hover:bg-secondary/70 transition-colors text-xs cursor-pointer"
+              title="AIM Background Daemon status (click to manage)"
+            >
+              <span className="relative flex h-1.5 w-1.5">
+                <span
+                  className={cn(
+                    'relative inline-flex rounded-full h-1.5 w-1.5',
+                    daemonInfo?.active
+                      ? 'bg-status-success-solid'
+                      : daemonInfo?.installed
+                      ? 'bg-status-warning-solid'
+                      : 'bg-[#666666]'
+                  )}
+                />
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground hover:text-foreground">
+                {daemonInfo?.active ? 'Daemon active' : daemonInfo?.installed ? 'Daemon stopped' : 'Daemon uninstalled'}
+              </span>
+            </button>
+
+            {/* Server Connection Pill */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-card text-xs">
+              <span className="relative flex h-1.5 w-1.5">
                 <span
                   className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
                     isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
                   }`}
                 />
                 <span
-                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                  className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
                     isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
                   }`}
                 />
               </span>
               <span className="font-mono text-[11px] text-foreground">
-                {isOnline ? 'Server Connected' : 'Connecting...'}
+                {isOnline ? 'Server' : 'Connecting...'}
               </span>
             </div>
           </div>
         </header>
 
         {/* Stage Content */}
-        <main className="flex-1 overflow-y-auto px-6 py-6 min-h-0 bg-background">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 min-h-0 bg-background">
           <div className="max-w-7xl mx-auto">
             {currentView === 'overview' && (
               <ProfilesView

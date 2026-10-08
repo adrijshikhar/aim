@@ -18,7 +18,13 @@ function FencedCodeBlock({ text, language }: FencedCodeBlockProps) {
   const [copied, setCopied] = useState(false);
 
   // If this code block is specifically marked as diff or formatted as unified diff
-  if (language === 'diff' || text.startsWith('@@') || (text.includes('\n+') && text.includes('\n-'))) {
+  const isDiff =
+    language === 'diff' ||
+    text.startsWith('diff --git') ||
+    text.startsWith('--- a/') ||
+    /^@@\s+-\d+/m.test(text);
+
+  if (isDiff) {
     return <DiffViewer diffText={text} />;
   }
 

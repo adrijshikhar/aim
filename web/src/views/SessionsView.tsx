@@ -93,7 +93,7 @@ export function SessionsView({
   }, [selectedProfile]);
 
   const fetchSessions = React.useCallback(async (force = false) => {
-    if (!force && (sessionsMemoryCache || sessions.length > 0)) {
+    if (!force && sessionsMemoryCache && sessionsMemoryCache.length > 0) {
       setRefreshing(true);
     } else {
       setLoading(true);
@@ -366,16 +366,22 @@ export function SessionsView({
         size: 160,
         cell: ({ row }) => {
           const rawCwd = row.original.cwd || '';
-          if (!rawCwd) return <span className="text-[#666666] font-mono text-xs">-</span>;
+          if (!rawCwd) return <span className="text-muted-foreground font-mono text-xs">-</span>;
           const parts = rawCwd.split('/').filter(Boolean);
           const basename = parts.length > 0 ? parts[parts.length - 1] : rawCwd;
-          const parent = parts.length > 1 ? `.../${parts[parts.length - 2]}/` : '';
+          const parent = parts.length > 1 ? parts[parts.length - 2] : null;
           return (
-            <div className="flex items-center gap-1.5 font-mono text-xs max-w-[155px]" title={rawCwd}>
-              <Folder className="h-3.5 w-3.5 shrink-0 text-[#666666]" />
-              <div className="truncate flex items-baseline gap-1">
-                <span className="text-[#ededed] font-medium shrink-0">{basename}</span>
-                {parent && <span className="text-[#555555] text-[11px] truncate">{parent}</span>}
+            <div className="flex items-center gap-1.5 font-mono text-xs min-w-0" title={rawCwd}>
+              <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+              <div className="truncate flex items-baseline gap-0.5 text-xs">
+                {parent && (
+                  <span className="text-muted-foreground/60 shrink-0">
+                    .../{parent}/
+                  </span>
+                )}
+                <span className="text-foreground font-medium truncate">
+                  {basename}
+                </span>
               </div>
             </div>
           );
@@ -385,21 +391,25 @@ export function SessionsView({
         id: 'goal_title',
         header: 'GOAL / TITLE',
         cell: ({ row }) => {
-          const title = row.original.title?.trim() || 'Untitled Session';
-          const goal = row.original.goal?.trim();
-          const isGoalDistinct = goal && goal.toLowerCase() !== title.toLowerCase();
+          const rawTitle = row.original.title?.trim();
+          const rawGoal = row.original.goal?.trim();
+          const sid = `sess-${row.original.id.slice(0, 8)}`;
+
+          // Promote goal to primary title if explicit title is missing or generic
+          const hasSpecificTitle = rawTitle && rawTitle.toLowerCase() !== 'untitled session';
+          const primary = hasSpecificTitle ? rawTitle : (rawGoal || sid);
+          const secondary = hasSpecificTitle && rawGoal && rawTitle.toLowerCase() !== rawGoal.toLowerCase()
+            ? rawGoal
+            : hasSpecificTitle || rawGoal ? sid : null;
+
           return (
             <div className="space-y-0.5 min-w-0 pr-2">
-              <div className="text-xs font-sans font-medium text-[#ededed] truncate" title={title}>
-                {title}
+              <div className="text-xs font-sans font-medium text-foreground truncate" title={primary}>
+                {primary}
               </div>
-              {isGoalDistinct ? (
-                <div className="text-[11px] font-sans text-[#888888] truncate" title={goal}>
-                  {goal}
-                </div>
-              ) : (
-                <div className="text-[10px] font-mono text-[#555555] truncate">
-                  sess-{row.original.id.slice(0, 8)}
+              {secondary && (
+                <div className="text-[11px] font-sans text-muted-foreground truncate" title={secondary}>
+                  {secondary}
                 </div>
               )}
             </div>
@@ -413,7 +423,7 @@ export function SessionsView({
             variant="ghost"
             size="sm"
             onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-            className="h-7 px-1 text-xs font-mono text-[#a1a1a1] hover:text-[#ededed]"
+            className="h-7 px-1 -ml-1 text-xs font-mono text-muted-foreground hover:text-foreground"
           >
             TURNS
             {column.getIsSorted() === 'asc' ? (
@@ -421,14 +431,14 @@ export function SessionsView({
             ) : column.getIsSorted() === 'desc' ? (
               <ArrowDown className="ml-1 h-3 w-3" />
             ) : (
-              <ArrowUpDown className="ml-1 h-3 w-3 text-[#555555]" />
+              <ArrowUpDown className="ml-1 h-3 w-3 text-muted-foreground/60" />
             )}
           </Button>
         ),
         size: 70,
         cell: ({ row }) => (
-          <span className="flex items-center gap-1 font-mono text-xs text-[#a1a1a1]">
-            <MessageSquare className="h-3 w-3 text-[#666666]" />
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#141414] border border-[#242424] font-mono text-[11px] text-muted-foreground tabular-nums">
+            <MessageSquare className="h-3 w-3 text-muted-foreground/70" />
             {row.original.turns}
           </span>
         ),
@@ -440,7 +450,7 @@ export function SessionsView({
             variant="ghost"
             size="sm"
             onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-            className="h-7 px-1 text-xs font-mono text-[#a1a1a1] hover:text-[#ededed]"
+            className="h-7 px-1 -ml-1 text-xs font-mono text-muted-foreground hover:text-foreground"
           >
             UPDATED
             {column.getIsSorted() === 'asc' ? (
@@ -448,14 +458,17 @@ export function SessionsView({
             ) : column.getIsSorted() === 'desc' ? (
               <ArrowDown className="ml-1 h-3 w-3" />
             ) : (
-              <ArrowUpDown className="ml-1 h-3 w-3 text-[#555555]" />
+              <ArrowUpDown className="ml-1 h-3 w-3 text-muted-foreground/60" />
             )}
           </Button>
         ),
         size: 90,
         cell: ({ row }) => (
-          <span className="flex items-center gap-1 font-mono text-xs text-[#a1a1a1]">
-            <Clock className="h-3 w-3 text-[#666666]" />
+          <span
+            className="flex items-center gap-1 font-mono text-xs text-muted-foreground cursor-default"
+            title={new Date(row.original.updated_at).toLocaleString()}
+          >
+            <Clock className="h-3 w-3 text-muted-foreground/70" />
             {formatRelativeTime(row.original.updated_at)}
           </span>
         ),
