@@ -365,6 +365,13 @@ export function QuotaBreakdown({
           {agent && <AgentBadge agent={agent} />}
           <Badge
             variant="outline"
+            title={
+              isEffectiveExhausted
+                ? 'Quota fully exhausted. Requests will return 429 until window resets.'
+                : isWarning
+                ? `${effectiveBottleneckPct}% quota remaining before rate limit window is exhausted.`
+                : `${effectiveBottleneckPct}% quota remaining. Capacity is optimal.`
+            }
             className={cn(
               'text-[11px] font-sans font-medium tracking-tight flex items-center gap-1.5 px-2.5 py-0.5 rounded-full',
               isEffectiveExhausted
@@ -388,7 +395,7 @@ export function QuotaBreakdown({
               {isEffectiveExhausted
                 ? 'Exhausted'
                 : isWarning
-                ? `Throttled (${effectiveBottleneckPct}%)`
+                ? `Low Quota (${effectiveBottleneckPct}%)`
                 : `Optimal (${effectiveBottleneckPct}%)`}
             </span>
           </Badge>
@@ -521,7 +528,7 @@ export function QuotaBreakdown({
                 <span className="h-1.5 w-1.5 rounded-full bg-rose-500/80" />
                 <span>Exhausted</span>
               </span>
-            ) : isWarning ? 'Throttled' : 'Optimal'}
+            ) : isWarning ? 'Low Quota' : 'Optimal'}
           </Badge>
         </div>
       </div>

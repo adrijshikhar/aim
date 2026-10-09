@@ -111,7 +111,7 @@ function parseQuotaDetails(summary?: string, isExhausted?: boolean, pct: number 
       subtext = bottleneckModel ? `${bottleneckModel} limit reached` : 'Usage ceiling reached';
     } else if (pct <= 30) {
       headline = `${pct}% Headroom`;
-      subtext = bottleneckModel ? `${bottleneckModel} throttled` : 'Approaching rolling limit';
+      subtext = bottleneckModel ? `${bottleneckModel} low quota` : 'Approaching rolling limit';
     } else {
       headline = 'Standard Capacity';
       subtext = 'All models operating normally';
@@ -632,7 +632,7 @@ export function ProfilesView({
       return (
         <Badge variant="outline" className="badge-warning text-[11px] font-sans px-2.5 py-0.5">
           <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-          <span>Rate Limit Warning <span className="font-mono tabular-nums">({q.bottleneck_pct}%)</span></span>
+          <span>Low Quota <span className="font-mono tabular-nums">({q.bottleneck_pct}%)</span></span>
         </Badge>
       );
     }
