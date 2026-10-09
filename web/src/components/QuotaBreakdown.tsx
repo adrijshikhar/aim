@@ -291,18 +291,19 @@ export function QuotaBreakdown({
             />
           )}
 
-          {/* Expected Pace Marker Tick (CodexBar visual parity) */}
+          {/* Expected Pace Marker Tick (CodexBar visual parity with dark contrast borders) */}
           {win.pct > 0 &&
             pacing.timeUntilResetSeconds &&
             pacing.expectedRemainingPercent > 0 &&
             pacing.expectedRemainingPercent < 100 && (
               <div
-                title={`Expected pace at this time: ${Math.round(pacing.expectedRemainingPercent)}% remaining`}
+                title={`Expected pace at this time: ${Math.round(pacing.expectedRemainingPercent)}% remaining (${pacing.paceLabel})`}
                 className={cn(
-                  "absolute top-0 bottom-0 w-[2px] z-10 -ml-[1px] transition-all duration-300",
+                  "absolute top-0 bottom-0 w-[5px] -translate-x-1/2 z-10 pointer-events-none transition-all duration-300",
+                  "border-l-[1.5px] border-r-[1.5px] border-black",
                   pacing.stage === 'deficit'
-                    ? "bg-status-danger-solid shadow-[0_0_4px_rgba(239,68,68,0.8)]"
-                    : "bg-white/80 shadow-[0_0_3px_rgba(255,255,255,0.6)]"
+                    ? "bg-rose-500 shadow-[0_0_2px_rgba(244,63,94,0.8)]"
+                    : "bg-white shadow-[0_0_2px_rgba(255,255,255,0.6)]"
                 )}
                 style={{ left: `${Math.min(100, Math.max(0, pacing.expectedRemainingPercent))}%` }}
               />
