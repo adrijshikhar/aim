@@ -291,22 +291,23 @@ export function QuotaBreakdown({
             />
           )}
 
-          {/* Expected Pace Marker Tick (CodexBar visual parity with edge-collision suppression and track inset) */}
+          {/* Expected Pace Marker Tick: 1px Razor Stencil Hairline (CodexBar visual parity) */}
           {win.pct > 0 &&
             pacing.timeUntilResetSeconds &&
-            pacing.expectedRemainingPercent >= 3 &&
-            pacing.expectedRemainingPercent <= 97 && (
+            pacing.expectedRemainingPercent >= 4 &&
+            pacing.expectedRemainingPercent <= 96 && (
               <div
                 title={`Expected pace at this time: ${Math.round(pacing.expectedRemainingPercent)}% remaining (${pacing.paceLabel})`}
-                className={cn(
-                  "absolute top-[1px] bottom-[1px] w-[5px] -translate-x-1/2 z-10 pointer-events-none transition-all duration-300 rounded-[1px]",
-                  "border-l-[1.5px] border-r-[1.5px] border-black/80",
-                  pacing.stage === 'deficit'
-                    ? "bg-rose-500"
-                    : "bg-white"
-                )}
-                style={{ left: `${Math.min(97, Math.max(3, pacing.expectedRemainingPercent))}%` }}
-              />
+                className="absolute top-0 bottom-0 w-[3px] -translate-x-1/2 z-10 pointer-events-none transition-all duration-300 flex items-center justify-center bg-[#0c0c0c]"
+                style={{ left: `${Math.min(96, Math.max(4, pacing.expectedRemainingPercent))}%` }}
+              >
+                <div
+                  className={cn(
+                    "w-[1px] h-full",
+                    pacing.stage === 'deficit' ? "bg-rose-400" : "bg-white"
+                  )}
+                />
+              </div>
             )}
         </div>
 
