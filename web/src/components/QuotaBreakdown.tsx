@@ -302,8 +302,8 @@ export function QuotaBreakdown({
                   "absolute top-[1px] bottom-[1px] w-[5px] -translate-x-1/2 z-10 pointer-events-none transition-all duration-300 rounded-[1px]",
                   "border-l-[1.5px] border-r-[1.5px] border-black/80",
                   pacing.stage === 'deficit'
-                    ? "bg-rose-500 shadow-[0_0_2px_rgba(244,63,94,0.8)]"
-                    : "bg-white shadow-[0_0_2px_rgba(255,255,255,0.6)]"
+                    ? "bg-rose-500"
+                    : "bg-white"
                 )}
                 style={{ left: `${Math.min(97, Math.max(3, pacing.expectedRemainingPercent))}%` }}
               />
