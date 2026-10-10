@@ -126,6 +126,16 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                 -{totalDeletions}
               </span>
             )}
+            {parsedFiles.length === 1 && parsedFiles[0].isRename && (
+              <span className="badge-warning text-[10px] px-1.5 py-0.5">
+                renamed {parsedFiles[0].similarityIndex ? `(${parsedFiles[0].similarityIndex}%)` : ''}
+              </span>
+            )}
+            {parsedFiles.length === 1 && parsedFiles[0].isBinary && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                binary
+              </span>
+            )}
             {topTruncationNotice && (
               <span className="badge-warning text-[10px] px-1.5 py-0.5 inline-flex items-center gap-1">
                 <AlertTriangle className="h-2.5 w-2.5" />
@@ -182,10 +192,33 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                           <MinusCircle className="h-2.5 w-2.5" /> deleted
                         </span>
                       )}
+                      {file.isRename && (
+                        <span className="badge-warning text-[9px] px-1 py-0.5 rounded">
+                          renamed {file.similarityIndex ? `(${file.similarityIndex}%)` : ''}
+                        </span>
+                      )}
+                      {file.isBinary && (
+                        <span className="text-[9px] px-1 py-0.5 rounded font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                          binary
+                        </span>
+                      )}
                       <span className="ml-auto font-sans">
                         <span className="text-status-success">+{file.additions}</span>{' '}
                         <span className="text-status-danger">-{file.deletions}</span>
                       </span>
+                    </div>
+                  )}
+
+                  {/* Empty chunk banner for binary or rename-only files */}
+                  {file.isBinary && (
+                    <div className="p-3 text-center font-mono text-[11px] text-[#888888] bg-[#0c0c0c]">
+                      Binary file (not shown in text diff)
+                    </div>
+                  )}
+                  {file.isRename && file.chunks.length === 0 && (
+                    <div className="p-3 text-center font-mono text-[11px] text-[#888888] bg-[#0c0c0c]">
+                      File renamed from <span className="text-[#ededed] font-medium">{file.from}</span> to{' '}
+                      <span className="text-[#ededed] font-medium">{file.to}</span> with no content changes
                     </div>
                   )}
 
