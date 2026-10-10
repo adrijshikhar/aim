@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import parseDiff from 'parse-diff';
-import { FileCode, Copy, Check, ChevronDown, ChevronRight, PlusCircle, MinusCircle } from 'lucide-react';
+import { FileCode, Copy, Check, ChevronDown, ChevronRight, PlusCircle, MinusCircle, AlertTriangle } from 'lucide-react';
+import { parseRobustDiff, type DiffFile } from '@/lib/diff-parser';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 
@@ -22,31 +22,21 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
       .trim();
   }, [diffText]);
 
-  // Parse diff with AST parser
-  const parsedFiles = React.useMemo(() => {
+  // Extract leading truncation notice if present
+  const topTruncationNotice = React.useMemo(() => {
+    const match = cleanedDiff.match(/^<truncated\s+([^>]+)>/im);
+    return match ? match[1] : null;
+  }, [cleanedDiff]);
+
+  // Parse diff with robust AST parser
+  const parsedFiles: DiffFile[] = React.useMemo(() => {
     if (!cleanedDiff) return [];
-
-    let textToParse = cleanedDiff;
-    // If input is bare changes without hunk/git headers, synthesize a hunk header so parse-diff can construct the AST
-    if (
-      !textToParse.includes('@@') &&
-      !textToParse.startsWith('diff --git') &&
-      !textToParse.startsWith('---')
-    ) {
-      textToParse = `@@ -1,1 +1,1 @@\n${textToParse}`;
-    }
-
-    try {
-      return parseDiff(textToParse);
-    } catch {
-      return [];
-    }
+    return parseRobustDiff(cleanedDiff);
   }, [cleanedDiff]);
 
   // Compute total additions / deletions across all files
   const { totalAdditions, totalDeletions } = React.useMemo(() => {
     if (!parsedFiles.length) {
-      // Fallback counting if AST parsing returned no files
       let addCount = 0;
       let delCount = 0;
       for (const line of cleanedDiff.split('\n')) {
@@ -74,16 +64,30 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
       return filePath.split('/').pop() || filePath;
     }
     const first = parsedFiles[0];
-    if (first?.to) {
+    if (first?.to && first.to !== 'Diff Changes' && first.to !== 'file') {
       return first.to.replace(/^b\//, '').split('/').pop() || first.to;
     }
-    if (first?.from) {
+    if (first?.from && first.from !== 'Diff Changes' && first.from !== 'file') {
       return first.from.replace(/^a\//, '').split('/').pop() || first.from;
+    }
+    // Check if any chunk header contains function/class context
+    const firstHunk = first?.chunks?.find((c) => /@@.*?@@\s+(.+)/.test(c.content))?.content;
+    if (firstHunk) {
+      const match = /@@.*?@@\s+(?:export\s+(?:function\s+|const\s+|class\s+)?|function\s+|class\s+)?([a-zA-Z0-9_$]+)/.exec(firstHunk);
+      if (match) {
+        return `Diff (${match[1]})`;
+      }
     }
     return 'Diff Changes';
   }, [filePath, parsedFiles]);
 
-  const fullDisplayPath = filePath || parsedFiles[0]?.to?.replace(/^b\//, '') || parsedFiles[0]?.from?.replace(/^a\//, '');
+  const fullDisplayPath =
+    filePath ||
+    (parsedFiles[0]?.to && parsedFiles[0].to !== 'Diff Changes' && parsedFiles[0].to !== 'file'
+      ? parsedFiles[0].to.replace(/^b\//, '')
+      : parsedFiles[0]?.from && parsedFiles[0].from !== 'Diff Changes' && parsedFiles[0].from !== 'file'
+      ? parsedFiles[0].from.replace(/^a\//, '')
+      : undefined);
 
   return (
     <div className="rounded-[6px] border border-[#262626] bg-[#0d0d0d] overflow-hidden my-2.5 font-mono text-xs shadow-sm">
@@ -120,6 +124,12 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
             {totalDeletions > 0 && (
               <span className="badge-danger text-[10px] px-1.5 py-0.5">
                 -{totalDeletions}
+              </span>
+            )}
+            {topTruncationNotice && (
+              <span className="badge-warning text-[10px] px-1.5 py-0.5 inline-flex items-center gap-1">
+                <AlertTriangle className="h-2.5 w-2.5" />
+                truncated {topTruncationNotice}
               </span>
             )}
           </div>
@@ -205,6 +215,19 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                             oldNum = change.ln;
                           } else if (isAdd) {
                             newNum = change.ln;
+                          }
+
+                          const isTruncation = /^<truncated\s+.*>$/i.test(change.content.trim());
+                          if (isTruncation) {
+                            return (
+                              <div
+                                key={changeIdx}
+                                className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border-y border-amber-500/20 text-amber-400 font-mono text-[10px]"
+                              >
+                                <AlertTriangle className="h-3 w-3 shrink-0" />
+                                <span>{change.content.trim()}</span>
+                              </div>
+                            );
                           }
 
                           // Strip leading '+', '-', or ' ' from change content

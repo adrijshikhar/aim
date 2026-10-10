@@ -10,6 +10,7 @@ import {
   FileCode2,
 } from 'lucide-react';
 import { DiffViewer } from './DiffViewer';
+import { isDiffText, extractDiffFilePath } from '@/lib/diff-parser';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 
@@ -344,14 +345,11 @@ export function parseFileViewContent(text: string): FileCodeBlockProps | null {
 function FencedCodeBlock({ text, language }: FencedCodeBlockProps) {
   const [copied, setCopied] = useState(false);
 
-  const isDiff =
-    language === 'diff' ||
-    text.startsWith('diff --git') ||
-    text.startsWith('--- a/') ||
-    /^@@\s+-\d+/m.test(text);
+  const isDiff = isDiffText(text, language);
 
   if (isDiff) {
-    return <DiffViewer diffText={text} />;
+    const detectedPath = extractDiffFilePath(text);
+    return <DiffViewer diffText={text} filePath={detectedPath} />;
   }
 
   const handleCopy = () => {
@@ -445,14 +443,10 @@ export function TurnMessageRenderer({ content }: TurnMessageRendererProps) {
     return <div className="space-y-2">{segments}</div>;
   }
 
-  // 2. Check for unified diff if starting with diff markers
-  if (
-    content.includes('--- a/') &&
-    content.includes('+++ b/') &&
-    content.includes('@@')
-  ) {
-    const filePathMatch = /\+\+\+ b\/([^\s\n]+)/.exec(content);
-    return <DiffViewer diffText={content} filePath={filePathMatch ? filePathMatch[1] : undefined} />;
+  // 2. Check for unified diff / git diff block
+  if (isDiffText(content)) {
+    const detectedPath = extractDiffFilePath(content);
+    return <DiffViewer diffText={content} filePath={detectedPath} />;
   }
 
   // 3. Check for File View Block
@@ -557,6 +551,43 @@ function StructuredTextBlock({ text }: { text: string }) {
           </div>
         )}
         <FileCodeBlock {...fileView} />
+      </div>
+    );
+  }
+
+  // Check if mainContent itself is a diff
+  const isDiff = useMemo(() => isDiffText(mainContent), [mainContent]);
+  if (isDiff) {
+    const detectedPath = extractDiffFilePath(mainContent);
+    return (
+      <div className="space-y-2">
+        {hasMetadata && (
+          <div className="flex flex-wrap items-center gap-2 p-2 rounded-[5px] bg-[#111111] border border-[#222222] text-[11px] font-sans text-[#a1a1a1]">
+            {toolAction && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono text-[10px]">
+                <FileEdit className="h-3 w-3" />
+                {toolAction}
+              </span>
+            )}
+            {exitCode !== null && (
+              <span
+                className={`inline-flex items-center gap-1 font-mono text-[10px] font-medium ${
+                  exitCode === 0 ? 'badge-success' : 'badge-danger'
+                }`}
+              >
+                <Terminal className="h-2.5 w-2.5" />
+                exit code {exitCode}
+              </span>
+            )}
+            {metadataLines.some((m) => m.startsWith('Completed At:')) && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-[#777777]">
+                <Clock className="h-2.5 w-2.5 text-[#555555]" />
+                {metadataLines.find((m) => m.startsWith('Completed At:'))?.replace('Completed At: ', '')}
+              </span>
+            )}
+          </div>
+        )}
+        <DiffViewer diffText={mainContent} filePath={detectedPath} />
       </div>
     );
   }
