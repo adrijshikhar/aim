@@ -90,4 +90,35 @@ func TestDarwinLauncher_Unit(t *testing.T) {
 	if err := noneLauncher.LaunchTerminal(ctx, "echo 1"); !errors.Is(err, service.ErrNoTerminalAvailable) {
 		t.Errorf("expected ErrNoTerminalAvailable, got %v", err)
 	}
+
+	// 6. LaunchInTerminal explicitly targets terminal
+	executedCmds = nil
+	multiMap := map[string]bool{
+		"Ghostty":  true,
+		"iTerm2":   true,
+		"Terminal": true,
+	}
+	multiLauncher := service.NewDarwinLauncher(nil, func(name string) bool { return multiMap[name] }, mockRun)
+	if specific, ok := multiLauncher.(interface {
+		LaunchInTerminal(ctx context.Context, term, cmdStr string) error
+	}); ok {
+		err := specific.LaunchInTerminal(ctx, "iTerm2", "aim resume claude 12345678")
+		if err != nil {
+			t.Fatalf("unexpected error from LaunchInTerminal(iTerm2): %v", err)
+		}
+		if len(executedCmds) != 1 || executedCmds[0][0] != "osascript" {
+			t.Errorf("expected osascript command for iTerm2, got %v", executedCmds)
+		}
+
+		executedCmds = nil
+		err = specific.LaunchInTerminal(ctx, "Ghostty", "aim resume codex 87654321")
+		if err != nil {
+			t.Fatalf("unexpected error from LaunchInTerminal(Ghostty): %v", err)
+		}
+		if len(executedCmds) != 1 || executedCmds[0][0] != "open" {
+			t.Errorf("expected open command for Ghostty, got %v", executedCmds)
+		}
+	} else {
+		t.Fatal("multiLauncher does not implement LaunchInTerminal")
+	}
 }

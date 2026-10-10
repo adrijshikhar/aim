@@ -223,7 +223,7 @@ export function QuotaBreakdown({
   };
 
   const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-muted-foreground';
+    if (pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
     return 'text-[#ededed]';
   };
@@ -298,7 +298,7 @@ export function QuotaBreakdown({
             pacing.expectedRemainingPercent <= 96 && (
               <div
                 title={`Expected pace at this time: ${Math.round(pacing.expectedRemainingPercent)}% remaining (${pacing.paceLabel})`}
-                className="absolute top-0 bottom-0 w-[3px] -translate-x-1/2 z-10 pointer-events-none transition-all duration-300 flex items-center justify-center bg-[#0c0c0c]"
+                className="absolute top-0 bottom-0 w-[3px] -translate-x-1/2 z-10 pointer-events-none transition-all duration-300 flex items-center justify-center bg-[#181818]"
                 style={{ left: `${Math.min(96, Math.max(4, pacing.expectedRemainingPercent))}%` }}
               >
                 <div

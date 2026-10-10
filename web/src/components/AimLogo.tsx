@@ -19,7 +19,7 @@ export function AimLogo({ className, variant = 'dart', ...props }: AimLogoProps)
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           className={cn('shrink-0 select-none', className)}
-          aria-label="AIM Logo — Core Void"
+          aria-label="AIM Logo: Core Void"
           {...props}
         >
           <mask id={`void-mask-${maskId}`}>
@@ -40,7 +40,7 @@ export function AimLogo({ className, variant = 'dart', ...props }: AimLogoProps)
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           className={cn('shrink-0 select-none', className)}
-          aria-label="AIM Logo — Tri-Agent Nexus"
+          aria-label="AIM Logo: Tri-Agent Nexus"
           {...props}
         >
           <line x1="50" y1="24" x2="50" y2="50" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
@@ -60,7 +60,7 @@ export function AimLogo({ className, variant = 'dart', ...props }: AimLogoProps)
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           className={cn('shrink-0 select-none', className)}
-          aria-label="AIM Logo — Architectural Monogram"
+          aria-label="AIM Logo: Architectural Monogram"
           {...props}
         >
           <path d="M22 74L50 22L78 74" stroke="currentColor" strokeWidth="7.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -75,7 +75,7 @@ export function AimLogo({ className, variant = 'dart', ...props }: AimLogoProps)
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           className={cn('shrink-0 select-none', className)}
-          aria-label="AIM Logo — Radial Aperture"
+          aria-label="AIM Logo: Radial Aperture"
           {...props}
         >
           <g stroke="currentColor" strokeWidth="5" strokeLinecap="round">
@@ -97,7 +97,7 @@ export function AimLogo({ className, variant = 'dart', ...props }: AimLogoProps)
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           className={cn('shrink-0 select-none', className)}
-          aria-label="AIM Logo — Dual Sandboxes"
+          aria-label="AIM Logo: Dual Sandboxes"
           {...props}
         >
           <circle cx="39" cy="50" r="23" stroke="currentColor" strokeWidth="5.5" />
@@ -113,7 +113,7 @@ export function AimLogo({ className, variant = 'dart', ...props }: AimLogoProps)
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           className={cn('shrink-0 select-none', className)}
-          aria-label="AIM Logo — Forward Dart"
+          aria-label="AIM Logo: Forward Dart"
           {...props}
         >
           <path d="M78 22L28 42L48 52L58 72L78 22Z" fill="currentColor" />

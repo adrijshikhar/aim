@@ -520,6 +520,30 @@ func TestResumeSession(t *testing.T) {
 		t.Fatalf("unexpected resume request: %+v", resumedReq)
 	}
 
+	// Valid resume with specific terminal emulator target
+	termBody := service.ResumeRequest{
+		Agent:     "claude",
+		Profile:   "work",
+		SessionID: "sess-abc-123",
+		Terminal:  "iTerm2",
+	}
+	tb, _ := json.Marshal(termBody)
+	termResp, err := http.Post(ts.URL+"/api/sessions/resume", "application/json", bytes.NewReader(tb))
+	if err != nil {
+		t.Fatalf("POST /api/sessions/resume failed: %v", err)
+	}
+	defer termResp.Body.Close()
+	var termData map[string]string
+	if err := json.NewDecoder(termResp.Body).Decode(&termData); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if termData["terminal"] != "iTerm2" {
+		t.Fatalf("expected terminal iTerm2, got %q", termData["terminal"])
+	}
+	if resumedReq.Terminal != "iTerm2" {
+		t.Fatalf("expected resumedReq.Terminal to be iTerm2, got %q", resumedReq.Terminal)
+	}
+
 	// Missing parameters
 	badBody := service.ResumeRequest{SessionID: "sess-abc"}
 	bb, _ := json.Marshal(badBody)

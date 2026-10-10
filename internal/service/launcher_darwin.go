@@ -140,3 +140,38 @@ func (d *darwinLauncher) LaunchTerminal(ctx context.Context, cmdStr string) erro
 	}
 	return ErrNoTerminalAvailable
 }
+
+// LaunchInTerminal attempts to launch specifically in the requested terminal emulator.
+func (d *darwinLauncher) LaunchInTerminal(ctx context.Context, term, cmdStr string) error {
+	cmdStr = strings.TrimSpace(cmdStr)
+	if cmdStr == "" {
+		return ErrEmptyCommand
+	}
+
+	switch strings.ToLower(strings.TrimSpace(term)) {
+	case "ghostty":
+		args := FormatGhosttyArgs(cmdStr)
+		if err := d.runCmd(ctx, "open", args...); err != nil {
+			return fmt.Errorf("ghostty launch failed: %w", err)
+		}
+		return nil
+	case "iterm", "iterm2":
+		appName := "iTerm2"
+		if !d.appExists("iTerm2") && d.appExists("iTerm") {
+			appName = "iTerm"
+		}
+		script := FormatITermScript(appName, cmdStr)
+		if err := d.runCmd(ctx, "osascript", "-e", script); err != nil {
+			return fmt.Errorf("iterm launch failed: %w", err)
+		}
+		return nil
+	case "terminal", "terminal.app":
+		script := FormatTerminalScript(cmdStr)
+		if err := d.runCmd(ctx, "osascript", "-e", "tell application \"Terminal\" to activate", "-e", script); err != nil {
+			return fmt.Errorf("terminal.app launch failed: %w", err)
+		}
+		return nil
+	default:
+		return d.LaunchTerminal(ctx, cmdStr)
+	}
+}

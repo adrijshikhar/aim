@@ -364,7 +364,7 @@ export function SessionsView({
       {
         accessorKey: 'cwd',
         header: 'DIRECTORY (CWD)',
-        size: 160,
+        size: 210,
         cell: ({ row }) => {
           const rawCwd = row.original.cwd || '';
           if (!rawCwd) return <span className="text-muted-foreground font-mono text-xs">-</span>;
@@ -391,6 +391,7 @@ export function SessionsView({
       {
         id: 'goal_title',
         header: 'GOAL / TITLE',
+        size: 280,
         cell: ({ row }) => {
           const rawTitle = row.original.title?.trim();
           const rawGoal = row.original.goal?.trim();
@@ -401,7 +402,9 @@ export function SessionsView({
           const primary = hasSpecificTitle ? rawTitle : (rawGoal || sid);
           const secondary = hasSpecificTitle && rawGoal && rawTitle.toLowerCase() !== rawGoal.toLowerCase()
             ? rawGoal
-            : hasSpecificTitle || rawGoal ? sid : null;
+            : !hasSpecificTitle && rawTitle && rawGoal && rawGoal.toLowerCase() !== rawTitle.toLowerCase()
+              ? rawTitle
+              : null;
 
           return (
             <div className="space-y-0.5 min-w-0 pr-2">
@@ -485,7 +488,7 @@ export function SessionsView({
       {
         id: 'actions',
         header: () => null,
-        size: 110,
+        size: 124,
         cell: ({ row }) => {
           const sess = row.original;
           const isThisResuming = resumingId === sess.id;
@@ -509,7 +512,8 @@ export function SessionsView({
                 <button
                   type="button"
                   onClick={() => setFlagModalSession(sess)}
-                  className="h-7 px-1.5 text-[#888888] hover:text-[#ededed] hover:bg-[#202020] transition-colors flex items-center justify-center cursor-pointer"
+                  disabled={isThisResuming}
+                  className="h-7 px-1.5 text-[#888888] hover:text-[#ededed] hover:bg-[#202020] transition-colors flex items-center justify-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Resume with flags"
                 >
                   <ChevronDown className="h-3 w-3" />
@@ -570,14 +574,14 @@ export function SessionsView({
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-2 text-[#666666] hover:text-[#ededed] cursor-pointer"
+              className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 rounded-[4px] flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer transition-colors"
               title="Clear search"
               aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           ) : (
-            <div className="absolute right-2.5 top-1.5 pointer-events-none">
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
               <kbd className="text-[10px] font-mono px-1.5 py-0.5 border border-border bg-[#111111] text-[#a1a1a1] rounded">
                 /
               </kbd>

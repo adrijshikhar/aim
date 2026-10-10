@@ -72,6 +72,7 @@ export interface ResumeRequest {
   agent: string;
   profile: string;
   session_id: string;
+  terminal?: string;
   flags?: string[];
   aim_flags?: string[];
   adapter_flags?: string[];

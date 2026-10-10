@@ -75,7 +75,9 @@ func (s *Server) handleResumeSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	terminalName := "terminal"
-	if s.launcher != nil {
+	if strings.TrimSpace(req.Terminal) != "" && strings.TrimSpace(req.Terminal) != "default" {
+		terminalName = strings.TrimSpace(req.Terminal)
+	} else if s.launcher != nil {
 		terms := s.launcher.AvailableTerminals()
 		if len(terms) > 0 {
 			terminalName = terms[0]

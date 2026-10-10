@@ -233,5 +233,13 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 	launchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	if targetTerm := strings.TrimSpace(req.Terminal); targetTerm != "" && targetTerm != "default" {
+		if specificLauncher, ok := s.launcher.(interface {
+			LaunchInTerminal(ctx context.Context, term, cmdStr string) error
+		}); ok {
+			return specificLauncher.LaunchInTerminal(launchCtx, targetTerm, cmdStr)
+		}
+	}
+
 	return s.launcher.LaunchTerminal(launchCtx, cmdStr)
 }

@@ -224,7 +224,7 @@ export function FileCodeBlock({
           <tbody>
             {lines.map((l, idx) => (
               <tr key={idx} className="hover:bg-white/[0.03] group transition-colors">
-                <td className="w-12 sm:w-16 select-none text-right pr-3.5 pl-2 text-[#555555] group-hover:text-[#888888] border-r border-[#1c1c1c] bg-[#0c0c0c] font-mono text-[11px] align-top tabular-nums">
+                <td className="sticky left-0 z-10 w-12 sm:w-16 select-none text-right pr-3.5 pl-2 text-[#555555] group-hover:text-[#888888] border-r border-[#1c1c1c] bg-[#0c0c0c] font-mono text-[11px] align-top tabular-nums">
                   {l.lineNum !== '' ? l.lineNum : ''}
                 </td>
                 <td className="pl-3.5 pr-4 py-0 font-mono text-[11px] text-[#ededed] whitespace-pre align-top select-text">
@@ -298,6 +298,14 @@ export function parseFileViewContent(text: string): FileCodeBlockProps | null {
         truncatedNote = 'Content truncated to limit · View with offset or slice for more lines';
         continue;
       }
+
+      // Check if there are any numbered lines remaining ahead
+      const hasMoreNumberedLines = rawLines.slice(i).some((l) => /^\s*\d+:\s?/.test(l));
+      if (!hasMoreNumberedLines) {
+        // We reached the end of the numbered code snippet, do not swallow trailing chat prose
+        break;
+      }
+
       if (rawLine.trim() === '') {
         codeLines.push({ lineNum: '', code: '' });
         cleanCodeArr.push('');

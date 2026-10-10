@@ -83,16 +83,39 @@ export function formatSecondsToDuration(seconds: number): string {
   return `${Math.max(1, mins)}m`;
 }
 
-function formatShortDate(d: Date): string {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = months[d.getMonth()];
-  const day = d.getDate();
+function formatTimeOnly(d: Date): string {
   let hours = d.getHours();
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12;
   hours = hours ? hours : 12; // 0 -> 12
   const mins = d.getMinutes().toString().padStart(2, '0');
-  return `${month} ${day} at ${hours}:${mins} ${ampm}`;
+  return `${hours}:${mins} ${ampm}`;
+}
+
+export function formatWindowRange(start: Date, end: Date): string {
+  const isSameDay =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === end.getDate();
+
+  const now = new Date();
+  const isToday =
+    isSameDay &&
+    start.getFullYear() === now.getFullYear() &&
+    start.getMonth() === now.getMonth() &&
+    start.getDate() === now.getDate();
+
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const startMonth = months[start.getMonth()];
+  const endMonth = months[end.getMonth()];
+
+  if (isToday) {
+    return `Today, ${formatTimeOnly(start)} - ${formatTimeOnly(end)}`;
+  }
+  if (isSameDay) {
+    return `${startMonth} ${start.getDate()}, ${formatTimeOnly(start)} - ${formatTimeOnly(end)}`;
+  }
+  return `${startMonth} ${start.getDate()} at ${formatTimeOnly(start)} - ${endMonth} ${end.getDate()} at ${formatTimeOnly(end)}`;
 }
 
 /**
@@ -270,7 +293,7 @@ export function calculateWindowPacing({
   let windowDateRange: string | undefined;
   if (resetDate) {
     const startDate = new Date(resetDate.getTime() - durationSec * 1000);
-    windowDateRange = `Est. ${formatShortDate(startDate)} – ${formatShortDate(resetDate)}`;
+    windowDateRange = `Est. ${formatWindowRange(startDate, resetDate)}`;
   }
 
   return {

@@ -190,27 +190,29 @@ export function McpView({
 
   return (
     <div className="space-y-6">
-      {/* Top Banner */}
-      <div className="rounded-geist border border-[#262626] bg-[#111111] p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="space-y-1">
+      {/* Header bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-1">
+        <div className="space-y-0.5">
           <div className="flex items-center gap-2">
-            <Cpu className="h-4 w-4 text-[#ededed]" />
-            <h3 className="font-semibold text-sm text-[#ededed]">
+            <Cpu className="h-4 w-4 text-foreground" />
+            <h3 className="font-semibold text-sm text-foreground">
               Model Context Protocol (MCP) Catalog
             </h3>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground">
+              {filteredServers.length} {filteredServers.length === 1 ? 'server' : 'servers'}
+            </span>
           </div>
-          <p className="text-xs text-[#a1a1a1] max-w-2xl leading-relaxed">
-            AIM manages and bridges MCP server definitions across your agent environments.
-            Global servers are shared across all profiles, while scoped servers attach only to their designated profile.
+          <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
+            AIM manages MCP server definitions across agent environments. Global servers are shared, while scoped servers attach only to designated profiles.
           </p>
         </div>
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
           <Button
             variant="outline"
             size="sm"
             onClick={fetchServers}
             disabled={loading}
-            className="rounded-geist h-8 font-mono text-xs border-[#262626] bg-[#0a0a0a] text-[#ededed] hover:bg-[#161616]"
+            className="rounded-geist h-8 font-mono text-xs border-border bg-card text-foreground hover:bg-secondary cursor-pointer"
           >
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -222,10 +224,10 @@ export function McpView({
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Search input */}
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-[#666666]" />
+          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground/60" />
           <Input
             placeholder="Search MCP servers by name, command, or env..."
-            className="pl-9 pr-8 h-8 text-xs rounded-geist border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
+            className="pl-9 pr-8 h-8 text-xs font-sans rounded-geist border-border bg-card text-foreground placeholder:text-muted-foreground/50 focus:border-border"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -346,7 +348,7 @@ export function McpView({
                         stdio
                       </span>
                       <span className="badge-success text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                         Active
                       </span>
                       <Badge

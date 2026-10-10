@@ -205,6 +205,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
       agent: session.agent,
       profile: session.profile,
       session_id: session.id,
+      terminal: selectedTerminal === 'default' ? undefined : selectedTerminal,
       aim_flags: getActiveAimFlagsList(),
       adapter_flags: getActiveAdapterFlagsList(),
       custom_args: customArgs.trim() || undefined,

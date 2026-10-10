@@ -122,6 +122,7 @@ type ResumeRequest struct {
 	Agent        string   `json:"agent"`
 	Profile      string   `json:"profile"`
 	SessionID    string   `json:"session_id"`
+	Terminal     string   `json:"terminal,omitempty"`      // Target terminal emulator: Ghostty, iTerm2, Terminal, etc.
 	Flags        []string `json:"flags,omitempty"`         // Legacy combined fallback
 	AimFlags     []string `json:"aim_flags,omitempty"`     // Orchestrator flags: --exact, --catalyst, --fork, --force
 	AdapterFlags []string `json:"adapter_flags,omitempty"` // Runnable adapter flags: e.g. --dangerously-skip-permissions

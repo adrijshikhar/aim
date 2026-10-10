@@ -49,16 +49,54 @@ interface SessionDetailViewProps {
 
 const INITIAL_BATCH_SIZE = 25;
 
+const matchToolCategory = (name: string, tokens: string[]) => {
+  return tokens.some((token) => {
+    const regex = new RegExp(`(^|[_\\-\\b])${token}([_\\-\\b]|$)`, 'i');
+    return regex.test(name);
+  });
+};
+
 const getToolConfig = (toolName: string) => {
   const name = toolName.toLowerCase();
-  // 1. Exec / Bash / Commands -> Mint (#9fc9a2)
+
+  // 1. Edit / Write / Patch / Replace -> Lavender (#c0a8dd)
   if (
-    name.includes('run') ||
-    name.includes('exec') ||
-    name.includes('bash') ||
-    name.includes('command') ||
-    name.includes('terminal') ||
-    name.includes('shell')
+    matchToolCategory(name, [
+      'write',
+      'edit',
+      'replace',
+      'patch',
+      'modify',
+      'create',
+      'delete',
+      'update',
+      'insert',
+      'remove',
+    ])
+  ) {
+    return {
+      category: 'edit',
+      color: '#c0a8dd',
+      borderClass: 'border-[#c0a8dd]/25',
+      bgClass: 'bg-[#c0a8dd]/5',
+      headerHoverClass: 'hover:bg-[#c0a8dd]/10',
+      iconClass: 'text-[#c0a8dd]',
+      tagClass: 'border-[#c0a8dd]/30 text-[#c0a8dd] bg-[#c0a8dd]/10',
+      Icon: PenTool,
+    };
+  }
+
+  // 2. Exec / Bash / Commands -> Mint (#9fc9a2)
+  if (
+    matchToolCategory(name, [
+      'run',
+      'exec',
+      'bash',
+      'command',
+      'terminal',
+      'shell',
+      'cmd',
+    ])
   ) {
     return {
       category: 'exec',
@@ -72,17 +110,22 @@ const getToolConfig = (toolName: string) => {
     };
   }
 
-  // 2. Read / View / Grep / Search -> Pastel Blue (#9fbbe0)
+  // 3. Read / View / Grep / Search -> Pastel Blue (#9fbbe0)
   if (
-    name.includes('read') ||
-    name.includes('view') ||
-    name.includes('cat') ||
-    name.includes('list') ||
-    name.includes('get') ||
-    name.includes('grep') ||
-    name.includes('search') ||
-    name.includes('find') ||
-    name.includes('inspect')
+    matchToolCategory(name, [
+      'read',
+      'view',
+      'cat',
+      'list',
+      'get',
+      'grep',
+      'search',
+      'find',
+      'inspect',
+      'fetch',
+      'show',
+      'describe',
+    ])
   ) {
     return {
       category: 'read',
@@ -93,28 +136,6 @@ const getToolConfig = (toolName: string) => {
       iconClass: 'text-[#9fbbe0]',
       tagClass: 'border-[#9fbbe0]/30 text-[#9fbbe0] bg-[#9fbbe0]/10',
       Icon: FileText,
-    };
-  }
-
-  // 3. Edit / Write / Patch / Replace -> Lavender (#c0a8dd)
-  if (
-    name.includes('write') ||
-    name.includes('edit') ||
-    name.includes('replace') ||
-    name.includes('patch') ||
-    name.includes('modify') ||
-    name.includes('create') ||
-    name.includes('delete')
-  ) {
-    return {
-      category: 'edit',
-      color: '#c0a8dd',
-      borderClass: 'border-[#c0a8dd]/25',
-      bgClass: 'bg-[#c0a8dd]/5',
-      headerHoverClass: 'hover:bg-[#c0a8dd]/10',
-      iconClass: 'text-[#c0a8dd]',
-      tagClass: 'border-[#c0a8dd]/30 text-[#c0a8dd] bg-[#c0a8dd]/10',
-      Icon: PenTool,
     };
   }
 
@@ -312,7 +333,25 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
   };
 
   const copyTurnContent = (turn: SessionTurnDTO) => {
-    const text = turn.content || (turn.tool_calls ? JSON.stringify(turn.tool_calls, null, 2) : '');
+    const parts: string[] = [];
+    if (turn.thinking) {
+      parts.push(`--- Reasoning ---\n${turn.thinking}`);
+    }
+    if (turn.tool_calls && turn.tool_calls.length > 0) {
+      const toolText = turn.tool_calls
+        .map((t) => {
+          let s = `Tool: ${t.tool_name}`;
+          if (t.arguments) s += `\nArguments: ${t.arguments}`;
+          if (t.output) s += `\nOutput: ${t.output}`;
+          return s;
+        })
+        .join('\n\n');
+      parts.push(`--- Tool Execution ---\n${toolText}`);
+    }
+    if (turn.content) {
+      parts.push(turn.content);
+    }
+    const text = parts.join('\n\n') || turn.content || '';
     navigator.clipboard.writeText(text);
     setCopiedTurn(turn.turn_index);
     setTimeout(() => setCopiedTurn(null), 2000);
@@ -521,7 +560,12 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
       if (fullText.trim() === mainHeadline.trim() || fullText.length <= 85) {
         mainDesc = null;
       } else {
-        mainDesc = fullText;
+        if (fullText.startsWith(mainHeadline)) {
+          const remainder = fullText.slice(mainHeadline.length).replace(/^[\s.:—-]+/, '').trim();
+          mainDesc = remainder || null;
+        } else {
+          mainDesc = fullText;
+        }
       }
     }
 

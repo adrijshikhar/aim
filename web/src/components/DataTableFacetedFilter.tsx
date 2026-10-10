@@ -112,8 +112,10 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
                     }}
                     onClick={() => toggleOption(opt.value)}
                     className={cn(
-                      'flex items-center justify-between px-2 py-1.5 rounded-[4px] text-xs cursor-pointer select-none transition-colors hover:bg-secondary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                      isSelected && 'bg-secondary'
+                      'flex items-center justify-between px-2 py-1.5 rounded-[4px] text-xs cursor-pointer select-none transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                      isSelected
+                        ? 'bg-white/[0.08] text-foreground font-medium'
+                        : 'text-foreground/80 hover:bg-secondary hover:text-foreground'
                     )}
                   >
                     <div className="flex items-center gap-2 min-w-0">

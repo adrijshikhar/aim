@@ -421,10 +421,11 @@ export function ProfilesView({
     return 'bg-status-success-solid';
   };
 
-  const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-muted-foreground';
+  const getTextColor = (pct: number | null | undefined) => {
+    if (pct == null) return 'text-muted-foreground';
+    if (pct <= 0) return 'text-status-danger';
     if (pct <= 30) return 'text-status-warning';
-    return 'text-muted-foreground';
+    return 'text-foreground';
   };
 
   const currentProfile = React.useMemo(() => {
@@ -770,12 +771,11 @@ export function ProfilesView({
                 type="button"
                 onClick={() => handleCopyPath(currentProfile.path)}
                 title={copiedPath ? 'Copied to clipboard' : 'Copy sandbox path'}
-                className="p-1 rounded hover:bg-[#1a1a1a] text-[#666666] hover:text-[#ededed] cursor-pointer transition-colors shrink-0"
+                aria-label={copiedPath ? 'Copied to clipboard' : 'Copy sandbox path'}
+                className="h-6 w-6 rounded flex items-center justify-center hover:bg-secondary text-[#666666] hover:text-[#ededed] cursor-pointer transition-colors shrink-0"
               >
                 {copiedPath ? (
-                  <span className="flex items-center gap-1 text-[10px] text-status-success font-sans font-medium">
-                    <Check className="h-3 w-3" /> Copied!
-                  </span>
+                  <Check className="h-3 w-3 text-status-success" />
                 ) : (
                   <Copy className="h-3 w-3" />
                 )}
@@ -1200,13 +1200,14 @@ export function ProfilesView({
               </CardHeader>
               <CardContent className="p-5 pt-0 space-y-3">
                 <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
-                  <div className="space-y-0.5">
+                  <label htmlFor="switch-global-mcp" className="space-y-0.5 cursor-pointer flex-1">
                     <div className="text-xs font-semibold text-[#ededed]">Global MCP Servers</div>
                     <div className="text-[11px] text-[#666666]">
                       Inherit centrally installed MCP servers from host environment.
                     </div>
-                  </div>
+                  </label>
                   <Switch
+                    id="switch-global-mcp"
                     size="sm"
                     checked={isMcpGlobalOn}
                     disabled={updatingConfig}
@@ -1215,13 +1216,14 @@ export function ProfilesView({
                 </div>
 
                 <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
-                  <div className="space-y-0.5">
+                  <label htmlFor="switch-global-plugins" className="space-y-0.5 cursor-pointer flex-1">
                     <div className="text-xs font-semibold text-[#ededed]">Global Plugins</div>
                     <div className="text-[11px] text-[#666666]">
                       Inherit global plugins from host environment into this profile.
                     </div>
-                  </div>
+                  </label>
                   <Switch
+                    id="switch-global-plugins"
                     size="sm"
                     checked={isPluginsGlobalOn}
                     disabled={updatingConfig}
@@ -1424,7 +1426,9 @@ export function ProfilesView({
               </thead>
               <tbody className="divide-y divide-[#1c1c1c]">
                 {filteredProfilesList.map((p) => {
-                  const pct = p.quota?.bottleneck_pct ?? 100;
+                  const pct = p.quota?.bottleneck_pct;
+                  const isExhausted = p.quota?.is_exhausted || (pct != null && pct <= 0);
+                  const effectivePct = isExhausted ? 0 : pct;
                   return (
                     <tr
                       key={p.name}
@@ -1478,30 +1482,30 @@ export function ProfilesView({
                       <td className="px-4 py-3 min-w-[160px]">
                         <div className="flex items-center justify-between text-[11px] mb-1">
                           <span className="text-muted-foreground font-mono">Headroom</span>
-                          <span className={cn('font-mono font-semibold tabular-nums text-xs', getTextColor(pct))}>
-                            {pct}%
+                          <span className={cn('font-mono font-semibold tabular-nums text-xs', getTextColor(effectivePct))}>
+                            {effectivePct != null ? `${effectivePct}%` : '--%'}
                           </span>
                         </div>
-                          <div
-                            role="progressbar"
-                            aria-valuenow={pct}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-label="Profile quota"
-                            className="w-full h-1.5 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
-                          >
-                            {(pct > 0 && !p.quota?.is_exhausted) && (
-                              <div
-                                className={cn(
-                                  "h-full transition-all duration-300",
-                                  getProgressColor(pct)
-                                )}
-                                style={{
-                                  width: `${Math.min(100, pct)}%`,
-                                }}
-                              />
-                            )}
-                          </div>
+                        <div
+                          role="progressbar"
+                          aria-valuenow={effectivePct ?? 0}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-label="Profile quota"
+                          className="w-full h-1.5 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
+                        >
+                          {effectivePct != null && effectivePct > 0 && !isExhausted && (
+                            <div
+                              className={cn(
+                                "h-full transition-all duration-300",
+                                getProgressColor(effectivePct)
+                              )}
+                              style={{
+                                width: `${Math.min(100, effectivePct)}%`,
+                              }}
+                            />
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="inline-flex items-center text-[#ededed] group-hover:translate-x-0.5 transition-transform font-medium">
@@ -1533,7 +1537,7 @@ export function ProfilesView({
                     onSelectProfile(p.name);
                   }
                 }}
-                className="group relative overflow-hidden transition-all duration-150 border border-border bg-card hover:border-border/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-geist flex flex-col justify-between cursor-pointer"
+                className="group relative overflow-hidden transition-all duration-150 border border-border bg-card hover:border-[#383838] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-geist flex flex-col justify-between cursor-pointer"
                 onClick={() => onSelectProfile(p.name)}
               >
                 <div>
@@ -1675,44 +1679,51 @@ export function ProfilesView({
                           </span>
                           <div className="flex items-center gap-1.5">
                             {(() => {
+                              const pct = p.quota?.bottleneck_pct;
+                              const isExhausted = p.quota?.is_exhausted || (pct != null && pct <= 0);
+                              const effectivePct = isExhausted ? 0 : pct;
                               const qDetails = parseQuotaDetails(
                                 p.quota?.summary,
-                                p.quota?.is_exhausted || (p.quota?.bottleneck_pct ?? 100) <= 0,
-                                p.quota?.bottleneck_pct ?? 100
+                                isExhausted,
+                                effectivePct ?? 100
                               );
-                              return qDetails.resetTime ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
-                                  <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
-                                  <span>{qDetails.resetTime}</span>
-                                </span>
-                              ) : null;
+                              return (
+                                <>
+                                  {qDetails.resetTime && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
+                                      <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
+                                      <span>{qDetails.resetTime}</span>
+                                    </span>
+                                  )}
+                                  <span
+                                    className={cn(
+                                      'tabular-nums font-mono text-xs font-semibold',
+                                      getTextColor(effectivePct)
+                                    )}
+                                  >
+                                    {effectivePct != null ? `${effectivePct}%` : '--%'}
+                                  </span>
+                                </>
+                              );
                             })()}
-                            <span
-                              className={cn(
-                                'tabular-nums font-mono text-xs font-semibold',
-                                getTextColor(p.quota?.bottleneck_pct ?? 100)
-                              )}
-                            >
-                              {p.quota?.bottleneck_pct ?? 100}%
-                            </span>
                           </div>
                         </div>
                         <div
                           role="progressbar"
-                          aria-valuenow={p.quota?.bottleneck_pct ?? 100}
+                          aria-valuenow={p.quota?.bottleneck_pct ?? 0}
                           aria-valuemin={0}
                           aria-valuemax={100}
                           aria-label="Profile quota"
                           className="w-full h-1.5 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
                         >
-                          {((p.quota?.bottleneck_pct ?? 100) > 0 && !p.quota?.is_exhausted) && (
+                          {((p.quota?.bottleneck_pct ?? 0) > 0 && !p.quota?.is_exhausted) && (
                             <div
                               className={cn(
                                 "h-full transition-all duration-300",
-                                getProgressColor(p.quota?.bottleneck_pct ?? 100)
+                                getProgressColor(p.quota?.bottleneck_pct ?? 0)
                               )}
                               style={{
-                                width: `${Math.min(100, p.quota?.bottleneck_pct ?? 100)}%`,
+                                width: `${Math.min(100, p.quota?.bottleneck_pct ?? 0)}%`,
                               }}
                             />
                           )}

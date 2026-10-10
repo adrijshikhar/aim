@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AimLogo } from '@/components/AimLogo';
 import { ProfileDTO, DaemonDTO } from '@/lib/api';
+import { cn } from '@/lib/utils';
 
 interface SidebarProps {
   currentView: 'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail';
@@ -16,6 +17,7 @@ interface SidebarProps {
   profiles: ProfileDTO[];
   daemonInfo: DaemonDTO | null;
   version?: string;
+  isOnline?: boolean;
   onSelectView: (view: 'overview' | 'sessions' | 'mcp') => void;
   onSelectProfile: (profileName: string) => void;
   onOpenAddProfile: () => void;
@@ -28,6 +30,7 @@ export function Sidebar({
   profiles,
   daemonInfo,
   version = 'v0.12.0',
+  isOnline = true,
   onSelectView,
   onSelectProfile,
   onOpenAddProfile,
@@ -62,14 +65,21 @@ export function Sidebar({
         label: 'Auth',
       };
     }
-    const pct = p.quota?.bottleneck_pct ?? 100;
-    if (p.quota?.is_exhausted || pct <= 0) {
+    if (p.quota?.is_exhausted || (p.quota?.bottleneck_pct != null && p.quota.bottleneck_pct <= 0)) {
       return {
         color: 'bg-status-danger-solid',
         text: 'text-status-danger',
         label: '0%',
       };
     }
+    if (p.quota?.bottleneck_pct == null) {
+      return {
+        color: 'bg-muted-foreground/40',
+        text: 'text-muted-foreground',
+        label: '--%',
+      };
+    }
+    const pct = p.quota.bottleneck_pct;
     if (pct <= 30) {
       return {
         color: 'bg-status-warning-solid',
@@ -95,7 +105,7 @@ export function Sidebar({
     );
   }, [profiles, findQuery]);
 
-  const isProfilesActive = currentView === 'overview' || currentView === 'profile-detail';
+  const isOverviewActive = currentView === 'overview';
   const isSessionsActive = currentView === 'sessions' || currentView === 'session-detail';
   const isMcpActive = currentView === 'mcp';
 
@@ -147,12 +157,12 @@ export function Sidebar({
             type="button"
             onClick={() => onSelectView('overview')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-geist text-xs font-sans transition-colors cursor-pointer text-left ${
-              isProfilesActive
+              isOverviewActive
                 ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
                 : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
             }`}
           >
-            <Layers className={`h-3.5 w-3.5 ${isProfilesActive ? 'text-foreground' : 'text-muted-foreground'}`} />
+            <Layers className={`h-3.5 w-3.5 ${isOverviewActive ? 'text-foreground' : 'text-muted-foreground'}`} />
             <span>Profiles</span>
             <span className="ml-auto text-[10px] font-mono text-muted-foreground/70">
               {profiles.length}
@@ -239,8 +249,8 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Footer System Status */}
-      <div className="p-3 border-t border-border bg-muted/20">
+      {/* Footer System Status & Developer Profile */}
+      <div className="p-3 border-t border-border bg-muted/20 space-y-2">
         <button
           type="button"
           onClick={onOpenDaemonModal}
@@ -263,6 +273,35 @@ export function Sidebar({
           </div>
           <Radio className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
         </button>
+
+        {/* Developer Identity Row with Backend Health Indicator */}
+        <div className="flex items-center justify-between px-1 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="h-5 w-5 rounded-[4px] bg-secondary border border-border flex items-center justify-center text-[10px] font-mono text-foreground font-semibold shrink-0">
+              D
+            </div>
+            <div className="min-w-0 flex items-center gap-1.5">
+              <span className="text-[11px] font-sans font-medium text-foreground truncate">
+                AIM dev
+              </span>
+              <span className="text-[10px] font-mono text-muted-foreground/70">
+                {version}
+              </span>
+            </div>
+          </div>
+          <div
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] border border-border/60 bg-card text-[10px] font-mono text-muted-foreground shrink-0"
+            title={isOnline ? 'Backend connected' : 'Backend offline'}
+          >
+            <span
+              className={cn(
+                'h-1.5 w-1.5 rounded-full',
+                isOnline ? 'bg-status-success-solid' : 'bg-status-danger-solid'
+              )}
+            />
+            <span>{isOnline ? 'live' : 'offline'}</span>
+          </div>
+        </div>
       </div>
     </aside>
   );

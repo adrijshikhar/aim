@@ -423,7 +423,7 @@ export function App() {
       case 'overview':
         return (
           <div className="flex items-center gap-1.5 text-sm font-mono">
-            <span className="text-[#ededed] font-semibold">All Agent Profiles</span>
+            <span className="text-foreground font-semibold">All Agent Profiles</span>
           </div>
         );
       case 'profile-detail':
@@ -432,52 +432,58 @@ export function App() {
             <button
               type="button"
               onClick={() => handleSelectView('overview')}
-              className="text-[#a1a1a1] hover:text-[#ededed] cursor-pointer"
+              className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
             >
               Profiles
             </button>
-            <ChevronRight className="h-3.5 w-3.5 text-[#666666]" />
-            <span className="text-[#ededed] font-semibold">{selectedProfile}</span>
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+            <span className="text-foreground font-semibold">{selectedProfile}</span>
           </div>
         );
       case 'sessions':
         return (
           <div className="flex items-center gap-1.5 text-sm font-mono">
-            <span className="text-[#ededed] font-semibold">Sessions Explorer</span>
+            <span className="text-foreground font-semibold">Sessions Explorer</span>
             {selectedProfile !== 'all' && (
               <>
-                <ChevronRight className="h-3.5 w-3.5 text-[#666666]" />
-                <span className="text-[#a1a1a1]">{selectedProfile}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                <span className="text-muted-foreground">{selectedProfile}</span>
               </>
             )}
           </div>
         );
-      case 'session-detail':
+      case 'session-detail': {
+        const agentName = viewedSession?.agent || targetAgentHint;
         return (
           <div className="flex items-center gap-1.5 text-sm font-mono">
             <button
               type="button"
               onClick={handleBackFromSession}
-              className="text-[#a1a1a1] hover:text-[#ededed] cursor-pointer"
+              className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
             >
               Sessions
             </button>
-            <ChevronRight className="h-3.5 w-3.5 text-[#666666]" />
-            <span className="text-[#a1a1a1]">{viewedSession?.agent}</span>
-            <ChevronRight className="h-3.5 w-3.5 text-[#666666]" />
-            <span className="text-[#ededed] font-semibold">
+            {agentName && (
+              <>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                <span className="text-muted-foreground">{agentName}</span>
+              </>
+            )}
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+            <span className="text-foreground font-semibold">
               {viewedSession ? viewedSession.id.slice(0, 8) : targetSessionId ? targetSessionId.slice(0, 8) : 'Detail'}
             </span>
           </div>
         );
+      }
       case 'mcp':
         return (
           <div className="flex items-center gap-1.5 text-sm font-mono">
-            <span className="text-[#ededed] font-semibold">MCP Catalog</span>
+            <span className="text-foreground font-semibold">MCP Catalog</span>
             {selectedMcpScope !== 'all' && (
               <>
-                <ChevronRight className="h-3.5 w-3.5 text-[#666666]" />
-                <span className="text-[#a1a1a1]">{selectedMcpScope}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                <span className="text-muted-foreground">{selectedMcpScope}</span>
               </>
             )}
           </div>
@@ -494,6 +500,7 @@ export function App() {
         profiles={profiles}
         daemonInfo={daemonInfo}
         version={status.version}
+        isOnline={isOnline}
         onSelectView={handleSelectView}
         onSelectProfile={handleSelectProfile}
         onOpenAddProfile={() => setIsAddProfileOpen(true)}

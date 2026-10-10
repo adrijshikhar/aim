@@ -63,11 +63,12 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
     if (filePath) {
       return filePath.split('/').pop() || filePath;
     }
+    const isNullPath = (p?: string) => !p || p === '/dev/null' || p === 'dev/null' || p === 'Diff Changes' || p === 'file';
     const first = parsedFiles[0];
-    if (first?.to && first.to !== 'Diff Changes' && first.to !== 'file') {
+    if (first?.to && !isNullPath(first.to)) {
       return first.to.replace(/^b\//, '').split('/').pop() || first.to;
     }
-    if (first?.from && first.from !== 'Diff Changes' && first.from !== 'file') {
+    if (first?.from && !isNullPath(first.from)) {
       return first.from.replace(/^a\//, '').split('/').pop() || first.from;
     }
     // Check if any chunk header contains function/class context
@@ -81,13 +82,18 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
     return 'Diff Changes';
   }, [filePath, parsedFiles]);
 
-  const fullDisplayPath =
-    filePath ||
-    (parsedFiles[0]?.to && parsedFiles[0].to !== 'Diff Changes' && parsedFiles[0].to !== 'file'
-      ? parsedFiles[0].to.replace(/^b\//, '')
-      : parsedFiles[0]?.from && parsedFiles[0].from !== 'Diff Changes' && parsedFiles[0].from !== 'file'
-      ? parsedFiles[0].from.replace(/^a\//, '')
-      : undefined);
+  const fullDisplayPath = React.useMemo(() => {
+    if (filePath) return filePath;
+    const isNullPath = (p?: string) => !p || p === '/dev/null' || p === 'dev/null' || p === 'Diff Changes' || p === 'file';
+    const first = parsedFiles[0];
+    if (first?.to && !isNullPath(first.to)) {
+      return first.to.replace(/^b\//, '');
+    }
+    if (first?.from && !isNullPath(first.from)) {
+      return first.from.replace(/^a\//, '');
+    }
+    return undefined;
+  }, [filePath, parsedFiles]);
 
   return (
     <div className="rounded-[6px] border border-[#262626] bg-[#0d0d0d] overflow-hidden my-2.5 font-mono text-xs shadow-sm">
