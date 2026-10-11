@@ -19,7 +19,6 @@ import { AddProfileModal } from '@/components/AddProfileModal';
 import { Toaster } from '@/components/ui/toaster';
 import { SessionDetailSkeleton } from '@/components/Skeletons';
 import { ChevronRight } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 type ViewType = 'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail';
 
@@ -516,52 +515,6 @@ export function App() {
             <div className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] border border-border bg-card/60 text-[10px] font-mono text-muted-foreground">
               <span className="text-[#666666]">ws:</span>
               <span className="text-foreground font-medium">default</span>
-            </div>
-          </div>
-
-          {/* Right Header Status Pills */}
-          <div className="flex items-center gap-2">
-            {/* Live Daemon Status Pill */}
-            <button
-              type="button"
-              onClick={() => setIsDaemonOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-card hover:bg-secondary/70 transition-colors text-xs cursor-pointer"
-              title="AIM Background Daemon status (click to manage)"
-            >
-              <span className="relative flex h-1.5 w-1.5">
-                <span
-                  className={cn(
-                    'relative inline-flex rounded-full h-1.5 w-1.5',
-                    daemonInfo?.active
-                      ? 'bg-status-success-solid'
-                      : daemonInfo?.installed
-                      ? 'bg-status-warning-solid'
-                      : 'bg-[#666666]'
-                  )}
-                />
-              </span>
-              <span className="font-mono text-[11px] text-muted-foreground hover:text-foreground">
-                {daemonInfo?.active ? 'Daemon active' : daemonInfo?.installed ? 'Daemon stopped' : 'Daemon uninstalled'}
-              </span>
-            </button>
-
-            {/* Server Connection Pill */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-card text-xs">
-              <span className="relative flex h-1.5 w-1.5">
-                <span
-                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                    isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
-                  }`}
-                />
-                <span
-                  className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
-                    isOnline ? 'bg-status-success-solid' : 'bg-status-warning-solid'
-                  }`}
-                />
-              </span>
-              <span className="font-mono text-[11px] text-foreground">
-                {isOnline ? 'Server' : 'Connecting...'}
-              </span>
             </div>
           </div>
         </header>

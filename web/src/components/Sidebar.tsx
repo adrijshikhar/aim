@@ -282,23 +282,30 @@ export function Sidebar({
             </div>
             <div className="min-w-0 flex items-center gap-1.5">
               <span className="text-[11px] font-sans font-medium text-foreground truncate">
-                AIM dev
+                AIM
               </span>
               <span className="text-[10px] font-mono text-muted-foreground/70">
-                {version}
+                {version ? (version.startsWith('v') || version === 'dev' ? version : `v${version}`) : 'dev'}
               </span>
             </div>
           </div>
           <div
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] border border-border/60 bg-card text-[10px] font-mono text-muted-foreground shrink-0"
+            className="flex items-center gap-1.5 px-1.5 py-0.5 rounded-[4px] border border-border/60 bg-card text-[10px] font-mono text-muted-foreground shrink-0"
             title={isOnline ? 'Backend connected' : 'Backend offline'}
           >
-            <span
-              className={cn(
-                'h-1.5 w-1.5 rounded-full',
-                isOnline ? 'bg-status-success-solid' : 'bg-status-danger-solid'
+            <span className="relative flex h-1.5 w-1.5 items-center justify-center">
+              {isOnline && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-success-solid opacity-75" />
               )}
-            />
+              <span
+                className={cn(
+                  'relative inline-flex h-1.5 w-1.5 rounded-full',
+                  isOnline
+                    ? 'bg-status-success-solid shadow-[0_0_8px_#30a46c]'
+                    : 'bg-status-danger-solid'
+                )}
+              />
+            </span>
             <span>{isOnline ? 'live' : 'offline'}</span>
           </div>
         </div>
