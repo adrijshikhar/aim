@@ -512,10 +512,6 @@ export function App() {
         <header className="h-14 border-b border-border bg-background/90 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             {getHeaderTitle()}
-            <div className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] border border-border bg-card/60 text-[10px] font-mono text-muted-foreground">
-              <span className="text-[#666666]">ws:</span>
-              <span className="text-foreground font-medium">default</span>
-            </div>
           </div>
         </header>
 

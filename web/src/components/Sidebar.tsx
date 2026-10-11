@@ -274,21 +274,8 @@ export function Sidebar({
           <Radio className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
         </button>
 
-        {/* Developer Identity Row with Backend Health Indicator */}
-        <div className="flex items-center justify-between px-1 text-xs">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="h-5 w-5 rounded-[4px] bg-secondary border border-border flex items-center justify-center text-[10px] font-mono text-foreground font-semibold shrink-0">
-              D
-            </div>
-            <div className="min-w-0 flex items-center gap-1.5">
-              <span className="text-[11px] font-sans font-medium text-foreground truncate">
-                AIM
-              </span>
-              <span className="text-[10px] font-mono text-muted-foreground/70">
-                {version ? (version.startsWith('v') || version === 'dev' ? version : `v${version}`) : 'dev'}
-              </span>
-            </div>
-          </div>
+        {/* Backend Health Indicator */}
+        <div className="flex items-center justify-start px-0.5 text-xs">
           <div
             className="flex items-center gap-1.5 px-1.5 py-0.5 rounded-[4px] border border-border/60 bg-card text-[10px] font-mono text-muted-foreground shrink-0"
             title={isOnline ? 'Backend connected' : 'Backend offline'}
