@@ -29,6 +29,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 		Profile: q.Get("profile"),
 		Query:   q.Get("q"),
 		Limit:   limit,
+		Force:   q.Get("force") == "true" || q.Get("refresh") == "true",
 	}
 
 	sessions, err := s.sessions.ListSessions(r.Context(), filter)

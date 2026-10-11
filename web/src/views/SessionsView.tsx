@@ -55,10 +55,30 @@ interface SessionsViewProps {
   onViewSession?: (session: SessionDTO) => void;
 }
 
-// Module-level in-memory cache to ensure instant back-navigation from session detail with zero refresh flash
+// Module-level in-memory cache and sessionStorage persistence to guarantee 0ms instant view switching with zero skeleton flash
 let sessionsMemoryCache: SessionDTO[] | null = null;
 let lastSessionsFetchTimestamp = 0;
 const SESSIONS_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
+const SESSIONS_STORAGE_KEY = 'aim_sessions_cache_v1';
+
+function getInitialSessions(): SessionDTO[] {
+  if (sessionsMemoryCache && sessionsMemoryCache.length > 0) {
+    return sessionsMemoryCache;
+  }
+  try {
+    const raw = sessionStorage.getItem(SESSIONS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        sessionsMemoryCache = parsed;
+        return parsed;
+      }
+    }
+  } catch {
+    // Ignore storage parse errors
+  }
+  return [];
+}
 
 export function SessionsView({
   selectedProfile = 'all',
@@ -66,8 +86,10 @@ export function SessionsView({
   profiles = [],
   onViewSession,
 }: SessionsViewProps) {
-  const [sessions, setSessions] = React.useState<SessionDTO[]>(() => sessionsMemoryCache || []);
-  const [loading, setLoading] = React.useState(!sessionsMemoryCache);
+  const initialSessions = React.useMemo(() => getInitialSessions(), []);
+  const [sessions, setSessions] = React.useState<SessionDTO[]>(initialSessions);
+  // Only show skeleton on true cold boot when zero cached sessions exist
+  const [loading, setLoading] = React.useState(initialSessions.length === 0);
   const [refreshing, setRefreshing] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [selectedEngines, setSelectedEngines] = React.useState<Set<string>>(new Set());
@@ -94,19 +116,27 @@ export function SessionsView({
   }, [selectedProfile]);
 
   const fetchSessions = React.useCallback(async (force = false) => {
-    if (!force && sessionsMemoryCache && sessionsMemoryCache.length > 0) {
+    // If we already have sessions in state or cache, perform a silent background revalidation without ever clearing the table
+    if (!force && (sessionsMemoryCache && sessionsMemoryCache.length > 0)) {
+      setRefreshing(true);
+    } else if (force) {
       setRefreshing(true);
     } else {
       setLoading(true);
     }
     try {
-      const data = await getSessions();
+      const data = await getSessions(force ? { force: true } : undefined);
       sessionsMemoryCache = data;
       lastSessionsFetchTimestamp = Date.now();
+      try {
+        sessionStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(data));
+      } catch {
+        // Ignore storage quota errors
+      }
       setSessions(data);
     } catch {
       // Fallback data if server unreachable and no cache exists
-      if (!sessionsMemoryCache) {
+      if (!sessionsMemoryCache || sessionsMemoryCache.length === 0) {
         const fallback: SessionDTO[] = [
           {
             id: 'sess-89412e',
@@ -142,7 +172,7 @@ export function SessionsView({
 
   React.useEffect(() => {
     const isStale = Date.now() - lastSessionsFetchTimestamp > SESSIONS_CACHE_TTL_MS;
-    if (!sessionsMemoryCache || isStale) {
+    if (!sessionsMemoryCache || sessionsMemoryCache.length === 0 || isStale) {
       fetchSessions();
     }
   }, [fetchSessions]);

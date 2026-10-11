@@ -250,34 +250,22 @@ export function Sidebar({
       </div>
 
       {/* Footer System Status & Developer Profile */}
-      <div className="p-3 border-t border-border bg-muted/20 space-y-2">
+      <div className="p-3 border-t border-border bg-muted/20">
         <button
           type="button"
           onClick={onOpenDaemonModal}
           className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-geist border border-border bg-card hover:bg-secondary hover:border-border/80 transition-colors cursor-pointer text-xs group"
-          title="Manage OS Background Daemon"
+          title="AIM Background Daemon status (click to manage)"
         >
           <div className="flex items-center gap-2">
-            <span className="flex h-2 w-2 relative items-center justify-center">
-              {daemonInfo?.active ? (
-                <span className="h-2 w-2 rounded-full bg-status-success-solid" />
-              ) : daemonInfo?.installed ? (
-                <span className="h-2 w-2 rounded-full bg-status-warning-solid" />
-              ) : (
-                <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
-              )}
-            </span>
+            <Radio className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors shrink-0" />
             <span className="font-mono text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
               Daemon: {daemonInfo?.active ? 'Active' : daemonInfo?.installed ? 'Inactive' : 'Off'}
             </span>
           </div>
-          <Radio className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
-        </button>
 
-        {/* Backend Health Indicator */}
-        <div className="flex items-center justify-start px-0.5 text-xs">
           <div
-            className="flex items-center gap-1.5 px-1.5 py-0.5 rounded-[4px] border border-border/60 bg-card text-[10px] font-mono text-muted-foreground shrink-0"
+            className="flex items-center gap-1.5 px-1.5 py-0.5 rounded-[4px] border border-border/60 bg-muted/40 text-[10px] font-mono text-muted-foreground shrink-0"
             title={isOnline ? 'Backend connected' : 'Backend offline'}
           >
             <span className="relative flex h-1.5 w-1.5 items-center justify-center">
@@ -295,7 +283,7 @@ export function Sidebar({
             </span>
             <span>{isOnline ? 'live' : 'offline'}</span>
           </div>
-        </div>
+        </button>
       </div>
     </aside>
   );

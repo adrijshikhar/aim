@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/session"
@@ -17,8 +18,11 @@ var (
 )
 
 type sessionService struct {
-	mgr      *session.Manager
-	launcher LauncherService
+	mgr       *session.Manager
+	launcher  LauncherService
+	mu        sync.RWMutex
+	cache     []SessionDTO
+	cachedAt  time.Time
 }
 
 // NewSessionService creates a new SessionService wrapping session.Manager and LauncherService.
@@ -36,72 +40,97 @@ func NewSessionService(mgr *session.Manager, launcher ...LauncherService) Sessio
 }
 
 // ListSessions queries sessions from storage, applies filtering, and enriches metadata.
+// Uses an in-memory 30s cache to avoid repeated expensive transcript disk parsing on every request.
 func (s *sessionService) ListSessions(ctx context.Context, filter SessionFilter) ([]SessionDTO, error) {
 	if s.mgr == nil {
 		return []SessionDTO{}, nil
 	}
 
-	mgrSessions, err := s.mgr.ListSessions(ctx, filter.Agent, filter.Profile, false)
-	if err != nil {
-		return nil, err
+	var all []SessionDTO
+	s.mu.RLock()
+	if !filter.Force && s.cache != nil && time.Since(s.cachedAt) < 30*time.Second {
+		all = s.cache
+	}
+	s.mu.RUnlock()
+
+	if all == nil {
+		mgrSessions, err := s.mgr.ListSessions(ctx, "", "", false)
+		if err != nil {
+			return nil, err
+		}
+
+		all = make([]SessionDTO, 0, len(mgrSessions))
+		for _, sess := range mgrSessions {
+			cwd := sess.Cwd
+			if cwd == "" && s.mgr != nil {
+				cwd, _ = s.mgr.ResolveCwd(ctx, &sess)
+			}
+
+			goal := sess.Goal
+			if goal == "" && s.mgr != nil {
+				if sum, err := s.mgr.ResolveSummary(ctx, &sess); err == nil {
+					goal = sum.Goal
+					if goal == "" {
+						goal = sum.RecentActivity
+					}
+				}
+			}
+			if goal == "" {
+				goal = sess.Summary
+			}
+
+			turns := sess.MessageCount
+			if turns == 0 && sess.Progress != "" {
+				var parsed int
+				if n, err := fmt.Sscanf(sess.Progress, "%d", &parsed); err == nil && n == 1 && parsed > 0 {
+					turns = parsed
+				}
+			}
+
+			dto := SessionDTO{
+				ID:        sess.ID,
+				Agent:     sess.Agent,
+				Profile:   sess.Profile,
+				Title:     sess.Title,
+				Cwd:       cwd,
+				Goal:      goal,
+				Turns:     turns,
+				UpdatedAt: sess.LastActiveAt,
+				IsActive:  sess.Status == session.StatusActive,
+				PID:       sess.PID,
+			}
+			all = append(all, dto)
+		}
+
+		s.mu.Lock()
+		s.cache = all
+		s.cachedAt = time.Now()
+		s.mu.Unlock()
 	}
 
 	query := strings.ToLower(strings.TrimSpace(filter.Query))
-	results := make([]SessionDTO, 0, len(mgrSessions))
+	results := make([]SessionDTO, 0, len(all))
 
-	for _, sess := range mgrSessions {
-		cwd := sess.Cwd
-		if cwd == "" && s.mgr != nil {
-			cwd, _ = s.mgr.ResolveCwd(ctx, &sess)
+	for _, dto := range all {
+		if filter.Agent != "" && !strings.EqualFold(dto.Agent, filter.Agent) {
+			continue
 		}
-
-		goal := sess.Goal
-		if goal == "" && s.mgr != nil {
-			if sum, err := s.mgr.ResolveSummary(ctx, &sess); err == nil {
-				goal = sum.Goal
-				if goal == "" {
-					goal = sum.RecentActivity
-				}
-			}
-		}
-		if goal == "" {
-			goal = sess.Summary
+		if filter.Profile != "" && !strings.EqualFold(dto.Profile, filter.Profile) {
+			continue
 		}
 
 		if query != "" {
-			match := strings.Contains(strings.ToLower(sess.ID), query) ||
-				strings.Contains(strings.ToLower(sess.ShortID), query) ||
-				strings.Contains(strings.ToLower(sess.Title), query) ||
-				strings.Contains(strings.ToLower(goal), query) ||
-				strings.Contains(strings.ToLower(cwd), query) ||
-				strings.Contains(strings.ToLower(sess.Summary), query) ||
-				strings.Contains(strings.ToLower(sess.Agent), query) ||
-				strings.Contains(strings.ToLower(sess.Profile), query)
+			match := strings.Contains(strings.ToLower(dto.ID), query) ||
+				strings.Contains(strings.ToLower(dto.Title), query) ||
+				strings.Contains(strings.ToLower(dto.Goal), query) ||
+				strings.Contains(strings.ToLower(dto.Cwd), query) ||
+				strings.Contains(strings.ToLower(dto.Agent), query) ||
+				strings.Contains(strings.ToLower(dto.Profile), query)
 			if !match {
 				continue
 			}
 		}
 
-		turns := sess.MessageCount
-		if turns == 0 && sess.Progress != "" {
-			var parsed int
-			if n, err := fmt.Sscanf(sess.Progress, "%d", &parsed); err == nil && n == 1 && parsed > 0 {
-				turns = parsed
-			}
-		}
-
-		dto := SessionDTO{
-			ID:        sess.ID,
-			Agent:     sess.Agent,
-			Profile:   sess.Profile,
-			Title:     sess.Title,
-			Cwd:       cwd,
-			Goal:      goal,
-			Turns:     turns,
-			UpdatedAt: sess.LastActiveAt,
-			IsActive:  sess.Status == session.StatusActive,
-			PID:       sess.PID,
-		}
 		results = append(results, dto)
 
 		if filter.Limit > 0 && len(results) >= filter.Limit {

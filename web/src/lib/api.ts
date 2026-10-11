@@ -66,6 +66,7 @@ export interface SessionFilter {
   profile?: string;
   query?: string;
   limit?: number;
+  force?: boolean;
 }
 
 export interface ResumeRequest {
@@ -264,6 +265,7 @@ export async function getSessions(filter?: SessionFilter): Promise<SessionDTO[]>
     params.set('query', filter.query);
   }
   if (filter?.limit) params.set('limit', filter.limit.toString());
+  if (filter?.force) params.set('force', 'true');
 
   const queryString = params.toString();
   const url = queryString ? `${BASE_URL}/sessions?${queryString}` : `${BASE_URL}/sessions`;

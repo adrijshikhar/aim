@@ -85,6 +85,7 @@ type SessionFilter struct {
 	Profile string `json:"profile,omitempty"`
 	Query   string `json:"query,omitempty"`
 	Limit   int    `json:"limit,omitempty"`
+	Force   bool   `json:"force,omitempty"`
 }
 
 // ToolCallDTO represents an invoked tool action within an assistant turn.

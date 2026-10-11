@@ -333,10 +333,12 @@ export function App() {
     checkStatus();
     fetchDaemonStatus();
     fetchProfiles();
+    getSessions().catch(() => {});
     const interval = setInterval(() => {
       checkStatus();
       fetchDaemonStatus();
       fetchProfiles();
+      getSessions().catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
   }, [fetchDaemonStatus, fetchProfiles]);
@@ -541,14 +543,14 @@ export function App() {
                 onViewSession={handleViewSession}
               />
             )}
-            {currentView === 'sessions' && (
+            <div className={currentView === 'sessions' ? 'block' : 'hidden'}>
               <SessionsView
                 selectedProfile={selectedProfile}
                 onSelectProfile={setSelectedProfile}
                 profiles={profiles}
                 onViewSession={handleViewSession}
               />
-            )}
+            </div>
             {currentView === 'session-detail' && (
               viewedSession ? (
                 <SessionDetailView
