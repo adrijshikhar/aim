@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,15 +117,25 @@ func (m *mockSessionService) GetSessionTranscript(ctx context.Context, agent, se
 	}, nil
 }
 
+func (m *mockSessionService) InvalidateCache() {}
+
 // mockLauncherService is a mock implementation of service.LauncherService.
 type mockLauncherService struct {
 	launchTerminalFn     func(ctx context.Context, cmdStr string) error
+	launchInTerminalFn   func(ctx context.Context, term, cmdStr string) error
 	availableTerminalsFn func() []string
 }
 
 func (m *mockLauncherService) LaunchTerminal(ctx context.Context, cmdStr string) error {
 	if m.launchTerminalFn != nil {
 		return m.launchTerminalFn(ctx, cmdStr)
+	}
+	return nil
+}
+
+func (m *mockLauncherService) LaunchInTerminal(ctx context.Context, term, cmdStr string) error {
+	if m.launchInTerminalFn != nil {
+		return m.launchInTerminalFn(ctx, term, cmdStr)
 	}
 	return nil
 }
@@ -1071,3 +1082,62 @@ func TestGetSessionTranscript(t *testing.T) {
 		t.Fatalf("unexpected transcript: %+v", transcript)
 	}
 }
+
+func TestCrossOriginProtection(t *testing.T) {
+	sess := &mockSessionService{}
+	ts, _ := setupTestServer(t, nil, sess, nil, false)
+
+	client := &http.Client{}
+
+	// 1. Cross-site Sec-Fetch-Site header blocks mutating request
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/sessions/resume", strings.NewReader(`{"agent":"claude","session_id":"s1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for cross-site Sec-Fetch-Site, got %d", resp.StatusCode)
+	}
+
+	// 2. Untrusted Origin header blocks mutating request
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/sessions/resume", strings.NewReader(`{"agent":"claude","session_id":"s1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil-attacker.com")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for untrusted origin, got %d", resp.StatusCode)
+	}
+
+	// 3. Trusted localhost Origin is allowed
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/sessions/resume", strings.NewReader(`{"agent":"claude","session_id":"s1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://localhost:5173")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK for localhost origin, got %d", resp.StatusCode)
+	}
+
+	// 4. Safe GET endpoint is permitted even with external origin
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/status", nil)
+	req.Header.Set("Origin", "https://external-client.org")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK for GET status, got %d", resp.StatusCode)
+	}
+}
+

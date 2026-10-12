@@ -134,6 +134,7 @@ type ResumeRequest struct {
 // LauncherService defines the contract for launching interactive terminal windows.
 type LauncherService interface {
 	LaunchTerminal(ctx context.Context, cmdStr string) error
+	LaunchInTerminal(ctx context.Context, term, cmdStr string) error
 	AvailableTerminals() []string
 }
 
@@ -153,6 +154,7 @@ type SessionService interface {
 	ListSessions(ctx context.Context, filter SessionFilter) ([]SessionDTO, error)
 	ResumeSessionInTerminal(ctx context.Context, req ResumeRequest) error
 	GetSessionTranscript(ctx context.Context, agent, sessionID string) (*SessionTranscriptDTO, error)
+	InvalidateCache()
 }
 
 // MCPServerDTO represents a configured MCP server.

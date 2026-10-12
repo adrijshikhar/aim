@@ -20,6 +20,14 @@ func (f *fallbackLauncher) LaunchTerminal(ctx context.Context, cmdStr string) er
 	return ErrNoTerminalAvailable
 }
 
+func (f *fallbackLauncher) LaunchInTerminal(ctx context.Context, term, cmdStr string) error {
+	if strings.TrimSpace(cmdStr) == "" {
+		return ErrEmptyCommand
+	}
+	return ErrNoTerminalAvailable
+}
+
 func (f *fallbackLauncher) AvailableTerminals() []string {
 	return nil
 }
+

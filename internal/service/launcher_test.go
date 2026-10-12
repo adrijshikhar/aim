@@ -27,6 +27,13 @@ func TestFormatITermScript(t *testing.T) {
 	if !strings.Contains(script, `\"my session\"`) {
 		t.Errorf("expected escaped quotes in script: %s", script)
 	}
+
+	// Verify newline sanitization
+	multilineCmd := "echo line1\r\necho line2\n"
+	sanitizedScript := service.FormatITermScript("iTerm2", multilineCmd)
+	if strings.Contains(sanitizedScript, "\n") || strings.Contains(sanitizedScript, "\r") {
+		t.Errorf("expected newlines to be stripped from iTerm script: %s", sanitizedScript)
+	}
 }
 
 func TestFormatTerminalScript(t *testing.T) {
@@ -43,6 +50,13 @@ func TestFormatTerminalScript(t *testing.T) {
 	escapedScript := service.FormatTerminalScript(complexCmd)
 	if !strings.Contains(escapedScript, `\\world`) || !strings.Contains(escapedScript, `\"hello`) {
 		t.Errorf("expected properly escaped backslashes and quotes: %s", escapedScript)
+	}
+
+	// Test newline sanitization
+	multilineCmd := "echo line1\r\necho line2\n"
+	sanitizedScript := service.FormatTerminalScript(multilineCmd)
+	if strings.Contains(sanitizedScript, "\n") || strings.Contains(sanitizedScript, "\r") {
+		t.Errorf("expected newlines to be stripped from Terminal script: %s", sanitizedScript)
 	}
 }
 

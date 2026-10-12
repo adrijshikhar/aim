@@ -23,5 +23,23 @@ export default defineConfig({
   build: {
     outDir: '../internal/web/dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/lucide-react')) {
+            return 'lucide';
+          }
+          if (id.includes('node_modules/react-markdown') || id.includes('node_modules/remark-gfm') || id.includes('node_modules/micromark') || id.includes('node_modules/mdast') || id.includes('node_modules/unist')) {
+            return 'markdown';
+          }
+          if (id.includes('node_modules/@tanstack/react-table')) {
+            return 'table';
+          }
+          if (id.includes('node_modules/@radix-ui')) {
+            return 'radix';
+          }
+        },
+      },
+    },
   },
 });

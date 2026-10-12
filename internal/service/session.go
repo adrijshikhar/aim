@@ -15,6 +15,7 @@ import (
 var (
 	safeIdentifierPattern = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
 	safeFlagPattern       = regexp.MustCompile(`^--?[a-zA-Z0-9_./=-]+$`)
+	safeArgPattern        = regexp.MustCompile(`^[a-zA-Z0-9_./=-]+$`)
 )
 
 type sessionService struct {
@@ -218,7 +219,7 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 		customTokens = strings.Fields(req.CustomFlags)
 	}
 	for _, tok := range customTokens {
-		if !safeFlagPattern.MatchString(tok) {
+		if !safeArgPattern.MatchString(tok) {
 			return fmt.Errorf("invalid custom argument %q: contains illegal characters", tok)
 		}
 		adapterFlags = append(adapterFlags, tok)
@@ -258,17 +259,24 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 
 	cmdStr := strings.Join(cmdParts, " ")
 
+	// Invalidate session cache upon launching a terminal session so subsequent queries reflect new state
+	s.InvalidateCache()
+
 	// Detach terminal launch context from ephemeral request context
 	launchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if targetTerm := strings.TrimSpace(req.Terminal); targetTerm != "" && targetTerm != "default" {
-		if specificLauncher, ok := s.launcher.(interface {
-			LaunchInTerminal(ctx context.Context, term, cmdStr string) error
-		}); ok {
-			return specificLauncher.LaunchInTerminal(launchCtx, targetTerm, cmdStr)
-		}
+		return s.launcher.LaunchInTerminal(launchCtx, targetTerm, cmdStr)
 	}
 
 	return s.launcher.LaunchTerminal(launchCtx, cmdStr)
+}
+
+// InvalidateCache clears the in-memory session cache so subsequent queries fetch fresh data from disk.
+func (s *sessionService) InvalidateCache() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cache = nil
+	s.cachedAt = time.Time{}
 }

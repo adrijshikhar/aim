@@ -154,7 +154,20 @@ func (s *Server) setupRoutes() {
 	s.handler = s.corsMiddleware(mux)
 }
 
-// corsMiddleware injects CORS headers and handles OPTIONS preflight when devMode is true.
+// isAllowedOrigin checks if an Origin or Referer header belongs to localhost/127.0.0.1.
+func isAllowedOrigin(originStr string) bool {
+	if originStr == "" {
+		return true
+	}
+	u, err := url.Parse(originStr)
+	if err != nil {
+		return false
+	}
+	hostname := u.Hostname()
+	return hostname == "127.0.0.1" || hostname == "localhost" || hostname == "::1"
+}
+
+// corsMiddleware injects CORS headers, handles preflight, and enforces origin isolation on mutating endpoints.
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.devMode {
@@ -166,6 +179,23 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 				return
 			}
 		}
+
+		// Enforce origin validation on mutating API requests to prevent drive-by CSRF attacks
+		if r.Method == http.MethodPost || r.Method == http.MethodDelete || r.Method == http.MethodPatch || r.Method == http.MethodPut {
+			if r.Header.Get("Sec-Fetch-Site") == "cross-site" && !s.devMode {
+				writeJSONError(w, http.StatusForbidden, "cross-origin requests are forbidden")
+				return
+			}
+			if origin := r.Header.Get("Origin"); origin != "" && !isAllowedOrigin(origin) {
+				writeJSONError(w, http.StatusForbidden, "cross-origin requests are forbidden")
+				return
+			}
+			if referer := r.Header.Get("Referer"); referer != "" && !isAllowedOrigin(referer) {
+				writeJSONError(w, http.StatusForbidden, "cross-origin requests are forbidden")
+				return
+			}
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }

@@ -118,6 +118,15 @@ func (m *mockLauncher) LaunchTerminal(ctx context.Context, cmdStr string) error 
 	m.launchedCmds = append(m.launchedCmds, cmdStr)
 	return nil
 }
+
+func (m *mockLauncher) LaunchInTerminal(ctx context.Context, term, cmdStr string) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.launchedCmds = append(m.launchedCmds, cmdStr)
+	return nil
+}
+
 func (m *mockLauncher) AvailableTerminals() []string {
 	return m.available
 }

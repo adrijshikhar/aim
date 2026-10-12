@@ -100,3 +100,24 @@ func (l *linuxLauncher) LaunchTerminal(ctx context.Context, cmdStr string) error
 	}
 	return ErrNoTerminalAvailable
 }
+
+// LaunchInTerminal attempts to launch specifically in the requested terminal emulator.
+func (l *linuxLauncher) LaunchInTerminal(ctx context.Context, term, cmdStr string) error {
+	cmdStr = strings.TrimSpace(cmdStr)
+	if cmdStr == "" {
+		return ErrEmptyCommand
+	}
+
+	term = strings.TrimSpace(term)
+	if term == "" || strings.EqualFold(term, "default") {
+		return l.LaunchTerminal(ctx, cmdStr)
+	}
+
+	bin, err := l.lookPath(term)
+	if err != nil {
+		return fmt.Errorf("terminal %q not found: %w", term, err)
+	}
+
+	args := FormatLinuxArgs(bin, cmdStr)
+	return l.startCmd(ctx, args[0], args[1:]...)
+}

@@ -23,6 +23,8 @@ func FormatGhosttyArgs(cmdStr string) []string {
 func FormatITermScript(appName, cmdStr string) string {
 	escaped := strings.ReplaceAll(cmdStr, "\\", "\\\\")
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, "\r", "")
+	escaped = strings.ReplaceAll(escaped, "\n", " ")
 	return fmt.Sprintf(`tell application "%s" to create window with default profile command "%s"`, appName, escaped)
 }
 
@@ -30,6 +32,8 @@ func FormatITermScript(appName, cmdStr string) string {
 func FormatTerminalScript(cmdStr string) string {
 	escaped := strings.ReplaceAll(cmdStr, "\\", "\\\\")
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, "\r", "")
+	escaped = strings.ReplaceAll(escaped, "\n", " ")
 	return fmt.Sprintf(`tell application "Terminal" to do script "%s"`, escaped)
 }
 

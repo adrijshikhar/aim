@@ -23,9 +23,15 @@ func (s *sessionService) GetSessionTranscript(ctx context.Context, agent, sessio
 	if agent == "" {
 		return nil, errors.New("agent is required")
 	}
+	if !safeIdentifierPattern.MatchString(agent) {
+		return nil, fmt.Errorf("invalid agent %q: contains illegal characters", agent)
+	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return nil, errors.New("session ID is required")
+	}
+	if !safeIdentifierPattern.MatchString(sessionID) {
+		return nil, fmt.Errorf("invalid session ID %q: contains illegal characters", sessionID)
 	}
 
 	if s.mgr == nil {
@@ -75,15 +81,21 @@ func (s *sessionService) GetSessionTranscript(ctx context.Context, agent, sessio
 	switch strings.ToLower(sess.Agent) {
 	case "claude":
 		turns, err := parseClaudeTranscript(sess)
-		if err == nil && len(turns) > 0 {
+		if len(turns) > 0 {
 			transcript.Turns = turns
 			return transcript, nil
 		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			_ = err
+		}
 	case "agy":
 		turns, err := parseAgyTranscript(sess)
-		if err == nil && len(turns) > 0 {
+		if len(turns) > 0 {
 			transcript.Turns = turns
 			return transcript, nil
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			_ = err
 		}
 	}
 
