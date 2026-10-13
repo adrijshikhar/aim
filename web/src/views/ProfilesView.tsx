@@ -1147,196 +1147,207 @@ export function ProfilesView({
           </TabsContent>
 
           {/* TAB 4: SETTINGS */}
-          <TabsContent value="settings" className="space-y-6 max-w-5xl focus-visible:outline-none">
-            {/* Profile Overview Card */}
-            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-              <CardHeader className="p-5 pb-3">
-                <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                  <Folder className="h-4 w-4 text-[#666666]" />
-                  Profile Workspace Information
-                </CardTitle>
-                <CardDescription className="text-xs text-[#888888] pt-1">
-                  Filesystem storage isolation and workspace summary.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-5 pt-0 space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
-                    <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Profile Name</div>
-                    <div className="text-sm font-semibold text-[#ededed] font-mono">{currentProfile.name}</div>
-                  </div>
-                  <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
-                    <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Configured Engines</div>
-                    <div className="text-sm font-semibold text-[#ededed] font-mono">{profileAdapters.length}</div>
-                  </div>
-                  <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
-                    <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Recorded Sessions</div>
-                    <div className="text-sm font-semibold text-[#ededed] font-mono">{profileSessions.length}</div>
-                  </div>
-                  <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
-                    <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Active MCP Tools</div>
-                    <div className="text-sm font-semibold text-[#ededed] font-mono">{profileMcpServers.length}</div>
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-3 text-xs">
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Sandbox Storage Path</div>
-                    <div className="text-xs font-mono text-[#a1a1a1] truncate">{currentProfile.path}</div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (currentProfile?.path) {
-                        navigator.clipboard.writeText(currentProfile.path);
-                        setCopiedPath(true);
-                        setTimeout(() => setCopiedPath(false), 2000);
-                      }
-                    }}
-                    className="h-7 px-2.5 rounded-geist border-[#2a2a2a] bg-[#141414] hover:bg-[#1a1a1a] text-xs text-[#ededed] shrink-0 cursor-pointer"
-                  >
-                    {copiedPath ? (
-                      <>
-                        <Check className="h-3 w-3 mr-1.5 text-status-success" />
-                        <span>Copied</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3 w-3 mr-1.5 text-[#888888]" />
-                        <span>Copy Path</span>
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Configured Engines Card */}
-            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-              <CardHeader className="p-5 pb-3">
-                <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 text-[#666666]" />
-                  Configured Agent Engines
-                </CardTitle>
-                <CardDescription className="text-xs text-[#888888] pt-1">
-                  Engines sharing this sandbox workspace profile.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-5 pt-0 space-y-3">
-                {profileAdapters.length === 0 ? (
-                  <div className="p-6 rounded-geist bg-[#0f0f0f] border border-dashed border-[#222222] text-center space-y-2">
-                    <div className="text-xs text-[#888888]">No AI agent engines authenticated yet for this profile.</div>
-                    <div className="text-[11px] text-[#666666] font-mono">
-                      Run <span className="text-[#ededed] bg-[#161616] px-1.5 py-0.5 rounded border border-[#262626]">aim run &lt;agent&gt; {currentProfile.name}</span> to initialize an engine workspace.
+          {/* TAB 4: SETTINGS */}
+          <TabsContent value="settings" className="space-y-6 focus-visible:outline-none">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              {/* LEFT COLUMN: Workspace Info & Inheritance */}
+              <div className="space-y-6">
+                {/* Profile Overview Card */}
+                <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                  <CardHeader className="p-5 pb-3">
+                    <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                      <Folder className="h-4 w-4 text-[#666666]" />
+                      Profile Workspace Information
+                    </CardTitle>
+                    <CardDescription className="text-xs text-[#888888] pt-1">
+                      Filesystem storage isolation and workspace summary.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5 pt-0 space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
+                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Profile Name</div>
+                        <div className="text-sm font-semibold text-[#ededed] font-mono truncate">{currentProfile.name}</div>
+                      </div>
+                      <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
+                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Configured Engines</div>
+                        <div className="text-sm font-semibold text-[#ededed] font-mono">{profileAdapters.length}</div>
+                      </div>
+                      <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
+                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Recorded Sessions</div>
+                        <div className="text-sm font-semibold text-[#ededed] font-mono">{profileSessions.length}</div>
+                      </div>
+                      <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
+                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Active MCP Tools</div>
+                        <div className="text-sm font-semibold text-[#ededed] font-mono">{profileMcpServers.length}</div>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  profileAdapters.map((ad) => (
-                    <div
-                      key={ad.agent}
-                      className="p-3.5 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          {getAgentBadge(ad.agent)}
-                          <span className="font-semibold text-[#ededed] capitalize">{ad.agent}</span>
-                        </div>
-                        <div className="text-[#666666] text-[11px]">
-                          {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials' : 'No credentials')}
+
+                    <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-3 text-xs">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Sandbox Storage Path</div>
+                        <div className="text-xs font-mono text-[#a1a1a1] truncate" title={currentProfile.path}>
+                          {currentProfile.path}
                         </div>
                       </div>
-                      {ad.has_credentials ? (
-                        <Badge variant="outline" className="badge-success text-[11px]">
-                          <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                          <span>Auth OK</span>
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="badge-warning text-[11px]">
-                          <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                          <span>Needs Auth</span>
-                        </Badge>
-                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (currentProfile?.path) {
+                            navigator.clipboard.writeText(currentProfile.path);
+                            setCopiedPath(true);
+                            setTimeout(() => setCopiedPath(false), 2000);
+                          }
+                        }}
+                        className="h-7 px-2.5 rounded-geist border-[#2a2a2a] bg-[#141414] hover:bg-[#1a1a1a] text-xs text-[#ededed] shrink-0 cursor-pointer"
+                      >
+                        {copiedPath ? (
+                          <>
+                            <Check className="h-3 w-3 mr-1.5 text-status-success" />
+                            <span>Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3 mr-1.5 text-[#888888]" />
+                            <span>Copy Path</span>
+                          </>
+                        )}
+                      </Button>
                     </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
 
-            {/* Global Workspace Inheritance Card */}
-            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-              <CardHeader className="p-5 pb-3">
-                <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 text-[#666666]" />
-                  Global Workspace Inheritance
-                </CardTitle>
-                <CardDescription className="text-xs text-[#888888] pt-1">
-                  Configure whether this profile inherits tools and plugins from global host settings.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-5 pt-0 space-y-3">
-                <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
-                  <label htmlFor="switch-global-mcp" className="space-y-0.5 cursor-pointer flex-1">
-                    <div className="text-xs font-semibold text-[#ededed]">Global MCP Servers</div>
-                    <div className="text-[11px] text-[#666666]">
-                      Inherit centrally installed MCP servers from host environment.
+                {/* Global Workspace Inheritance Card */}
+                <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                  <CardHeader className="p-5 pb-3">
+                    <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                      <SlidersHorizontal className="h-4 w-4 text-[#666666]" />
+                      Global Workspace Inheritance
+                    </CardTitle>
+                    <CardDescription className="text-xs text-[#888888] pt-1">
+                      Configure whether this profile inherits tools and plugins from global host settings.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5 pt-0 space-y-3">
+                    <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
+                      <label htmlFor="switch-global-mcp" className="space-y-0.5 cursor-pointer flex-1">
+                        <div className="text-xs font-semibold text-[#ededed]">Global MCP Servers</div>
+                        <div className="text-[11px] text-[#666666]">
+                          Inherit centrally installed MCP servers from host environment.
+                        </div>
+                      </label>
+                      <Switch
+                        id="switch-global-mcp"
+                        size="sm"
+                        checked={isMcpGlobalOn}
+                        disabled={updatingConfig}
+                        onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
+                      />
                     </div>
-                  </label>
-                  <Switch
-                    id="switch-global-mcp"
-                    size="sm"
-                    checked={isMcpGlobalOn}
-                    disabled={updatingConfig}
-                    onCheckedChange={() => handleToggleMcpGlobal(currentProfile.name, isMcpGlobalOn)}
-                  />
-                </div>
 
-                <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
-                  <label htmlFor="switch-global-plugins" className="space-y-0.5 cursor-pointer flex-1">
-                    <div className="text-xs font-semibold text-[#ededed]">Global Plugins</div>
-                    <div className="text-[11px] text-[#666666]">
-                      Inherit global plugins from host environment into this profile.
+                    <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
+                      <label htmlFor="switch-global-plugins" className="space-y-0.5 cursor-pointer flex-1">
+                        <div className="text-xs font-semibold text-[#ededed]">Global Plugins</div>
+                        <div className="text-[11px] text-[#666666]">
+                          Inherit global plugins from host environment into this profile.
+                        </div>
+                      </label>
+                      <Switch
+                        id="switch-global-plugins"
+                        size="sm"
+                        checked={isPluginsGlobalOn}
+                        disabled={updatingConfig}
+                        onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
+                      />
                     </div>
-                  </label>
-                  <Switch
-                    id="switch-global-plugins"
-                    size="sm"
-                    checked={isPluginsGlobalOn}
-                    disabled={updatingConfig}
-                    onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
-                  />
-                </div>
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              </div>
 
-            {/* Danger Zone */}
-            <Card className="border border-status-danger-border bg-status-danger-bg rounded-geist">
-              <CardHeader className="p-5 pb-3">
-                <CardTitle className="text-sm font-semibold text-status-danger flex items-center gap-2">
-                  <ShieldAlert className="h-4 w-4 text-status-danger" />
-                  Danger Zone
-                </CardTitle>
-                <CardDescription className="text-xs text-[#888888] pt-1">
-                  Permanent actions that cannot be undone.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-5 pt-0">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="text-xs text-[#888888]">
-                    Deleting this profile permanently removes its sandbox directory and configuration.
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
-                    className="h-8 rounded-geist text-xs font-sans border-status-danger-border bg-status-danger-bg text-status-danger hover:bg-status-danger-solid hover:text-white cursor-pointer px-3 shrink-0"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                    Delete Profile
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+              {/* RIGHT COLUMN: Configured Engines & Danger Zone */}
+              <div className="space-y-6">
+                {/* Configured Engines Card */}
+                <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                  <CardHeader className="p-5 pb-3">
+                    <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                      <SlidersHorizontal className="h-4 w-4 text-[#666666]" />
+                      Configured Agent Engines
+                    </CardTitle>
+                    <CardDescription className="text-xs text-[#888888] pt-1">
+                      Engines sharing this sandbox workspace profile.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5 pt-0 space-y-3">
+                    {profileAdapters.length === 0 ? (
+                      <div className="p-6 rounded-geist bg-[#0f0f0f] border border-dashed border-[#222222] text-center space-y-2">
+                        <div className="text-xs text-[#888888]">No AI agent engines authenticated yet for this profile.</div>
+                        <div className="text-[11px] text-[#666666] font-mono">
+                          Run <span className="text-[#ededed] bg-[#161616] px-1.5 py-0.5 rounded border border-[#262626]">aim run &lt;agent&gt; {currentProfile.name}</span> to initialize an engine workspace.
+                        </div>
+                      </div>
+                    ) : (
+                      profileAdapters.map((ad) => (
+                        <div
+                          key={ad.agent}
+                          className="p-3.5 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              {getAgentBadge(ad.agent)}
+                              <span className="font-semibold text-[#ededed] capitalize">{ad.agent}</span>
+                            </div>
+                            <div className="text-[#666666] text-[11px]">
+                              {ad.account?.email || (ad.has_credentials ? 'Active CLI credentials' : 'No credentials')}
+                            </div>
+                          </div>
+                          {ad.has_credentials ? (
+                            <Badge variant="outline" className="badge-success text-[11px]">
+                              <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                              <span>Auth OK</span>
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="badge-warning text-[11px]">
+                              <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                              <span>Needs Auth</span>
+                            </Badge>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Danger Zone */}
+                <Card className="border border-status-danger-border bg-status-danger-bg rounded-geist">
+                  <CardHeader className="p-5 pb-3">
+                    <CardTitle className="text-sm font-semibold text-status-danger flex items-center gap-2">
+                      <ShieldAlert className="h-4 w-4 text-status-danger" />
+                      Danger Zone
+                    </CardTitle>
+                    <CardDescription className="text-xs text-[#888888] pt-1">
+                      Permanent actions that cannot be undone.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5 pt-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="text-xs text-[#888888]">
+                        Deleting this profile permanently removes its sandbox directory and configuration.
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openDeleteDialog(currentProfile.agent, currentProfile.name)}
+                        className="h-8 rounded-geist text-xs font-sans border-status-danger-border bg-status-danger-bg text-status-danger hover:bg-status-danger-solid hover:text-white cursor-pointer px-3 shrink-0"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                        Delete Profile
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
 
