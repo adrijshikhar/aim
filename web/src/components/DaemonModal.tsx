@@ -20,6 +20,7 @@ import {
   Copy,
   Folder,
   Terminal,
+  ChevronDown,
 } from 'lucide-react';
 import { DaemonDTO, installDaemon, uninstallDaemon, runDaemonOnce, getDaemonLogs } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -127,6 +128,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
   const [totalLogLines, setTotalLogLines] = useState(0);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [loadingMoreLogs, setLoadingMoreLogs] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const terminalRef = useRef<HTMLDivElement>(null);
   const isInitialLoadRef = useRef(true);
   const { toast } = useToast();
@@ -144,6 +146,14 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
       setLoadingLogs(false);
     }
   }, []);
+
+  const handleToggleLogs = () => {
+    const next = !showLogs;
+    setShowLogs(next);
+    if (next && logs.length === 0) {
+      fetchLogs();
+    }
+  };
 
   const handleLoadMoreLogs = useCallback(async () => {
     if (loadingMoreLogs || logs.length >= totalLogLines) return;
@@ -182,17 +192,29 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
   useEffect(() => {
     if (open) {
       fetchLogs();
+    } else {
+      setShowLogs(false);
     }
   }, [open, fetchLogs]);
 
   useEffect(() => {
-    if (logs.length > 0 && isInitialLoadRef.current) {
+    if (logs.length > 0 && isInitialLoadRef.current && showLogs) {
       if (terminalRef.current) {
         terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
       }
       isInitialLoadRef.current = false;
     }
-  }, [logs]);
+  }, [logs, showLogs]);
+
+  useEffect(() => {
+    if (showLogs && logs.length > 0) {
+      requestAnimationFrame(() => {
+        if (terminalRef.current) {
+          terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+        }
+      });
+    }
+  }, [showLogs]);
 
   const handleCopyLogs = () => {
     navigator.clipboard.writeText(logs.join('\n'));
@@ -418,112 +440,132 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         </div>
 
         {/* Execution Log Stream */}
-        <div className="rounded-geist border border-border bg-background p-3 text-xs space-y-2">
+        <div className="rounded-geist border border-border bg-background p-3 text-xs space-y-2.5 transition-all">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground">
+            <button
+              type="button"
+              onClick={handleToggleLogs}
+              className="flex items-center gap-2 text-left cursor-pointer select-none group focus:outline-none"
+            >
+              <ChevronDown
+                className={cn(
+                  "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
+                  !showLogs && "-rotate-90"
+                )}
+              />
+              <Terminal className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+              <span className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground group-hover:text-foreground transition-colors font-semibold">
                 Execution Logs
               </span>
               {totalLogLines > 0 && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] font-mono bg-secondary/40 text-muted-foreground border-border px-1.5 py-0 rounded-geist"
-                >
-                  {logs.length < totalLogLines
+                <span className="text-[10px] font-mono bg-secondary/70 text-muted-foreground border border-border px-1.5 py-0.5 rounded-geist leading-none inline-flex items-center">
+                  {showLogs && logs.length < totalLogLines
                     ? `${logs.length} of ${totalLogLines} lines`
                     : `${totalLogLines} lines`}
-                </Badge>
+                </span>
               )}
-            </div>
+            </button>
             <div className="flex items-center gap-1.5">
+              {showLogs && (
+                <>
+                  <button
+                    type="button"
+                    onClick={fetchLogs}
+                    disabled={loadingLogs}
+                    title="Refresh logs"
+                    className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <RefreshCw className={cn("h-3 w-3", loadingLogs && "animate-spin")} />
+                    Refresh
+                  </button>
+                  {logs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleCopyLogs}
+                      title="Copy logs"
+                      className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      {copiedLogs ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
+                      {copiedLogs ? 'Copied' : 'Copy'}
+                    </button>
+                  )}
+                </>
+              )}
               <button
                 type="button"
-                onClick={fetchLogs}
-                disabled={loadingLogs}
-                title="Refresh logs"
+                onClick={handleToggleLogs}
                 className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
               >
-                <RefreshCw className={cn("h-3 w-3", loadingLogs && "animate-spin")} />
-                Refresh
+                {showLogs ? 'Collapse' : 'View Logs'}
               </button>
-              {logs.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleCopyLogs}
-                  title="Copy logs"
-                  className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  {copiedLogs ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
-                  {copiedLogs ? 'Copied' : 'Copy'}
-                </button>
-              )}
             </div>
           </div>
 
-          <div
-            ref={terminalRef}
-            onScroll={handleScroll}
-            className="bg-[#050505] border border-[#222222] rounded-geist p-2.5 font-mono text-[11px] max-h-56 overflow-y-auto space-y-1 select-text scrollbar-thin"
-          >
-            {loadingLogs && logs.length === 0 ? (
-              <div className="py-6 text-center text-muted-foreground/60 flex items-center justify-center gap-2">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                <span>Loading daemon logs...</span>
-              </div>
-            ) : logs.length === 0 ? (
-              <div className="py-6 text-center text-muted-foreground/60">
-                No daemon logs recorded yet. Trigger a sync below to generate execution records.
-              </div>
-            ) : (
-              <>
-                {loadingMoreLogs && (
-                  <div className="py-2 text-center text-muted-foreground/60 flex items-center justify-center gap-1.5 border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
-                    <RefreshCw className="h-3 w-3 animate-spin text-primary" />
-                    <span>Loading earlier records...</span>
-                  </div>
-                )}
-                {logs.length >= totalLogLines && totalLogLines > 0 && (
-                  <div className="py-2 text-center text-muted-foreground/40 select-none border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
-                    — Beginning of execution logs ({totalLogLines} lines) —
-                  </div>
-                )}
-                {logs.map((rawLine, i) => {
-                  const { timestamp, level, message } = parseLogLine(rawLine);
-
-                  return (
-                    <div key={i} className="leading-relaxed break-all flex items-baseline gap-2 font-mono text-[11px] py-0.5">
-                      {timestamp && (
-                        <span className="text-[#666666] select-none shrink-0 font-mono text-[10px]">
-                          [{timestamp}]
-                        </span>
-                      )}
-                      <span
-                        className={cn(
-                          "font-semibold select-none shrink-0 text-[9.5px] px-1.5 py-0.2 rounded-xs uppercase tracking-wide",
-                          level === 'ERROR' && "text-red-400 bg-red-950/50 border border-red-800/50",
-                          level === 'WARN' && "text-yellow-400 bg-yellow-950/50 border border-yellow-700/50",
-                          level === 'INFO' && "text-sky-400 bg-sky-950/40 border border-sky-800/40"
-                        )}
-                      >
-                        {level}
-                      </span>
-                      <span
-                        className={cn(
-                          "flex-1",
-                          level === 'ERROR' && "text-red-300 font-medium",
-                          level === 'WARN' && "text-yellow-300 font-medium",
-                          level === 'INFO' && "text-[#ededed]"
-                        )}
-                      >
-                        {message}
-                      </span>
+          {showLogs && (
+            <div
+              ref={terminalRef}
+              onScroll={handleScroll}
+              className="bg-[#050505] border border-[#222222] rounded-geist p-2.5 font-mono text-[11px] max-h-44 overflow-y-auto space-y-1 select-text scrollbar-thin"
+            >
+              {loadingLogs && logs.length === 0 ? (
+                <div className="py-6 text-center text-muted-foreground/60 flex items-center justify-center gap-2">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  <span>Loading daemon logs...</span>
+                </div>
+              ) : logs.length === 0 ? (
+                <div className="py-6 text-center text-muted-foreground/60">
+                  No daemon logs recorded yet. Trigger a sync below to generate execution records.
+                </div>
+              ) : (
+                <>
+                  {loadingMoreLogs && (
+                    <div className="py-2 text-center text-muted-foreground/60 flex items-center justify-center gap-1.5 border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
+                      <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                      <span>Loading earlier records...</span>
                     </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
+                  )}
+                  {logs.length >= totalLogLines && totalLogLines > 0 && (
+                    <div className="py-2 text-center text-muted-foreground/40 select-none border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
+                      — Beginning of execution logs ({totalLogLines} lines) —
+                    </div>
+                  )}
+                  {logs.map((rawLine, i) => {
+                    const { timestamp, level, message } = parseLogLine(rawLine);
+
+                    return (
+                      <div key={i} className="leading-relaxed break-all flex items-baseline gap-2 font-mono text-[11px] py-0.5">
+                        {timestamp && (
+                          <span className="text-[#666666] select-none shrink-0 font-mono text-[10px]">
+                            [{timestamp}]
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            "font-semibold select-none shrink-0 text-[9.5px] px-1.5 py-0.2 rounded-xs uppercase tracking-wide",
+                            level === 'ERROR' && "text-red-400 bg-red-950/50 border border-red-800/50",
+                            level === 'WARN' && "text-yellow-400 bg-yellow-950/50 border border-yellow-700/50",
+                            level === 'INFO' && "text-sky-400 bg-sky-950/40 border border-sky-800/40"
+                          )}
+                        >
+                          {level}
+                        </span>
+                        <span
+                          className={cn(
+                            "flex-1",
+                            level === 'ERROR' && "text-red-300 font-medium",
+                            level === 'WARN' && "text-yellow-300 font-medium",
+                            level === 'INFO' && "text-[#ededed]"
+                          )}
+                        >
+                          {message}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <DialogFooter className="pt-2 flex items-center justify-between sm:justify-between w-full">
