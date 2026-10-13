@@ -421,6 +421,38 @@ func TestDeleteProfile(t *testing.T) {
 		t.Fatalf("expected codex / test-prof, got %s / %s", deletedAgent, deletedName)
 	}
 
+	// Valid DELETE /api/profiles/{name} (without agent)
+	deletedAgent = "old"
+	deletedName = "old"
+	reqNoAgent, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/profiles/test-prof", nil)
+	respNoAgent, err := http.DefaultClient.Do(reqNoAgent)
+	if err != nil {
+		t.Fatalf("DELETE /api/profiles/test-prof failed: %v", err)
+	}
+	defer respNoAgent.Body.Close()
+	if respNoAgent.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", respNoAgent.StatusCode)
+	}
+	if deletedAgent != "" || deletedName != "test-prof" {
+		t.Fatalf("expected empty agent / test-prof, got %q / %q", deletedAgent, deletedName)
+	}
+
+	// Valid DELETE /api/profiles?name=test-prof (query param)
+	deletedAgent = "old"
+	deletedName = "old"
+	reqQuery, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/profiles?name=test-prof", nil)
+	respQuery, err := http.DefaultClient.Do(reqQuery)
+	if err != nil {
+		t.Fatalf("DELETE /api/profiles?name=test-prof failed: %v", err)
+	}
+	defer respQuery.Body.Close()
+	if respQuery.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", respQuery.StatusCode)
+	}
+	if deletedAgent != "" || deletedName != "test-prof" {
+		t.Fatalf("expected empty agent / test-prof, got %q / %q", deletedAgent, deletedName)
+	}
+
 	// DELETE failure
 	reqFail, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/profiles/codex/fail", nil)
 	respFail, err := http.DefaultClient.Do(reqFail)
@@ -919,7 +951,7 @@ func TestServer_MCPService_ThreadSafe(t *testing.T) {
 
 type mockDaemonService struct {
 	getStatusFn func(ctx context.Context) (*service.DaemonDTO, error)
-	getLogsFn   func(ctx context.Context, maxLines int) (*service.DaemonLogsDTO, error)
+	getLogsFn   func(ctx context.Context, maxLines, offset int) (*service.DaemonLogsDTO, error)
 	installFn   func(ctx context.Context, binaryPath string) (*service.DaemonDTO, error)
 	uninstallFn func(ctx context.Context) error
 	runOnceFn   func(ctx context.Context) error
@@ -932,9 +964,9 @@ func (m *mockDaemonService) GetStatus(ctx context.Context) (*service.DaemonDTO, 
 	return &service.DaemonDTO{Installed: true, Active: true, Label: "dev.aim-cli.daemon", IntervalSec: 900}, nil
 }
 
-func (m *mockDaemonService) GetLogs(ctx context.Context, maxLines int) (*service.DaemonLogsDTO, error) {
+func (m *mockDaemonService) GetLogs(ctx context.Context, maxLines, offset int) (*service.DaemonLogsDTO, error) {
 	if m.getLogsFn != nil {
-		return m.getLogsFn(ctx, maxLines)
+		return m.getLogsFn(ctx, maxLines, offset)
 	}
 	return &service.DaemonLogsDTO{
 		LogPath:    "/tmp/daemon.log",
@@ -997,18 +1029,21 @@ func TestGetDaemon(t *testing.T) {
 }
 
 func TestGetDaemonLogs(t *testing.T) {
+	var receivedTail, receivedOffset int
 	ts, srv := setupTestServer(t, nil, nil, nil, false)
 	srv.SetDaemonService(&mockDaemonService{
-		getLogsFn: func(ctx context.Context, maxLines int) (*service.DaemonLogsDTO, error) {
+		getLogsFn: func(ctx context.Context, maxLines, offset int) (*service.DaemonLogsDTO, error) {
+			receivedTail = maxLines
+			receivedOffset = offset
 			return &service.DaemonLogsDTO{
 				LogPath:    "/Users/test/.aim/daemon.log",
 				Lines:      []string{"[2026-10-14 00:00:00 UTC] daemon run: quota refresh completed (6 updated)"},
-				TotalLines: 1,
+				TotalLines: 10,
 			}, nil
 		},
 	})
 
-	resp, err := http.Get(ts.URL + "/api/daemon/logs?tail=50")
+	resp, err := http.Get(ts.URL + "/api/daemon/logs?tail=20&offset=5")
 	if err != nil {
 		t.Fatalf("GET /api/daemon/logs failed: %v", err)
 	}
@@ -1022,8 +1057,11 @@ func TestGetDaemonLogs(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
-	if dto.TotalLines != 1 || len(dto.Lines) != 1 {
+	if dto.TotalLines != 10 || len(dto.Lines) != 1 {
 		t.Errorf("unexpected daemon logs DTO: %+v", dto)
+	}
+	if receivedTail != 20 || receivedOffset != 5 {
+		t.Errorf("expected tail 20, offset 5, got tail %d, offset %d", receivedTail, receivedOffset)
 	}
 }
 

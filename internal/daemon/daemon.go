@@ -134,10 +134,16 @@ func GenerateSystemdTimer(cfg SystemdConfig) ([]byte, error) {
 }
 
 // AppendDaemonLog writes a timestamped record to the daemon log.
+// Rotates the log file if it exceeds 5MB to prevent unbounded disk growth.
 func AppendDaemonLog(logPath, message string) error {
 	dir := filepath.Dir(logPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
+	}
+
+	// Check for size-based log rotation (> 5MB)
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 5*1024*1024 {
+		_ = os.Rename(logPath, logPath+".1")
 	}
 
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -151,10 +157,13 @@ func AppendDaemonLog(logPath, message string) error {
 	return err
 }
 
-// ReadDaemonLogs returns up to maxLines most recent lines from the daemon log.
-func ReadDaemonLogs(logPath string, maxLines int) ([]string, int, error) {
+// ReadDaemonLogs returns up to maxLines lines from the daemon log, ending at total - offset.
+func ReadDaemonLogs(logPath string, maxLines, offset int) ([]string, int, error) {
 	if maxLines <= 0 {
 		maxLines = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	data, err := os.ReadFile(logPath)
 	if err != nil {
@@ -172,10 +181,17 @@ func ReadDaemonLogs(logPath string, maxLines int) ([]string, int, error) {
 	}
 	allLines := strings.Split(raw, "\n")
 	total := len(allLines)
-	if len(allLines) > maxLines {
-		allLines = allLines[len(allLines)-maxLines:]
+
+	end := total - offset
+	if end <= 0 {
+		return []string{}, total, nil
 	}
-	return allLines, total, nil
+	start := end - maxLines
+	if start < 0 {
+		start = 0
+	}
+
+	return allLines[start:end], total, nil
 }
 
 // ReadLastDaemonRun parses the most recent execution timestamp and message from the daemon log.

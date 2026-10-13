@@ -46,13 +46,16 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
   const [logs, setLogs] = useState<string[]>([]);
   const [totalLogLines, setTotalLogLines] = useState(0);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [loadingMoreLogs, setLoadingMoreLogs] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const isInitialLoadRef = useRef(true);
   const { toast } = useToast();
 
   const fetchLogs = useCallback(async () => {
     setLoadingLogs(true);
+    isInitialLoadRef.current = true;
     try {
-      const data = await getDaemonLogs(100);
+      const data = await getDaemonLogs(50, 0);
       setLogs(data.lines || []);
       setTotalLogLines(data.total_lines || 0);
     } catch (err) {
@@ -62,6 +65,22 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
     }
   }, []);
 
+  const handleLoadMoreLogs = async () => {
+    if (loadingMoreLogs || logs.length >= totalLogLines) return;
+    setLoadingMoreLogs(true);
+    try {
+      const data = await getDaemonLogs(50, logs.length);
+      if (data.lines && data.lines.length > 0) {
+        setLogs((prev) => [...data.lines, ...prev]);
+      }
+      setTotalLogLines(data.total_lines || 0);
+    } catch (err) {
+      console.error('Failed to load older daemon logs', err);
+    } finally {
+      setLoadingMoreLogs(false);
+    }
+  };
+
   useEffect(() => {
     if (open) {
       fetchLogs();
@@ -69,8 +88,9 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
   }, [open, fetchLogs]);
 
   useEffect(() => {
-    if (logs.length > 0) {
+    if (logs.length > 0 && isInitialLoadRef.current) {
       logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      isInitialLoadRef.current = false;
     }
   }, [logs]);
 
@@ -310,7 +330,9 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                   variant="outline"
                   className="text-[10px] font-mono bg-secondary/40 text-muted-foreground border-border px-1.5 py-0 rounded-geist"
                 >
-                  {totalLogLines} lines
+                  {logs.length < totalLogLines
+                    ? `${logs.length} of ${totalLogLines} lines`
+                    : `${totalLogLines} lines`}
                 </Badge>
               )}
             </div>
@@ -351,6 +373,25 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               </div>
             ) : (
               <>
+                {logs.length < totalLogLines && (
+                  <div className="pt-0.5 pb-2 text-center sticky top-0 bg-[#050505]/95 backdrop-blur-sm z-10 border-b border-[#1c1c1c]">
+                    <button
+                      type="button"
+                      disabled={loadingMoreLogs}
+                      onClick={handleLoadMoreLogs}
+                      className="text-[10px] text-muted-foreground hover:text-foreground bg-[#141414] hover:bg-[#1f1f1f] border border-[#2b2b2b] px-3 py-0.5 rounded-geist transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-sm"
+                    >
+                      {loadingMoreLogs ? (
+                        <>
+                          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                          <span>Loading older logs...</span>
+                        </>
+                      ) : (
+                        <span>Load older logs ({totalLogLines - logs.length} remaining)</span>
+                      )}
+                    </button>
+                  </div>
+                )}
                 {logs.map((line, i) => {
                   const lower = line.toLowerCase();
                   const hasRealError =

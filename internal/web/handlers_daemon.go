@@ -50,7 +50,14 @@ func (s *Server) handleGetDaemonLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logs, err := daemonSvc.GetLogs(r.Context(), maxLines)
+	offset := 0
+	if offStr := r.URL.Query().Get("offset"); offStr != "" {
+		if n, err := strconv.Atoi(offStr); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	logs, err := daemonSvc.GetLogs(r.Context(), maxLines, offset)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return

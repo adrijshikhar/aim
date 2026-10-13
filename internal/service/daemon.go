@@ -33,9 +33,9 @@ func (s *daemonService) GetStatus(ctx context.Context) (*DaemonDTO, error) {
 	return toDaemonDTO(info), nil
 }
 
-func (s *daemonService) GetLogs(ctx context.Context, maxLines int) (*DaemonLogsDTO, error) {
+func (s *daemonService) GetLogs(ctx context.Context, maxLines, offset int) (*DaemonLogsDTO, error) {
 	logPath := filepath.Join(s.baseDir, "daemon.log")
-	lines, total, err := daemon.ReadDaemonLogs(logPath, maxLines)
+	lines, total, err := daemon.ReadDaemonLogs(logPath, maxLines, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read daemon logs: %w", err)
 	}

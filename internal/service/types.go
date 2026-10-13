@@ -194,7 +194,7 @@ type DaemonLogsDTO struct {
 // DaemonService provides management of the host OS background daemon service.
 type DaemonService interface {
 	GetStatus(ctx context.Context) (*DaemonDTO, error)
-	GetLogs(ctx context.Context, maxLines int) (*DaemonLogsDTO, error)
+	GetLogs(ctx context.Context, maxLines, offset int) (*DaemonLogsDTO, error)
 	Install(ctx context.Context, binaryPath string) (*DaemonDTO, error)
 	Uninstall(ctx context.Context) error
 	RunOnce(ctx context.Context) error

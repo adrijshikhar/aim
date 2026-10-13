@@ -133,6 +133,8 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("POST /api/profiles/{name}/refresh", s.handleRefreshSingleProfile)
 	mux.HandleFunc("PATCH /api/profiles/{name}/config", s.handleUpdateProfileConfig)
 	mux.HandleFunc("DELETE /api/profiles/{agent}/{name}", s.handleDeleteProfile)
+	mux.HandleFunc("DELETE /api/profiles/{name}", s.handleDeleteProfile)
+	mux.HandleFunc("DELETE /api/profiles", s.handleDeleteProfile)
 	mux.HandleFunc("GET /api/adapters", s.handleGetAdapters)
 	mux.HandleFunc("GET /api/sessions", s.handleGetSessions)
 	mux.HandleFunc("GET /api/sessions/{agent}/{id}/transcript", s.handleGetSessionTranscript)

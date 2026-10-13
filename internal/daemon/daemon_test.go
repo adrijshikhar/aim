@@ -224,7 +224,7 @@ func TestReadDaemonLogs(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "daemon.log")
 
 	// Missing file returns empty without error
-	lines, total, err := ReadDaemonLogs(logPath, 10)
+	lines, total, err := ReadDaemonLogs(logPath, 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
 	}
@@ -232,22 +232,35 @@ func TestReadDaemonLogs(t *testing.T) {
 		t.Errorf("expected 0 lines for missing file, got %d, total %d", len(lines), total)
 	}
 
-	// Append 5 lines
+	// Append 5 lines: line1, line22, line333, line4444, line55555
 	for i := 1; i <= 5; i++ {
-		_ = AppendDaemonLog(logPath, strings.Repeat("line", i))
+		_ = AppendDaemonLog(logPath, strings.Repeat("x", i))
 	}
 
-	lines, total, err = ReadDaemonLogs(logPath, 3)
+	// Latest 2 lines (offset 0)
+	lines, total, err = ReadDaemonLogs(logPath, 2, 0)
 	if err != nil {
 		t.Fatalf("ReadDaemonLogs failed: %v", err)
 	}
 	if total != 5 {
 		t.Errorf("expected total 5, got %d", total)
 	}
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines returned, got %d", len(lines))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines returned, got %d", len(lines))
 	}
-	if !strings.Contains(lines[2], "linelinelinelineline") {
-		t.Errorf("expected last line to contain 5x line, got: %s", lines[2])
+	if !strings.Contains(lines[1], "xxxxx") {
+		t.Errorf("expected last line to contain xxxxx, got: %s", lines[1])
+	}
+
+	// Older 2 lines (offset 2)
+	lines, total, err = ReadDaemonLogs(logPath, 2, 2)
+	if err != nil {
+		t.Fatalf("ReadDaemonLogs failed with offset: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines returned with offset 2, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "xx") || !strings.Contains(lines[1], "xxx") {
+		t.Errorf("unexpected offset lines: %+v", lines)
 	}
 }

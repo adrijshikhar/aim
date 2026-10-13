@@ -63,7 +63,8 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
-// handleDeleteProfile handles DELETE /api/profiles/{agent}/{name} to remove an agent profile.
+// handleDeleteProfile handles DELETE /api/profiles/{agent}/{name}, DELETE /api/profiles/{name},
+// or DELETE /api/profiles?name=... to remove an agent profile or entire profile.
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	if s.profiles == nil {
 		writeJSONError(w, http.StatusInternalServerError, "profile service unavailable")
@@ -72,16 +73,25 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 
 	agent := r.PathValue("agent")
 	name := r.PathValue("name")
-	if agent == "" || name == "" {
+	if name == "" {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/profiles/"), "/")
-		if len(parts) >= 2 {
+		if len(parts) >= 2 && parts[0] != "" {
 			agent = parts[0]
 			name = parts[1]
+		} else if len(parts) == 1 && parts[0] != "" {
+			name = parts[0]
 		}
 	}
 
-	if strings.TrimSpace(agent) == "" || strings.TrimSpace(name) == "" {
-		writeJSONError(w, http.StatusBadRequest, "agent and profile name are required")
+	if name == "" {
+		name = r.URL.Query().Get("name")
+	}
+	if agent == "" {
+		agent = r.URL.Query().Get("agent")
+	}
+
+	if strings.TrimSpace(name) == "" {
+		writeJSONError(w, http.StatusBadRequest, "profile name is required")
 		return
 	}
 
