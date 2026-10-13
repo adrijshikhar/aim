@@ -364,7 +364,7 @@ func TestPersistWithStash_NilPersistFn(t *testing.T) {
 
 	res := &oauth.TokenResult{AccessToken: "acc", RefreshToken: "ref"}
 	err := oauth.PersistWithStash(store, "spent", "claude", "work", res, nil)
-	if err != nil {
-		t.Errorf("expected nil error on nil persistFn, got: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on nil persistFn, got nil")
 	}
 }

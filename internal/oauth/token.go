@@ -88,16 +88,18 @@ func ExchangeCode(ctx context.Context, cfg ProviderConfig, code, verifier, redir
 // and deletes the stash entry only upon successful completion. If persistence fails or crashes,
 // the credentials remain in the unclaimed store for future self-healing.
 func PersistWithStash(store *StashStore, spentToken, agent, profile string, res *TokenResult, persistFn func() error) error {
+	if persistFn == nil {
+		return fmt.Errorf("persist function cannot be nil")
+	}
+
 	if store != nil && spentToken != "" && res != nil {
 		if err := store.Save(spentToken, agent, profile, res.AccessToken, res.RefreshToken, res.ExpiresAt, res.TokenType, res.IDToken); err != nil {
 			return fmt.Errorf("failed to stash credentials: %w", err)
 		}
 	}
 
-	if persistFn != nil {
-		if err := persistFn(); err != nil {
-			return err
-		}
+	if err := persistFn(); err != nil {
+		return err
 	}
 
 	if store != nil && spentToken != "" {
