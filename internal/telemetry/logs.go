@@ -2,12 +2,12 @@ package telemetry
 
 import (
 	"context"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/logger"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	otelLog "go.opentelemetry.io/otel/log"
@@ -48,7 +48,7 @@ func InitPostHogLogs(cfg *config.Config) {
 		}),
 	)
 	if err != nil {
-		log.Printf("failed to create PostHog log exporter: %v", err)
+		logger.Debug("failed to create PostHog log exporter: %v", err)
 		return
 	}
 

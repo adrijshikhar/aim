@@ -175,3 +175,97 @@ func TestBindCmd_AscendingSubdirResolution(t *testing.T) {
 		t.Errorf("expected ascending resolution to find 'bound-client', got: %s", out)
 	}
 }
+
+func TestBindCmd_PathTraversalRejected(t *testing.T) {
+	tempHome := t.TempDir()
+	origHome := os.Getenv("AIM_HOME")
+	defer func() { _ = os.Setenv("AIM_HOME", origHome) }()
+	_ = os.Setenv("AIM_HOME", tempHome)
+
+	testDir := t.TempDir()
+	origWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origWd) }()
+	if err := os.Chdir(testDir); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+
+	pm := profile.NewProfileManager(tempHome)
+	reg := agents.NewRegistry()
+
+	_, errOut := captureOutput(t, func() {
+		code := dispatch([]string{"bind", "../../evil"}, reg, pm)
+		if code == 0 {
+			t.Fatalf("expected non-zero exit code for path traversal profile name")
+		}
+	})
+
+	if !strings.Contains(errOut, "path traversal not allowed") {
+		t.Errorf("expected error about path traversal, got: %s", errOut)
+	}
+
+	// Verify .aim-profile was NOT written
+	if _, err := os.Stat(filepath.Join(testDir, ".aim-profile")); !os.IsNotExist(err) {
+		t.Errorf(".aim-profile must not be created when validation fails")
+	}
+}
+
+func TestBindCmd_InvalidProfileInFileSurfacedInRun(t *testing.T) {
+	tempHome := t.TempDir()
+	origHome := os.Getenv("AIM_HOME")
+	defer func() { _ = os.Setenv("AIM_HOME", origHome) }()
+	_ = os.Setenv("AIM_HOME", tempHome)
+
+	testDir := t.TempDir()
+	origWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origWd) }()
+	if err := os.Chdir(testDir); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+
+	pm := profile.NewProfileManager(tempHome)
+	reg := agents.NewRegistry()
+	mock := &mockAdapter{name: "mock-agent", binaryPath: "/bin/echo"}
+	reg.Register(mock)
+
+	// Write malicious .aim-profile
+	_ = os.WriteFile(filepath.Join(testDir, ".aim-profile"), []byte("../../evil\n"), 0644)
+
+	_, errOut := captureOutput(t, func() {
+		code := dispatch([]string{"run", "mock-agent"}, reg, pm)
+		if code == 0 {
+			t.Fatalf("expected non-zero exit code when resolving malicious .aim-profile")
+		}
+	})
+
+	if !strings.Contains(errOut, "resolving repository profile") || !strings.Contains(errOut, "path traversal not allowed") {
+		t.Errorf("expected error about path traversal when running, got: %s", errOut)
+	}
+}
+
+func TestBindCmd_ProfileNotExistsWarning(t *testing.T) {
+	tempHome := t.TempDir()
+	origHome := os.Getenv("AIM_HOME")
+	defer func() { _ = os.Setenv("AIM_HOME", origHome) }()
+	_ = os.Setenv("AIM_HOME", tempHome)
+
+	testDir := t.TempDir()
+	origWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origWd) }()
+	if err := os.Chdir(testDir); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+
+	pm := profile.NewProfileManager(tempHome)
+	reg := agents.NewRegistry()
+
+	_, errOut := captureOutput(t, func() {
+		code := dispatch([]string{"bind", "non-existent-profile"}, reg, pm)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d", code)
+		}
+	})
+
+	if !strings.Contains(errOut, "Warning: profile 'non-existent-profile' does not currently exist") {
+		t.Errorf("expected warning on stderr, got: %s", errOut)
+	}
+}

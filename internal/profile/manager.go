@@ -124,7 +124,9 @@ func NewProfileManager(baseDir string, checker ...SessionChecker) *ProfileManage
 	return pm
 }
 
-func validateProfileName(name string) error {
+// ValidateProfileName validates that a profile name is non-empty, not "." or "..",
+// and does not contain path traversal characters.
+func ValidateProfileName(name string) error {
 	if name == "" {
 		return fmt.Errorf("profile name cannot be empty")
 	}
@@ -135,6 +137,10 @@ func validateProfileName(name string) error {
 		return fmt.Errorf("invalid profile name %q: path traversal not allowed", name)
 	}
 	return nil
+}
+
+func validateProfileName(name string) error {
+	return ValidateProfileName(name)
 }
 
 func (m *ProfileManager) ProfilesRoot() string {
