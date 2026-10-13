@@ -43,7 +43,7 @@ func (s *Server) handleGetDaemonLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxLines := 100
+	maxLines := 200
 	if tailStr := r.URL.Query().Get("tail"); tailStr != "" {
 		if n, err := strconv.Atoi(tailStr); err == nil && n > 0 && n <= 1000 {
 			maxLines = n

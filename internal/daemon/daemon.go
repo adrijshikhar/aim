@@ -133,9 +133,9 @@ func GenerateSystemdTimer(cfg SystemdConfig) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// AppendDaemonLog writes a timestamped record to the daemon log.
+// AppendDaemonLog writes a timestamped record with severity level (INFO, WARN, ERROR) to the daemon log.
 // Rotates the log file if it exceeds 5MB to prevent unbounded disk growth.
-func AppendDaemonLog(logPath, message string) error {
+func AppendDaemonLog(logPath, level, message string) error {
 	dir := filepath.Dir(logPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -152,15 +152,20 @@ func AppendDaemonLog(logPath, message string) error {
 	}
 	defer f.Close()
 
+	lvl := strings.ToUpper(strings.TrimSpace(level))
+	if lvl == "" {
+		lvl = "INFO"
+	}
+
 	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
-	_, err = fmt.Fprintf(f, "[%s] %s\n", timestamp, strings.TrimSpace(message))
+	_, err = fmt.Fprintf(f, "[%s] [%s] %s\n", timestamp, lvl, strings.TrimSpace(message))
 	return err
 }
 
 // ReadDaemonLogs returns up to maxLines lines from the daemon log, ending at total - offset.
 func ReadDaemonLogs(logPath string, maxLines, offset int) ([]string, int, error) {
 	if maxLines <= 0 {
-		maxLines = 100
+		maxLines = 200
 	}
 	if offset < 0 {
 		offset = 0
@@ -212,6 +217,12 @@ func ReadLastDaemonRun(logPath string) (time.Time, string) {
 			if idx > 1 {
 				timeStr := line[1:idx]
 				msg := strings.TrimSpace(line[idx+1:])
+				// If message starts with [LEVEL], strip it for cleaner summary
+				if strings.HasPrefix(msg, "[") {
+					if endIdx := strings.Index(msg, "]"); endIdx > 1 {
+						msg = strings.TrimSpace(msg[endIdx+1:])
+					}
+				}
 				if t, err := time.Parse("2006-01-02 15:04:05 MST", timeStr); err == nil {
 					return t, msg
 				}
@@ -331,7 +342,7 @@ func Install(binaryPath, baseDir string, homeOverride ...string) (*ServiceInfo, 
 			}
 		}
 
-		_ = AppendDaemonLog(logPath, fmt.Sprintf("daemon service installed (binary: %s, interval: 15m)", binaryPath))
+		_ = AppendDaemonLog(logPath, "INFO", fmt.Sprintf("daemon service installed (binary: %s, interval: 15m)", binaryPath))
 		return Status(baseDir)
 	}
 
@@ -372,7 +383,7 @@ func Install(binaryPath, baseDir string, homeOverride ...string) (*ServiceInfo, 
 			return nil, fmt.Errorf("failed to enable systemd timer: %s (%w)", strings.TrimSpace(string(out)), err)
 		}
 
-		_ = AppendDaemonLog(logPath, fmt.Sprintf("daemon service installed (binary: %s, interval: 15m)", binaryPath))
+		_ = AppendDaemonLog(logPath, "INFO", fmt.Sprintf("daemon service installed (binary: %s, interval: 15m)", binaryPath))
 		return Status(baseDir)
 	}
 
@@ -399,7 +410,7 @@ func Uninstall(baseDir string, homeOverride ...string) error {
 			return fmt.Errorf("failed to remove plist file: %w", err)
 		}
 
-		_ = AppendDaemonLog(logPath, "daemon service uninstalled")
+		_ = AppendDaemonLog(logPath, "INFO", "daemon service uninstalled")
 		return nil
 	}
 
@@ -409,7 +420,7 @@ func Uninstall(baseDir string, homeOverride ...string) error {
 		_ = os.Remove(SystemdServicePath(home))
 		_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
 
-		_ = AppendDaemonLog(logPath, "daemon service uninstalled")
+		_ = AppendDaemonLog(logPath, "INFO", "daemon service uninstalled")
 		return nil
 	}
 
@@ -444,7 +455,7 @@ func RunOnce(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManag
 	}
 
 	if len(targets) == 0 {
-		_ = AppendDaemonLog(logPath, "daemon run: 0 configured profiles found")
+		_ = AppendDaemonLog(logPath, "WARN", "daemon run: 0 configured profiles found")
 		return nil
 	}
 
@@ -461,8 +472,15 @@ func RunOnce(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManag
 		}
 	}
 
+	level := "INFO"
+	if errorCount > 0 && successCount == 0 {
+		level = "ERROR"
+	} else if errorCount > 0 {
+		level = "WARN"
+	}
+
 	msg := fmt.Sprintf("daemon run: quota refresh completed (%d updated, %d errors out of %d targets)",
 		successCount, errorCount, len(targets))
-	_ = AppendDaemonLog(logPath, msg)
+	_ = AppendDaemonLog(logPath, level, msg)
 	return nil
 }

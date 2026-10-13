@@ -32,6 +32,86 @@ interface DaemonModalProps {
   onRefreshDaemon: () => Promise<void>;
 }
 
+interface ParsedLogLine {
+  timestamp: string;
+  level: 'INFO' | 'WARN' | 'ERROR';
+  message: string;
+}
+
+function parseLogLine(rawLine: string): ParsedLogLine {
+  const line = rawLine.trim();
+
+  // Pattern 1: Standard AIM format: [2026-10-14 01:05:00 UTC] [INFO] message
+  const standardMatch = line.match(/^\[(.*?)\]\s*\[(INFO|WARN|WARNING|ERROR|FATAL|DEBUG)\]\s*(.*)$/i);
+  if (standardMatch) {
+    const [, ts, lvl, msg] = standardMatch;
+    const upper = lvl.toUpperCase();
+    const level: 'INFO' | 'WARN' | 'ERROR' = upper.startsWith('WARN')
+      ? 'WARN'
+      : upper === 'ERROR' || upper === 'FATAL'
+      ? 'ERROR'
+      : 'INFO';
+    return {
+      timestamp: ts.endsWith('UTC') ? ts : `${ts} UTC`,
+      level,
+      message: msg,
+    };
+  }
+
+  // Pattern 2: Legacy AIM format: [2026-10-14 01:05:00 UTC] message
+  const legacyMatch = line.match(/^\[(.*?)\]\s*(.*)$/);
+  if (legacyMatch) {
+    const [, ts, msg] = legacyMatch;
+    const lower = msg.toLowerCase();
+    let level: 'INFO' | 'WARN' | 'ERROR' = 'INFO';
+    if ((!lower.includes('0 errors') && lower.includes('error')) || lower.includes('fatal') || lower.includes('failed') || lower.includes('panic')) {
+      level = 'ERROR';
+    } else if (lower.includes('warn') || lower.includes('0 configured') || lower.includes('timeout') || lower.includes('deadline exceeded')) {
+      level = 'WARN';
+    }
+    return {
+      timestamp: ts.endsWith('UTC') ? ts : `${ts} UTC`,
+      level,
+      message: msg,
+    };
+  }
+
+  // Pattern 3: Go standard log format: 2026/10/13 14:53:31 message
+  const goLogMatch = line.match(/^(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2})\s*(.*)$/);
+  if (goLogMatch) {
+    const [, rawTs, msg] = goLogMatch;
+    const ts = rawTs.replace(/\//g, '-') + ' UTC';
+    const lower = msg.toLowerCase();
+    let level: 'INFO' | 'WARN' | 'ERROR' = 'INFO';
+    if (lower.includes('error') || lower.includes('fatal') || lower.includes('failed')) {
+      level = 'ERROR';
+    } else if (lower.includes('warn') || lower.includes('deadline exceeded') || lower.includes('timeout')) {
+      level = 'WARN';
+    }
+    return {
+      timestamp: ts,
+      level,
+      message: msg,
+    };
+  }
+
+  // Fallback: No timestamp in line
+  const lower = line.toLowerCase();
+  let level: 'INFO' | 'WARN' | 'ERROR' = 'INFO';
+  if ((!lower.includes('0 errors') && lower.includes('error')) || lower.includes('failed')) {
+    level = 'ERROR';
+  } else if (lower.includes('warn') || lower.includes('timeout') || lower.includes('deadline exceeded')) {
+    level = 'WARN';
+  }
+  return {
+    timestamp: '',
+    level,
+    message: line,
+  };
+}
+
+const PAGE_SIZE = 200;
+
 export const DaemonModal: React.FC<DaemonModalProps> = ({
   open,
   onOpenChange,
@@ -55,7 +135,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
     setLoadingLogs(true);
     isInitialLoadRef.current = true;
     try {
-      const data = await getDaemonLogs(50, 0);
+      const data = await getDaemonLogs(PAGE_SIZE, 0);
       setLogs(data.lines || []);
       setTotalLogLines(data.total_lines || 0);
     } catch (err) {
@@ -69,7 +149,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
     if (loadingMoreLogs || logs.length >= totalLogLines) return;
     setLoadingMoreLogs(true);
     try {
-      const data = await getDaemonLogs(50, logs.length);
+      const data = await getDaemonLogs(PAGE_SIZE, logs.length);
       if (data.lines && data.lines.length > 0) {
         setLogs((prev) => [...data.lines, ...prev]);
       }
@@ -361,7 +441,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
             </div>
           </div>
 
-          <div className="bg-[#050505] border border-[#222222] rounded-geist p-2.5 font-mono text-[11px] max-h-44 overflow-y-auto space-y-1 select-text scrollbar-thin">
+          <div className="bg-[#050505] border border-[#222222] rounded-geist p-2.5 font-mono text-[11px] max-h-56 overflow-y-auto space-y-1 select-text scrollbar-thin">
             {loadingLogs && logs.length === 0 ? (
               <div className="py-6 text-center text-muted-foreground/60 flex items-center justify-center gap-2">
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -387,57 +467,43 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                           <span>Loading older logs...</span>
                         </>
                       ) : (
-                        <span>Load older logs ({totalLogLines - logs.length} remaining)</span>
+                        <span>
+                          Load older logs ({Math.min(PAGE_SIZE, totalLogLines - logs.length)} more, {totalLogLines - logs.length} remaining)
+                        </span>
                       )}
                     </button>
                   </div>
                 )}
-                {logs.map((line, i) => {
-                  const lower = line.toLowerCase();
-                  const hasRealError =
-                    (!lower.includes('0 errors') && lower.includes('error')) ||
-                    lower.includes('failed') ||
-                    lower.includes('fatal') ||
-                    lower.includes('panic');
-                  const isSuccess =
-                    lower.includes('completed') ||
-                    lower.includes('installed') ||
-                    lower.includes('0 errors');
-
-                  const match = line.match(/^(\[.*?\])\s*(.*)$/);
-                  if (match) {
-                    const [, timestamp, msg] = match;
-                    return (
-                      <div key={i} className="leading-relaxed break-all">
-                        <span className="text-[#666666] select-none mr-2">{timestamp}</span>
-                        <span
-                          className={cn(
-                            hasRealError
-                              ? "text-status-danger font-medium"
-                              : isSuccess
-                              ? "text-[#ededed]"
-                              : "text-[#888888]"
-                          )}
-                        >
-                          {msg}
-                        </span>
-                      </div>
-                    );
-                  }
+                {logs.map((rawLine, i) => {
+                  const { timestamp, level, message } = parseLogLine(rawLine);
 
                   return (
-                    <div
-                      key={i}
-                      className={cn(
-                        "leading-relaxed break-all",
-                        hasRealError
-                          ? "text-status-danger font-medium"
-                          : isSuccess
-                          ? "text-[#ededed]"
-                          : "text-[#888888]"
+                    <div key={i} className="leading-relaxed break-all flex items-baseline gap-2 font-mono text-[11px] py-0.5">
+                      {timestamp && (
+                        <span className="text-[#666666] select-none shrink-0 font-mono text-[10px]">
+                          [{timestamp}]
+                        </span>
                       )}
-                    >
-                      {line}
+                      <span
+                        className={cn(
+                          "font-semibold select-none shrink-0 text-[9.5px] px-1.5 py-0.2 rounded-xs uppercase tracking-wide",
+                          level === 'ERROR' && "text-red-400 bg-red-950/50 border border-red-800/50",
+                          level === 'WARN' && "text-yellow-400 bg-yellow-950/50 border border-yellow-700/50",
+                          level === 'INFO' && "text-sky-400 bg-sky-950/40 border border-sky-800/40"
+                        )}
+                      >
+                        {level}
+                      </span>
+                      <span
+                        className={cn(
+                          "flex-1",
+                          level === 'ERROR' && "text-red-300 font-medium",
+                          level === 'WARN' && "text-yellow-300 font-medium",
+                          level === 'INFO' && "text-[#ededed]"
+                        )}
+                      >
+                        {message}
+                      </span>
                     </div>
                   );
                 })}

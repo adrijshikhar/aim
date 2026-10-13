@@ -8,6 +8,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	otelLog "go.opentelemetry.io/otel/log"
@@ -51,6 +52,10 @@ func InitPostHogLogs(cfg *config.Config) {
 		logger.Debug("failed to create PostHog log exporter: %v", err)
 		return
 	}
+
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		logger.Debug("otel background error: %v", err)
+	}))
 
 	posthogLogProvider = sdklog.NewLoggerProvider(
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(exporter)),

@@ -108,7 +108,7 @@ func TestLogExecution(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "daemon.log")
 
-	if err := AppendDaemonLog(logPath, "quota refresh completed for 2 profiles"); err != nil {
+	if err := AppendDaemonLog(logPath, "INFO", "quota refresh completed for 2 profiles"); err != nil {
 		t.Fatalf("AppendDaemonLog failed: %v", err)
 	}
 
@@ -120,7 +120,10 @@ func TestLogExecution(t *testing.T) {
 	if !strings.Contains(content, "quota refresh completed for 2 profiles") {
 		t.Errorf("expected log to contain message, got: %s", content)
 	}
-	// Verify timestamp exists
+	// Verify timestamp exists and level exists
+	if !strings.Contains(content, "[INFO]") {
+		t.Errorf("expected [INFO] level tag in log, got: %s", content)
+	}
 	if !strings.Contains(content, "[") || !strings.Contains(content, "]") {
 		t.Errorf("expected timestamp bracket in log, got: %s", content)
 	}
@@ -140,9 +143,9 @@ func TestReadLastRunFromLog(t *testing.T) {
 	}
 
 	// Add entry
-	_ = AppendDaemonLog(logPath, "first run")
+	_ = AppendDaemonLog(logPath, "INFO", "first run")
 	time.Sleep(10 * time.Millisecond)
-	_ = AppendDaemonLog(logPath, "second run completed successfully")
+	_ = AppendDaemonLog(logPath, "INFO", "second run completed successfully")
 
 	lastRun, msg = ReadLastDaemonRun(logPath)
 	if lastRun.IsZero() {
@@ -234,7 +237,7 @@ func TestReadDaemonLogs(t *testing.T) {
 
 	// Append 5 lines: line1, line22, line333, line4444, line55555
 	for i := 1; i <= 5; i++ {
-		_ = AppendDaemonLog(logPath, strings.Repeat("x", i))
+		_ = AppendDaemonLog(logPath, "INFO", strings.Repeat("x", i))
 	}
 
 	// Latest 2 lines (offset 0)

@@ -337,7 +337,7 @@ export async function getDaemonStatus(): Promise<DaemonDTO> {
   return handleResponse<DaemonDTO>(res);
 }
 
-export async function getDaemonLogs(tail = 50, offset = 0): Promise<DaemonLogsDTO> {
+export async function getDaemonLogs(tail = 200, offset = 0): Promise<DaemonLogsDTO> {
   const res = await fetch(`${BASE_URL}/daemon/logs?tail=${tail}&offset=${offset}`);
   return handleResponse<DaemonLogsDTO>(res);
 }
