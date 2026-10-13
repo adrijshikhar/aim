@@ -1,6 +1,7 @@
 package oauth_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -193,5 +194,69 @@ func TestStashStore_Prune(t *testing.T) {
 	freshCred, _ := store.Find(freshToken)
 	if freshCred == nil {
 		t.Errorf("expected fresh cred to be kept")
+	}
+}
+
+func TestPersistWithStash_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewStashStore(tempDir)
+
+	spent := "spent-123"
+	res := &oauth.TokenResult{
+		AccessToken:  "new-acc",
+		RefreshToken: "new-ref",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+
+	persisted := false
+	err := oauth.PersistWithStash(store, spent, "claude", "work", res, func() error {
+		// During persistFn, the stash MUST exist
+		cred, err := store.Find(spent)
+		if err != nil || cred == nil {
+			t.Errorf("expected stash to exist during persistFn, got %v, %v", cred, err)
+		}
+		persisted = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if !persisted {
+		t.Fatalf("expected persistFn to be called")
+	}
+
+	// After success, stash must be removed
+	cred, err := store.Find(spent)
+	if err != nil || cred != nil {
+		t.Errorf("expected stash to be removed after success, got: %v", cred)
+	}
+}
+
+func TestPersistWithStash_FailureRetainsStash(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewStashStore(tempDir)
+
+	spent := "spent-fail"
+	res := &oauth.TokenResult{
+		AccessToken:  "acc-fail",
+		RefreshToken: "ref-fail",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+
+	expectedErr := errors.New("keychain locked")
+	err := oauth.PersistWithStash(store, spent, "claude", "work", res, func() error {
+		return expectedErr
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected error %v, got: %v", expectedErr, err)
+	}
+
+	// Stash MUST be retained for recovery
+	cred, err := store.Find(spent)
+	if err != nil {
+		t.Fatalf("expected nil error on Find, got: %v", err)
+	}
+	if cred == nil || cred.AccessToken != "acc-fail" {
+		t.Fatalf("expected retained stash credential, got: %+v", cred)
 	}
 }

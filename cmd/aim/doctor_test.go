@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -95,5 +97,28 @@ func TestDoctor_BridgeBlockOncePerProfile(t *testing.T) {
 	}
 	if n := strings.Count(out, "Bridge:"); n != 1 {
 		t.Errorf("expected one Bridge line for the profile, got %d:\n%s", n, out)
+	}
+}
+
+func TestDoctor_UnclaimedTokens(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	store := oauth.NewStashStore(tempDir)
+	_ = store.Save("spent-tok", "claude", "work", "acc", "ref", time.Now().Add(time.Hour))
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	_ = cmd.Execute()
+	output := buf.String()
+
+	if !strings.Contains(output, "Unclaimed OAuth tokens found") {
+		t.Errorf("expected doctor to report unclaimed OAuth tokens, got: %s", output)
 	}
 }

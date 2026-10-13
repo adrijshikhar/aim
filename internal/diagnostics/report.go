@@ -93,6 +93,11 @@ func GenerateReport(reg *agents.Registry, pm *profile.ProfileManager, cfg *confi
 	}
 	b.WriteString("## Profiles Configuration\n")
 	b.WriteString(fmt.Sprintf("- Total Configured Profiles: %d\n", totalProfiles))
+	if pm != nil {
+		if unclaimed, _ := pm.UnclaimedStore().List(); len(unclaimed) > 0 {
+			b.WriteString(fmt.Sprintf("- Unclaimed OAuth Tokens: %d\n", len(unclaimed)))
+		}
+	}
 	if cfg != nil {
 		b.WriteString(fmt.Sprintf("- Custom Bridged Paths: %d\n", len(cfg.CustomBridgedPaths)))
 		b.WriteString(fmt.Sprintf("- Custom Ignored Keychains: %d\n", len(cfg.CustomIgnoredKeychains)))
