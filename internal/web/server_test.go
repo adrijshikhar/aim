@@ -919,6 +919,7 @@ func TestServer_MCPService_ThreadSafe(t *testing.T) {
 
 type mockDaemonService struct {
 	getStatusFn func(ctx context.Context) (*service.DaemonDTO, error)
+	getLogsFn   func(ctx context.Context, maxLines int) (*service.DaemonLogsDTO, error)
 	installFn   func(ctx context.Context, binaryPath string) (*service.DaemonDTO, error)
 	uninstallFn func(ctx context.Context) error
 	runOnceFn   func(ctx context.Context) error
@@ -929,6 +930,17 @@ func (m *mockDaemonService) GetStatus(ctx context.Context) (*service.DaemonDTO, 
 		return m.getStatusFn(ctx)
 	}
 	return &service.DaemonDTO{Installed: true, Active: true, Label: "dev.aim-cli.daemon", IntervalSec: 900}, nil
+}
+
+func (m *mockDaemonService) GetLogs(ctx context.Context, maxLines int) (*service.DaemonLogsDTO, error) {
+	if m.getLogsFn != nil {
+		return m.getLogsFn(ctx, maxLines)
+	}
+	return &service.DaemonLogsDTO{
+		LogPath:    "/tmp/daemon.log",
+		Lines:      []string{"log 1", "log 2"},
+		TotalLines: 2,
+	}, nil
 }
 
 func (m *mockDaemonService) Install(ctx context.Context, binaryPath string) (*service.DaemonDTO, error) {
@@ -981,6 +993,37 @@ func TestGetDaemon(t *testing.T) {
 	}
 	if !dto.Installed || !dto.Active || dto.IntervalSec != 900 {
 		t.Errorf("unexpected daemon DTO: %+v", dto)
+	}
+}
+
+func TestGetDaemonLogs(t *testing.T) {
+	ts, srv := setupTestServer(t, nil, nil, nil, false)
+	srv.SetDaemonService(&mockDaemonService{
+		getLogsFn: func(ctx context.Context, maxLines int) (*service.DaemonLogsDTO, error) {
+			return &service.DaemonLogsDTO{
+				LogPath:    "/Users/test/.aim/daemon.log",
+				Lines:      []string{"[2026-10-14 00:00:00 UTC] daemon run: quota refresh completed (6 updated)"},
+				TotalLines: 1,
+			}, nil
+		},
+	})
+
+	resp, err := http.Get(ts.URL + "/api/daemon/logs?tail=50")
+	if err != nil {
+		t.Fatalf("GET /api/daemon/logs failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var dto service.DaemonLogsDTO
+	if err := json.NewDecoder(resp.Body).Decode(&dto); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if dto.TotalLines != 1 || len(dto.Lines) != 1 {
+		t.Errorf("unexpected daemon logs DTO: %+v", dto)
 	}
 }
 

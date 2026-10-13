@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/daemon"
@@ -30,6 +31,19 @@ func (s *daemonService) GetStatus(ctx context.Context) (*DaemonDTO, error) {
 		return nil, fmt.Errorf("failed to retrieve daemon status: %w", err)
 	}
 	return toDaemonDTO(info), nil
+}
+
+func (s *daemonService) GetLogs(ctx context.Context, maxLines int) (*DaemonLogsDTO, error) {
+	logPath := filepath.Join(s.baseDir, "daemon.log")
+	lines, total, err := daemon.ReadDaemonLogs(logPath, maxLines)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read daemon logs: %w", err)
+	}
+	return &DaemonLogsDTO{
+		LogPath:    logPath,
+		Lines:      lines,
+		TotalLines: total,
+	}, nil
 }
 
 func (s *daemonService) Install(ctx context.Context, binaryPath string) (*DaemonDTO, error) {

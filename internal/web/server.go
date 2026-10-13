@@ -141,6 +141,7 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("GET /api/health", s.handleGetStatus)
 	mux.HandleFunc("GET /api/mcp", s.handleGetMcpServers)
 	mux.HandleFunc("GET /api/daemon", s.handleGetDaemon)
+	mux.HandleFunc("GET /api/daemon/logs", s.handleGetDaemonLogs)
 	mux.HandleFunc("POST /api/daemon/install", s.handleDaemonInstall)
 	mux.HandleFunc("POST /api/daemon/uninstall", s.handleDaemonUninstall)
 	mux.HandleFunc("POST /api/daemon/run", s.handleDaemonRun)

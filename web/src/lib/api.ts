@@ -318,9 +318,20 @@ export interface DaemonDTO {
   last_run_message?: string;
 }
 
+export interface DaemonLogsDTO {
+  log_path: string;
+  lines: string[];
+  total_lines: number;
+}
+
 export async function getDaemonStatus(): Promise<DaemonDTO> {
   const res = await fetch(`${BASE_URL}/daemon`);
   return handleResponse<DaemonDTO>(res);
+}
+
+export async function getDaemonLogs(tail = 100): Promise<DaemonLogsDTO> {
+  const res = await fetch(`${BASE_URL}/daemon/logs?tail=${tail}`);
+  return handleResponse<DaemonLogsDTO>(res);
 }
 
 export async function installDaemon(binaryPath?: string): Promise<DaemonDTO> {

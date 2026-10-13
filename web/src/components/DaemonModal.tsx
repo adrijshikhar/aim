@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -19,8 +19,10 @@ import {
   Check,
   Copy,
   Folder,
+  Terminal,
 } from 'lucide-react';
-import { DaemonDTO, installDaemon, uninstallDaemon, runDaemonOnce } from '../lib/api';
+import { DaemonDTO, installDaemon, uninstallDaemon, runDaemonOnce, getDaemonLogs } from '../lib/api';
+import { cn } from '../lib/utils';
 import { useToast } from './ui/use-toast';
 
 interface DaemonModalProps {
@@ -40,7 +42,43 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
   const [installing, setInstalling] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [copiedLogs, setCopiedLogs] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [totalLogLines, setTotalLogLines] = useState(0);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const logEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  const fetchLogs = useCallback(async () => {
+    setLoadingLogs(true);
+    try {
+      const data = await getDaemonLogs(100);
+      setLogs(data.lines || []);
+      setTotalLogLines(data.total_lines || 0);
+    } catch (err) {
+      console.error('Failed to load daemon logs', err);
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      fetchLogs();
+    }
+  }, [open, fetchLogs]);
+
+  useEffect(() => {
+    if (logs.length > 0) {
+      logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs]);
+
+  const handleCopyLogs = () => {
+    navigator.clipboard.writeText(logs.join('\n'));
+    setCopiedLogs(true);
+    setTimeout(() => setCopiedLogs(false), 2000);
+  };
 
   const handleCopy = (key: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -58,6 +96,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         variant: 'success',
       });
       await onRefreshDaemon();
+      await fetchLogs();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to install daemon';
       toast({
@@ -80,6 +119,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         variant: 'success',
       });
       await onRefreshDaemon();
+      await fetchLogs();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to uninstall daemon';
       toast({
@@ -102,6 +142,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         variant: 'success',
       });
       await onRefreshDaemon();
+      await fetchLogs();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to run daemon task';
       toast({
@@ -136,7 +177,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl bg-card border-border text-foreground p-6 shadow-2xl rounded-geist">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-card border-border text-foreground p-6 shadow-2xl rounded-geist">
         <DialogHeader className="space-y-1.5 pb-3 border-b border-border pr-8">
           <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
@@ -256,7 +297,82 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
           )}
         </div>
 
-        <DialogFooter className="pt-2 border-t border-border flex items-center justify-between sm:justify-between w-full">
+        {/* Execution Log Stream */}
+        <div className="rounded-geist border border-border bg-background p-3 text-xs space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground">
+                Execution Logs
+              </span>
+              {totalLogLines > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-mono bg-secondary/40 text-muted-foreground border-border px-1.5 py-0 rounded-geist"
+                >
+                  {totalLogLines} lines
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={fetchLogs}
+                disabled={loadingLogs}
+                title="Refresh logs"
+                className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                <RefreshCw className={cn("h-3 w-3", loadingLogs && "animate-spin")} />
+                Refresh
+              </button>
+              {logs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleCopyLogs}
+                  title="Copy logs"
+                  className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  {copiedLogs ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
+                  {copiedLogs ? 'Copied' : 'Copy'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-[#050505] border border-[#222222] rounded-geist p-2.5 font-mono text-[11px] max-h-44 overflow-y-auto space-y-1 select-text scrollbar-thin">
+            {loadingLogs && logs.length === 0 ? (
+              <div className="py-6 text-center text-muted-foreground/60 flex items-center justify-center gap-2">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                <span>Loading daemon logs...</span>
+              </div>
+            ) : logs.length === 0 ? (
+              <div className="py-6 text-center text-muted-foreground/60">
+                No daemon logs recorded yet. Trigger a sync below to generate execution records.
+              </div>
+            ) : (
+              <>
+                {logs.map((line, i) => {
+                  const isErr = line.toLowerCase().includes('error') || line.toLowerCase().includes('failed');
+                  const isSuccess = line.toLowerCase().includes('completed') || line.toLowerCase().includes('installed');
+                  return (
+                    <div
+                      key={i}
+                      className={cn(
+                        "leading-relaxed break-all",
+                        isErr ? "text-status-danger" : isSuccess ? "text-[#a3e635]" : "text-muted-foreground"
+                      )}
+                    >
+                      {line}
+                    </div>
+                  );
+                })}
+                <div ref={logEndRef} />
+              </>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="pt-2 flex items-center justify-between sm:justify-between w-full">
           {isInstalled ? (
             <Button
               type="button"

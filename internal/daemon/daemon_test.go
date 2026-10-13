@@ -218,3 +218,36 @@ func TestRunOnce_Success(t *testing.T) {
 		t.Errorf("cached report does not match expected: %+v", rep)
 	}
 }
+
+func TestReadDaemonLogs(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "daemon.log")
+
+	// Missing file returns empty without error
+	lines, total, err := ReadDaemonLogs(logPath, 10)
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if len(lines) != 0 || total != 0 {
+		t.Errorf("expected 0 lines for missing file, got %d, total %d", len(lines), total)
+	}
+
+	// Append 5 lines
+	for i := 1; i <= 5; i++ {
+		_ = AppendDaemonLog(logPath, strings.Repeat("line", i))
+	}
+
+	lines, total, err = ReadDaemonLogs(logPath, 3)
+	if err != nil {
+		t.Fatalf("ReadDaemonLogs failed: %v", err)
+	}
+	if total != 5 {
+		t.Errorf("expected total 5, got %d", total)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines returned, got %d", len(lines))
+	}
+	if !strings.Contains(lines[2], "linelinelinelineline") {
+		t.Errorf("expected last line to contain 5x line, got: %s", lines[2])
+	}
+}

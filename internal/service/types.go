@@ -184,9 +184,17 @@ type DaemonDTO struct {
 	LastRunMessage string    `json:"last_run_message,omitempty"`
 }
 
+// DaemonLogsDTO represents recent log records from the daemon log file.
+type DaemonLogsDTO struct {
+	LogPath    string   `json:"log_path"`
+	Lines      []string `json:"lines"`
+	TotalLines int      `json:"total_lines"`
+}
+
 // DaemonService provides management of the host OS background daemon service.
 type DaemonService interface {
 	GetStatus(ctx context.Context) (*DaemonDTO, error)
+	GetLogs(ctx context.Context, maxLines int) (*DaemonLogsDTO, error)
 	Install(ctx context.Context, binaryPath string) (*DaemonDTO, error)
 	Uninstall(ctx context.Context) error
 	RunOnce(ctx context.Context) error

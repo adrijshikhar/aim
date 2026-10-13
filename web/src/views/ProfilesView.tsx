@@ -809,7 +809,7 @@ export function ProfilesView({
                 <Gauge className="h-3.5 w-3.5 text-[#666666]" />
                 <span>Quota</span>
                 {profileAdapters.length > 1 && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                  <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
                     {profileAdapters.length}
                   </span>
                 )}
@@ -817,14 +817,14 @@ export function ProfilesView({
               <TabsTrigger value="sessions" className="gap-2 text-xs">
                 <Terminal className="h-3.5 w-3.5 text-[#666666]" />
                 <span>Sessions</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
                   {profileSessions.length}
                 </span>
               </TabsTrigger>
               <TabsTrigger value="mcp" className="gap-2 text-xs">
                 <Server className="h-3.5 w-3.5 text-[#666666]" />
                 <span>MCP Tools</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
                   {profileMcpServers.length}
                 </span>
               </TabsTrigger>

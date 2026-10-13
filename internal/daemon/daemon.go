@@ -151,6 +151,33 @@ func AppendDaemonLog(logPath, message string) error {
 	return err
 }
 
+// ReadDaemonLogs returns up to maxLines most recent lines from the daemon log.
+func ReadDaemonLogs(logPath string, maxLines int) ([]string, int, error) {
+	if maxLines <= 0 {
+		maxLines = 100
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, 0, nil
+		}
+		return nil, 0, err
+	}
+	if len(data) == 0 {
+		return []string{}, 0, nil
+	}
+	raw := strings.TrimRight(string(data), "\r\n")
+	if raw == "" {
+		return []string{}, 0, nil
+	}
+	allLines := strings.Split(raw, "\n")
+	total := len(allLines)
+	if len(allLines) > maxLines {
+		allLines = allLines[len(allLines)-maxLines:]
+	}
+	return allLines, total, nil
+}
+
 // ReadLastDaemonRun parses the most recent execution timestamp and message from the daemon log.
 func ReadLastDaemonRun(logPath string) (time.Time, string) {
 	data, err := os.ReadFile(logPath)

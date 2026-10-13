@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/aim-cli/aim/internal/service"
 )
@@ -27,6 +28,35 @@ func (s *Server) handleGetDaemon(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, info)
+}
+
+// handleGetDaemonLogs handles GET /api/daemon/logs to view recent daemon log records.
+func (s *Server) handleGetDaemonLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	daemonSvc := s.DaemonService()
+	if daemonSvc == nil {
+		writeJSON(w, http.StatusOK, &service.DaemonLogsDTO{Lines: []string{}})
+		return
+	}
+
+	maxLines := 100
+	if tailStr := r.URL.Query().Get("tail"); tailStr != "" {
+		if n, err := strconv.Atoi(tailStr); err == nil && n > 0 && n <= 1000 {
+			maxLines = n
+		}
+	}
+
+	logs, err := daemonSvc.GetLogs(r.Context(), maxLines)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, logs)
 }
 
 // handleDaemonInstall handles POST /api/daemon/install to install and start the background service.
