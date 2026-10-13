@@ -130,6 +130,12 @@ func (s *Server) callWhoami(id any) JSONRPCResponse {
 	cacheStore := usage.NewCacheStore(baseDir, usage.DefaultTTL)
 	if rep, ok := cacheStore.Get(agentName, profileName); ok && rep.Summary != "" {
 		quotaSummary = rep.Summary
+	} else if rep, ok := cacheStore.GetStale(agentName, profileName); ok && rep.Summary != "" {
+		quotaSummary = rep.Summary
+	} else if s.reg != nil {
+		if adapter, err := s.reg.Get(agentName); err == nil && adapter.HasCredentials(profileDir) {
+			quotaSummary = "[run 'aim usage' to inspect limits]"
+		}
 	}
 
 	payload := map[string]any{

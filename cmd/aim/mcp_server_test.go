@@ -350,3 +350,29 @@ func TestMCPServeCmd_NoArgsConstraint(t *testing.T) {
 		t.Fatal("expected error when positional args provided to serve, got nil")
 	}
 }
+
+func TestMCPInstallCmd_CorruptConfigRefusesOverwrite(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	claudePath := filepath.Join(tempDir, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(`{corrupt json`), 0600)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"mcp", "install", "claude"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when .claude.json is corrupt, got nil")
+	}
+
+	content, _ := os.ReadFile(claudePath)
+	if string(content) != "{corrupt json" {
+		t.Errorf("file was modified despite corruption error: %s", string(content))
+	}
+}

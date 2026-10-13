@@ -219,6 +219,58 @@ func TestMCPServer_ToolCall_Whoami(t *testing.T) {
 	}
 }
 
+func TestMCPServer_ToolCall_Whoami_StaleQuota(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_PROFILE", "work")
+	t.Setenv("AIM_AGENT", "claude")
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	// Pre-seed an expired/stale report with short TTL
+	cacheStore := usage.NewCacheStore(tempDir, time.Millisecond)
+	_ = cacheStore.Put(usage.Report{
+		Agent:     "claude",
+		Profile:   "work",
+		Status:    usage.StatusOK,
+		Summary:   "Stale 50% remaining",
+		FetchedAt: time.Now().Add(-time.Hour),
+	})
+	time.Sleep(10 * time.Millisecond) // expire TTL
+
+	srv := aimmcp.NewServer(reg, pm, tempDir)
+	input := `{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"aim_whoami","arguments":{}}}` + "\n"
+	var inBuf bytes.Buffer
+	inBuf.WriteString(input)
+	var outBuf bytes.Buffer
+
+	if err := srv.Serve(&inBuf, &outBuf); err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	var callResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &callResp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(callResp.Result.Content) == 0 {
+		t.Fatal("expected content")
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(callResp.Result.Content[0].Text), &data); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if data["quota_summary"] != "Stale 50% remaining" {
+		t.Errorf("expected stale quota %q, got %v", "Stale 50% remaining", data["quota_summary"])
+	}
+}
+
 func TestMCPServer_ToolCall_GetQuota(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_PROFILE", "dev")

@@ -132,8 +132,14 @@ func installClaudeMCPEntry(path string) error {
 	}
 
 	var fullDoc map[string]any
-	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
-		_ = json.Unmarshal(data, &fullDoc)
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read existing claude config at %s: %w", path, err)
+	}
+	if err == nil && len(data) > 0 {
+		if jsonErr := json.Unmarshal(data, &fullDoc); jsonErr != nil {
+			return fmt.Errorf("failed to parse existing claude config at %s: %w", path, jsonErr)
+		}
 	}
 	if fullDoc == nil {
 		fullDoc = make(map[string]any)
