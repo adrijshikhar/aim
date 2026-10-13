@@ -464,4 +464,3 @@ func TestMCPServer_MalformedJSONRecovery(t *testing.T) {
 		t.Errorf("expected ID 99, got %d", pingResp.ID)
 	}
 }
-
