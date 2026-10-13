@@ -67,6 +67,7 @@ func (p *Provider) listFromJSONL(indexPath, profileName string, isHost bool) ([]
 			if f, err := os.Open(s.StoragePath); err == nil {
 				if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
 					s.Progress = fmt.Sprintf("%d turns", tc)
+					s.MessageCount = tc
 				}
 				_ = f.Close()
 			}

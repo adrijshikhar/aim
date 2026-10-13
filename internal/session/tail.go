@@ -20,7 +20,9 @@ func ReadTurnCounts(f *os.File) (int, error) {
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if bytes.Contains(line, []byte(`"type":"USER_INPUT"`)) ||
-			bytes.Contains(line, []byte(`"type":"user"`)) {
+			bytes.Contains(line, []byte(`"type":"user"`)) ||
+			bytes.Contains(line, []byte(`"type":"SYSTEM_MESSAGE"`)) ||
+			bytes.Contains(line, []byte(`"source":"USER_EXPLICIT"`)) {
 			turns++
 		}
 	}
@@ -39,7 +41,9 @@ func ReadMessageCounts(f *os.File) (int, error) {
 		line := scanner.Bytes()
 		if bytes.Contains(line, []byte(`"type":"user"`)) ||
 			bytes.Contains(line, []byte(`"type":"assistant"`)) ||
-			bytes.Contains(line, []byte(`"type":"USER_INPUT"`)) {
+			bytes.Contains(line, []byte(`"type":"USER_INPUT"`)) ||
+			bytes.Contains(line, []byte(`"type":"PLANNER_RESPONSE"`)) ||
+			bytes.Contains(line, []byte(`"type":"SYSTEM_MESSAGE"`)) {
 			count++
 		}
 	}

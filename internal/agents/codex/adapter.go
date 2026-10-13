@@ -26,12 +26,13 @@ import (
 
 // Compile-time assertions that Adapter implements the segregated agent interfaces.
 var (
-	_ agents.AgentAdapter        = (*Adapter)(nil)
-	_ agents.Authenticator       = (*Adapter)(nil)
-	_ agents.Diagnostician       = (*Adapter)(nil)
-	_ agents.UsageProvider       = (*Adapter)(nil)
-	_ agents.AccountInfoProvider = (*Adapter)(nil)
-	_ agents.FullAdapter         = (*Adapter)(nil)
+	_ agents.AgentAdapter          = (*Adapter)(nil)
+	_ agents.Authenticator         = (*Adapter)(nil)
+	_ agents.Diagnostician         = (*Adapter)(nil)
+	_ agents.UsageProvider         = (*Adapter)(nil)
+	_ agents.AccountInfoProvider   = (*Adapter)(nil)
+	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
+	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
 type Adapter struct {
@@ -843,4 +844,33 @@ func getAllLatestCodexRateLimits(profileName, profileDir string) []*codexRateLim
 		results = append(results, collected[k])
 	}
 	return results
+}
+
+// RunnableFlags returns the list of CLI flags supported by the codex executable.
+func (a *Adapter) RunnableFlags() []agents.RunnableFlag {
+	return []agents.RunnableFlag{
+		{
+			Flag:        "--approval-mode full-auto",
+			Name:        "Full Auto Approval",
+			Description: "Run commands and apply edits automatically without confirmation.",
+			Type:        "choice",
+			Choices:     []string{"full-auto", "auto-edit", "suggest"},
+			Default:     "full-auto",
+			Dangerous:   true,
+		},
+		{
+			Flag:        "--stream",
+			Name:        "Stream Output",
+			Description: "Stream token completions in real time.",
+			Type:        "bool",
+			Dangerous:   false,
+		},
+		{
+			Flag:        "--no-alt-screen",
+			Name:        "Disable Alternate Screen",
+			Description: "Keep conversation visible in the standard scrollback buffer.",
+			Type:        "bool",
+			Dangerous:   false,
+		},
+	}
 }

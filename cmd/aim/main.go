@@ -29,7 +29,7 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 	defer logger.Close()
 
 	cfg, _ := config.LoadConfig()
-	updater.MaybeTriggerBackgroundCheck(Version, config.CacheDir())
+	updater.MaybeTriggerBackgroundCheck(GetVersion(), config.CacheDir())
 	if cfg != nil && cfg.Debug {
 		env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_DEBUG")))
 		if env != "0" && env != "false" && env != "no" && env != "off" {

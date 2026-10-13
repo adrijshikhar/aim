@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
@@ -18,6 +19,7 @@ import (
 )
 
 var (
+	versionMu sync.RWMutex
 	// Version is the current version of AIM, injected at build time via -ldflags.
 	Version = "dev"
 	// Commit is the git commit hash at build time.
@@ -26,7 +28,23 @@ var (
 	Date = "unknown"
 
 	debugFlag bool
+)
 
+// GetVersion returns the current version safely across goroutines.
+func GetVersion() string {
+	versionMu.RLock()
+	defer versionMu.RUnlock()
+	return Version
+}
+
+// SetVersion sets the current version safely across goroutines.
+func SetVersion(v string) {
+	versionMu.Lock()
+	defer versionMu.Unlock()
+	Version = v
+}
+
+var (
 	gitDescribeSuffixRegex = regexp.MustCompile(`(-\d+)?-g[0-9a-fA-F]+([-+]dirty)?$`)
 	dirtySuffixRegex       = regexp.MustCompile(`[-+]dirty$`)
 	commitHashOnlyRegex    = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
@@ -128,6 +146,7 @@ Primary Commands:
   mv <agent> <src> <dst>     Move agent account and credentials between profiles
   daemon [cmd]               Manage periodic background daemon tasks
   whoami                     Show active profile, agent, session, and quota
+  web                        Start the AIM web dashboard
   mcp [serve|install]        Read-only stdio MCP server for agent self-inspection
   completion <shell>         Generate shell completion script (zsh, bash, fish)
 
@@ -176,6 +195,7 @@ Flags:
 		newMCPCmd(reg, pm),
 		newCompletionCmd(rootCmd),
 		newVersionCmd(),
+		newWebCmd(reg, pm),
 	)
 
 	return rootCmd

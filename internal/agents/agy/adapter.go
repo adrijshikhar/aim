@@ -59,13 +59,14 @@ func getOAuthCredentials() (string, string) {
 
 // Compile-time assertions that Adapter implements the segregated agent interfaces.
 var (
-	_ agents.AgentAdapter        = (*Adapter)(nil)
-	_ agents.Authenticator       = (*Adapter)(nil)
-	_ agents.Diagnostician       = (*Adapter)(nil)
-	_ agents.UsageProvider       = (*Adapter)(nil)
-	_ agents.AccountInfoProvider = (*Adapter)(nil)
-	_ agents.FullAdapter         = (*Adapter)(nil)
-	_ agents.PostLauncher        = (*Adapter)(nil)
+	_ agents.AgentAdapter          = (*Adapter)(nil)
+	_ agents.Authenticator         = (*Adapter)(nil)
+	_ agents.Diagnostician         = (*Adapter)(nil)
+	_ agents.UsageProvider         = (*Adapter)(nil)
+	_ agents.AccountInfoProvider   = (*Adapter)(nil)
+	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
+	_ agents.FullAdapter           = (*Adapter)(nil)
+	_ agents.PostLauncher          = (*Adapter)(nil)
 )
 
 type Adapter struct {
@@ -1060,4 +1061,24 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 	}
 
 	return report, nil
+}
+
+// RunnableFlags returns the list of CLI flags supported by the agy executable.
+func (a *Adapter) RunnableFlags() []agents.RunnableFlag {
+	return []agents.RunnableFlag{
+		{
+			Flag:        "--auto-approve",
+			Name:        "Auto Approve",
+			Description: "Automatically execute proposed tool actions without manual confirmation.",
+			Type:        "bool",
+			Dangerous:   true,
+		},
+		{
+			Flag:        "--debug",
+			Name:        "Debug Mode",
+			Description: "Enable verbose engine diagnostics and debugging traces.",
+			Type:        "bool",
+			Dangerous:   false,
+		},
+	}
 }
