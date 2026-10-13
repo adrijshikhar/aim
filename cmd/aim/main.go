@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -40,14 +39,14 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 	telemetry.InitPostHog(cfg)
 	defer func() {
 		if err := telemetry.ClosePostHog(); err != nil {
-			log.Printf("error closing PostHog client: %v", err)
+			logger.Debug("error closing PostHog client: %v", err)
 		}
 	}()
 
 	telemetry.InitPostHogLogs(cfg)
 	defer func() {
 		if err := telemetry.ClosePostHogLogs(); err != nil {
-			log.Printf("error closing PostHog log exporter: %v", err)
+			logger.Debug("error closing PostHog log exporter: %v", err)
 		}
 	}()
 	if len(args) == 0 || args[0] != "__complete" {
