@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -28,17 +30,34 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			if len(cleanArgs) > 0 && (cleanArgs[0] == "-h" || cleanArgs[0] == "--help") {
 				return cmd.Help()
 			}
-			if len(cleanArgs) < 2 {
+			if len(cleanArgs) == 0 {
 				return fmt.Errorf("run requires <agent> and <profile>")
 			}
 			agentName := cleanArgs[0]
-			profileName := cleanArgs[1]
+			var profileName string
 			var extraArgs []string
-			if len(cleanArgs) > 2 {
-				extraArgs = cleanArgs[2:]
-				if len(extraArgs) > 0 && extraArgs[0] == "--" {
-					extraArgs = extraArgs[1:]
+
+			if len(cleanArgs) >= 2 && !strings.HasPrefix(cleanArgs[1], "-") {
+				profileName = cleanArgs[1]
+				if len(cleanArgs) > 2 {
+					extraArgs = cleanArgs[2:]
 				}
+			} else {
+				// No explicit profile argument provided; attempt repository directory binding resolution
+				cwd, _ := os.Getwd()
+				if res, err := profile.ResolveDirProfile(cwd); err == nil && res != nil && res.Profile != "" {
+					profileName = res.Profile
+					fmt.Fprintf(cmd.ErrOrStderr(), "[aim] Using repository-bound profile '%s' from %s\n", profileName, filepath.Base(res.SourceFile))
+				} else {
+					return fmt.Errorf("run requires <agent> and <profile>")
+				}
+				if len(cleanArgs) > 1 {
+					extraArgs = cleanArgs[1:]
+				}
+			}
+
+			if len(extraArgs) > 0 && extraArgs[0] == "--" {
+				extraArgs = extraArgs[1:]
 			}
 			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName), autoCreate)
 			if err != nil {

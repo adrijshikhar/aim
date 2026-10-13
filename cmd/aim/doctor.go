@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -92,6 +93,7 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 		diagnosePlatformTo(out, agentName, cfg)
 		diagnoseDaemonTo(out)
 		diagnoseUnclaimedTokensTo(out, baseDir, agentName)
+		diagnoseBindingTo(out)
 		return ok
 	}
 
@@ -105,6 +107,7 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 	diagnosePlatformTo(out, "", cfg)
 	diagnoseDaemonTo(out)
 	diagnoseUnclaimedTokensTo(out, baseDir, "")
+	diagnoseBindingTo(out)
 	return allOK
 }
 
@@ -286,4 +289,20 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 
 func generateDiagnosticReport(reg *agents.Registry, pm *profile.ProfileManager, agentName string) string {
 	return diagnostics.GenerateReport(reg, pm, nil, agentName, Version, Commit)
+}
+
+func diagnoseBindingTo(out io.Writer) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	res, err := profile.ResolveDirProfile(cwd)
+	if err != nil || res == nil {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Repository Binding]"))
+	okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
+	cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Binding:")
+	fmt.Fprintf(out, "  %s %s Directory bound to profile '%s' (via %s)\n", okBadge, cat, res.Profile, filepath.Base(res.SourceFile))
 }
