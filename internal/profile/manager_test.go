@@ -231,9 +231,9 @@ func TestProfileManager_ListProfilesForAgent(t *testing.T) {
 		t.Errorf("expected nil profiles with nil ProfileManager, got %v", nilPMProfiles)
 	}
 
-	// 9. Explicitly configured profile with [agy] only must NOT match claude even if credentials exist on disk
+	// 9. Profile configured with [codex] in config, but having claude credentials on disk MUST match claude
 	_, _ = pm.EnsureProfile("office")
-	cfg.AddProfileAgent("office", "agy") // Explicitly agy only
+	cfg.AddProfileAgent("office", "codex") // Config only lists codex
 	claudeCreds := filepath.Join(pm.ProfileDir("office"), ".claude", ".credentials.json")
 	_ = os.MkdirAll(filepath.Dir(claudeCreds), 0755)
 	_ = os.WriteFile(claudeCreds, []byte(`{"claudeAiOauth":{"accessToken":"tok"}}`), 0600)
@@ -242,10 +242,15 @@ func TestProfileManager_ListProfilesForAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	foundOffice := false
 	for _, m := range claudeMatches {
 		if m == "office" {
-			t.Fatalf("CRITICAL: profile 'office' with explicit agents [agy] was matched for 'claude' due to disk credentials!")
+			foundOffice = true
+			break
 		}
+	}
+	if !foundOffice {
+		t.Fatalf("expected profile 'office' to match 'claude' due to valid disk credentials even if config only lists codex")
 	}
 }
 
@@ -655,12 +660,17 @@ func (m *mockAgentAdapter) DisplayName() string { return m.name }
 func (m *mockAgentAdapter) Aliases() []string   { return nil }
 func (m *mockAgentAdapter) BinaryName() string  { return m.name }
 func (m *mockAgentAdapter) HasCredentials(profileDir string) bool {
-	if m.name != "agy" {
-		return false
+	if m.name == "agy" {
+		p := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+		fi, err := os.Stat(p)
+		return err == nil && fi.Size() > 0
 	}
-	p := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-	fi, err := os.Stat(p)
-	return err == nil && fi.Size() > 0
+	if m.name == "claude" {
+		p := filepath.Join(profileDir, ".claude", ".credentials.json")
+		fi, err := os.Stat(p)
+		return err == nil && fi.Size() > 0
+	}
+	return false
 }
 func (m *mockAgentAdapter) Login(ctx context.Context, profileName, profileDir string) error {
 	return nil

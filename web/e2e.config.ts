@@ -17,10 +17,10 @@ export default {
     {
       engine: web(),
       app: {
-        url: process.env.APP_URL || 'http://127.0.0.1:8080',
+        url: process.env.APP_URL || 'http://127.0.0.1:18480',
         command: {
           executable: 'go',
-          args: ['run', 'github.com/aim-cli/aim/cmd/aim', 'web', '--port', '8080', '--no-open'],
+          args: ['run', 'github.com/aim-cli/aim/cmd/aim', 'web', '--foreground', '--port', '18480', '--no-open'],
           reuseExisting: false,
           log: '.e2e/logs/app.log',
         },
