@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.0](https://github.com/adrijshikhar/aim/compare/v0.12.0...v0.13.0) (2026-10-13)
+
+
+### Features
+
+* **daemon:** add native OS background service for 15-minute quota cache refresh ([#81](https://github.com/adrijshikhar/aim/issues/81)) ([affbe58](https://github.com/adrijshikhar/aim/commit/affbe583c4885d9287c6b65cdf2beadc324566a6))
+* diagnostics, feedback reporting, auto-updater, and telemetry with runtime fixes ([#79](https://github.com/adrijshikhar/aim/issues/79)) ([56baa03](https://github.com/adrijshikhar/aim/commit/56baa0394d5bd27b77f02aa7a889643083289b90))
+* **mcp:** add read-only stdio MCP server ('aim mcp serve') ([#83](https://github.com/adrijshikhar/aim/issues/83)) ([48e4bcc](https://github.com/adrijshikhar/aim/commit/48e4bcc9c7ceb06bf28c3dd69ade09b39feb2aae))
+* **oauth:** crash-resilient unclaimed token stash store ([#82](https://github.com/adrijshikhar/aim/issues/82)) ([eb852c7](https://github.com/adrijshikhar/aim/commit/eb852c7f5aa29ab32e359308d378b812538093bd))
+* **session:** add generic CWD resolution and rich session summaries across adapters ([#75](https://github.com/adrijshikhar/aim/issues/75)) ([51d6865](https://github.com/adrijshikhar/aim/commit/51d6865bb99025954673fd8f2d007d7c60c84cc9))
+
+
+### Bug Fixes
+
+* **usage:** prevent false offline badge during quota refresh and preserve cached quotas ([#77](https://github.com/adrijshikhar/aim/issues/77)) ([eeb7375](https://github.com/adrijshikhar/aim/commit/eeb737549b629b599b2b7a37a625463166293298))
+
 ## [0.12.0](https://github.com/adrijshikhar/aim/compare/v0.11.2...v0.12.0) (2026-10-02)
 
 
