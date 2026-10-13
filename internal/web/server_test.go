@@ -1140,4 +1140,3 @@ func TestCrossOriginProtection(t *testing.T) {
 		t.Errorf("expected 200 OK for GET status, got %d", resp.StatusCode)
 	}
 }
-

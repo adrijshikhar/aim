@@ -30,4 +30,3 @@ func (f *fallbackLauncher) LaunchInTerminal(ctx context.Context, term, cmdStr st
 func (f *fallbackLauncher) AvailableTerminals() []string {
 	return nil
 }
-

@@ -19,11 +19,11 @@ var (
 )
 
 type sessionService struct {
-	mgr       *session.Manager
-	launcher  LauncherService
-	mu        sync.RWMutex
-	cache     []SessionDTO
-	cachedAt  time.Time
+	mgr      *session.Manager
+	launcher LauncherService
+	mu       sync.RWMutex
+	cache    []SessionDTO
+	cachedAt time.Time
 }
 
 // NewSessionService creates a new SessionService wrapping session.Manager and LauncherService.
