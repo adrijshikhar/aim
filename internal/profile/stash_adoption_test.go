@@ -67,3 +67,28 @@ func TestProfileManager_AdoptStash(t *testing.T) {
 		t.Errorf("expected 1 file pruned, got %d", pruned)
 	}
 }
+
+func TestProfileManager_RemoveStash(t *testing.T) {
+	tempDir := t.TempDir()
+	pm := profile.NewProfileManager(tempDir)
+
+	spentToken := "tok-to-remove"
+	_ = pm.UnclaimedStore().Save(spentToken, "claude", "work", "acc", "ref", time.Now().Add(time.Hour))
+
+	cred, err := pm.AdoptStash("claude", "work", spentToken)
+	if err != nil || cred == nil {
+		t.Fatalf("expected to adopt stash: %v", err)
+	}
+
+	if err := pm.RemoveStash(spentToken); err != nil {
+		t.Fatalf("expected nil error on RemoveStash: %v", err)
+	}
+
+	credAfter, err := pm.AdoptStash("claude", "work", spentToken)
+	if err != nil {
+		t.Fatalf("expected nil error after removal: %v", err)
+	}
+	if credAfter != nil {
+		t.Errorf("expected cred to be nil after RemoveStash")
+	}
+}

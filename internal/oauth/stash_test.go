@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,5 +259,112 @@ func TestPersistWithStash_FailureRetainsStash(t *testing.T) {
 	}
 	if cred == nil || cred.AccessToken != "acc-fail" {
 		t.Fatalf("expected retained stash credential, got: %+v", cred)
+	}
+}
+
+func TestStashStore_EmptySpentToken(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewStashStore(tempDir)
+
+	if err := store.Save("", "claude", "work", "acc", "ref", time.Now()); err == nil {
+		t.Errorf("expected error on empty spentToken in Save, got nil")
+	}
+	if err := store.Save("   ", "claude", "work", "acc", "ref", time.Now()); err == nil {
+		t.Errorf("expected error on whitespace spentToken in Save, got nil")
+	}
+
+	if _, err := store.Find(""); err == nil {
+		t.Errorf("expected error on empty spentToken in Find, got nil")
+	}
+	if _, err := store.Adopt("", "claude", "work"); err == nil {
+		t.Errorf("expected error on empty spentToken in Adopt, got nil")
+	}
+	if err := store.Remove(""); err == nil {
+		t.Errorf("expected error on empty spentToken in Remove, got nil")
+	}
+}
+
+func TestStashStore_Prune_ZeroDurationDefaultsToSevenDaysAndPrunesTmp(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewStashStore(tempDir)
+
+	freshTok := "fresh-token-keep"
+	_ = store.Save(freshTok, "claude", "work", "acc", "ref", time.Now())
+
+	// Create an old json stash and an old orphaned .tmp file
+	oldTok := "old-token-delete"
+	_ = store.Save(oldTok, "claude", "work", "acc", "ref", time.Now())
+	oldJsonPath := store.StashPath(oldTok)
+	oldTmpPath := filepath.Join(store.Dir, "orphaned-crash-1234.tmp")
+	_ = os.WriteFile(oldTmpPath, []byte("crash-data"), 0600)
+
+	oldTime := time.Now().Add(-10 * 24 * time.Hour)
+	_ = os.Chtimes(oldJsonPath, oldTime, oldTime)
+	_ = os.Chtimes(oldTmpPath, oldTime, oldTime)
+
+	// Calling Prune(0) should default to 7 days, NOT wipe fresh tokens
+	pruned, err := store.Prune(0)
+	if err != nil {
+		t.Fatalf("Prune(0) returned error: %v", err)
+	}
+	if pruned != 2 {
+		t.Errorf("expected 2 files pruned (.json and .tmp), got %d", pruned)
+	}
+
+	// Fresh token must still exist
+	freshCred, err := store.Find(freshTok)
+	if err != nil || freshCred == nil {
+		t.Fatalf("fresh token was improperly pruned by Prune(0): %v", err)
+	}
+
+	// Old files must be gone
+	if _, err := os.Stat(oldJsonPath); !os.IsNotExist(err) {
+		t.Errorf("expected old json file to be deleted")
+	}
+	if _, err := os.Stat(oldTmpPath); !os.IsNotExist(err) {
+		t.Errorf("expected old tmp file to be deleted")
+	}
+}
+
+func TestStashStore_ConcurrentSave(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewStashStore(tempDir)
+
+	spent := "concurrent-spent-token"
+	var wg sync.WaitGroup
+	errCh := make(chan error, 10)
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			err := store.Save(spent, "claude", "work", "acc", "ref", time.Now().Add(time.Hour))
+			if err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("unexpected error in concurrent Save: %v", err)
+	}
+
+	cred, err := store.Find(spent)
+	if err != nil || cred == nil {
+		t.Fatalf("expected valid stash after concurrent saves, got: %+v, err: %v", cred, err)
+	}
+}
+
+func TestPersistWithStash_NilPersistFn(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewStashStore(tempDir)
+
+	res := &oauth.TokenResult{AccessToken: "acc", RefreshToken: "ref"}
+	err := oauth.PersistWithStash(store, "spent", "claude", "work", res, nil)
+	if err != nil {
+		t.Errorf("expected nil error on nil persistFn, got: %v", err)
 	}
 }

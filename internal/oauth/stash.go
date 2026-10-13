@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,8 @@ type StashedCredential struct {
 	Profile        string    `json:"profile"`
 	AccessToken    string    `json:"access_token"`
 	RefreshToken   string    `json:"refresh_token"`
+	TokenType      string    `json:"token_type,omitempty"`
+	IDToken        string    `json:"id_token,omitempty"`
 	ExpiresAt      time.Time `json:"expires_at"`
 	CreatedAt      time.Time `json:"created_at"`
 }
@@ -46,10 +49,16 @@ func (s *StashStore) StashPath(spentToken string) string {
 }
 
 // Save atomically writes an uncommitted token pair to the stash directory.
-func (s *StashStore) Save(spentToken, agent, profile, accessToken, refreshToken string, expiresAt time.Time) error {
+func (s *StashStore) Save(spentToken, agent, profile, accessToken, refreshToken string, expiresAt time.Time, extras ...string) error {
+	spentToken = strings.TrimSpace(spentToken)
+	if spentToken == "" {
+		return fmt.Errorf("spentToken cannot be empty")
+	}
+
 	if err := os.MkdirAll(s.Dir, 0700); err != nil {
 		return fmt.Errorf("failed to create unclaimed directory: %w", err)
 	}
+	_ = os.Chmod(s.Dir, 0700)
 
 	cred := StashedCredential{
 		SpentTokenHash: HashToken(spentToken),
@@ -60,6 +69,12 @@ func (s *StashStore) Save(spentToken, agent, profile, accessToken, refreshToken 
 		ExpiresAt:      expiresAt,
 		CreatedAt:      time.Now().UTC(),
 	}
+	if len(extras) > 0 {
+		cred.TokenType = extras[0]
+	}
+	if len(extras) > 1 {
+		cred.IDToken = extras[1]
+	}
 
 	data, err := json.MarshalIndent(cred, "", "  ")
 	if err != nil {
@@ -67,13 +82,34 @@ func (s *StashStore) Save(spentToken, agent, profile, accessToken, refreshToken 
 	}
 
 	targetPath := s.StashPath(spentToken)
-	tmpPath := targetPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	tmpFile, err := os.CreateTemp(s.Dir, HashToken(spentToken)+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary stash file: %w", err)
+	}
+	tmpName := tmpFile.Name()
+
+	// Ensure 0600 permissions
+	_ = tmpFile.Chmod(0600)
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("failed to write temporary stash file: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, targetPath); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to sync temporary stash file: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to close temporary stash file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, targetPath); err != nil {
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("failed to finalize stash file: %w", err)
 	}
 
@@ -82,6 +118,11 @@ func (s *StashStore) Save(spentToken, agent, profile, accessToken, refreshToken 
 
 // Find retrieves a stashed credential matching the spent token fingerprint.
 func (s *StashStore) Find(spentToken string) (*StashedCredential, error) {
+	spentToken = strings.TrimSpace(spentToken)
+	if spentToken == "" {
+		return nil, fmt.Errorf("spentToken cannot be empty")
+	}
+
 	targetPath := s.StashPath(spentToken)
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
@@ -101,6 +142,11 @@ func (s *StashStore) Find(spentToken string) (*StashedCredential, error) {
 
 // Adopt retrieves and validates an unclaimed credential for the target agent and profile.
 func (s *StashStore) Adopt(spentToken, agent, profile string) (*StashedCredential, error) {
+	spentToken = strings.TrimSpace(spentToken)
+	if spentToken == "" {
+		return nil, fmt.Errorf("spentToken cannot be empty")
+	}
+
 	cred, err := s.Find(spentToken)
 	if err != nil {
 		return nil, err
@@ -119,6 +165,11 @@ func (s *StashStore) Adopt(spentToken, agent, profile string) (*StashedCredentia
 
 // Remove deletes a stashed credential file after successful persistence.
 func (s *StashStore) Remove(spentToken string) error {
+	spentToken = strings.TrimSpace(spentToken)
+	if spentToken == "" {
+		return fmt.Errorf("spentToken cannot be empty")
+	}
+
 	targetPath := s.StashPath(spentToken)
 	if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove stash file: %w", err)
@@ -155,7 +206,12 @@ func (s *StashStore) List() ([]*StashedCredential, error) {
 }
 
 // Prune removes stash records older than maxAge to prevent stale disk accumulation.
+// If maxAge is zero or negative, it defaults to 7 days to prevent accidental purging.
 func (s *StashStore) Prune(maxAge time.Duration) (int, error) {
+	if maxAge <= 0 {
+		maxAge = 7 * 24 * time.Hour
+	}
+
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -168,7 +224,8 @@ func (s *StashStore) Prune(maxAge time.Duration) (int, error) {
 	prunedCount := 0
 
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		ext := filepath.Ext(entry.Name())
+		if entry.IsDir() || (ext != ".json" && ext != ".tmp") {
 			continue
 		}
 		info, err := entry.Info()

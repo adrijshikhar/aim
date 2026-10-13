@@ -88,13 +88,15 @@ func ExchangeCode(ctx context.Context, cfg ProviderConfig, code, verifier, redir
 // the credentials remain in the unclaimed store for future self-healing.
 func PersistWithStash(store *StashStore, spentToken, agent, profile string, res *TokenResult, persistFn func() error) error {
 	if store != nil && spentToken != "" && res != nil {
-		if err := store.Save(spentToken, agent, profile, res.AccessToken, res.RefreshToken, res.ExpiresAt); err != nil {
+		if err := store.Save(spentToken, agent, profile, res.AccessToken, res.RefreshToken, res.ExpiresAt, res.TokenType, res.IDToken); err != nil {
 			return fmt.Errorf("failed to stash credentials: %w", err)
 		}
 	}
 
-	if err := persistFn(); err != nil {
-		return err
+	if persistFn != nil {
+		if err := persistFn(); err != nil {
+			return err
+		}
 	}
 
 	if store != nil && spentToken != "" {

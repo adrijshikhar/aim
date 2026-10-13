@@ -54,6 +54,11 @@ func (m *ProfileManager) AdoptStash(agent, profileName, spentToken string) (*oau
 	return m.UnclaimedStore().Adopt(spentToken, agent, profileName)
 }
 
+// RemoveStash deletes an unclaimed credential record from the stash after successful adoption and persistence.
+func (m *ProfileManager) RemoveStash(spentToken string) error {
+	return m.UnclaimedStore().Remove(spentToken)
+}
+
 // FindUnclaimedCredentials returns any stashed credentials matching the agent and profile.
 func (m *ProfileManager) FindUnclaimedCredentials(agent, profileName string) ([]*oauth.StashedCredential, error) {
 	all, err := m.UnclaimedStore().List()

@@ -122,3 +122,35 @@ func TestDoctor_UnclaimedTokens(t *testing.T) {
 		t.Errorf("expected doctor to report unclaimed OAuth tokens, got: %s", output)
 	}
 }
+
+func TestDoctor_UnclaimedTokens_FilterByAgent(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	store := oauth.NewStashStore(tempDir)
+	_ = store.Save("spent-claude", "claude", "work", "acc", "ref", time.Now().Add(time.Hour))
+	_ = store.Save("spent-agy", "agy", "personal", "acc", "ref", time.Now().Add(time.Hour))
+
+	reg := agents.NewRegistry()
+	reg.Register(&doctorMockAdapter{mockAdapter: mockAdapter{name: "claude", hasCreds: true}})
+	reg.Register(&doctorMockAdapter{mockAdapter: mockAdapter{name: "agy", hasCreds: true}})
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+	_, _ = pm.EnsureProfile("personal")
+
+	// Running doctor for "claude" should report claude's unclaimed token, not agy's
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor", "claude"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	_ = cmd.Execute()
+	output := buf.String()
+
+	if !strings.Contains(output, "Unclaimed OAuth tokens found (1 uncommitted") {
+		t.Errorf("expected doctor to report 1 unclaimed token for claude, got:\n%s", output)
+	}
+	if strings.Contains(output, "Agent: agy") {
+		t.Errorf("expected doctor claude not to report agy token, got:\n%s", output)
+	}
+}

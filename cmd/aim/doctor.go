@@ -91,7 +91,7 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 		ok := diagnoseAdapterTo(out, adapter, pm, cfg, reg, map[string]bool{})
 		diagnosePlatformTo(out, agentName, cfg)
 		diagnoseDaemonTo(out)
-		diagnoseUnclaimedTokensTo(out, baseDir)
+		diagnoseUnclaimedTokensTo(out, baseDir, agentName)
 		return ok
 	}
 
@@ -104,7 +104,7 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 	}
 	diagnosePlatformTo(out, "", cfg)
 	diagnoseDaemonTo(out)
-	diagnoseUnclaimedTokensTo(out, baseDir)
+	diagnoseUnclaimedTokensTo(out, baseDir, "")
 	return allOK
 }
 
@@ -183,7 +183,7 @@ func diagnosePlatformTo(out io.Writer, agentName string, cfg *config.Config) {
 	}
 }
 
-func diagnoseUnclaimedTokensTo(out io.Writer, baseDir string) {
+func diagnoseUnclaimedTokensTo(out io.Writer, baseDir string, agentName string) {
 	store := oauth.NewStashStore(baseDir)
 	_, _ = store.Prune(7 * 24 * time.Hour)
 
@@ -197,7 +197,14 @@ func diagnoseUnclaimedTokensTo(out io.Writer, baseDir string) {
 		return
 	}
 
-	if len(creds) == 0 {
+	var filtered []*oauth.StashedCredential
+	for _, c := range creds {
+		if agentName == "" || c.Agent == agentName {
+			filtered = append(filtered, c)
+		}
+	}
+
+	if len(filtered) == 0 {
 		return
 	}
 
@@ -206,8 +213,8 @@ func diagnoseUnclaimedTokensTo(out io.Writer, baseDir string) {
 	warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
 	cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Unclaimed Tokens:")
 	fmt.Fprintf(out, "  %s %s Unclaimed OAuth tokens found (%d uncommitted credential(s) in %s)\n",
-		warnBadge, cat, len(creds), store.Dir)
-	for _, c := range creds {
+		warnBadge, cat, len(filtered), store.Dir)
+	for _, c := range filtered {
 		fmt.Fprintf(out, "         - Agent: %s, Profile: %s (spent token hash: %.12s...)\n",
 			lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(c.Agent),
 			lipgloss.NewStyle().Foreground(tui.TextPrimary).Render(c.Profile),
