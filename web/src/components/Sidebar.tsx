@@ -124,6 +124,7 @@ export function Sidebar({
           </div>
           <div className="flex items-center gap-1.5">
             <span className="font-semibold text-sm tracking-tight text-foreground">AIM</span>
+            <span className="sr-only">Agent Identity Manager</span>
             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground">
               {version}
             </span>
@@ -152,8 +153,10 @@ export function Sidebar({
       {/* Navigation Sections */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-5">
         {/* Section 1: Navigation Views */}
-        <div className="space-y-0.5">
+        <div role="tablist" aria-label="Views" className="space-y-0.5">
           <button
+            role="tab"
+            aria-selected={isOverviewActive}
             type="button"
             onClick={() => onSelectView('overview')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-geist text-xs font-sans transition-colors cursor-pointer text-left ${
@@ -170,6 +173,8 @@ export function Sidebar({
           </button>
 
           <button
+            role="tab"
+            aria-selected={isSessionsActive}
             type="button"
             onClick={() => onSelectView('sessions')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-geist text-xs font-sans transition-colors cursor-pointer text-left ${
@@ -183,6 +188,8 @@ export function Sidebar({
           </button>
 
           <button
+            role="tab"
+            aria-selected={isMcpActive}
             type="button"
             onClick={() => onSelectView('mcp')}
             className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-geist text-xs font-sans transition-colors cursor-pointer text-left ${

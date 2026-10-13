@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -134,6 +135,9 @@ var (
 
 // MaybeTriggerBackgroundCheck runs an asynchronous release check if cache is older than 24h.
 func MaybeTriggerBackgroundCheck(currentVersion, cacheDir string) {
+	if currentVersion == "dev" || currentVersion == "" || os.Getenv("AIM_DISABLE_UPDATE_CHECK") == "1" {
+		return
+	}
 	cached, err := readCache(cacheDir)
 	if err == nil && cached != nil && time.Since(cached.CheckedAt) < 24*time.Hour {
 		return

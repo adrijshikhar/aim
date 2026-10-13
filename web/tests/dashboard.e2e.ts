@@ -11,7 +11,7 @@ test('dashboard header and navigation tabs render correctly', async ({ app, scre
   // Verify navigation tabs
   const profilesTab = screen.getByRole('tab', { name: /Profiles/i });
   const sessionsTab = screen.getByRole('tab', { name: /Sessions/i });
-  const mcpTab = screen.getByRole('tab', { name: /MCP Servers/i });
+  const mcpTab = screen.getByRole('tab', { name: /MCP/i });
 
   await expect(profilesTab).toBeVisible();
   await expect(sessionsTab).toBeVisible();
@@ -23,7 +23,7 @@ test('dashboard header and navigation tabs render correctly', async ({ app, scre
 
   // Navigate to MCP Servers tab
   await mcpTab.tap();
-  await expect(screen.getByText('Model Context Protocol (MCP) Infrastructure')).toBeVisible();
+  await expect(screen.getByText(/Model Context Protocol \(MCP\)/i)).toBeVisible();
 
   // Return to Profiles tab
   await profilesTab.tap();

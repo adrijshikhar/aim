@@ -21,7 +21,7 @@ export default {
         command: {
           executable: 'go',
           args: ['run', 'github.com/aim-cli/aim/cmd/aim', 'web', '--port', '8080', '--no-open'],
-          reuseExisting: true,
+          reuseExisting: false,
           log: '.e2e/logs/app.log',
         },
       },

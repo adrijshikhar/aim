@@ -34,9 +34,9 @@ func TestUpdater_NoticeOnStderrWhenUpdateAvailable(t *testing.T) {
 	pm := profile.NewProfileManager(tempBase)
 	reg := agents.NewRegistry()
 
-	origVer := Version
-	defer func() { Version = origVer }()
-	Version = "0.12.1"
+	origVer := GetVersion()
+	defer func() { SetVersion(origVer) }()
+	SetVersion("0.12.1")
 
 	_, errOut := captureOutput(t, func() {
 		code := dispatch([]string{"version"}, reg, pm)
@@ -70,9 +70,9 @@ func TestUpdater_NoNoticeWhenJsonFlag(t *testing.T) {
 	pm := profile.NewProfileManager(tempBase)
 	reg := agents.NewRegistry()
 
-	origVer := Version
-	defer func() { Version = origVer }()
-	Version = "0.12.1"
+	origVer2 := GetVersion()
+	defer func() { SetVersion(origVer2) }()
+	SetVersion("0.12.1")
 
 	_, errOut := captureOutput(t, func() {
 		_ = dispatch([]string{"list", "--json"}, reg, pm)

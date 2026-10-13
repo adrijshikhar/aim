@@ -20,9 +20,9 @@ test('sessions table renders with filters and resume action', async ({ app, scre
   await searchInput.fill('');
 
   // Check table headers
-  await expect(screen.getByText('Agent')).toBeVisible();
-  await expect(screen.getByText('Profile')).toBeVisible();
-  await expect(screen.getByText('Directory (CWD)')).toBeVisible();
-  await expect(screen.getByText('Goal / Title')).toBeVisible();
-  await expect(screen.getByText('Action')).toBeVisible();
+  await expect(screen.getByRole('columnheader', { name: /AGENT/i })).toBeVisible();
+  await expect(screen.getByRole('columnheader', { name: /PROFILE/i })).toBeVisible();
+  await expect(screen.getByRole('columnheader', { name: /DIRECTORY/i })).toBeVisible();
+  await expect(screen.getByRole('columnheader', { name: /GOAL/i })).toBeVisible();
+  await expect(screen.getByRole('columnheader', { name: /UPDATED/i })).toBeVisible();
 });
