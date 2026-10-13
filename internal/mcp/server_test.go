@@ -3,6 +3,8 @@ package mcp_test
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -462,5 +464,172 @@ func TestMCPServer_MalformedJSONRecovery(t *testing.T) {
 	}
 	if pingResp.ID != 99 {
 		t.Errorf("expected ID 99, got %d", pingResp.ID)
+	}
+}
+
+func TestMCPServer_AgentIdentityIsolation(t *testing.T) {
+	tempDir := t.TempDir()
+	pm := profile.NewProfileManager(tempDir)
+	pDir, _ := pm.EnsureProfile("multi-agent")
+
+	// Set up Codex credentials in the profile
+	codexDir := filepath.Join(pDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"email":"codex@example.com"}`), 0600)
+
+	// Set up Claude credentials in the profile
+	claudeDir := filepath.Join(pDir, ".claude")
+	_ = os.MkdirAll(claudeDir, 0700)
+	_ = os.WriteFile(filepath.Join(claudeDir, ".claude.json"), []byte(`{"oauthAccount":{"emailAddress":"claude@example.com"}}`), 0600)
+
+	// Simulate active agent is Claude
+	t.Setenv("AIM_PROFILE", "multi-agent")
+	t.Setenv("AIM_AGENT", "claude")
+
+	reg := agents.NewRegistry()
+	srv := aimmcp.NewServer(reg, pm, tempDir)
+
+	input := `{"jsonrpc":"2.0","id":101,"method":"tools/call","params":{"name":"aim_whoami","arguments":{}}}` + "\n"
+	var inBuf bytes.Buffer
+	inBuf.WriteString(input)
+	var outBuf bytes.Buffer
+
+	if err := srv.Serve(&inBuf, &outBuf); err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	var callResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &callResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	text := callResp.Result.Content[0].Text
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("failed to unmarshal whoami payload: %v", err)
+	}
+
+	if payload["account_email"] != "claude@example.com" {
+		t.Errorf("expected claude email 'claude@example.com', got %v (isolation breach)", payload["account_email"])
+	}
+}
+
+func TestMCPServer_NilProfileManager(t *testing.T) {
+	tempDir := t.TempDir()
+	reg := agents.NewRegistry()
+	srv := aimmcp.NewServer(reg, nil, tempDir)
+
+	// whoami with nil pm
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"aim_whoami","arguments":{}}}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"aim_list_profiles","arguments":{}}}` + "\n"
+
+	var inBuf bytes.Buffer
+	inBuf.WriteString(input)
+	var outBuf bytes.Buffer
+
+	if err := srv.Serve(&inBuf, &outBuf); err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(outBuf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(lines))
+	}
+
+	for i, line := range lines {
+		var resp struct {
+			Result struct {
+				IsError bool `json:"isError"`
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			t.Fatalf("line %d: decode error: %v", i, err)
+		}
+		if !resp.Result.IsError {
+			t.Errorf("line %d: expected isError true when pm is nil", i)
+		}
+	}
+}
+
+func TestMCPServer_ToolCall_GetQuota_CaseInsensitive(t *testing.T) {
+	tempDir := t.TempDir()
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	cacheStore := usage.NewCacheStore(tempDir, time.Hour)
+	_ = cacheStore.Put(usage.Report{
+		Agent:   "claude",
+		Profile: "work",
+		Status:  usage.StatusOK,
+		Summary: "Available",
+	})
+
+	srv := aimmcp.NewServer(reg, pm, tempDir)
+
+	// uppercase agent "Claude"
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"aim_get_quota","arguments":{"agent":"Claude","profile":"work"}}}` + "\n"
+	var inBuf bytes.Buffer
+	inBuf.WriteString(input)
+	var outBuf bytes.Buffer
+
+	if err := srv.Serve(&inBuf, &outBuf); err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+
+	var rep usage.Report
+	if err := json.Unmarshal([]byte(resp.Result.Content[0].Text), &rep); err != nil {
+		t.Fatalf("expected quota report for case-insensitive agent, got: %s", resp.Result.Content[0].Text)
+	}
+	if rep.Summary != "Available" {
+		t.Errorf("expected summary 'Available', got %q", rep.Summary)
+	}
+}
+
+func TestMCPServer_ToolCall_GetQuota_InvalidArgs(t *testing.T) {
+	tempDir := t.TempDir()
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	srv := aimmcp.NewServer(reg, pm, tempDir)
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"aim_get_quota","arguments":"not-an-object"}}` + "\n"
+	var inBuf bytes.Buffer
+	inBuf.WriteString(input)
+	var outBuf bytes.Buffer
+
+	if err := srv.Serve(&inBuf, &outBuf); err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	var resp struct {
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Error == nil || resp.Error.Code != -32602 {
+		t.Errorf("expected -32602 for invalid arguments, got %+v", resp.Error)
 	}
 }

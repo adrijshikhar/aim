@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,18 +35,20 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	enc := json.NewEncoder(out)
 
 	for scanner.Scan() {
-		line := scanner.Bytes()
+		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
 			continue
 		}
 
 		var req JSONRPCRequest
 		if err := json.Unmarshal(line, &req); err != nil {
-			_ = enc.Encode(JSONRPCResponse{
+			if encErr := enc.Encode(JSONRPCResponse{
 				JSONRPC: "2.0",
 				ID:      nil,
 				Error:   &Error{Code: -32700, Message: "Parse error"},
-			})
+			}); encErr != nil {
+				return encErr
+			}
 			continue
 		}
 

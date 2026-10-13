@@ -248,3 +248,105 @@ func TestMCPServeCmd_WhoamiTool(t *testing.T) {
 		t.Errorf("expected agent 'claude', got %v", payload["agent"])
 	}
 }
+
+func TestMCPInstallCmd_ProfilePathTraversal(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"mcp", "install", "claude", "--profile", "../../evil"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for path traversal in --profile, got nil")
+	}
+	if !strings.Contains(err.Error(), "path traversal") {
+		t.Errorf("expected 'path traversal' in error, got: %v", err)
+	}
+}
+
+func TestMCPInstallCmd_ProfileNotFound(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"mcp", "install", "claude", "--profile", "nonexistent"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for nonexistent profile, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("expected 'does not exist' in error, got: %v", err)
+	}
+}
+
+func TestMCPServeCmd_InvalidProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"mcp", "serve", "--profile", "../../evil"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for path traversal in --profile, got nil")
+	}
+	if !strings.Contains(err.Error(), "path traversal") {
+		t.Errorf("expected 'path traversal' in error, got: %v", err)
+	}
+}
+
+func TestMCPServeCmd_NonexistentProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"mcp", "serve", "--profile", "nonexistent"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for nonexistent profile, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("expected 'does not exist' in error, got: %v", err)
+	}
+}
+
+func TestMCPServeCmd_NoArgsConstraint(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"mcp", "serve", "extra-arg"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when positional args provided to serve, got nil")
+	}
+}

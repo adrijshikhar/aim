@@ -40,8 +40,17 @@ func newMCPServeCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 		Long: `Starts a JSON-RPC 2.0 Model Context Protocol server over stdio.
 Exposes read-only tools: aim_whoami, aim_get_quota, and aim_list_profiles.
 Guarantees strict read-only operation: no profile switching, creation, or deletion capabilities exist.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if profileFlag != "" {
+				if pm != nil {
+					if _, err := pm.ResolveProfile(profileFlag); err != nil {
+						return fmt.Errorf("invalid profile %q: %w", profileFlag, err)
+					}
+					if !pm.ProfileExists(profileFlag) {
+						return fmt.Errorf("profile %q does not exist", profileFlag)
+					}
+				}
 				_ = os.Setenv("AIM_PROFILE", profileFlag)
 			}
 			if agentFlag != "" {
@@ -85,7 +94,13 @@ By default installs for 'claude' into ~/.claude.json, or into the specified prof
 				if pm == nil {
 					return fmt.Errorf("profile manager not initialized")
 				}
-				pDir := pm.ProfileDir(profileFlag)
+				pDir, err := pm.ResolveProfile(profileFlag)
+				if err != nil {
+					return fmt.Errorf("invalid profile %q: %w", profileFlag, err)
+				}
+				if !pm.ProfileExists(profileFlag) {
+					return fmt.Errorf("profile %q does not exist", profileFlag)
+				}
 				targetDir := filepath.Join(pDir, ".claude")
 				if err := os.MkdirAll(targetDir, 0700); err != nil {
 					return fmt.Errorf("failed to create profile directory: %w", err)

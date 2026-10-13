@@ -83,6 +83,19 @@ func (s *Server) resolveActiveContext() (string, string) {
 }
 
 func (s *Server) callWhoami(id any) JSONRPCResponse {
+	if s.pm == nil {
+		return JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      id,
+			Result: ToolResult{
+				Content: []ToolContent{
+					{Type: "text", Text: "Profile manager is not initialized."},
+				},
+				IsError: true,
+			},
+		}
+	}
+
 	profileName, agentName := s.resolveActiveContext()
 
 	baseDir := s.baseDir
@@ -111,7 +124,7 @@ func (s *Server) callWhoami(id any) JSONRPCResponse {
 	}
 
 	profileDir := filepath.Join(profilesDir, profileName)
-	accInfo := profile.GetProfileAccountInfo(profileDir)
+	accInfo := profile.GetProfileAccountInfoForAgent(profileDir, agentName)
 
 	quotaSummary := ""
 	cacheStore := usage.NewCacheStore(baseDir, usage.DefaultTTL)
@@ -159,7 +172,13 @@ func (s *Server) callGetQuota(id any, argsRaw json.RawMessage) JSONRPCResponse {
 		Profile string `json:"profile"`
 	}
 	if len(argsRaw) > 0 {
-		_ = json.Unmarshal(argsRaw, &args)
+		if err := json.Unmarshal(argsRaw, &args); err != nil {
+			return JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      id,
+				Error:   &Error{Code: -32602, Message: fmt.Sprintf("Invalid arguments: %v", err)},
+			}
+		}
 	}
 
 	activeProfile, activeAgent := s.resolveActiveContext()
@@ -167,9 +186,9 @@ func (s *Server) callGetQuota(id any, argsRaw json.RawMessage) JSONRPCResponse {
 	if targetProfile == "" {
 		targetProfile = activeProfile
 	}
-	targetAgent := strings.TrimSpace(args.Agent)
+	targetAgent := strings.ToLower(strings.TrimSpace(args.Agent))
 	if targetAgent == "" {
-		targetAgent = activeAgent
+		targetAgent = strings.ToLower(activeAgent)
 	}
 
 	if targetProfile == "" {
@@ -233,6 +252,19 @@ func (s *Server) callGetQuota(id any, argsRaw json.RawMessage) JSONRPCResponse {
 }
 
 func (s *Server) callListProfiles(id any) JSONRPCResponse {
+	if s.pm == nil {
+		return JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      id,
+			Result: ToolResult{
+				Content: []ToolContent{
+					{Type: "text", Text: "Profile manager is not initialized."},
+				},
+				IsError: true,
+			},
+		}
+	}
+
 	profs, err := s.pm.ListProfiles()
 	if err != nil {
 		return JSONRPCResponse{
