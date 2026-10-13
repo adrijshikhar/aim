@@ -127,7 +127,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
   const [totalLogLines, setTotalLogLines] = useState(0);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [loadingMoreLogs, setLoadingMoreLogs] = useState(false);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<HTMLDivElement>(null);
   const isInitialLoadRef = useRef(true);
   const { toast } = useToast();
 
@@ -145,19 +145,37 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
     }
   }, []);
 
-  const handleLoadMoreLogs = async () => {
+  const handleLoadMoreLogs = useCallback(async () => {
     if (loadingMoreLogs || logs.length >= totalLogLines) return;
+    const container = terminalRef.current;
+    const prevScrollHeight = container ? container.scrollHeight : 0;
+    const prevScrollTop = container ? container.scrollTop : 0;
+
     setLoadingMoreLogs(true);
     try {
       const data = await getDaemonLogs(PAGE_SIZE, logs.length);
       if (data.lines && data.lines.length > 0) {
         setLogs((prev) => [...data.lines, ...prev]);
+        // Preserve scroll position when older logs are prepended
+        requestAnimationFrame(() => {
+          if (terminalRef.current) {
+            const newScrollHeight = terminalRef.current.scrollHeight;
+            terminalRef.current.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+          }
+        });
       }
       setTotalLogLines(data.total_lines || 0);
     } catch (err) {
       console.error('Failed to load older daemon logs', err);
     } finally {
       setLoadingMoreLogs(false);
+    }
+  }, [loadingMoreLogs, logs.length, totalLogLines]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollTop <= 20 && !loadingMoreLogs && logs.length < totalLogLines && !loadingLogs) {
+      handleLoadMoreLogs();
     }
   };
 
@@ -169,7 +187,9 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
 
   useEffect(() => {
     if (logs.length > 0 && isInitialLoadRef.current) {
-      logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      if (terminalRef.current) {
+        terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+      }
       isInitialLoadRef.current = false;
     }
   }, [logs]);
@@ -441,7 +461,11 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
             </div>
           </div>
 
-          <div className="bg-[#050505] border border-[#222222] rounded-geist p-2.5 font-mono text-[11px] max-h-56 overflow-y-auto space-y-1 select-text scrollbar-thin">
+          <div
+            ref={terminalRef}
+            onScroll={handleScroll}
+            className="bg-[#050505] border border-[#222222] rounded-geist p-2.5 font-mono text-[11px] max-h-56 overflow-y-auto space-y-1 select-text scrollbar-thin"
+          >
             {loadingLogs && logs.length === 0 ? (
               <div className="py-6 text-center text-muted-foreground/60 flex items-center justify-center gap-2">
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -453,25 +477,15 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               </div>
             ) : (
               <>
-                {logs.length < totalLogLines && (
-                  <div className="pt-0.5 pb-2 text-center sticky top-0 bg-[#050505]/95 backdrop-blur-sm z-10 border-b border-[#1c1c1c]">
-                    <button
-                      type="button"
-                      disabled={loadingMoreLogs}
-                      onClick={handleLoadMoreLogs}
-                      className="text-[10px] text-muted-foreground hover:text-foreground bg-[#141414] hover:bg-[#1f1f1f] border border-[#2b2b2b] px-3 py-0.5 rounded-geist transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-sm"
-                    >
-                      {loadingMoreLogs ? (
-                        <>
-                          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-                          <span>Loading older logs...</span>
-                        </>
-                      ) : (
-                        <span>
-                          Load older logs ({Math.min(PAGE_SIZE, totalLogLines - logs.length)} more, {totalLogLines - logs.length} remaining)
-                        </span>
-                      )}
-                    </button>
+                {loadingMoreLogs && (
+                  <div className="py-2 text-center text-muted-foreground/60 flex items-center justify-center gap-1.5 border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
+                    <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                    <span>Loading earlier records...</span>
+                  </div>
+                )}
+                {logs.length >= totalLogLines && totalLogLines > 0 && (
+                  <div className="py-2 text-center text-muted-foreground/40 select-none border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
+                    — Beginning of execution logs ({totalLogLines} lines) —
                   </div>
                 )}
                 {logs.map((rawLine, i) => {
@@ -507,7 +521,6 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                     </div>
                   );
                 })}
-                <div ref={logEndRef} />
               </>
             )}
           </div>
