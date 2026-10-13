@@ -269,4 +269,3 @@ func TestBindCmd_ProfileNotExistsWarning(t *testing.T) {
 		t.Errorf("expected warning on stderr, got: %s", errOut)
 	}
 }
-
