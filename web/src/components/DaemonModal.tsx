@@ -352,14 +352,48 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
             ) : (
               <>
                 {logs.map((line, i) => {
-                  const isErr = line.toLowerCase().includes('error') || line.toLowerCase().includes('failed');
-                  const isSuccess = line.toLowerCase().includes('completed') || line.toLowerCase().includes('installed');
+                  const lower = line.toLowerCase();
+                  const hasRealError =
+                    (!lower.includes('0 errors') && lower.includes('error')) ||
+                    lower.includes('failed') ||
+                    lower.includes('fatal') ||
+                    lower.includes('panic');
+                  const isSuccess =
+                    lower.includes('completed') ||
+                    lower.includes('installed') ||
+                    lower.includes('0 errors');
+
+                  const match = line.match(/^(\[.*?\])\s*(.*)$/);
+                  if (match) {
+                    const [, timestamp, msg] = match;
+                    return (
+                      <div key={i} className="leading-relaxed break-all">
+                        <span className="text-[#666666] select-none mr-2">{timestamp}</span>
+                        <span
+                          className={cn(
+                            hasRealError
+                              ? "text-status-danger font-medium"
+                              : isSuccess
+                              ? "text-[#ededed]"
+                              : "text-[#888888]"
+                          )}
+                        >
+                          {msg}
+                        </span>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div
                       key={i}
                       className={cn(
                         "leading-relaxed break-all",
-                        isErr ? "text-status-danger" : isSuccess ? "text-[#a3e635]" : "text-muted-foreground"
+                        hasRealError
+                          ? "text-status-danger font-medium"
+                          : isSuccess
+                          ? "text-[#ededed]"
+                          : "text-[#888888]"
                       )}
                     >
                       {line}
