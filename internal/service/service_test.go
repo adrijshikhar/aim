@@ -638,6 +638,10 @@ func TestSessionService_ResumeSessionInTerminal(t *testing.T) {
 
 func TestSessionService_GetSessionTranscript(t *testing.T) {
 	ctx := context.Background()
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	_ = os.MkdirAll(filepath.Join(tempDir, "profiles", "work"), 0755)
+
 	mgr := session.NewManager()
 	prov := &mockSessionProvider{
 		agent: "claude",
