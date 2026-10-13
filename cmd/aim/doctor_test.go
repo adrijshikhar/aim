@@ -154,3 +154,30 @@ func TestDoctor_UnclaimedTokens_FilterByAgent(t *testing.T) {
 		t.Errorf("expected doctor claude not to report agy token, got:\n%s", output)
 	}
 }
+
+func TestDoctor_UnclaimedTokens_ReportsPruning(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	store := oauth.NewStashStore(tempDir)
+	spent := "spent-old-to-prune"
+	_ = store.Save(spent, "claude", "work", "acc", "ref", time.Now())
+	oldPath := store.StashPath(spent)
+	oldTime := time.Now().Add(-10 * 24 * time.Hour)
+	_ = os.Chtimes(oldPath, oldTime, oldTime)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	_ = cmd.Execute()
+	output := buf.String()
+
+	if !strings.Contains(output, "Pruned 1 expired unclaimed token record(s)") {
+		t.Errorf("expected doctor to report pruned records, got:\n%s", output)
+	}
+}

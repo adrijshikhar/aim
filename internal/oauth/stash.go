@@ -196,11 +196,11 @@ func (s *StashStore) List() ([]*StashedCredential, error) {
 		if err != nil {
 			continue
 		}
-		var cred StashedCredential
-		if err := json.Unmarshal(data, &cred); err != nil {
+		cred := new(StashedCredential)
+		if err := json.Unmarshal(data, cred); err != nil {
 			continue
 		}
-		creds = append(creds, &cred)
+		creds = append(creds, cred)
 	}
 	return creds, nil
 }

@@ -185,7 +185,7 @@ func diagnosePlatformTo(out io.Writer, agentName string, cfg *config.Config) {
 
 func diagnoseUnclaimedTokensTo(out io.Writer, baseDir string, agentName string) {
 	store := oauth.NewStashStore(baseDir)
-	_, _ = store.Prune(7 * 24 * time.Hour)
+	pruned, _ := store.Prune(7 * 24 * time.Hour)
 
 	creds, err := store.List()
 	if err != nil {
@@ -204,21 +204,28 @@ func diagnoseUnclaimedTokensTo(out io.Writer, baseDir string, agentName string) 
 		}
 	}
 
-	if len(filtered) == 0 {
+	if len(filtered) == 0 && pruned == 0 {
 		return
 	}
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Unclaimed Tokens]"))
-	warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
-	cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Unclaimed Tokens:")
-	fmt.Fprintf(out, "  %s %s Unclaimed OAuth tokens found (%d uncommitted credential(s) in %s)\n",
-		warnBadge, cat, len(filtered), store.Dir)
-	for _, c := range filtered {
-		fmt.Fprintf(out, "         - Agent: %s, Profile: %s (spent token hash: %.12s...)\n",
-			lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(c.Agent),
-			lipgloss.NewStyle().Foreground(tui.TextPrimary).Render(c.Profile),
-			c.SpentTokenHash)
+	if pruned > 0 {
+		infoBadge := lipgloss.NewStyle().Bold(true).Foreground(tui.TextMuted).Width(8).Render("[INFO]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Unclaimed Tokens:")
+		fmt.Fprintf(out, "  %s %s Pruned %d expired unclaimed token record(s) older than 7 days\n", infoBadge, cat, pruned)
+	}
+	if len(filtered) > 0 {
+		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Unclaimed Tokens:")
+		fmt.Fprintf(out, "  %s %s Unclaimed OAuth tokens found (%d uncommitted credential(s) in %s)\n",
+			warnBadge, cat, len(filtered), store.Dir)
+		for _, c := range filtered {
+			fmt.Fprintf(out, "         - Agent: %s, Profile: %s (spent token hash: %.12s...)\n",
+				lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(c.Agent),
+				lipgloss.NewStyle().Foreground(tui.TextPrimary).Render(c.Profile),
+				c.SpentTokenHash)
+		}
 	}
 }
 

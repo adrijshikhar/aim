@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/aim-cli/aim/internal/logger"
 	"golang.org/x/oauth2"
 )
 
@@ -100,7 +101,9 @@ func PersistWithStash(store *StashStore, spentToken, agent, profile string, res 
 	}
 
 	if store != nil && spentToken != "" {
-		_ = store.Remove(spentToken)
+		if err := store.Remove(spentToken); err != nil {
+			logger.Debug("[oauth] Failed to clean up stash file for %s/%s: %v", agent, profile, err)
+		}
 	}
 	return nil
 }
