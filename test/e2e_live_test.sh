@@ -458,12 +458,21 @@ echo "  ✔ 'aim run codex work mcp list --json' cleanly passed through to agent
 echo ""
 echo "=== Phase 6: Redundant Command Removal Guardrails ==="
 
-# 1. aim mcp
-MCP_ERR=$("$AIM_BIN" mcp 2>&1 || true)
-if echo "$MCP_ERR" | grep -q "unknown command \"mcp\""; then
-  echo "  ✔ 'aim mcp' correctly rejected as unknown command"
+# 1. aim import
+IMPORT_CMD_ERR=$("$AIM_BIN" import 2>&1 || true)
+if echo "$IMPORT_CMD_ERR" | grep -q "unknown command \"import\""; then
+  echo "  ✔ 'aim import' correctly rejected as unknown command"
 else
-  echo "FAIL: 'aim mcp' was not rejected as unknown command: $MCP_ERR"
+  echo "FAIL: 'aim import' was not rejected as unknown command: $IMPORT_CMD_ERR"
+  exit 1
+fi
+
+# 2. aim mcp exposes serve and install
+MCP_HELP=$("$AIM_BIN" mcp --help 2>&1 || true)
+if echo "$MCP_HELP" | grep -q "serve" && echo "$MCP_HELP" | grep -q "install"; then
+  echo "  ✔ 'aim mcp' exposes serve and install subcommands"
+else
+  echo "FAIL: 'aim mcp' help missing serve or install: $MCP_HELP"
   exit 1
 fi
 
