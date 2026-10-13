@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"runtime"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/daemon"
 	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
@@ -31,13 +35,13 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 				agent = args[0]
 			}
 			if report {
-				fmt.Print(generateDiagnosticReport(reg, pm, agent))
+				fmt.Fprint(cmd.OutOrStdout(), generateDiagnosticReport(reg, pm, agent))
 				telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
 				telClient.Track(telemetry.EventDoctorReportGenerated, map[string]any{})
 				_ = telClient.Close()
 				return nil
 			}
-			ok := runDoctor(reg, pm, agent)
+			ok := runDoctorTo(cmd.OutOrStdout(), reg, pm, agent)
 			if check && !ok {
 				return fmt.Errorf("doctor diagnostics reported failures")
 			}
@@ -56,8 +60,12 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 }
 
 func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName string) bool {
+	return runDoctorTo(os.Stdout, reg, pm, agentName)
+}
+
+func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName string) bool {
 	logger.Debug("[doctor] Running diagnostics (agent=%q)", agentName)
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Doctor Diagnostics ==="))
+	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Doctor Diagnostics ==="))
 	if reg == nil {
 		return true
 	}
@@ -68,39 +76,50 @@ func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName strin
 	}
 	cfg, _ := config.LoadConfig()
 
+	baseDir := config.BaseDir()
+	if pm != nil && pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+
 	if agentName != "" {
 		adapter, err := reg.Get(agentName)
 		if err != nil {
 			failBadge := tui.GaugeRedStyle.Width(8).Render("[FAIL]")
-			fmt.Printf("%s Unknown agent: %s\n", failBadge, agentName)
+			fmt.Fprintf(out, "%s Unknown agent: %s\n", failBadge, agentName)
 			return false
 		}
-		ok := diagnoseAdapter(adapter, pm, cfg, reg, map[string]bool{})
-		diagnosePlatform(agentName, cfg)
-		diagnoseDaemon()
+		ok := diagnoseAdapterTo(out, adapter, pm, cfg, reg, map[string]bool{})
+		diagnosePlatformTo(out, agentName, cfg)
+		diagnoseDaemonTo(out)
+		diagnoseUnclaimedTokensTo(out, baseDir, agentName)
 		return ok
 	}
 
 	allOK := true
 	bridged := map[string]bool{}
 	for _, adapter := range reg.All() {
-		if !diagnoseAdapter(adapter, pm, cfg, reg, bridged) {
+		if !diagnoseAdapterTo(out, adapter, pm, cfg, reg, bridged) {
 			allOK = false
 		}
 	}
-	diagnosePlatform("", cfg)
-	diagnoseDaemon()
+	diagnosePlatformTo(out, "", cfg)
+	diagnoseDaemonTo(out)
+	diagnoseUnclaimedTokensTo(out, baseDir, "")
 	return allOK
 }
 
 func diagnoseDaemon() {
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Background Daemon]"))
+	diagnoseDaemonTo(os.Stdout)
+}
+
+func diagnoseDaemonTo(out io.Writer) {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Background Daemon]"))
 	info, err := daemon.Status(config.BaseDir())
 	if err != nil || info == nil || !info.Installed {
 		infoBadge := lipgloss.NewStyle().Bold(true).Foreground(tui.TextMuted).Width(8).Render("[INFO]")
 		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Daemon:")
-		fmt.Printf("  %s %s Not installed (run 'aim daemon install' to enable background tasks)\n", infoBadge, cat)
+		fmt.Fprintf(out, "  %s %s Not installed (run 'aim daemon install' to enable background tasks)\n", infoBadge, cat)
 		return
 	}
 
@@ -115,21 +134,25 @@ func diagnoseDaemon() {
 		if runtime.GOOS == "linux" {
 			serviceManager = "systemd"
 		}
-		fmt.Printf("  %s %s Active (%s, interval: 15m, last run: %s)\n", okBadge, cat, serviceManager, lastRunStr)
+		fmt.Fprintf(out, "  %s %s Active (%s, interval: 15m, last run: %s)\n", okBadge, cat, serviceManager, lastRunStr)
 	} else {
 		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
 		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Daemon:")
-		fmt.Printf("  %s %s Installed but inactive (%s)\n", warnBadge, cat, info.ConfigPath)
+		fmt.Fprintf(out, "  %s %s Installed but inactive (%s)\n", warnBadge, cat, info.ConfigPath)
 	}
 }
 
 func diagnosePlatform(agentName string, cfg *config.Config) {
+	diagnosePlatformTo(os.Stdout, agentName, cfg)
+}
+
+func diagnosePlatformTo(out io.Writer, agentName string, cfg *config.Config) {
 	if runtime.GOOS != "darwin" {
 		return
 	}
 
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Platform Diagnostics (macOS)]"))
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Platform Diagnostics (macOS)]"))
 	var customServices []string
 	if cfg != nil {
 		customServices = cfg.CustomIgnoredKeychains
@@ -139,13 +162,13 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 	if len(lingering) > 0 {
 		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
 		keychainCat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain:")
-		fmt.Printf("  %s %s %d host agent token(s) detected in macOS Keychain (AIM uses file-based profile isolation):\n",
+		fmt.Fprintf(out, "  %s %s %d host agent token(s) detected in macOS Keychain (AIM uses file-based profile isolation):\n",
 			okBadge,
 			keychainCat,
 			len(lingering),
 		)
 		for _, entry := range lingering {
-			fmt.Printf("         - %s %s\n",
+			fmt.Fprintf(out, "         - %s %s\n",
 				lipgloss.NewStyle().Foreground(tui.TextPrimary).Render(entry.Description),
 				lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("(service: %q)", entry.Service)),
 			)
@@ -153,28 +176,75 @@ func diagnosePlatform(agentName string, cfg *config.Config) {
 	} else {
 		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
 		keychainCat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain:")
-		fmt.Printf("  %s %s No host agent tokens in macOS Keychain.\n",
+		fmt.Fprintf(out, "  %s %s No host agent tokens in macOS Keychain.\n",
 			okBadge,
 			keychainCat,
 		)
 	}
 }
 
-// diagnoseAdapter prints one agent's block. The Bridge results describe the
-// profile rather than the agent, so they are shown only under the first agent
-// that lists the profile; bridged records the profiles already shown.
+func diagnoseUnclaimedTokensTo(out io.Writer, baseDir string, agentName string) {
+	store := oauth.NewStashStore(baseDir)
+	pruned, _ := store.Prune(7 * 24 * time.Hour)
+
+	creds, err := store.List()
+	if err != nil {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Unclaimed Tokens]"))
+		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Unclaimed Tokens:")
+		fmt.Fprintf(out, "  %s %s Failed to read unclaimed tokens store: %v\n", warnBadge, cat, err)
+		return
+	}
+
+	var filtered []*oauth.StashedCredential
+	for _, c := range creds {
+		if agentName == "" || c.Agent == agentName {
+			filtered = append(filtered, c)
+		}
+	}
+
+	if len(filtered) == 0 && pruned == 0 {
+		return
+	}
+
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Unclaimed Tokens]"))
+	if pruned > 0 {
+		infoBadge := lipgloss.NewStyle().Bold(true).Foreground(tui.TextMuted).Width(8).Render("[INFO]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Unclaimed Tokens:")
+		fmt.Fprintf(out, "  %s %s Pruned %d expired unclaimed token record(s) older than 7 days\n", infoBadge, cat, pruned)
+	}
+	if len(filtered) > 0 {
+		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Unclaimed Tokens:")
+		fmt.Fprintf(out, "  %s %s Unclaimed OAuth tokens found (%d uncommitted credential(s) in %s)\n",
+			warnBadge, cat, len(filtered), store.Dir)
+		for _, c := range filtered {
+			fmt.Fprintf(out, "         - Agent: %s, Profile: %s (spent token hash: %.12s...)\n",
+				lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(c.Agent),
+				lipgloss.NewStyle().Foreground(tui.TextPrimary).Render(c.Profile),
+				c.SpentTokenHash)
+		}
+	}
+}
+
 func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry, bridged map[string]bool) bool {
+	return diagnoseAdapterTo(os.Stdout, adapter, pm, cfg, reg, bridged)
+}
+
+func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry, bridged map[string]bool) bool {
 	allOK := true
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render(fmt.Sprintf("[%s (%s)]", adapter.DisplayName(), adapter.Name())))
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render(fmt.Sprintf("[%s (%s)]", adapter.DisplayName(), adapter.Name())))
 	profiles, _ := pm.ListProfilesForAgent(adapter.Name(), cfg, reg)
 	if len(profiles) == 0 {
-		fmt.Println(lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("  No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
+		fmt.Fprintln(out, lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("  No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
 		return true
 	}
 	for _, p := range profiles {
-		fmt.Println()
-		fmt.Printf("Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
 		var results []agents.DiagnosticResult
 		if diag, ok := adapter.(agents.Diagnostician); ok {
 			results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
@@ -208,7 +278,7 @@ func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cf
 				allOK = false
 			}
 			badge, cat, msg := presenter.RenderDiagnosticResult(r)
-			fmt.Printf("  %s %s %s\n", badge, cat, msg)
+			fmt.Fprintf(out, "  %s %s %s\n", badge, cat, msg)
 		}
 	}
 	return allOK

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/aim-cli/aim/internal/logger"
 	"golang.org/x/oauth2"
 )
 
@@ -80,4 +81,31 @@ func ExchangeCode(ctx context.Context, cfg ProviderConfig, code, verifier, redir
 		}
 	}
 	return res, nil
+}
+
+// PersistWithStash wraps persistent saving of refreshed credentials with a local stash safety net.
+// It saves the credentials to the unclaimed stash store before invoking the persist function,
+// and deletes the stash entry only upon successful completion. If persistence fails or crashes,
+// the credentials remain in the unclaimed store for future self-healing.
+func PersistWithStash(store *StashStore, spentToken, agent, profile string, res *TokenResult, persistFn func() error) error {
+	if persistFn == nil {
+		return fmt.Errorf("persist function cannot be nil")
+	}
+
+	if store != nil && spentToken != "" && res != nil {
+		if err := store.Save(spentToken, agent, profile, res.AccessToken, res.RefreshToken, res.ExpiresAt, res.TokenType, res.IDToken); err != nil {
+			return fmt.Errorf("failed to stash credentials: %w", err)
+		}
+	}
+
+	if err := persistFn(); err != nil {
+		return err
+	}
+
+	if store != nil && spentToken != "" {
+		if err := store.Remove(spentToken); err != nil {
+			logger.Debug("[oauth] Failed to clean up stash file for %s/%s: %v", agent, profile, err)
+		}
+	}
+	return nil
 }

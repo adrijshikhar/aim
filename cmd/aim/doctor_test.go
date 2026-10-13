@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -95,5 +97,87 @@ func TestDoctor_BridgeBlockOncePerProfile(t *testing.T) {
 	}
 	if n := strings.Count(out, "Bridge:"); n != 1 {
 		t.Errorf("expected one Bridge line for the profile, got %d:\n%s", n, out)
+	}
+}
+
+func TestDoctor_UnclaimedTokens(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	store := oauth.NewStashStore(tempDir)
+	_ = store.Save("spent-tok", "claude", "work", "acc", "ref", time.Now().Add(time.Hour))
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	_ = cmd.Execute()
+	output := buf.String()
+
+	if !strings.Contains(output, "Unclaimed OAuth tokens found") {
+		t.Errorf("expected doctor to report unclaimed OAuth tokens, got: %s", output)
+	}
+}
+
+func TestDoctor_UnclaimedTokens_FilterByAgent(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	store := oauth.NewStashStore(tempDir)
+	_ = store.Save("spent-claude", "claude", "work", "acc", "ref", time.Now().Add(time.Hour))
+	_ = store.Save("spent-agy", "agy", "personal", "acc", "ref", time.Now().Add(time.Hour))
+
+	reg := agents.NewRegistry()
+	reg.Register(&doctorMockAdapter{mockAdapter: mockAdapter{name: "claude", hasCreds: true}})
+	reg.Register(&doctorMockAdapter{mockAdapter: mockAdapter{name: "agy", hasCreds: true}})
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+	_, _ = pm.EnsureProfile("personal")
+
+	// Running doctor for "claude" should report claude's unclaimed token, not agy's
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor", "claude"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	_ = cmd.Execute()
+	output := buf.String()
+
+	if !strings.Contains(output, "Unclaimed OAuth tokens found (1 uncommitted") {
+		t.Errorf("expected doctor to report 1 unclaimed token for claude, got:\n%s", output)
+	}
+	if strings.Contains(output, "Agent: agy") {
+		t.Errorf("expected doctor claude not to report agy token, got:\n%s", output)
+	}
+}
+
+func TestDoctor_UnclaimedTokens_ReportsPruning(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	store := oauth.NewStashStore(tempDir)
+	spent := "spent-old-to-prune"
+	_ = store.Save(spent, "claude", "work", "acc", "ref", time.Now())
+	oldPath := store.StashPath(spent)
+	oldTime := time.Now().Add(-10 * 24 * time.Hour)
+	_ = os.Chtimes(oldPath, oldTime, oldTime)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	_ = cmd.Execute()
+	output := buf.String()
+
+	if !strings.Contains(output, "Pruned 1 expired unclaimed token record(s)") {
+		t.Errorf("expected doctor to report pruned records, got:\n%s", output)
 	}
 }

@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/merge"
+	"github.com/aim-cli/aim/internal/oauth"
 )
 
 // SessionChecker verifies whether a profile has running foreground sessions
@@ -35,6 +37,49 @@ func (m *ProfileManager) MergeStateStore() merge.Store {
 		return m.MergeStore
 	}
 	return merge.Store{Dir: filepath.Join(config.StateDir(), "profile-merge")}
+}
+
+// UnclaimedStore returns the stash store for crash-resilient OAuth rotation staging.
+func (m *ProfileManager) UnclaimedStore() *oauth.StashStore {
+	base := config.BaseDir()
+	if m != nil && m.BaseDir != "" {
+		base = m.BaseDir
+	}
+	return oauth.NewStashStore(base)
+}
+
+// AdoptStash retrieves an uncommitted OAuth credential from the unclaimed stash
+// for the given spent token, agent, and profile.
+func (m *ProfileManager) AdoptStash(agent, profileName, spentToken string) (*oauth.StashedCredential, error) {
+	return m.UnclaimedStore().Adopt(spentToken, agent, profileName)
+}
+
+// RemoveStash deletes an unclaimed credential record from the stash after successful adoption and persistence.
+func (m *ProfileManager) RemoveStash(spentToken string) error {
+	return m.UnclaimedStore().Remove(spentToken)
+}
+
+// FindUnclaimedCredentials returns any stashed credentials matching the agent and profile.
+func (m *ProfileManager) FindUnclaimedCredentials(agent, profileName string) ([]*oauth.StashedCredential, error) {
+	all, err := m.UnclaimedStore().List()
+	if err != nil {
+		return nil, err
+	}
+	var matched []*oauth.StashedCredential
+	for _, c := range all {
+		if c.Agent == agent && c.Profile == profileName {
+			matched = append(matched, c)
+		}
+	}
+	return matched, nil
+}
+
+// PruneUnclaimed removes stash records older than maxAge (default 7 days).
+func (m *ProfileManager) PruneUnclaimed(maxAge time.Duration) (int, error) {
+	if maxAge <= 0 {
+		maxAge = 7 * 24 * time.Hour
+	}
+	return m.UnclaimedStore().Prune(maxAge)
 }
 
 // WithSessionChecker sets the SessionChecker for the ProfileManager and returns it.
