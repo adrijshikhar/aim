@@ -297,7 +297,15 @@ func diagnoseBindingTo(out io.Writer) {
 		return
 	}
 	res, err := profile.ResolveDirProfile(cwd)
-	if err != nil || res == nil {
+	if err != nil {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Repository Binding]"))
+		errBadge := tui.GaugeRedStyle.Width(8).Render("[FAIL]")
+		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Binding:")
+		fmt.Fprintf(out, "  %s %s %v\n", errBadge, cat, err)
+		return
+	}
+	if res == nil {
 		return
 	}
 	fmt.Fprintln(out)

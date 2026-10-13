@@ -1,6 +1,8 @@
 package profile
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +20,8 @@ type BindingResolution struct {
 
 // ResolveDirProfile ascends from dir upwards looking for an .aim-profile file.
 // It stops ascending if it encounters a .git boundary or the filesystem root.
+// It parses the file line-by-line, ignoring comments (#...) and blank lines,
+// and validates the profile name against path traversal.
 func ResolveDirProfile(dir string) (*BindingResolution, error) {
 	curr, err := filepath.Abs(dir)
 	if err != nil {
@@ -28,16 +32,27 @@ func ResolveDirProfile(dir string) (*BindingResolution, error) {
 		targetFile := filepath.Join(curr, ProfileFileName)
 		data, err := os.ReadFile(targetFile)
 		if err == nil {
-			line := strings.TrimSpace(string(data))
-			if idx := strings.Index(line, "#"); idx >= 0 {
-				line = strings.TrimSpace(line[:idx])
-			}
-			if line != "" {
+			scanner := bufio.NewScanner(bytes.NewReader(data))
+			for scanner.Scan() {
+				line := scanner.Text()
+				if idx := strings.Index(line, "#"); idx >= 0 {
+					line = line[:idx]
+				}
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				if err := ValidateProfileName(line); err != nil {
+					return nil, fmt.Errorf("invalid profile name %q in %s: %w", line, targetFile, err)
+				}
 				return &BindingResolution{
 					Profile:    line,
 					SourceFile: targetFile,
 					Directory:  curr,
 				}, nil
+			}
+			if err := scanner.Err(); err != nil {
+				return nil, fmt.Errorf("error reading %s: %w", targetFile, err)
 			}
 		}
 
@@ -60,8 +75,8 @@ func ResolveDirProfile(dir string) (*BindingResolution, error) {
 // BindDirectory writes the specified profile name into .aim-profile in dir.
 func BindDirectory(dir, profileName string) (string, error) {
 	cleanName := strings.TrimSpace(profileName)
-	if cleanName == "" {
-		return "", fmt.Errorf("profile name cannot be empty")
+	if err := ValidateProfileName(cleanName); err != nil {
+		return "", err
 	}
 
 	absDir, err := filepath.Abs(dir)

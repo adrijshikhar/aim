@@ -22,6 +22,9 @@ use this profile when launched inside this directory.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			profileName := args[0]
+			if err := profile.ValidateProfileName(profileName); err != nil {
+				return err
+			}
 			dir := targetDir
 			if dir == "" {
 				var err error
@@ -32,20 +35,8 @@ use this profile when launched inside this directory.`,
 			}
 
 			// Warn if profile is not configured
-			if pm != nil {
-				profiles, err := pm.ListProfiles()
-				if err == nil && len(profiles) > 0 {
-					found := false
-					for _, p := range profiles {
-						if p == profileName {
-							found = true
-							break
-						}
-					}
-					if !found {
-						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: profile '%s' does not currently exist. Run 'aim login <agent> %s' to configure it.\n", profileName, profileName)
-					}
-				}
+			if pm != nil && !pm.ProfileExists(profileName) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: profile '%s' does not currently exist. Run 'aim login <agent> %s' to configure it.\n", profileName, profileName)
 			}
 
 			filePath, err := profile.BindDirectory(dir, profileName)

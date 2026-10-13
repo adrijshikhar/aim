@@ -105,3 +105,78 @@ func TestResolveDirProfile_GitBoundary(t *testing.T) {
 		t.Errorf("expected nil resolution across .git boundary, got: %+v", res)
 	}
 }
+
+func TestResolveDirProfile_MultilineAndLeadingComments(t *testing.T) {
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, ".aim-profile")
+	content := `# Project AIM Configuration
+# Lines starting with hash are ignored
+
+   my-service-profile    # inline comment
+
+# trailing comment
+`
+	_ = os.WriteFile(filePath, []byte(content), 0644)
+
+	res, err := profile.ResolveDirProfile(tempDir)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if res == nil || res.Profile != "my-service-profile" {
+		t.Fatalf("expected profile 'my-service-profile', got: %+v", res)
+	}
+}
+
+func TestResolveDirProfile_PathTraversalRejection(t *testing.T) {
+	cases := []string{
+		"../../etc/passwd",
+		"../sibling",
+		"/root/admin",
+		"foo/bar",
+		"foo\\bar",
+		".",
+		"..",
+	}
+	for _, malicious := range cases {
+		t.Run(malicious, func(t *testing.T) {
+			tempDir := t.TempDir()
+			filePath := filepath.Join(tempDir, ".aim-profile")
+			_ = os.WriteFile(filePath, []byte(malicious+"\n"), 0644)
+
+			res, err := profile.ResolveDirProfile(tempDir)
+			if err == nil {
+				t.Fatalf("expected error for malicious profile %q, got nil (res: %+v)", malicious, res)
+			}
+		})
+	}
+}
+
+func TestBindDirectory_Validation(t *testing.T) {
+	tempDir := t.TempDir()
+	if _, err := profile.BindDirectory(tempDir, "  "); err == nil {
+		t.Errorf("expected error for empty profile name")
+	}
+	if _, err := profile.BindDirectory(tempDir, "../../evil"); err == nil {
+		t.Errorf("expected error for path traversal profile name")
+	}
+	if _, err := profile.BindDirectory(tempDir, "foo/bar"); err == nil {
+		t.Errorf("expected error for slashes in profile name")
+	}
+	if _, err := profile.BindDirectory(tempDir, ".."); err == nil {
+		t.Errorf("expected error for '..'")
+	}
+}
+
+func TestResolveDirProfile_EmptyOrOnlyComments(t *testing.T) {
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, ".aim-profile")
+	_ = os.WriteFile(filePath, []byte("# only comments\n   # more comments\n\n"), 0644)
+
+	res, err := profile.ResolveDirProfile(tempDir)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("expected nil resolution for empty/comments-only file, got: %+v", res)
+	}
+}

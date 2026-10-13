@@ -45,7 +45,11 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			} else {
 				// No explicit profile argument provided; attempt repository directory binding resolution
 				cwd, _ := os.Getwd()
-				if res, err := profile.ResolveDirProfile(cwd); err == nil && res != nil && res.Profile != "" {
+				res, err := profile.ResolveDirProfile(cwd)
+				if err != nil {
+					return fmt.Errorf("resolving repository profile: %w", err)
+				}
+				if res != nil && res.Profile != "" {
 					profileName = res.Profile
 					fmt.Fprintf(cmd.ErrOrStderr(), "[aim] Using repository-bound profile '%s' from %s\n", profileName, filepath.Base(res.SourceFile))
 				} else {
