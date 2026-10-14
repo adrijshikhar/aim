@@ -1820,7 +1820,7 @@ export function ProfilesView({
                   </CardContent>
                 </div>
 
-                {/* Card Footer: MCP & Plugin configuration chips + Inspect Action */}
+                {/* Card Footer: MCP & Plugin configuration chips */}
                 <CardFooter className="pt-2 pb-4 px-5 border-t border-border flex items-center justify-between text-[11px] font-sans text-muted-foreground">
                   <div className="flex items-center gap-1.5">
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted text-[10px] font-sans font-medium text-muted-foreground">
@@ -1838,10 +1838,6 @@ export function ProfilesView({
                       </span>
                     </span>
                   </div>
-
-                  <span className="flex items-center text-foreground group-hover:text-foreground transition-colors">
-                    Inspect <ChevronRight className="h-3 w-3 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
-                  </span>
                 </CardFooter>
               </Card>
             );
