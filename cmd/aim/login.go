@@ -11,6 +11,7 @@ import (
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
+	"github.com/aim-cli/aim/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -87,6 +88,13 @@ func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *prof
 	_ = refStore.Clear(adapter.Name(), profileName)
 	if agentName != adapter.Name() {
 		_ = refStore.Clear(agentName, profileName)
+	}
+
+	// Invalidate any cached usage failure report so subsequent usage checks reflect the active session
+	cacheStore := usage.NewCacheStore(baseDir, usage.DefaultTTL)
+	cacheStore.Delete(adapter.Name(), profileName)
+	if agentName != adapter.Name() {
+		cacheStore.Delete(agentName, profileName)
 	}
 
 	cfg.AddProfileAgent(profileName, adapter.Name())

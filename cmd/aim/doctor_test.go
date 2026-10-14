@@ -13,6 +13,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/usage"
 )
 
 type doctorMockAdapter struct {
@@ -290,6 +291,15 @@ func TestLogin_ClearsRefusalStore_Alias(t *testing.T) {
 		t.Fatalf("expected alias refusal before login")
 	}
 
+	// Also seed a cached failure report to verify it is invalidated upon login
+	cacheStore := usage.NewCacheStore(tempDir, usage.DefaultTTL)
+	_ = cacheStore.Put(usage.Report{
+		Agent:   "claude",
+		Profile: "work",
+		Status:  usage.StatusUnknown,
+		Error:   "re-login required (invalid_grant)",
+	})
+
 	reg := agents.NewRegistry()
 	reg.Register(&aliasMockAdapter{
 		mockAdapter:   mockAdapter{name: "claude"},
@@ -310,5 +320,11 @@ func TestLogin_ClearsRefusalStore_Alias(t *testing.T) {
 	}
 	if rec, ok := refStore.IsRefused("anthropic", "work"); ok || rec != nil {
 		t.Fatalf("expected alias refusal to be cleared after login via alias, got: ok=%v, rec=%v", ok, rec)
+	}
+
+	// Verify that the stale usage failure report was deleted from cache
+	freshCache := usage.NewCacheStore(tempDir, usage.DefaultTTL)
+	if rep, found := freshCache.Get("claude", "work"); found {
+		t.Fatalf("expected cached usage report to be invalidated after login, got: %+v", rep)
 	}
 }

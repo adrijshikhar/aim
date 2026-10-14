@@ -81,6 +81,8 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 	if pm != nil && pm.BaseDir != "" {
 		baseDir = pm.BaseDir
 	}
+	refStore := oauth.NewRefusalStore(baseDir)
+	_ = refStore.Prune()
 
 	if agentName != "" {
 		adapter, err := reg.Get(agentName)

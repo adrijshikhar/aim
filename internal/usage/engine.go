@@ -23,23 +23,28 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 
 	isForce := len(force) > 0 && force[0]
 
+	var refStore *oauth.RefusalStore
+	if cache != nil {
+		refStore = cache.RefusalStore()
+	}
+
 	var pending []TargetProfile
 	for _, target := range targets {
-		if cache != nil {
-			if refStore := cache.RefusalStore(); refStore != nil {
-				if rec, active := refStore.IsRefused(target.Agent, target.Profile); active && rec != nil {
-					rep := Report{
-						Agent:     target.Agent,
-						Profile:   target.Profile,
-						Status:    StatusUnknown,
-						FetchedAt: time.Now(),
-						Error:     "re-login required (" + string(rec.Code) + ")",
-						Summary:   "Re-login required: " + string(rec.Code),
-					}
-					_ = cache.Put(rep)
-					out <- rep
-					continue
+		if refStore != nil {
+			if rec, active := refStore.IsRefused(target.Agent, target.Profile); active && rec != nil {
+				rep := Report{
+					Agent:     target.Agent,
+					Profile:   target.Profile,
+					Status:    StatusUnknown,
+					FetchedAt: time.Now(),
+					Error:     "re-login required (" + string(rec.Code) + ")",
+					Summary:   "Re-login required: " + string(rec.Code),
 				}
+				if cache != nil {
+					_ = cache.Put(rep)
+				}
+				out <- rep
+				continue
 			}
 		}
 		if cache != nil && !isForce {
@@ -138,7 +143,9 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 
 				if rep != nil && rep.Status != StatusUnknown && err == nil {
 					if refStore != nil {
-						_ = refStore.Clear(t.Agent, t.Profile)
+						if err := refStore.Clear(t.Agent, t.Profile); err != nil {
+							logger.Debug("failed to clear refusal for %s:%s: %v", t.Agent, t.Profile, err)
+						}
 					}
 				} else if rep != nil {
 					errStr := rep.Error
@@ -150,7 +157,9 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 					}
 					if code, desc := parseRefusalFromError(errStr); code != oauth.RefusalNone {
 						if refStore != nil {
-							_ = refStore.Record(t.Agent, t.Profile, code, desc)
+							if err := refStore.Record(t.Agent, t.Profile, code, desc); err != nil {
+								logger.Debug("failed to persist refusal for %s:%s: %v", t.Agent, t.Profile, err)
+							}
 						}
 						rep.Error = "re-login required (" + string(code) + ")"
 						rep.Summary = "Re-login required: " + string(code)
@@ -263,6 +272,10 @@ func parseRefusalFromError(errStr string) (oauth.RefusalCode, string) {
 func isHTTP401(lower string) bool {
 	return strings.Contains(lower, " 401 ") ||
 		strings.HasPrefix(lower, "401 ") ||
+		strings.HasSuffix(lower, " 401") ||
+		strings.Contains(lower, "401:") ||
+		strings.Contains(lower, "(401)") ||
+		strings.Contains(lower, "[401]") ||
 		strings.Contains(lower, "status 401") ||
 		strings.Contains(lower, "status: 401") ||
 		strings.Contains(lower, "status code: 401") ||

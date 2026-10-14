@@ -67,6 +67,26 @@ func TestParseRefusalFromError_HTTP401Boundaries(t *testing.T) {
 			errStr:       `{"error": "network_failure", "endpoint": "127.0.0.1:4012"}`,
 			expectedCode: oauth.RefusalNone,
 		},
+		{
+			name:         "trailing suffix 401",
+			errStr:       "request failed with 401",
+			expectedCode: oauth.RefusalInvalidGrant,
+		},
+		{
+			name:         "colon separated 401",
+			errStr:       "received 401: token revoked",
+			expectedCode: oauth.RefusalInvalidGrant,
+		},
+		{
+			name:         "parenthesized 401",
+			errStr:       "HTTP error (401)",
+			expectedCode: oauth.RefusalInvalidGrant,
+		},
+		{
+			name:         "bracketed 401",
+			errStr:       "[401] Token rejected",
+			expectedCode: oauth.RefusalInvalidGrant,
+		},
 	}
 
 	for _, tt := range tests {

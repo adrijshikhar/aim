@@ -24,10 +24,10 @@ type RefusalRecord struct {
 }
 
 // RefusalStore manages persistent storage of OAuth refusal records in ~/.aim/refusals.json.
-// All operations are synchronized with an RWMutex and file writes are performed atomically.
+// Mutating operations are synchronized with a Mutex and file writes are performed atomically.
 type RefusalStore struct {
 	filePath string
-	mu       sync.RWMutex
+	mu       sync.Mutex
 }
 
 // NewRefusalStore returns a RefusalStore rooted in baseDir (storing records in baseDir/refusals.json).
@@ -52,7 +52,7 @@ func (s *RefusalStore) Record(agent, profile string, code RefusalCode, desc stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	records := s.loadUnlocked()
+	records := s.loadRecords()
 
 	// Clean expired entries on write
 	for k, r := range records {
@@ -70,17 +70,14 @@ func (s *RefusalStore) Record(agent, profile string, code RefusalCode, desc stri
 		RecordedAt:  time.Now().UTC(),
 	}
 
-	return s.saveUnlocked(records)
+	return s.saveRecords(records)
 }
 
 // IsRefused checks whether the agent and profile currently have an active (non-expired)
 // refusal record. If a record exists but has passed the 24-hour expiry window,
-// it returns nil, false.
+// it returns nil, false. Reads are lockless and read directly from disk via atomic snapshots.
 func (s *RefusalStore) IsRefused(agent, profile string) (*RefusalRecord, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	records := s.loadUnlocked()
+	records := s.loadRecords()
 	key := refusalKey(agent, profile)
 	rec, ok := records[key]
 	if !ok {
@@ -96,18 +93,19 @@ func (s *RefusalStore) IsRefused(agent, profile string) (*RefusalRecord, bool) {
 }
 
 // Clear removes any refusal record for the specified agent and profile.
+// If the key does not exist, it avoids unnecessary disk writes.
 func (s *RefusalStore) Clear(agent, profile string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	records := s.loadUnlocked()
+	records := s.loadRecords()
 	key := refusalKey(agent, profile)
 	if _, ok := records[key]; !ok {
 		return nil
 	}
 	delete(records, key)
 
-	return s.saveUnlocked(records)
+	return s.saveRecords(records)
 }
 
 // Prune purges all expired refusal records from disk. If maxAge is provided and > 0,
@@ -121,7 +119,7 @@ func (s *RefusalStore) Prune(maxAge ...time.Duration) error {
 		expiry = maxAge[0]
 	}
 
-	records := s.loadUnlocked()
+	records := s.loadRecords()
 	changed := false
 	for k, r := range records {
 		if time.Since(r.RecordedAt) > expiry {
@@ -134,10 +132,10 @@ func (s *RefusalStore) Prune(maxAge ...time.Duration) error {
 		return nil
 	}
 
-	return s.saveUnlocked(records)
+	return s.saveRecords(records)
 }
 
-func (s *RefusalStore) loadUnlocked() map[string]RefusalRecord {
+func (s *RefusalStore) loadRecords() map[string]RefusalRecord {
 	data, err := os.ReadFile(s.filePath)
 	if err != nil {
 		return make(map[string]RefusalRecord)
@@ -151,7 +149,7 @@ func (s *RefusalStore) loadUnlocked() map[string]RefusalRecord {
 	return records
 }
 
-func (s *RefusalStore) saveUnlocked(records map[string]RefusalRecord) error {
+func (s *RefusalStore) saveRecords(records map[string]RefusalRecord) error {
 	dir := filepath.Dir(s.filePath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create refusal store directory: %w", err)

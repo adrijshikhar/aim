@@ -509,6 +509,9 @@ func RunOnce(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManag
 	}
 
 	cache := usage.NewCacheStore(baseDir, usage.DefaultTTL)
+	if cache != nil && cache.RefusalStore() != nil {
+		_ = cache.RefusalStore().Prune()
+	}
 	reportsChan := usage.RefreshAsync(ctx, targets, cache, true)
 
 	successCount := 0
