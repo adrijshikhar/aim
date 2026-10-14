@@ -259,3 +259,65 @@ func TestRefusalStore_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestRefusalStore_Prune(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewRefusalStore(tempDir)
+	filePath := filepath.Join(tempDir, "refusals.json")
+
+	now := time.Now().UTC()
+	expiredTime := now.Add(-25 * time.Hour)
+	activeTime := now.Add(-1 * time.Hour)
+
+	records := map[string]oauth.RefusalRecord{
+		"claude:expired": {
+			Agent:       "claude",
+			Profile:     "expired",
+			Code:        oauth.RefusalInvalidGrant,
+			Description: "Expired refusal",
+			RecordedAt:  expiredTime,
+		},
+		"claude:active": {
+			Agent:       "claude",
+			Profile:     "active",
+			Code:        oauth.RefusalRefreshTokenExpired,
+			Description: "Active refusal",
+			RecordedAt:  activeTime,
+		},
+	}
+
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		t.Fatalf("failed to marshal records: %v", err)
+	}
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	if err := store.Prune(); err != nil {
+		t.Fatalf("unexpected error on Prune: %v", err)
+	}
+
+	// Verify on-disk file no longer contains expired record
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read refusals file: %v", err)
+	}
+	var onDisk map[string]oauth.RefusalRecord
+	if err := json.Unmarshal(fileData, &onDisk); err != nil {
+		t.Fatalf("failed to unmarshal pruned file: %v", err)
+	}
+
+	if _, exists := onDisk["claude:expired"]; exists {
+		t.Errorf("expected expired record to be purged from disk by Prune")
+	}
+	if _, exists := onDisk["claude:active"]; !exists {
+		t.Errorf("expected active record to be preserved on disk by Prune")
+	}
+
+	// Calling Prune again when nothing to purge should be a no-op returning nil
+	if err := store.Prune(); err != nil {
+		t.Fatalf("unexpected error on second Prune: %v", err)
+	}
+}
+

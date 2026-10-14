@@ -41,7 +41,7 @@ func ParseRefusal(statusCode int, body []byte) (RefusalCode, string) {
 			reason = payload.Message
 		}
 
-		switch strings.ToLower(payload.Error) {
+		switch strings.ToLower(strings.TrimSpace(payload.Error)) {
 		case "invalid_grant":
 			return RefusalInvalidGrant, reason
 		case "refresh_token_reused":

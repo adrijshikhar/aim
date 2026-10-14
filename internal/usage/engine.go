@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/oauth"
 )
 
 type TargetProfile struct {
@@ -24,6 +25,23 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 
 	var pending []TargetProfile
 	for _, target := range targets {
+		if cache != nil {
+			if refStore := cache.RefusalStore(); refStore != nil {
+				if rec, active := refStore.IsRefused(target.Agent, target.Profile); active && rec != nil {
+					rep := Report{
+						Agent:     target.Agent,
+						Profile:   target.Profile,
+						Status:    StatusUnknown,
+						FetchedAt: time.Now(),
+						Error:     "re-login required (" + string(rec.Code) + ")",
+						Summary:   "Re-login required: " + string(rec.Code),
+					}
+					_ = cache.Put(rep)
+					out <- rep
+					continue
+				}
+			}
+		}
 		if cache != nil && !isForce {
 			if rep, found := cache.Get(target.Agent, target.Profile); found {
 				out <- rep
@@ -63,6 +81,32 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 					wg.Done()
 				}()
 
+				var refStore *oauth.RefusalStore
+				if cache != nil {
+					refStore = cache.RefusalStore()
+				}
+
+				if refStore != nil {
+					if rec, active := refStore.IsRefused(t.Agent, t.Profile); active && rec != nil {
+						rep := &Report{
+							Agent:     t.Agent,
+							Profile:   t.Profile,
+							Status:    StatusUnknown,
+							FetchedAt: time.Now(),
+							Error:     "re-login required (" + string(rec.Code) + ")",
+							Summary:   "Re-login required: " + string(rec.Code),
+						}
+						if cache != nil && ctx.Err() == nil {
+							_ = cache.Put(*rep)
+						}
+						select {
+						case <-ctx.Done():
+						case out <- *rep:
+						}
+						return
+					}
+				}
+
 				timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
 
@@ -92,6 +136,25 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 					}
 				}
 
+				if rep != nil && rep.Status != StatusUnknown && err == nil {
+					if refStore != nil {
+						_ = refStore.Clear(t.Agent, t.Profile)
+					}
+				} else if rep != nil {
+					errStr := rep.Error
+					if errStr == "" && err != nil {
+						errStr = err.Error()
+					}
+					if errStr == "" {
+						errStr = rep.Summary
+					}
+					if code, desc := parseRefusalFromError(errStr); code != oauth.RefusalNone {
+						if refStore != nil {
+							_ = refStore.Record(t.Agent, t.Profile, code, desc)
+						}
+					}
+				}
+
 				if cache != nil && ctx.Err() == nil {
 					// Stale-While-Revalidate: If fetch failed with StatusUnknown, but cache already contains
 					// a valid, healthy report with quota windows, preserve the existing valid quota!
@@ -102,6 +165,7 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 
 						isAuthError := strings.Contains(combinedErr, "unauthorized") ||
 							strings.Contains(combinedErr, "invalid_grant") ||
+							strings.Contains(combinedErr, "refresh_token") ||
 							strings.Contains(combinedErr, "credential") ||
 							strings.Contains(combinedErr, "re-auth") ||
 							strings.Contains(combinedErr, "login")
@@ -146,4 +210,47 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 	}()
 
 	return out
+}
+
+func parseRefusalFromError(errStr string) (oauth.RefusalCode, string) {
+	if errStr == "" {
+		return oauth.RefusalNone, ""
+	}
+
+	trimmed := strings.TrimSpace(errStr)
+
+	// If error string contains a JSON object, attempt OAuth JSON parsing
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end > start {
+		jsonBlob := []byte(trimmed[start : end+1])
+		if code, desc := oauth.ParseRefusal(400, jsonBlob); code != oauth.RefusalNone {
+			if desc == "" {
+				desc = trimmed
+			}
+			return code, desc
+		}
+		if code, desc := oauth.ParseRefusal(401, jsonBlob); code != oauth.RefusalNone {
+			if desc == "" {
+				desc = trimmed
+			}
+			return code, desc
+		}
+	}
+
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.Contains(lower, string(oauth.RefusalRefreshTokenReused)):
+		return oauth.RefusalRefreshTokenReused, trimmed
+	case strings.Contains(lower, string(oauth.RefusalRefreshTokenExpired)):
+		return oauth.RefusalRefreshTokenExpired, trimmed
+	case strings.Contains(lower, string(oauth.RefusalRefreshTokenInvalidated)):
+		return oauth.RefusalRefreshTokenInvalidated, trimmed
+	case strings.Contains(lower, string(oauth.RefusalInvalidGrant)):
+		return oauth.RefusalInvalidGrant, trimmed
+	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized"):
+		return oauth.RefusalInvalidGrant, trimmed
+	}
+
+	return oauth.RefusalNone, ""
 }

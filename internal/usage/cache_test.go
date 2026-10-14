@@ -2,6 +2,7 @@ package usage_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -930,3 +932,236 @@ func TestRefreshAsync_MultipleWindowsPreserved(t *testing.T) {
 		t.Errorf("window percentages not preserved correctly: %+v", received[0].Windows)
 	}
 }
+
+func TestCacheStore_RefusalStoreGetterSetter(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	// Default initialization has non-nil RefusalStore
+	if store.RefusalStore() == nil {
+		t.Fatalf("expected non-nil default RefusalStore")
+	}
+
+	custom := oauth.NewRefusalStore(t.TempDir())
+	store.SetRefusalStore(custom)
+	if store.RefusalStore() != custom {
+		t.Fatalf("expected custom RefusalStore to be set")
+	}
+
+	// Nil receiver guards
+	var nilStore *usage.CacheStore
+	if nilStore.RefusalStore() != nil {
+		t.Errorf("expected nil RefusalStore on nil receiver")
+	}
+	nilStore.SetRefusalStore(custom) // Should not panic
+}
+
+func TestRefreshAsync_RefusalBackoffSkipsGetUsageFn(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	// Pre-record an active refusal
+	agent := "claude"
+	profile := "work"
+	if err := store.RefusalStore().Record(agent, profile, oauth.RefusalRefreshTokenReused, "Token consumed"); err != nil {
+		t.Fatalf("failed to record refusal: %v", err)
+	}
+
+	var called atomic.Bool
+	targets := []usage.TargetProfile{
+		{
+			Agent:   agent,
+			Profile: profile,
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				called.Store(true)
+				return &usage.Report{Status: usage.StatusOK}, nil
+			},
+		},
+	}
+
+	// Run forced refresh
+	ch := usage.RefreshAsync(context.Background(), targets, store, true)
+	var reports []usage.Report
+	for rep := range ch {
+		reports = append(reports, rep)
+	}
+
+	if called.Load() {
+		t.Errorf("expected GetUsageFn to be skipped during 24h refusal backoff")
+	}
+
+	if len(reports) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(reports))
+	}
+
+	rep := reports[0]
+	if rep.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown, got %s", rep.Status)
+	}
+	expectedErr := "re-login required (refresh_token_reused)"
+	if rep.Error != expectedErr {
+		t.Errorf("expected error %q, got %q", expectedErr, rep.Error)
+	}
+	expectedSummary := "Re-login required: refresh_token_reused"
+	if rep.Summary != expectedSummary {
+		t.Errorf("expected summary %q, got %q", expectedSummary, rep.Summary)
+	}
+
+	// Also verify that unforced refresh also skips GetUsageFn and yields refusal report
+	called.Store(false)
+	ch2 := usage.RefreshAsync(context.Background(), targets, store, false)
+	var reports2 []usage.Report
+	for r := range ch2 {
+		reports2 = append(reports2, r)
+	}
+
+	if called.Load() {
+		t.Errorf("expected GetUsageFn to be skipped on unforced refresh during 24h backoff")
+	}
+	if len(reports2) != 1 || reports2[0].Status != usage.StatusUnknown {
+		t.Errorf("expected refusal report on unforced refresh, got: %+v", reports2)
+	}
+}
+
+func TestRefreshAsync_RecordsRefusalOnFatalAuthError(t *testing.T) {
+	testCases := []struct {
+		name         string
+		errString    string
+		expectedCode oauth.RefusalCode
+	}{
+		{
+			name:         "invalid_grant error string",
+			errString:    "invalid_grant: token revoked",
+			expectedCode: oauth.RefusalInvalidGrant,
+		},
+		{
+			name:         "refresh_token_reused in error",
+			errString:    "refresh_token_reused: token consumed",
+			expectedCode: oauth.RefusalRefreshTokenReused,
+		},
+		{
+			name:         "refresh_token_expired",
+			errString:    "oauth error: refresh_token_expired",
+			expectedCode: oauth.RefusalRefreshTokenExpired,
+		},
+		{
+			name:         "refresh_token_invalidated",
+			errString:    "refresh_token_invalidated",
+			expectedCode: oauth.RefusalRefreshTokenInvalidated,
+		},
+		{
+			name:         "JSON payload invalid_grant",
+			errString:    `{"error": "invalid_grant", "error_description": "Bad refresh token"}`,
+			expectedCode: oauth.RefusalInvalidGrant,
+		},
+		{
+			name:         "HTTP 401 Unauthorized",
+			errString:    "401 Unauthorized: token expired",
+			expectedCode: oauth.RefusalInvalidGrant,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			store := usage.NewCacheStore(tmpDir, time.Hour)
+
+			agent := "test-agent"
+			profile := "test-prof"
+
+			targets := []usage.TargetProfile{
+				{
+					Agent:   agent,
+					Profile: profile,
+					GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+						return &usage.Report{
+							Agent:   agent,
+							Profile: p,
+							Status:  usage.StatusUnknown,
+							Error:   tc.errString,
+						}, nil
+					},
+				},
+			}
+
+			ch := usage.RefreshAsync(context.Background(), targets, store, true)
+			for range ch {
+			}
+
+			rec, refused := store.RefusalStore().IsRefused(agent, profile)
+			if !refused || rec == nil {
+				t.Fatalf("expected refusal recorded for %s:%s on error %q", agent, profile, tc.errString)
+			}
+			if rec.Code != tc.expectedCode {
+				t.Errorf("expected code %q, got %q", tc.expectedCode, rec.Code)
+			}
+		})
+	}
+}
+
+func TestRefreshAsync_ClearsRefusalOnSuccessfulFetch(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Hour)
+
+	agent := "claude"
+	profile := "work"
+
+	// Pre-seed an expired refusal record on disk to test that when a fetch succeeds,
+	// store.RefusalStore().Clear is called and cleans up any existing record.
+	filePath := store.RefusalStore().FilePath()
+	expiredRecords := map[string]oauth.RefusalRecord{
+		"claude:work": {
+			Agent:       "claude",
+			Profile:     "work",
+			Code:        oauth.RefusalInvalidGrant,
+			Description: "old refusal",
+			RecordedAt:  time.Now().Add(-25 * time.Hour), // Expired so IsRefused returns false
+		},
+	}
+	data, err := json.Marshal(expiredRecords)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
+		t.Fatalf("failed to write test refusal file: %v", err)
+	}
+
+	targets := []usage.TargetProfile{
+		{
+			Agent:   agent,
+			Profile: profile,
+			GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+				return &usage.Report{
+					Agent:   agent,
+					Profile: p,
+					Status:  usage.StatusOK,
+					Windows: []usage.LimitWindow{
+						{Name: "5-Hour", RemainingPct: 100},
+					},
+				}, nil
+			},
+		},
+	}
+
+	ch := usage.RefreshAsync(context.Background(), targets, store, true)
+	for range ch {
+	}
+
+	// Verify that the record was cleared from the store
+	rec, ok := store.RefusalStore().IsRefused(agent, profile)
+	if ok || rec != nil {
+		t.Fatalf("expected refusal to be cleared on successful fetch, got: ok=%v, rec=%v", ok, rec)
+	}
+
+	// Also verify that the file on disk no longer contains "claude:work"
+	raw, err := os.ReadFile(filePath)
+	if err == nil {
+		var onDisk map[string]oauth.RefusalRecord
+		if json.Unmarshal(raw, &onDisk) == nil {
+			if _, exists := onDisk["claude:work"]; exists {
+				t.Errorf("expected claude:work to be completely removed from refusals.json on Clear")
+			}
+		}
+	}
+}
+

@@ -181,3 +181,50 @@ func TestDoctor_UnclaimedTokens_ReportsPruning(t *testing.T) {
 		t.Errorf("expected doctor to report pruned records, got:\n%s", output)
 	}
 }
+
+func TestDoctor_RefusalRendering(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	refStore := oauth.NewRefusalStore(tempDir)
+	if err := refStore.Record("claude", "work", oauth.RefusalRefreshTokenReused, "refresh token reused"); err != nil {
+		t.Fatalf("failed to record refusal: %v", err)
+	}
+
+	reg := agents.NewRegistry()
+	reg.Register(&doctorMockAdapter{mockAdapter: mockAdapter{name: "claude", hasCreds: true}, failDr: false})
+
+	pm := profile.NewProfileManager(tempDir)
+	if _, err := pm.EnsureProfile("work"); err != nil {
+		t.Fatalf("failed to ensure profile: %v", err)
+	}
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor", "claude"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	_ = cmd.Execute()
+	output := buf.String()
+
+	expectedSubstrings := []string{
+		"[FAIL]",
+		"Auth:",
+		"Re-login Required (refresh_token_reused)",
+		"Remedy: Run 'aim login claude work'",
+	}
+
+	for _, sub := range expectedSubstrings {
+		if !strings.Contains(output, sub) {
+			t.Errorf("expected doctor output to contain %q, but got:\n%s", sub, output)
+		}
+	}
+
+	// Also verify that doctor --check fails when refusal is present
+	cmdCheck := newDoctorCmd(reg, pm)
+	cmdCheck.SetArgs([]string{"claude", "--check"})
+	if err := cmdCheck.Execute(); err == nil {
+		t.Errorf("expected doctor --check to return an error when refusal is active")
+	}
+}
+

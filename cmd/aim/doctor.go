@@ -252,6 +252,17 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 		if diag, ok := adapter.(agents.Diagnostician); ok {
 			results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
 		}
+		baseDir := config.BaseDir()
+		if pm != nil && pm.BaseDir != "" {
+			baseDir = pm.BaseDir
+		}
+		if rec, ok := oauth.NewRefusalStore(baseDir).IsRefused(adapter.Name(), p); ok && rec != nil {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Auth",
+				Status:   "FAIL",
+				Message:  fmt.Sprintf("Re-login Required (%s)\n         Remedy: Run 'aim login %s %s'", rec.Code, adapter.Name(), p),
+			})
+		}
 		if !bridged[p] {
 			bridged[p] = true
 			var extraPaths []string
