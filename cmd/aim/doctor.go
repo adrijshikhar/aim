@@ -19,6 +19,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
+	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -252,6 +253,7 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 		baseDir = pm.BaseDir
 	}
 	refStore := oauth.NewRefusalStore(baseDir)
+	usageCache := usage.NewCacheStore(baseDir, usage.DefaultTTL)
 
 	for _, p := range profiles {
 		fmt.Fprintln(out)
@@ -261,11 +263,64 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 			results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
 		}
 		if rec, ok := refStore.IsRefused(adapter.Name(), p); ok && rec != nil {
-			results = append(results, agents.DiagnosticResult{
+			filtered := make([]agents.DiagnosticResult, 0, len(results))
+			for _, r := range results {
+				if (r.Category == "Auth" || r.Category == "Token") && r.Status == "OK" {
+					continue
+				}
+				filtered = append(filtered, r)
+			}
+			results = append(filtered, agents.DiagnosticResult{
 				Category: "Auth",
 				Status:   "FAIL",
 				Message:  fmt.Sprintf("Re-login Required (%s)\n         Remedy: Run 'aim login %s %s'", rec.Code, adapter.Name(), p),
 			})
+		} else {
+			profDir := ""
+			if pm != nil {
+				profDir = pm.ProfileDir(p)
+			}
+			target := usage.TargetProfile{
+				Agent:      adapter.Name(),
+				Profile:    p,
+				ProfileDir: profDir,
+			}
+			rep := usage.InspectProfile(context.Background(), target, usageCache)
+
+			authFound := false
+			hasAuthCategory := false
+			for i := range results {
+				if results[i].Category == "Auth" || results[i].Category == "Token" {
+					hasAuthCategory = true
+					if results[i].Status == "OK" {
+						if rep.Status != usage.StatusOK {
+							results[i].Message = "Credentials configured (Idle - will renew on next turn)"
+						}
+						authFound = true
+					}
+				}
+			}
+			if !authFound && !hasAuthCategory && rep.Status == usage.StatusIdle {
+				insertIdx := len(results)
+				for i, r := range results {
+					if r.Category == "Binary" {
+						insertIdx = i + 1
+						break
+					}
+				}
+				idleResult := agents.DiagnosticResult{
+					Category: "Auth",
+					Status:   "OK",
+					Message:  "Credentials configured (Idle - will renew on next turn)",
+				}
+				if insertIdx >= len(results) {
+					results = append(results, idleResult)
+				} else {
+					results = append(results, agents.DiagnosticResult{})
+					copy(results[insertIdx+1:], results[insertIdx:])
+					results[insertIdx] = idleResult
+				}
+			}
 		}
 		if !bridged[p] {
 			bridged[p] = true

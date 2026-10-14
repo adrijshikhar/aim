@@ -84,7 +84,7 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 		}
 		if s.reg != nil {
 			for _, ad := range s.reg.All() {
-				if ad.HasCredentials(pDir) && !detectedSet[ad.Name()] {
+				if usage.HasCredentialsOnDisk(ad.Name(), pDir) && !detectedSet[ad.Name()] {
 					agentsList = append(agentsList, ad.Name())
 					detectedSet[ad.Name()] = true
 				}
@@ -98,14 +98,7 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 
 func (s *profileService) buildAdapterInfo(agentName, profileName string, adapter agents.AgentAdapter) AdapterInfo {
 	pDir := s.pm.ProfileDir(profileName)
-	hasCreds := false
-	if adapter != nil {
-		hasCreds = adapter.HasCredentials(pDir)
-	} else if s.reg != nil && agentName != "" {
-		if ad, err := s.reg.Get(agentName); err == nil {
-			hasCreds = ad.HasCredentials(pDir)
-		}
-	}
+	hasCreds := usage.HasCredentialsOnDisk(agentName, pDir)
 
 	acc := profile.GetProfileAccountInfoForAgent(pDir, agentName)
 	var accountPtr *profile.AccountInfo
@@ -114,11 +107,18 @@ func (s *profileService) buildAdapterInfo(agentName, profileName string, adapter
 	}
 
 	var quotaPtr *QuotaDTO
-	if s.cache != nil && agentName != "" {
-		if rep, ok := s.cache.Get(agentName, profileName); ok {
+	if agentName != "" {
+		target := usage.TargetProfile{
+			Agent:      agentName,
+			Profile:    profileName,
+			ProfileDir: pDir,
+		}
+		rep := usage.InspectProfile(context.Background(), target, s.cache)
+		if rep.Status != usage.StatusUnknown || len(rep.Windows) > 0 {
 			quotaPtr = reportToQuotaDTO(rep)
-		} else if rep, ok := s.cache.GetStale(agentName, profileName); ok {
-			quotaPtr = reportToQuotaDTO(rep)
+		}
+		if !hasCreds && (rep.Status == usage.StatusIdle || rep.Status == usage.StatusOK) {
+			hasCreds = true
 		}
 	}
 
@@ -200,6 +200,9 @@ func reportToQuotaDTO(rep usage.Report) *QuotaDTO {
 	}
 	if summary == "" && rep.Error != "" {
 		summary = rep.Error
+	}
+	if rep.Status == usage.StatusIdle && summary == "" {
+		summary = "Ready on use"
 	}
 
 	var windows []QuotaWindowDTO
@@ -520,7 +523,7 @@ func (s *profileService) RefreshUsage(ctx context.Context, agent, profileName st
 						}
 					}
 				}
-				if isAssociated || ad.HasCredentials(pDir) || len(agentsList) == 0 {
+				if isAssociated || usage.HasCredentialsOnDisk(ad.Name(), pDir) || len(agentsList) == 0 {
 					profs = []string{profileName}
 				}
 			}

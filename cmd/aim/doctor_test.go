@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
@@ -326,5 +328,38 @@ func TestLogin_ClearsRefusalStore_Alias(t *testing.T) {
 	freshCache := usage.NewCacheStore(tempDir, usage.DefaultTTL)
 	if rep, found := freshCache.Get("claude", "work"); found {
 		t.Fatalf("expected cached usage report to be invalidated after login, got: %+v", rep)
+	}
+}
+
+func TestDoctor_IdleProfileAuthMessage(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	if _, err := pm.EnsureProfile("idle-prof"); err != nil {
+		t.Fatalf("failed to ensure profile: %v", err)
+	}
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("idle-prof", "claude")
+	_ = config.SaveConfig(cfg)
+
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{name: "claude", hasCreds: true})
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor", "claude"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected doctor to succeed, got: %v", err)
+	}
+	output := buf.String()
+
+	cleanOut := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(output, "")
+	expectedStr := "[OK]     Auth: Credentials configured (Idle - will renew on next turn)"
+	if !strings.Contains(cleanOut, expectedStr) {
+		t.Errorf("expected doctor output to contain %q, but got:\n%s", expectedStr, output)
 	}
 }

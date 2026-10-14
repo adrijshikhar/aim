@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -37,15 +37,28 @@ func newListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command
 	}
 }
 
-func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string) string {
-	if cache == nil {
-		return ""
+func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string, profDir ...string) string {
+	dir := ""
+	if len(profDir) > 0 {
+		dir = profDir[0]
 	}
-	rep, ok := cache.Get(agent, profileName)
-	if !ok {
-		return ""
+	rep := usage.InspectProfile(context.Background(), usage.TargetProfile{
+		Agent:      agent,
+		Profile:    profileName,
+		ProfileDir: dir,
+	}, cache)
+
+	if rep.Status == usage.StatusIdle {
+		return "[idle: ready on use]"
 	}
 	if rep.Error != "" || rep.Status == usage.StatusUnknown {
+		if rep.Error == "no credentials" && cache != nil {
+			if _, ok := cache.Get(agent, profileName); !ok {
+				if _, found := cache.GetStale(agent, profileName); !found {
+					return ""
+				}
+			}
+		}
 		errLower := strings.ToLower(rep.Error)
 		summaryLower := strings.ToLower(rep.Summary)
 		if strings.Contains(errLower, "credential") || strings.Contains(summaryLower, "credential") {
@@ -169,17 +182,13 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 			fmt.Println(emptyStyle.Render(fmt.Sprintf("  No profiles found for agent %q. Run: aim login %s <profile>", canonicalAgent, canonicalAgent)))
 			return nil
 		}
-		hasStale := false
 		t := table.New().
 			Border(lipgloss.HiddenBorder()).
 			Headers("#", "PROFILE", "QUOTA STATUS", "STORAGE PATH")
 
 		for i, p := range profiles {
-			if cache.IsStale(canonicalAgent, p, 10*time.Minute) {
-				hasStale = true
-			}
 			badgeStr := ""
-			if summary := formatProfileUsageBadge(cache, canonicalAgent, p); summary != "" {
+			if summary := formatProfileUsageBadge(cache, canonicalAgent, p, pm.ProfileDir(p)); summary != "" {
 				if strings.HasPrefix(summary, "[") && strings.HasSuffix(summary, "]") {
 					badgeStr = summary
 				} else {
@@ -211,9 +220,6 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 		})
 
 		fmt.Println(t.Render())
-		if hasStale {
-			triggerPrewarmAsync(baseDir, canonicalAgent)
-		}
 		return nil
 	}
 
@@ -228,7 +234,6 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 		fmt.Println(emptyStyle.Render("  No profiles found. Run: aim login agy <profile>"))
 		return nil
 	}
-	hasStale := false
 	t := table.New().
 		Border(lipgloss.HiddenBorder()).
 		Headers("#", "PROFILE", "AGENTS", "QUOTA STATUS", "STORAGE PATH")
@@ -240,13 +245,11 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 			agentStr = fmt.Sprintf("[%s]", strings.Join(agentsList, ", "))
 		}
 
+		pDir := pm.ProfileDir(p)
 		var summaries []string
 		if len(agentsList) > 0 {
 			for _, ag := range agentsList {
-				if cache.IsStale(ag, p, 10*time.Minute) {
-					hasStale = true
-				}
-				if s := formatProfileUsageBadge(cache, ag, p); s != "" {
+				if s := formatProfileUsageBadge(cache, ag, p, pDir); s != "" {
 					if len(agentsList) > 1 {
 						summaries = append(summaries, fmt.Sprintf("%s: %s", ag, s))
 					} else {
@@ -256,10 +259,7 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 			}
 		} else if reg != nil {
 			for _, ad := range reg.All() {
-				if cache.IsStale(ad.Name(), p, 10*time.Minute) {
-					hasStale = true
-				}
-				if s := formatProfileUsageBadge(cache, ad.Name(), p); s != "" {
+				if s := formatProfileUsageBadge(cache, ad.Name(), p, pDir); s != "" {
 					summaries = append(summaries, s)
 				}
 			}
@@ -276,7 +276,7 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 			p,
 			agentStr,
 			badgeStr,
-			pm.ProfileDir(p),
+			pDir,
 		)
 	}
 
@@ -299,8 +299,5 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 	})
 
 	fmt.Println(t.Render())
-	if hasStale {
-		triggerPrewarmAsync(baseDir, "")
-	}
 	return nil
 }

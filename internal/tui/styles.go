@@ -159,6 +159,8 @@ func GaugeStyleForStatus(st usage.Status) lipgloss.Style {
 		return GaugeYellowStyle
 	case usage.StatusCritical, usage.StatusExhausted:
 		return GaugeRedStyle
+	case usage.StatusIdle:
+		return GaugeDimStyle
 	default:
 		return GaugeDimStyle
 	}

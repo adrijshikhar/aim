@@ -14,6 +14,9 @@ const (
 	StatusCritical  Status = "CRITICAL"
 	StatusExhausted Status = "EXHAUSTED"
 	StatusUnknown   Status = "UNKNOWN"
+	StatusIdle      Status = "IDLE"
+	StatusTimeout   Status = "TIMEOUT"
+	StatusOffline   Status = "OFFLINE"
 )
 
 type LimitWindow struct {
