@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func TestGeneratePlist(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "<string>dev.aim-cli.daemon</string>") {
+	if !strings.Contains(content, "<string>com.aim-cli.daemon</string>") {
 		t.Errorf("expected plist to contain service label, got:\n%s", content)
 	}
 	if !strings.Contains(content, "<string>/usr/local/bin/aim</string>") {
@@ -101,6 +102,35 @@ func TestStatus_NotInstalled(t *testing.T) {
 	}
 	if info.Active {
 		t.Errorf("expected Active to be false for empty directory")
+	}
+}
+
+func TestStatus_LegacyPlist(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("skipping macOS-specific launchd legacy test")
+	}
+	tmpHome := t.TempDir()
+	legacyDir := filepath.Join(tmpHome, "Library", "LaunchAgents")
+	if err := os.MkdirAll(legacyDir, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	legacyPlist := filepath.Join(legacyDir, LegacyServiceLabel+".plist")
+	if err := os.WriteFile(legacyPlist, []byte("<plist></plist>"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	info, err := Status(t.TempDir(), tmpHome)
+	if err != nil {
+		t.Fatalf("Status returned unexpected error: %v", err)
+	}
+	if !info.Installed {
+		t.Errorf("expected Installed to be true for legacy plist")
+	}
+	if info.Label != LegacyServiceLabel {
+		t.Errorf("expected Label to be %s, got %s", LegacyServiceLabel, info.Label)
+	}
+	if info.ConfigPath != legacyPlist {
+		t.Errorf("expected ConfigPath to be %s, got %s", legacyPlist, info.ConfigPath)
 	}
 }
 

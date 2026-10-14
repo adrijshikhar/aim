@@ -373,8 +373,8 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
           <div className="grid grid-cols-2 gap-2 font-mono text-[11px] pt-1">
             <div className="p-2 rounded-geist bg-card border border-border">
               <span className="text-muted-foreground/70 block text-[10px] uppercase">Service Label</span>
-              <span className="text-foreground font-medium truncate block" title={daemonInfo?.label || 'dev.aim-cli.daemon'}>
-                {daemonInfo?.label || 'dev.aim-cli.daemon'}
+              <span className="text-foreground font-medium truncate block" title={daemonInfo?.label || 'com.aim-cli.daemon'}>
+                {daemonInfo?.label || 'com.aim-cli.daemon'}
               </span>
             </div>
             <div className="p-2 rounded-geist bg-card border border-border">

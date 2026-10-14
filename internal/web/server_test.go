@@ -961,7 +961,7 @@ func (m *mockDaemonService) GetStatus(ctx context.Context) (*service.DaemonDTO, 
 	if m.getStatusFn != nil {
 		return m.getStatusFn(ctx)
 	}
-	return &service.DaemonDTO{Installed: true, Active: true, Label: "dev.aim-cli.daemon", IntervalSec: 900}, nil
+	return &service.DaemonDTO{Installed: true, Active: true, Label: "com.aim-cli.daemon", IntervalSec: 900}, nil
 }
 
 func (m *mockDaemonService) GetLogs(ctx context.Context, maxLines, offset int) (*service.DaemonLogsDTO, error) {
@@ -979,7 +979,7 @@ func (m *mockDaemonService) Install(ctx context.Context, binaryPath string) (*se
 	if m.installFn != nil {
 		return m.installFn(ctx, binaryPath)
 	}
-	return &service.DaemonDTO{Installed: true, Active: true, Label: "dev.aim-cli.daemon", IntervalSec: 900}, nil
+	return &service.DaemonDTO{Installed: true, Active: true, Label: "com.aim-cli.daemon", IntervalSec: 900}, nil
 }
 
 func (m *mockDaemonService) Uninstall(ctx context.Context) error {
@@ -1003,7 +1003,7 @@ func TestGetDaemon(t *testing.T) {
 			return &service.DaemonDTO{
 				Installed:   true,
 				Active:      true,
-				Label:       "dev.aim-cli.daemon",
+				Label:       "com.aim-cli.daemon",
 				IntervalSec: 900,
 			}, nil
 		},

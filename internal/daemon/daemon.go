@@ -261,6 +261,18 @@ func Status(baseDir string, homeOverride ...string) (*ServiceInfo, error) {
 			if err == nil && strings.Contains(string(out), DefaultServiceLabel) {
 				info.Active = true
 			}
+		} else {
+			// Backward compatibility: detect legacy service label plist
+			legacyPlistPath := filepath.Join(home, "Library", "LaunchAgents", LegacyServiceLabel+".plist")
+			if _, err := os.Stat(legacyPlistPath); err == nil {
+				info.Installed = true
+				info.ConfigPath = legacyPlistPath
+				info.Label = LegacyServiceLabel
+				out, err := exec.Command("launchctl", "list").Output()
+				if err == nil && strings.Contains(string(out), LegacyServiceLabel) {
+					info.Active = true
+				}
+			}
 		}
 		return info, nil
 	}
@@ -303,6 +315,15 @@ func Install(binaryPath, baseDir string, homeOverride ...string) (*ServiceInfo, 
 		plistPath := LaunchAgentPath(home)
 		if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
 			return nil, fmt.Errorf("failed to create LaunchAgents directory: %w", err)
+		}
+
+		// Unload and clean up legacy plist if present from earlier versions
+		legacyPlistPath := filepath.Join(home, "Library", "LaunchAgents", LegacyServiceLabel+".plist")
+		if _, err := os.Stat(legacyPlistPath); err == nil {
+			_ = exec.Command("launchctl", "unload", legacyPlistPath).Run()
+			uid := os.Getuid()
+			_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", uid), legacyPlistPath).Run()
+			_ = os.Remove(legacyPlistPath)
 		}
 
 		pathEnv := os.Getenv("PATH")
@@ -409,6 +430,13 @@ func Uninstall(baseDir string, homeOverride ...string) error {
 		if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove plist file: %w", err)
 		}
+
+		// Also clean up legacy plist if present
+		legacyPlistPath := filepath.Join(home, "Library", "LaunchAgents", LegacyServiceLabel+".plist")
+		_ = exec.Command("launchctl", "unload", legacyPlistPath).Run()
+		uid = os.Getuid()
+		_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", uid), legacyPlistPath).Run()
+		_ = os.Remove(legacyPlistPath)
 
 		_ = AppendDaemonLog(logPath, "INFO", "daemon service uninstalled")
 		return nil

@@ -6,7 +6,10 @@ import (
 
 const (
 	// DefaultServiceLabel identifies the AIM background daemon in launchd and systemd.
-	DefaultServiceLabel = "dev.aim-cli.daemon"
+	DefaultServiceLabel = "com.aim-cli.daemon"
+
+	// LegacyServiceLabel is the legacy service label for backward compatibility during upgrades.
+	LegacyServiceLabel = "dev.aim-cli.daemon"
 
 	// DefaultInterval is the scheduled period between background job runs.
 	DefaultInterval = 15 * time.Minute

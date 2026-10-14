@@ -83,7 +83,7 @@ func TestDaemonCmd_Status_Plain(t *testing.T) {
 	if !strings.Contains(output, "Installed:    No") {
 		t.Errorf("expected Installed: No, got: %s", output)
 	}
-	if !strings.Contains(output, "dev.aim-cli.daemon") {
+	if !strings.Contains(output, "com.aim-cli.daemon") {
 		t.Errorf("expected service label in output, got: %s", output)
 	}
 }
