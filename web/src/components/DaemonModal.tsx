@@ -20,7 +20,6 @@ import {
   Copy,
   Folder,
   Terminal,
-  ChevronDown,
 } from 'lucide-react';
 import { DaemonDTO, installDaemon, uninstallDaemon, runDaemonOnce, getDaemonLogs } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -442,19 +441,9 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         {/* Execution Log Stream */}
         <div className="rounded-geist border border-border bg-background p-3 text-xs space-y-2.5 transition-all">
           <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={handleToggleLogs}
-              className="flex items-center gap-2 text-left cursor-pointer select-none group focus:outline-none"
-            >
-              <ChevronDown
-                className={cn(
-                  "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
-                  !showLogs && "-rotate-90"
-                )}
-              />
-              <Terminal className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-              <span className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground group-hover:text-foreground transition-colors font-semibold">
+            <div className="flex items-center gap-2 select-none">
+              <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground font-semibold">
                 Execution Logs
               </span>
               {totalLogLines > 0 && (
@@ -464,7 +453,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                     : `${totalLogLines} lines`}
                 </span>
               )}
-            </button>
+            </div>
             <div className="flex items-center gap-1.5">
               {showLogs && (
                 <>
