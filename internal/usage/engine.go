@@ -234,7 +234,7 @@ func parseRefusalFromError(errStr string) (oauth.RefusalCode, string) {
 			return code, desc
 		}
 		// Only evaluate 401 fallback if the error explicitly indicates 401 / unauthorized
-		if strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") {
+		if isHTTP401(lower) || strings.Contains(lower, "unauthorized") {
 			if code, desc := oauth.ParseRefusal(401, jsonBlob); code != oauth.RefusalNone {
 				if desc == "" {
 					desc = trimmed
@@ -253,9 +253,21 @@ func parseRefusalFromError(errStr string) (oauth.RefusalCode, string) {
 		return oauth.RefusalRefreshTokenInvalidated, trimmed
 	case strings.Contains(lower, string(oauth.RefusalInvalidGrant)):
 		return oauth.RefusalInvalidGrant, trimmed
-	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized"):
+	case isHTTP401(lower) || strings.Contains(lower, "unauthorized"):
 		return oauth.RefusalInvalidGrant, trimmed
 	}
 
 	return oauth.RefusalNone, ""
 }
+
+func isHTTP401(lower string) bool {
+	return strings.Contains(lower, " 401 ") ||
+		strings.HasPrefix(lower, "401 ") ||
+		strings.Contains(lower, "status 401") ||
+		strings.Contains(lower, "status: 401") ||
+		strings.Contains(lower, "status code: 401") ||
+		strings.Contains(lower, "status code 401") ||
+		strings.Contains(lower, "http 401") ||
+		strings.Contains(lower, "401 unauthorized")
+}
+

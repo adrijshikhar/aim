@@ -1134,6 +1134,14 @@ func TestRefreshAsync_IgnoresGenericErrors(t *testing.T) {
 			name:      "random application error",
 			errString: "500 Internal Server Error",
 		},
+		{
+			name:      "connection error with port 4012",
+			errString: "connect to 127.0.0.1:4012: connection refused",
+		},
+		{
+			name:      "timestamp containing 14:01:00",
+			errString: "request failed at 14:01:00: connection reset by peer",
+		},
 	}
 
 	for _, tc := range genericErrors {

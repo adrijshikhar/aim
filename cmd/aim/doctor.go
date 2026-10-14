@@ -245,6 +245,12 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 		fmt.Fprintln(out, lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("  No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
 		return true
 	}
+	baseDir := config.BaseDir()
+	if pm != nil && pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	refStore := oauth.NewRefusalStore(baseDir)
+
 	for _, p := range profiles {
 		fmt.Fprintln(out)
 		fmt.Fprintf(out, "Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
@@ -252,11 +258,7 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 		if diag, ok := adapter.(agents.Diagnostician); ok {
 			results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
 		}
-		baseDir := config.BaseDir()
-		if pm != nil && pm.BaseDir != "" {
-			baseDir = pm.BaseDir
-		}
-		if rec, ok := oauth.NewRefusalStore(baseDir).IsRefused(adapter.Name(), p); ok && rec != nil {
+		if rec, ok := refStore.IsRefused(adapter.Name(), p); ok && rec != nil {
 			results = append(results, agents.DiagnosticResult{
 				Category: "Auth",
 				Status:   "FAIL",

@@ -83,7 +83,11 @@ func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *prof
 	if pm != nil && pm.BaseDir != "" {
 		baseDir = pm.BaseDir
 	}
-	_ = oauth.NewRefusalStore(baseDir).Clear(agentName, profileName)
+	refStore := oauth.NewRefusalStore(baseDir)
+	_ = refStore.Clear(adapter.Name(), profileName)
+	if agentName != adapter.Name() {
+		_ = refStore.Clear(agentName, profileName)
+	}
 
 	cfg.AddProfileAgent(profileName, adapter.Name())
 	_ = config.SaveConfig(cfg)

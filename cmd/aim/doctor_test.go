@@ -257,4 +257,61 @@ func TestLogin_ClearsRefusalStore(t *testing.T) {
 	}
 }
 
+type aliasMockAdapter struct {
+	mockAdapter
+	customAliases []string
+}
+
+func (a *aliasMockAdapter) Aliases() []string {
+	if a.customAliases != nil {
+		return a.customAliases
+	}
+	return a.mockAdapter.Aliases()
+}
+
+func TestLogin_ClearsRefusalStore_Alias(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	refStore := oauth.NewRefusalStore(tempDir)
+	// Record refusal under canonical name "claude"
+	if err := refStore.Record("claude", "work", oauth.RefusalRefreshTokenReused, "token consumed"); err != nil {
+		t.Fatalf("failed to record refusal: %v", err)
+	}
+	// Also record refusal under alias "anthropic" defensively
+	if err := refStore.Record("anthropic", "work", oauth.RefusalInvalidGrant, "invalid grant"); err != nil {
+		t.Fatalf("failed to record alias refusal: %v", err)
+	}
+
+	if _, ok := refStore.IsRefused("claude", "work"); !ok {
+		t.Fatalf("expected canonical refusal before login")
+	}
+	if _, ok := refStore.IsRefused("anthropic", "work"); !ok {
+		t.Fatalf("expected alias refusal before login")
+	}
+
+	reg := agents.NewRegistry()
+	reg.Register(&aliasMockAdapter{
+		mockAdapter:   mockAdapter{name: "claude"},
+		customAliases: []string{"anthropic"},
+	})
+	pm := profile.NewProfileManager(tempDir)
+
+	// Log in via alias "anthropic"
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"login", "anthropic", "work"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected login via alias to succeed, got: %v", err)
+	}
+
+	// Verify that both canonical and alias refusals were cleared
+	if rec, ok := refStore.IsRefused("claude", "work"); ok || rec != nil {
+		t.Fatalf("expected canonical refusal to be cleared after login via alias, got: ok=%v, rec=%v", ok, rec)
+	}
+	if rec, ok := refStore.IsRefused("anthropic", "work"); ok || rec != nil {
+		t.Fatalf("expected alias refusal to be cleared after login via alias, got: ok=%v, rec=%v", ok, rec)
+	}
+}
+
+
 

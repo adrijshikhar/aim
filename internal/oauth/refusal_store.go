@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,6 +42,10 @@ func (s *RefusalStore) FilePath() string {
 	return s.filePath
 }
 
+func refusalKey(agent, profile string) string {
+	return strings.ToLower(strings.TrimSpace(agent)) + ":" + strings.TrimSpace(profile)
+}
+
 // Record persists an OAuth refusal event for the given agent and profile.
 // It also cleans up expired refusal entries to keep storage compact.
 func (s *RefusalStore) Record(agent, profile string, code RefusalCode, desc string) error {
@@ -56,7 +61,7 @@ func (s *RefusalStore) Record(agent, profile string, code RefusalCode, desc stri
 		}
 	}
 
-	key := agent + ":" + profile
+	key := refusalKey(agent, profile)
 	records[key] = RefusalRecord{
 		Agent:       agent,
 		Profile:     profile,
@@ -76,7 +81,7 @@ func (s *RefusalStore) IsRefused(agent, profile string) (*RefusalRecord, bool) {
 	defer s.mu.RUnlock()
 
 	records := s.loadUnlocked()
-	key := agent + ":" + profile
+	key := refusalKey(agent, profile)
 	rec, ok := records[key]
 	if !ok {
 		return nil, false
@@ -96,21 +101,30 @@ func (s *RefusalStore) Clear(agent, profile string) error {
 	defer s.mu.Unlock()
 
 	records := s.loadUnlocked()
-	key := agent + ":" + profile
+	key := refusalKey(agent, profile)
+	if _, ok := records[key]; !ok {
+		return nil
+	}
 	delete(records, key)
 
 	return s.saveUnlocked(records)
 }
 
-// Prune purges all expired refusal records from disk.
-func (s *RefusalStore) Prune() error {
+// Prune purges all expired refusal records from disk. If maxAge is provided and > 0,
+// it uses maxAge; otherwise it defaults to RefusalExpiry.
+func (s *RefusalStore) Prune(maxAge ...time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	expiry := RefusalExpiry
+	if len(maxAge) > 0 && maxAge[0] > 0 {
+		expiry = maxAge[0]
+	}
 
 	records := s.loadUnlocked()
 	changed := false
 	for k, r := range records {
-		if time.Since(r.RecordedAt) > RefusalExpiry {
+		if time.Since(r.RecordedAt) > expiry {
 			delete(records, k)
 			changed = true
 		}

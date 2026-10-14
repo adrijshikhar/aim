@@ -321,3 +321,90 @@ func TestRefusalStore_Prune(t *testing.T) {
 	}
 }
 
+func TestRefusalStore_Clear_NoDiskWriteOnMissingKey(t *testing.T) {
+	emptyDir := t.TempDir()
+	emptyStore := oauth.NewRefusalStore(emptyDir)
+	if err := emptyStore.Clear("nonexistent", "profile"); err != nil {
+		t.Fatalf("unexpected error on Clear on empty store: %v", err)
+	}
+	if _, err := os.Stat(emptyStore.FilePath()); !os.IsNotExist(err) {
+		t.Fatalf("expected refusals.json not to be created when clearing non-existent entry")
+	}
+}
+
+func TestRefusalStore_KeyNormalization(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewRefusalStore(tempDir)
+
+	if err := store.Record("  Claude ", " work ", oauth.RefusalRefreshTokenReused, "desc"); err != nil {
+		t.Fatalf("failed to record: %v", err)
+	}
+
+	rec, ok := store.IsRefused("claude", "work")
+	if !ok || rec == nil {
+		t.Fatalf("expected key normalization to match 'claude:work'")
+	}
+
+	if err := store.Clear("CLAUDE", "work"); err != nil {
+		t.Fatalf("failed to clear: %v", err)
+	}
+
+	if _, ok := store.IsRefused("claude", "work"); ok {
+		t.Fatalf("expected normalized key to be cleared")
+	}
+}
+
+func TestRefusalStore_Prune_CustomMaxAge(t *testing.T) {
+	tempDir := t.TempDir()
+	store := oauth.NewRefusalStore(tempDir)
+	filePath := store.FilePath()
+
+	now := time.Now().UTC()
+	records := map[string]oauth.RefusalRecord{
+		"claude:two-hours-old": {
+			Agent:       "claude",
+			Profile:     "two-hours-old",
+			Code:        oauth.RefusalInvalidGrant,
+			Description: "Two hours old",
+			RecordedAt:  now.Add(-2 * time.Hour),
+		},
+		"claude:recent": {
+			Agent:       "claude",
+			Profile:     "recent",
+			Code:        oauth.RefusalInvalidGrant,
+			Description: "Recent",
+			RecordedAt:  now.Add(-10 * time.Minute),
+		},
+	}
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Prune with 1 hour maxAge
+	if err := store.Prune(1 * time.Hour); err != nil {
+		t.Fatalf("unexpected error on Prune with custom maxAge: %v", err)
+	}
+
+	rec, ok := store.IsRefused("claude", "recent")
+	if !ok || rec == nil {
+		t.Errorf("expected recent record to be retained")
+	}
+
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var onDisk map[string]oauth.RefusalRecord
+	if err := json.Unmarshal(fileData, &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := onDisk["claude:two-hours-old"]; exists {
+		t.Errorf("expected 2-hour-old record to be pruned with 1-hour maxAge")
+	}
+}
+
+
