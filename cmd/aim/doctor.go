@@ -81,6 +81,8 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 	if pm != nil && pm.BaseDir != "" {
 		baseDir = pm.BaseDir
 	}
+	refStore := oauth.NewRefusalStore(baseDir)
+	_ = refStore.Prune()
 
 	if agentName != "" {
 		adapter, err := reg.Get(agentName)
@@ -245,12 +247,25 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 		fmt.Fprintln(out, lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("  No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
 		return true
 	}
+	baseDir := config.BaseDir()
+	if pm != nil && pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	refStore := oauth.NewRefusalStore(baseDir)
+
 	for _, p := range profiles {
 		fmt.Fprintln(out)
 		fmt.Fprintf(out, "Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
 		var results []agents.DiagnosticResult
 		if diag, ok := adapter.(agents.Diagnostician); ok {
 			results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
+		}
+		if rec, ok := refStore.IsRefused(adapter.Name(), p); ok && rec != nil {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Auth",
+				Status:   "FAIL",
+				Message:  fmt.Sprintf("Re-login Required (%s)\n         Remedy: Run 'aim login %s %s'", rec.Code, adapter.Name(), p),
+			})
 		}
 		if !bridged[p] {
 			bridged[p] = true

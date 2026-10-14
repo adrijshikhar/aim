@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/oauth"
 )
 
 type diskCacheData struct {
@@ -18,21 +20,43 @@ type diskCacheData struct {
 const DefaultTTL = 15 * time.Minute
 
 type CacheStore struct {
-	mu       sync.RWMutex
-	filePath string
-	ttl      time.Duration
-	reports  map[string]Report
+	mu           sync.RWMutex
+	filePath     string
+	ttl          time.Duration
+	reports      map[string]Report
+	refusalStore *oauth.RefusalStore
 }
 
 func NewCacheStore(baseDir string, ttl time.Duration) *CacheStore {
 	filePath := filepath.Join(baseDir, "cache", "usage.json")
 	store := &CacheStore{
-		filePath: filePath,
-		ttl:      ttl,
-		reports:  make(map[string]Report),
+		filePath:     filePath,
+		ttl:          ttl,
+		reports:      make(map[string]Report),
+		refusalStore: oauth.NewRefusalStore(baseDir),
 	}
 	store.load()
 	return store
+}
+
+// RefusalStore returns the configured OAuth refusal store, or nil if none set.
+func (c *CacheStore) RefusalStore() *oauth.RefusalStore {
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.refusalStore
+}
+
+// SetRefusalStore sets the OAuth refusal store used for 24h backoff checks.
+func (c *CacheStore) SetRefusalStore(s *oauth.RefusalStore) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.refusalStore = s
 }
 
 func key(agent, profile string) string {

@@ -13,6 +13,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/usage"
 )
 
 type doctorMockAdapter struct {
@@ -179,5 +180,151 @@ func TestDoctor_UnclaimedTokens_ReportsPruning(t *testing.T) {
 
 	if !strings.Contains(output, "Pruned 1 expired unclaimed token record(s)") {
 		t.Errorf("expected doctor to report pruned records, got:\n%s", output)
+	}
+}
+
+func TestDoctor_RefusalRendering(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	refStore := oauth.NewRefusalStore(tempDir)
+	if err := refStore.Record("claude", "work", oauth.RefusalRefreshTokenReused, "refresh token reused"); err != nil {
+		t.Fatalf("failed to record refusal: %v", err)
+	}
+
+	reg := agents.NewRegistry()
+	reg.Register(&doctorMockAdapter{mockAdapter: mockAdapter{name: "claude", hasCreds: true}, failDr: false})
+
+	pm := profile.NewProfileManager(tempDir)
+	if _, err := pm.EnsureProfile("work"); err != nil {
+		t.Fatalf("failed to ensure profile: %v", err)
+	}
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor", "claude"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	_ = cmd.Execute()
+	output := buf.String()
+
+	expectedSubstrings := []string{
+		"[FAIL]",
+		"Auth:",
+		"Re-login Required (refresh_token_reused)",
+		"Remedy: Run 'aim login claude work'",
+	}
+
+	for _, sub := range expectedSubstrings {
+		if !strings.Contains(output, sub) {
+			t.Errorf("expected doctor output to contain %q, but got:\n%s", sub, output)
+		}
+	}
+
+	// Also verify that doctor --check fails when refusal is present
+	cmdCheck := newDoctorCmd(reg, pm)
+	cmdCheck.SetArgs([]string{"claude", "--check"})
+	if err := cmdCheck.Execute(); err == nil {
+		t.Errorf("expected doctor --check to return an error when refusal is active")
+	}
+}
+
+func TestLogin_ClearsRefusalStore(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	refStore := oauth.NewRefusalStore(tempDir)
+	if err := refStore.Record("claude", "work", oauth.RefusalRefreshTokenReused, "token consumed"); err != nil {
+		t.Fatalf("failed to record refusal: %v", err)
+	}
+
+	if _, ok := refStore.IsRefused("claude", "work"); !ok {
+		t.Fatalf("expected refusal before login")
+	}
+
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{name: "claude"})
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"login", "claude", "work"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected login to succeed, got: %v", err)
+	}
+
+	// Verify that the refusal was cleared from the store
+	if rec, ok := refStore.IsRefused("claude", "work"); ok || rec != nil {
+		t.Fatalf("expected refusal to be cleared after successful login, got: ok=%v, rec=%v", ok, rec)
+	}
+}
+
+type aliasMockAdapter struct {
+	mockAdapter
+	customAliases []string
+}
+
+func (a *aliasMockAdapter) Aliases() []string {
+	if a.customAliases != nil {
+		return a.customAliases
+	}
+	return a.mockAdapter.Aliases()
+}
+
+func TestLogin_ClearsRefusalStore_Alias(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	refStore := oauth.NewRefusalStore(tempDir)
+	// Record refusal under canonical name "claude"
+	if err := refStore.Record("claude", "work", oauth.RefusalRefreshTokenReused, "token consumed"); err != nil {
+		t.Fatalf("failed to record refusal: %v", err)
+	}
+	// Also record refusal under alias "anthropic" defensively
+	if err := refStore.Record("anthropic", "work", oauth.RefusalInvalidGrant, "invalid grant"); err != nil {
+		t.Fatalf("failed to record alias refusal: %v", err)
+	}
+
+	if _, ok := refStore.IsRefused("claude", "work"); !ok {
+		t.Fatalf("expected canonical refusal before login")
+	}
+	if _, ok := refStore.IsRefused("anthropic", "work"); !ok {
+		t.Fatalf("expected alias refusal before login")
+	}
+
+	// Also seed a cached failure report to verify it is invalidated upon login
+	cacheStore := usage.NewCacheStore(tempDir, usage.DefaultTTL)
+	_ = cacheStore.Put(usage.Report{
+		Agent:   "claude",
+		Profile: "work",
+		Status:  usage.StatusUnknown,
+		Error:   "re-login required (invalid_grant)",
+	})
+
+	reg := agents.NewRegistry()
+	reg.Register(&aliasMockAdapter{
+		mockAdapter:   mockAdapter{name: "claude"},
+		customAliases: []string{"anthropic"},
+	})
+	pm := profile.NewProfileManager(tempDir)
+
+	// Log in via alias "anthropic"
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"login", "anthropic", "work"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected login via alias to succeed, got: %v", err)
+	}
+
+	// Verify that both canonical and alias refusals were cleared
+	if rec, ok := refStore.IsRefused("claude", "work"); ok || rec != nil {
+		t.Fatalf("expected canonical refusal to be cleared after login via alias, got: ok=%v, rec=%v", ok, rec)
+	}
+	if rec, ok := refStore.IsRefused("anthropic", "work"); ok || rec != nil {
+		t.Fatalf("expected alias refusal to be cleared after login via alias, got: ok=%v, rec=%v", ok, rec)
+	}
+
+	// Verify that the stale usage failure report was deleted from cache
+	freshCache := usage.NewCacheStore(tempDir, usage.DefaultTTL)
+	if rep, found := freshCache.Get("claude", "work"); found {
+		t.Fatalf("expected cached usage report to be invalidated after login, got: %+v", rep)
 	}
 }
