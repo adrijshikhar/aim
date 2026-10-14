@@ -228,3 +228,33 @@ func TestDoctor_RefusalRendering(t *testing.T) {
 	}
 }
 
+func TestLogin_ClearsRefusalStore(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	refStore := oauth.NewRefusalStore(tempDir)
+	if err := refStore.Record("claude", "work", oauth.RefusalRefreshTokenReused, "token consumed"); err != nil {
+		t.Fatalf("failed to record refusal: %v", err)
+	}
+
+	if _, ok := refStore.IsRefused("claude", "work"); !ok {
+		t.Fatalf("expected refusal before login")
+	}
+
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{name: "claude"})
+	pm := profile.NewProfileManager(tempDir)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"login", "claude", "work"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected login to succeed, got: %v", err)
+	}
+
+	// Verify that the refusal was cleared from the store
+	if rec, ok := refStore.IsRefused("claude", "work"); ok || rec != nil {
+		t.Fatalf("expected refusal to be cleared after successful login, got: ok=%v, rec=%v", ok, rec)
+	}
+}
+
+

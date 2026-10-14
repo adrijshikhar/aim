@@ -152,6 +152,8 @@ func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStor
 						if refStore != nil {
 							_ = refStore.Record(t.Agent, t.Profile, code, desc)
 						}
+						rep.Error = "re-login required (" + string(code) + ")"
+						rep.Summary = "Re-login required: " + string(code)
 					}
 				}
 
@@ -218,6 +220,7 @@ func parseRefusalFromError(errStr string) (oauth.RefusalCode, string) {
 	}
 
 	trimmed := strings.TrimSpace(errStr)
+	lower := strings.ToLower(trimmed)
 
 	// If error string contains a JSON object, attempt OAuth JSON parsing
 	start := strings.Index(trimmed, "{")
@@ -230,15 +233,17 @@ func parseRefusalFromError(errStr string) (oauth.RefusalCode, string) {
 			}
 			return code, desc
 		}
-		if code, desc := oauth.ParseRefusal(401, jsonBlob); code != oauth.RefusalNone {
-			if desc == "" {
-				desc = trimmed
+		// Only evaluate 401 fallback if the error explicitly indicates 401 / unauthorized
+		if strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") {
+			if code, desc := oauth.ParseRefusal(401, jsonBlob); code != oauth.RefusalNone {
+				if desc == "" {
+					desc = trimmed
+				}
+				return code, desc
 			}
-			return code, desc
 		}
 	}
 
-	lower := strings.ToLower(trimmed)
 	switch {
 	case strings.Contains(lower, string(oauth.RefusalRefreshTokenReused)):
 		return oauth.RefusalRefreshTokenReused, trimmed

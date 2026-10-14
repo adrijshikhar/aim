@@ -8,6 +8,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/spf13/cobra"
@@ -77,6 +78,12 @@ func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *prof
 		return 1
 	}
 	loginSucceeded = true
+
+	baseDir := config.BaseDir()
+	if pm != nil && pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	_ = oauth.NewRefusalStore(baseDir).Clear(agentName, profileName)
 
 	cfg.AddProfileAgent(profileName, adapter.Name())
 	_ = config.SaveConfig(cfg)

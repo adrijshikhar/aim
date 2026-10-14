@@ -1085,7 +1085,21 @@ func TestRefreshAsync_RecordsRefusalOnFatalAuthError(t *testing.T) {
 			}
 
 			ch := usage.RefreshAsync(context.Background(), targets, store, true)
-			for range ch {
+			var received []usage.Report
+			for rep := range ch {
+				received = append(received, rep)
+			}
+
+			if len(received) != 1 {
+				t.Fatalf("expected 1 report, got %d", len(received))
+			}
+			expectedErr := "re-login required (" + string(tc.expectedCode) + ")"
+			if received[0].Error != expectedErr {
+				t.Errorf("expected canonical error %q, got %q", expectedErr, received[0].Error)
+			}
+			expectedSummary := "Re-login required: " + string(tc.expectedCode)
+			if received[0].Summary != expectedSummary {
+				t.Errorf("expected canonical summary %q, got %q", expectedSummary, received[0].Summary)
 			}
 
 			rec, refused := store.RefusalStore().IsRefused(agent, profile)
@@ -1094,6 +1108,64 @@ func TestRefreshAsync_RecordsRefusalOnFatalAuthError(t *testing.T) {
 			}
 			if rec.Code != tc.expectedCode {
 				t.Errorf("expected code %q, got %q", tc.expectedCode, rec.Code)
+			}
+		})
+	}
+}
+
+func TestRefreshAsync_IgnoresGenericErrors(t *testing.T) {
+	genericErrors := []struct {
+		name      string
+		errString string
+	}{
+		{
+			name:      "generic invalid_request JSON",
+			errString: `{"error": "invalid_request", "error_description": "missing client_id"}`,
+		},
+		{
+			name:      "rate limit exceeded JSON",
+			errString: `{"error": "rate_limit_exceeded", "message": "Too many requests, try again later"}`,
+		},
+		{
+			name:      "generic bad request text",
+			errString: "400 Bad Request: missing param",
+		},
+		{
+			name:      "random application error",
+			errString: "500 Internal Server Error",
+		},
+	}
+
+	for _, tc := range genericErrors {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			store := usage.NewCacheStore(tmpDir, time.Hour)
+
+			agent := "test-agent"
+			profile := "test-prof"
+
+			targets := []usage.TargetProfile{
+				{
+					Agent:   agent,
+					Profile: profile,
+					GetUsageFn: func(ctx context.Context, p, dir string) (*usage.Report, error) {
+						return &usage.Report{
+							Agent:   agent,
+							Profile: p,
+							Status:  usage.StatusUnknown,
+							Error:   tc.errString,
+						}, nil
+					},
+				},
+			}
+
+			ch := usage.RefreshAsync(context.Background(), targets, store, true)
+			for range ch {
+			}
+
+			rec, refused := store.RefusalStore().IsRefused(agent, profile)
+			if refused || rec != nil {
+				t.Fatalf("expected NO refusal recorded for generic error %q, but got code %v", tc.errString, rec.Code)
 			}
 		})
 	}

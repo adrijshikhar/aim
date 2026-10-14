@@ -12,6 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/daemon"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -118,6 +119,17 @@ func GenerateReport(reg *agents.Registry, pm *profile.ProfileManager, cfg *confi
 			var results []agents.DiagnosticResult
 			if diag, ok := adapter.(agents.Diagnostician); ok {
 				results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
+			}
+			baseDir := config.BaseDir()
+			if pm != nil && pm.BaseDir != "" {
+				baseDir = pm.BaseDir
+			}
+			if rec, ok := oauth.NewRefusalStore(baseDir).IsRefused(adapter.Name(), p); ok && rec != nil {
+				results = append(results, agents.DiagnosticResult{
+					Category: "Auth",
+					Status:   "FAIL",
+					Message:  fmt.Sprintf("Re-login Required (%s)", rec.Code),
+				})
 			}
 			if !bridged[p] {
 				bridged[p] = true
