@@ -298,13 +298,17 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 
 			if hasCreds && rep.Status == usage.StatusIdle {
 				authFound := false
+				hasAuthCategory := false
 				for i := range results {
-					if results[i].Category == "Auth" && results[i].Status == "OK" {
-						results[i].Message = "Credentials configured (Idle - will renew on next turn)"
-						authFound = true
+					if results[i].Category == "Auth" {
+						hasAuthCategory = true
+						if results[i].Status == "OK" {
+							results[i].Message = "Credentials configured (Idle - will renew on next turn)"
+							authFound = true
+						}
 					}
 				}
-				if !authFound {
+				if !authFound && !hasAuthCategory {
 					insertIdx := len(results)
 					for i, r := range results {
 						if r.Category == "Binary" {
