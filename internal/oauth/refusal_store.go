@@ -1,0 +1,185 @@
+package oauth
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// RefusalExpiry defines the backoff window (24 hours) after which a fatal OAuth
+// refusal expires, allowing background daemons and usage engines to retry auto-refresh.
+const RefusalExpiry = 24 * time.Hour
+
+// RefusalRecord represents a persisted refusal event for an agent profile.
+type RefusalRecord struct {
+	Agent       string      `json:"agent"`
+	Profile     string      `json:"profile"`
+	Code        RefusalCode `json:"code"`
+	Description string      `json:"description"`
+	RecordedAt  time.Time   `json:"recorded_at"`
+}
+
+// RefusalStore manages persistent storage of OAuth refusal records in ~/.aim/refusals.json.
+// All operations are synchronized with an RWMutex and file writes are performed atomically.
+type RefusalStore struct {
+	filePath string
+	mu       sync.RWMutex
+}
+
+// NewRefusalStore returns a RefusalStore rooted in baseDir (storing records in baseDir/refusals.json).
+func NewRefusalStore(baseDir string) *RefusalStore {
+	return &RefusalStore{
+		filePath: filepath.Join(baseDir, "refusals.json"),
+	}
+}
+
+// FilePath returns the absolute path to the underlying refusals.json file.
+func (s *RefusalStore) FilePath() string {
+	return s.filePath
+}
+
+// Record persists an OAuth refusal event for the given agent and profile.
+// It also cleans up expired refusal entries to keep storage compact.
+func (s *RefusalStore) Record(agent, profile string, code RefusalCode, desc string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records := s.loadUnlocked()
+
+	// Clean expired entries on write
+	for k, r := range records {
+		if time.Since(r.RecordedAt) > RefusalExpiry {
+			delete(records, k)
+		}
+	}
+
+	key := agent + ":" + profile
+	records[key] = RefusalRecord{
+		Agent:       agent,
+		Profile:     profile,
+		Code:        code,
+		Description: desc,
+		RecordedAt:  time.Now().UTC(),
+	}
+
+	return s.saveUnlocked(records)
+}
+
+// IsRefused checks whether the agent and profile currently have an active (non-expired)
+// refusal record. If a record exists but has passed the 24-hour expiry window,
+// it returns nil, false.
+func (s *RefusalStore) IsRefused(agent, profile string) (*RefusalRecord, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	records := s.loadUnlocked()
+	key := agent + ":" + profile
+	rec, ok := records[key]
+	if !ok {
+		return nil, false
+	}
+
+	// 24-hour backoff check
+	if time.Since(rec.RecordedAt) > RefusalExpiry {
+		return nil, false
+	}
+
+	return &rec, true
+}
+
+// Clear removes any refusal record for the specified agent and profile.
+func (s *RefusalStore) Clear(agent, profile string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records := s.loadUnlocked()
+	key := agent + ":" + profile
+	delete(records, key)
+
+	return s.saveUnlocked(records)
+}
+
+// Prune purges all expired refusal records from disk.
+func (s *RefusalStore) Prune() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records := s.loadUnlocked()
+	changed := false
+	for k, r := range records {
+		if time.Since(r.RecordedAt) > RefusalExpiry {
+			delete(records, k)
+			changed = true
+		}
+	}
+
+	if !changed {
+		return nil
+	}
+
+	return s.saveUnlocked(records)
+}
+
+func (s *RefusalStore) loadUnlocked() map[string]RefusalRecord {
+	data, err := os.ReadFile(s.filePath)
+	if err != nil {
+		return make(map[string]RefusalRecord)
+	}
+
+	var records map[string]RefusalRecord
+	if err := json.Unmarshal(data, &records); err != nil || records == nil {
+		return make(map[string]RefusalRecord)
+	}
+
+	return records
+}
+
+func (s *RefusalStore) saveUnlocked(records map[string]RefusalRecord) error {
+	dir := filepath.Dir(s.filePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create refusal store directory: %w", err)
+	}
+	_ = os.Chmod(dir, 0700)
+
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode refusal records: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp(dir, "refusals-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary refusal file: %w", err)
+	}
+	tmpName := tmpFile.Name()
+
+	// Ensure 0600 permissions
+	_ = tmpFile.Chmod(0600)
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to write temporary refusal file: %w", err)
+	}
+
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to sync temporary refusal file: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to close temporary refusal file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, s.filePath); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to commit refusal file: %w", err)
+	}
+
+	_ = os.Chmod(s.filePath, 0600)
+	return nil
+}
