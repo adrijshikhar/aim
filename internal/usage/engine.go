@@ -15,11 +15,10 @@ import (
 )
 
 type TargetProfile struct {
-	Agent            string
-	Profile          string
-	ProfileDir       string
-	GetUsageFn       func(ctx context.Context, profileName, profileDir string) (*Report, error)
-	HasCredentialsFn func(profileDir string) bool
+	Agent      string
+	Profile    string
+	ProfileDir string
+	GetUsageFn func(ctx context.Context, profileName, profileDir string) (*Report, error)
 }
 
 func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStore, force ...bool) <-chan Report {
@@ -332,6 +331,27 @@ func InspectProfile(ctx context.Context, target TargetProfile, cache *CacheStore
 	// 3. Stale cache check (NEVER invoke target.GetUsageFn)
 	if cache != nil {
 		if rep, found := cache.GetStale(target.Agent, target.Profile); found && rep.Status != StatusUnknown && len(rep.Windows) > 0 {
+			// If previously exhausted and reset time has not yet passed, retain StatusExhausted
+			if rep.Status == StatusExhausted {
+				stillExhausted := false
+				for _, w := range rep.Windows {
+					if w.RemainingPct <= 0 && (w.ResetsAt.IsZero() || time.Now().Before(w.ResetsAt)) {
+						stillExhausted = true
+						break
+					}
+				}
+				if stillExhausted {
+					rep.FromCache = true
+					if rep.Agent == "" {
+						rep.Agent = target.Agent
+					}
+					if rep.Profile == "" {
+						rep.Profile = target.Profile
+					}
+					return rep
+				}
+			}
+
 			rep.Status = StatusIdle
 			rep.FromCache = true
 			if rep.Summary == "" {
@@ -348,7 +368,7 @@ func InspectProfile(ctx context.Context, target TargetProfile, cache *CacheStore
 	}
 
 	// 4. Inspect credentials on disk (unrefused)
-	if hasCredentials(target) {
+	if HasCredentialsOnDisk(target.Agent, target.ProfileDir) {
 		return Report{
 			Agent:     target.Agent,
 			Profile:   target.Profile,
@@ -368,14 +388,9 @@ func InspectProfile(ctx context.Context, target TargetProfile, cache *CacheStore
 	}
 }
 
-func hasCredentials(target TargetProfile) bool {
-	if target.HasCredentialsFn != nil {
-		return target.HasCredentialsFn(target.ProfileDir)
-	}
-	return hasCredentialsOnDisk(target.Agent, target.ProfileDir)
-}
-
-func hasCredentialsOnDisk(agent, profileDir string) bool {
+// HasCredentialsOnDisk checks if the specified agent has valid, non-empty credentials on disk in profileDir.
+// It is strictly read-only: zero network calls, zero files created, modified, or auto-seeded.
+func HasCredentialsOnDisk(agent, profileDir string) bool {
 	if profileDir == "" {
 		return false
 	}
@@ -387,75 +402,63 @@ func hasCredentialsOnDisk(agent, profileDir string) bool {
 		return isFileWithCredentials(profileDir)
 	}
 
+	agentNorm := strings.ToLower(strings.TrimSpace(agent))
 	var candidates []string
-	switch strings.ToLower(agent) {
+	switch agentNorm {
 	case "codex", "codex-cli", "openai-codex":
-		candidates = append(candidates,
+		candidates = []string{
 			filepath.Join(profileDir, ".codex", "auth.json"),
 			filepath.Join(profileDir, "auth.json"),
-		)
+		}
 	case "claude", "claude-code":
-		candidates = append(candidates,
+		candidates = []string{
 			filepath.Join(profileDir, ".claude", "auth.json"),
 			filepath.Join(profileDir, ".claude", ".credentials.json"),
 			filepath.Join(profileDir, "auth.json"),
 			filepath.Join(profileDir, ".credentials.json"),
-		)
+		}
 	case "gemini", "gemini-cli":
-		candidates = append(candidates,
+		candidates = []string{
 			filepath.Join(profileDir, ".gemini", "gemini-oauth-token"),
 			filepath.Join(profileDir, "gemini-oauth-token"),
-		)
+		}
 	case "agy", "antigravity":
-		candidates = append(candidates,
+		candidates = []string{
 			filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token"),
 			filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json"),
 			filepath.Join(profileDir, "antigravity-oauth-token"),
-		)
+		}
+	case "":
+		// When agent is empty, check all known locations
+		candidates = []string{
+			filepath.Join(profileDir, ".codex", "auth.json"),
+			filepath.Join(profileDir, ".claude", "auth.json"),
+			filepath.Join(profileDir, ".claude", ".credentials.json"),
+			filepath.Join(profileDir, ".gemini", "gemini-oauth-token"),
+			filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token"),
+			filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json"),
+			filepath.Join(profileDir, "auth.json"),
+			filepath.Join(profileDir, "credentials.json"),
+			filepath.Join(profileDir, ".credentials.json"),
+			filepath.Join(profileDir, "token.json"),
+			filepath.Join(profileDir, ".token.json"),
+		}
+	default:
+		candidates = []string{
+			filepath.Join(profileDir, agentNorm+"-oauth-token"),
+			filepath.Join(profileDir, "."+agentNorm, "auth.json"),
+			filepath.Join(profileDir, "."+agentNorm, "token.json"),
+			filepath.Join(profileDir, "auth.json"),
+			filepath.Join(profileDir, "credentials.json"),
+			filepath.Join(profileDir, "token.json"),
+		}
 	}
 
-	// Common fallback candidates across supported agents
-	candidates = append(candidates,
-		filepath.Join(profileDir, ".codex", "auth.json"),
-		filepath.Join(profileDir, "auth.json"),
-		filepath.Join(profileDir, ".claude", "auth.json"),
-		filepath.Join(profileDir, ".claude", ".credentials.json"),
-		filepath.Join(profileDir, ".gemini", "gemini-oauth-token"),
-		filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token"),
-		filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json"),
-		filepath.Join(profileDir, "credentials.json"),
-		filepath.Join(profileDir, ".credentials.json"),
-		filepath.Join(profileDir, "token.json"),
-		filepath.Join(profileDir, ".token.json"),
-	)
-
-	checked := make(map[string]bool)
 	for _, p := range candidates {
-		if checked[p] {
-			continue
-		}
-		checked[p] = true
 		if isFileWithCredentials(p) {
 			return true
 		}
 	}
-
-	// Scan top-level files in profileDir for any credential file matching conventions
-	entries, err := os.ReadDir(profileDir)
-	if err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				lower := strings.ToLower(entry.Name())
-				if strings.Contains(lower, "auth") || strings.Contains(lower, "token") || strings.Contains(lower, "cred") {
-					fullPath := filepath.Join(profileDir, entry.Name())
-					if !checked[fullPath] && isFileWithCredentials(fullPath) {
-						return true
-					}
-				}
-			}
-		}
-	}
-
 	return false
 }
 

@@ -293,7 +293,9 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 				if results[i].Category == "Auth" || results[i].Category == "Token" {
 					hasAuthCategory = true
 					if results[i].Status == "OK" {
-						results[i].Message = "Credentials configured (Idle - will renew on next turn)"
+						if rep.Status != usage.StatusOK {
+							results[i].Message = "Credentials configured (Idle - will renew on next turn)"
+						}
 						authFound = true
 					}
 				}

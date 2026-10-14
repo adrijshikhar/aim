@@ -549,3 +549,105 @@ func TestInspection_ClaudeAiOauthStructure(t *testing.T) {
 		}
 	})
 }
+
+func TestInspection_CrossAgentCredentialIsolation(t *testing.T) {
+	tmpDir := t.TempDir()
+	profDir := filepath.Join(tmpDir, "profiles", "codex-only")
+	codexDir := filepath.Join(profDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"tokens":{"access_token":"ok","refresh_token":"ref"}}`), 0600)
+
+	// Codex inspection should find its credentials
+	codexRep := usage.InspectProfile(context.Background(), usage.TargetProfile{
+		Agent:      "codex",
+		Profile:    "codex-only",
+		ProfileDir: profDir,
+	}, nil)
+	if codexRep.Status != usage.StatusIdle {
+		t.Errorf("expected StatusIdle for codex inspection, got %q", codexRep.Status)
+	}
+
+	// Claude inspection must NOT detect Codex credentials
+	claudeRep := usage.InspectProfile(context.Background(), usage.TargetProfile{
+		Agent:      "claude",
+		Profile:    "codex-only",
+		ProfileDir: profDir,
+	}, nil)
+	if claudeRep.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown for claude inspection on codex-only profile, got %q", claudeRep.Status)
+	}
+	if claudeRep.Error != "no credentials" {
+		t.Errorf("expected 'no credentials', got %q", claudeRep.Error)
+	}
+
+	// Gemini inspection must NOT detect Codex credentials
+	geminiRep := usage.InspectProfile(context.Background(), usage.TargetProfile{
+		Agent:      "gemini",
+		Profile:    "codex-only",
+		ProfileDir: profDir,
+	}, nil)
+	if geminiRep.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown for gemini inspection on codex-only profile, got %q", geminiRep.Status)
+	}
+	if geminiRep.Error != "no credentials" {
+		t.Errorf("expected 'no credentials', got %q", geminiRep.Error)
+	}
+}
+
+func TestInspection_StaleCache_RetainsExhaustedStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheStore := usage.NewCacheStore(tmpDir, 5*time.Minute)
+
+	t.Run("still within reset window retains StatusExhausted", func(t *testing.T) {
+		futureReset := time.Now().Add(2 * time.Hour)
+		rep := usage.Report{
+			Agent:   "codex",
+			Profile: "exhausted-prof",
+			Status:  usage.StatusExhausted,
+			Windows: []usage.LimitWindow{
+				{Name: "5-Hour", RemainingPct: 0, ResetsAt: futureReset},
+			},
+			Summary:   "5h: 0% (resets in 2h)",
+			FetchedAt: time.Now().Add(-30 * time.Minute),
+		}
+		_ = cacheStore.Put(rep)
+
+		target := usage.TargetProfile{
+			Agent:   "codex",
+			Profile: "exhausted-prof",
+		}
+
+		inspected := usage.InspectProfile(context.Background(), target, cacheStore)
+		if inspected.Status != usage.StatusExhausted {
+			t.Errorf("expected StatusExhausted to be retained, got %q", inspected.Status)
+		}
+		if inspected.Summary != "5h: 0% (resets in 2h)" {
+			t.Errorf("expected summary preserved, got %q", inspected.Summary)
+		}
+	})
+
+	t.Run("after reset window elapsed promotes to StatusIdle", func(t *testing.T) {
+		pastReset := time.Now().Add(-10 * time.Minute)
+		rep := usage.Report{
+			Agent:   "codex",
+			Profile: "reset-prof",
+			Status:  usage.StatusExhausted,
+			Windows: []usage.LimitWindow{
+				{Name: "5-Hour", RemainingPct: 0, ResetsAt: pastReset},
+			},
+			Summary:   "5h: 0%",
+			FetchedAt: time.Now().Add(-30 * time.Minute),
+		}
+		_ = cacheStore.Put(rep)
+
+		target := usage.TargetProfile{
+			Agent:   "codex",
+			Profile: "reset-prof",
+		}
+
+		inspected := usage.InspectProfile(context.Background(), target, cacheStore)
+		if inspected.Status != usage.StatusIdle {
+			t.Errorf("expected StatusIdle after reset deadline, got %q", inspected.Status)
+		}
+	})
+}
