@@ -2,7 +2,10 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -12,10 +15,11 @@ import (
 )
 
 type TargetProfile struct {
-	Agent      string
-	Profile    string
-	ProfileDir string
-	GetUsageFn func(ctx context.Context, profileName, profileDir string) (*Report, error)
+	Agent            string
+	Profile          string
+	ProfileDir       string
+	GetUsageFn       func(ctx context.Context, profileName, profileDir string) (*Report, error)
+	HasCredentialsFn func(profileDir string) bool
 }
 
 func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStore, force ...bool) <-chan Report {
@@ -282,4 +286,245 @@ func isHTTP401(lower string) bool {
 		strings.Contains(lower, "status code 401") ||
 		strings.Contains(lower, "http 401") ||
 		strings.Contains(lower, "401 unauthorized")
+}
+
+// InspectProfile performs a strict read-only profile inspection with zero network calls and
+// zero file modifications. It respects active refusal backoffs, passes through fresh cache,
+// classifies stale cache with prior StatusOK as StatusIdle ("Ready on use"), and falls back
+// to inspecting credentials on disk.
+func InspectProfile(ctx context.Context, target TargetProfile, cache *CacheStore) Report {
+	var refStore *oauth.RefusalStore
+	if cache != nil {
+		refStore = cache.RefusalStore()
+	}
+
+	// 1. Check refusal store: active refusal takes precedence
+	if refStore != nil {
+		if rec, active := refStore.IsRefused(target.Agent, target.Profile); active && rec != nil {
+			return Report{
+				Agent:     target.Agent,
+				Profile:   target.Profile,
+				Status:    StatusUnknown,
+				FetchedAt: time.Now(),
+				Error:     "re-login required (" + string(rec.Code) + ")",
+				Summary:   "Re-login required: " + string(rec.Code),
+			}
+		}
+	}
+
+	// 2. Fresh cache check
+	if cache != nil {
+		if rep, found := cache.Get(target.Agent, target.Profile); found {
+			return rep
+		}
+	}
+
+	// 3. Stale cache check (NEVER invoke target.GetUsageFn)
+	if cache != nil {
+		if rep, found := cache.GetStale(target.Agent, target.Profile); found && rep.Status == StatusOK {
+			rep.Status = StatusIdle
+			rep.FromCache = true
+			if rep.Summary == "" {
+				rep.Summary = "Ready on use"
+			}
+			if rep.Agent == "" {
+				rep.Agent = target.Agent
+			}
+			if rep.Profile == "" {
+				rep.Profile = target.Profile
+			}
+			return rep
+		}
+	}
+
+	// 4. Inspect credentials on disk (unrefused)
+	if hasCredentials(target) {
+		return Report{
+			Agent:     target.Agent,
+			Profile:   target.Profile,
+			Status:    StatusIdle,
+			Summary:   "Ready on use",
+			FetchedAt: time.Now(),
+		}
+	}
+
+	// 5. No credentials on disk
+	return Report{
+		Agent:     target.Agent,
+		Profile:   target.Profile,
+		Status:    StatusUnknown,
+		Error:     "no credentials",
+		FetchedAt: time.Now(),
+	}
+}
+
+func hasCredentials(target TargetProfile) bool {
+	if target.HasCredentialsFn != nil {
+		return target.HasCredentialsFn(target.ProfileDir)
+	}
+	return hasCredentialsOnDisk(target.Agent, target.ProfileDir)
+}
+
+func hasCredentialsOnDisk(agent, profileDir string) bool {
+	if profileDir == "" {
+		return false
+	}
+	fi, err := os.Stat(profileDir)
+	if err != nil {
+		return false
+	}
+	if !fi.IsDir() {
+		return isFileWithCredentials(profileDir)
+	}
+
+	var candidates []string
+	switch strings.ToLower(agent) {
+	case "codex", "codex-cli", "openai-codex":
+		candidates = append(candidates,
+			filepath.Join(profileDir, ".codex", "auth.json"),
+			filepath.Join(profileDir, "auth.json"),
+		)
+	case "claude", "claude-code":
+		candidates = append(candidates,
+			filepath.Join(profileDir, ".claude", "auth.json"),
+			filepath.Join(profileDir, ".claude", ".credentials.json"),
+			filepath.Join(profileDir, "auth.json"),
+			filepath.Join(profileDir, ".credentials.json"),
+		)
+	case "gemini", "gemini-cli":
+		candidates = append(candidates,
+			filepath.Join(profileDir, ".gemini", "gemini-oauth-token"),
+			filepath.Join(profileDir, "gemini-oauth-token"),
+		)
+	case "agy", "antigravity":
+		candidates = append(candidates,
+			filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token"),
+			filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json"),
+			filepath.Join(profileDir, "antigravity-oauth-token"),
+		)
+	}
+
+	// Common fallback candidates across supported agents
+	candidates = append(candidates,
+		filepath.Join(profileDir, ".codex", "auth.json"),
+		filepath.Join(profileDir, "auth.json"),
+		filepath.Join(profileDir, ".claude", "auth.json"),
+		filepath.Join(profileDir, ".claude", ".credentials.json"),
+		filepath.Join(profileDir, ".gemini", "gemini-oauth-token"),
+		filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token"),
+		filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json"),
+		filepath.Join(profileDir, "credentials.json"),
+		filepath.Join(profileDir, ".credentials.json"),
+		filepath.Join(profileDir, "token.json"),
+		filepath.Join(profileDir, ".token.json"),
+	)
+
+	checked := make(map[string]bool)
+	for _, p := range candidates {
+		if checked[p] {
+			continue
+		}
+		checked[p] = true
+		if isFileWithCredentials(p) {
+			return true
+		}
+	}
+
+	// Scan top-level files in profileDir for any credential file matching conventions
+	entries, err := os.ReadDir(profileDir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				lower := strings.ToLower(entry.Name())
+				if strings.Contains(lower, "auth") || strings.Contains(lower, "token") || strings.Contains(lower, "cred") {
+					fullPath := filepath.Join(profileDir, entry.Name())
+					if !checked[fullPath] && isFileWithCredentials(fullPath) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func isFileWithCredentials(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() || fi.Size() == 0 {
+		return false
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return false
+	}
+
+	trimmed := strings.TrimSpace(string(data))
+	if len(trimmed) == 0 {
+		return false
+	}
+
+	// If file ends in .json or has JSON syntax
+	if strings.HasSuffix(strings.ToLower(path), ".json") || strings.HasPrefix(trimmed, "{") {
+		var raw any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return false
+		}
+		return hasJSONCredentials(raw)
+	}
+
+	return len(trimmed) > 0
+}
+
+func hasJSONCredentials(raw any) bool {
+	if raw == nil {
+		return false
+	}
+	m, ok := raw.(map[string]any)
+	if !ok || len(m) == 0 {
+		return false
+	}
+
+	// Check nested "tokens" map (e.g. Codex auth.json)
+	if tokens, ok := m["tokens"].(map[string]any); ok && len(tokens) > 0 {
+		for _, k := range []string{"access_token", "refresh_token", "id_token", "token"} {
+			if s, ok := tokens[k].(string); ok && strings.TrimSpace(s) != "" {
+				return true
+			}
+		}
+	}
+
+	// Check nested "token" map (e.g. Antigravity token)
+	if tokenObj, ok := m["token"].(map[string]any); ok && len(tokenObj) > 0 {
+		for _, k := range []string{"access_token", "refresh_token", "id_token", "token"} {
+			if s, ok := tokenObj[k].(string); ok && strings.TrimSpace(s) != "" {
+				return true
+			}
+		}
+	}
+
+	// Check Claude oauth
+	if oauthObj, ok := m["claudeAiOauth"].(map[string]any); ok && len(oauthObj) > 0 {
+		return true
+	}
+
+	// Check direct token / key fields
+	for _, k := range []string{
+		"access_token", "refresh_token", "id_token", "token",
+		"api_key", "apiKey", "openai_api_key",
+		"session_key", "sessionKey",
+		"client_email", "private_key",
+	} {
+		if s, ok := m[k].(string); ok && strings.TrimSpace(s) != "" {
+			return true
+		}
+	}
+
+	// Check Google ADC service_account or authorized_user
+	if t, ok := m["type"].(string); ok && (t == "authorized_user" || t == "service_account") {
+		return true
+	}
+
+	return false
 }
