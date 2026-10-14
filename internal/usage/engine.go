@@ -293,6 +293,16 @@ func isHTTP401(lower string) bool {
 // classifies stale cache with prior StatusOK as StatusIdle ("Ready on use"), and falls back
 // to inspecting credentials on disk.
 func InspectProfile(ctx context.Context, target TargetProfile, cache *CacheStore) Report {
+	if ctx != nil && ctx.Err() != nil {
+		return Report{
+			Agent:     target.Agent,
+			Profile:   target.Profile,
+			Status:    StatusUnknown,
+			FetchedAt: time.Now(),
+			Error:     ctx.Err().Error(),
+		}
+	}
+
 	var refStore *oauth.RefusalStore
 	if cache != nil {
 		refStore = cache.RefusalStore()
@@ -321,7 +331,7 @@ func InspectProfile(ctx context.Context, target TargetProfile, cache *CacheStore
 
 	// 3. Stale cache check (NEVER invoke target.GetUsageFn)
 	if cache != nil {
-		if rep, found := cache.GetStale(target.Agent, target.Profile); found && rep.Status == StatusOK {
+		if rep, found := cache.GetStale(target.Agent, target.Profile); found && rep.Status != StatusUnknown && len(rep.Windows) > 0 {
 			rep.Status = StatusIdle
 			rep.FromCache = true
 			if rep.Summary == "" {
@@ -451,7 +461,7 @@ func hasCredentialsOnDisk(agent, profileDir string) bool {
 
 func isFileWithCredentials(path string) bool {
 	fi, err := os.Stat(path)
-	if err != nil || fi.IsDir() || fi.Size() == 0 {
+	if err != nil || fi.IsDir() || fi.Size() == 0 || fi.Size() > 1<<20 {
 		return false
 	}
 

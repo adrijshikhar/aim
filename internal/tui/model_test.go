@@ -657,6 +657,16 @@ func TestTUIUsage_GaugeColorStyles(t *testing.T) {
 	if GaugeStyleForStatus(usage.StatusUnknown).GetForeground() != GaugeDimStyle.GetForeground() {
 		t.Errorf("expected GaugeDimStyle for StatusUnknown")
 	}
+	if GaugeStyleForStatus(usage.StatusIdle).GetForeground() != GaugeDimStyle.GetForeground() {
+		t.Errorf("expected GaugeDimStyle for StatusIdle")
+	}
+
+	idleRep := usage.Report{
+		Status: usage.StatusIdle,
+	}
+	if badge := formatUsageSummaryBadge(idleRep); badge != "[idle: ready on use]" {
+		t.Errorf("expected '[idle: ready on use]', got %q", badge)
+	}
 }
 
 func TestTUIUsage_TabSwitchTriggersRefresh(t *testing.T) {

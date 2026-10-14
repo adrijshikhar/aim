@@ -951,3 +951,45 @@ func TestProfileService_RefreshUsage(t *testing.T) {
 		t.Fatalf("cache was not updated properly: %+v", cachedRep)
 	}
 }
+
+func TestProfileService_IdleProfileQuotaSummary(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("idle-prof")
+
+	cfg, _ := config.LoadConfig()
+	if cfg == nil {
+		cfg = config.NewDefaultConfig()
+	}
+	cfg.AddProfileAgent("idle-prof", "mock")
+	_ = config.SaveConfig(cfg)
+
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{name: "mock"})
+
+	cache := usage.NewCacheStore(tempDir, usage.DefaultTTL)
+	_ = cache.Put(usage.Report{
+		Agent:     "mock",
+		Profile:   "idle-prof",
+		Status:    usage.StatusIdle,
+		Summary:   "",
+		FetchedAt: time.Now(),
+	})
+
+	svc := service.NewProfileService(pm, reg, cache)
+	profs, err := svc.ListProfiles(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListProfiles failed: %v", err)
+	}
+	if len(profs) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(profs))
+	}
+	if profs[0].Quota == nil {
+		t.Fatal("expected non-nil Quota")
+	}
+	if profs[0].Quota.Summary != "Ready on use" {
+		t.Errorf("expected Quota.Summary == 'Ready on use', got %q", profs[0].Quota.Summary)
+	}
+}

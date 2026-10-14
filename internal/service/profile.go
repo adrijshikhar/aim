@@ -201,6 +201,9 @@ func reportToQuotaDTO(rep usage.Report) *QuotaDTO {
 	if summary == "" && rep.Error != "" {
 		summary = rep.Error
 	}
+	if rep.Status == usage.StatusIdle && summary == "" {
+		summary = "Ready on use"
+	}
 
 	var windows []QuotaWindowDTO
 	if len(rep.Windows) > 0 {

@@ -43,7 +43,17 @@ func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string)
 	}
 	rep, ok := cache.Get(agent, profileName)
 	if !ok {
-		return ""
+		staleRep, found := cache.GetStale(agent, profileName)
+		if !found {
+			return ""
+		}
+		rep = staleRep
+		if rep.Status != usage.StatusUnknown {
+			rep.Status = usage.StatusIdle
+		}
+	}
+	if rep.Status == usage.StatusIdle {
+		return "[idle: ready on use]"
 	}
 	if rep.Error != "" || rep.Status == usage.StatusUnknown {
 		errLower := strings.ToLower(rep.Error)

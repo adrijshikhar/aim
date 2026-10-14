@@ -446,6 +446,9 @@ func (m Model) cancelStream() {
 }
 
 func formatBadge(rep usage.Report, isNarrow bool) string {
+	if rep.Status == usage.StatusIdle {
+		return "[idle: ready on use]"
+	}
 	if rep.Error != "" || rep.Status == usage.StatusUnknown {
 		errLower := strings.ToLower(rep.Error)
 		summaryLower := strings.ToLower(rep.Summary)
@@ -485,6 +488,13 @@ func formatBadge(rep usage.Report, isNarrow bool) string {
 	// Always report the bottleneck / most constrained limit percentage so the
 	// displayed percentage is strictly consistent with the badge color/status.
 	return fmt.Sprintf("[%d%%]", rep.BottleneckPct())
+}
+
+func formatUsageSummaryBadge(rep usage.Report) string {
+	if rep.Status == usage.StatusIdle {
+		return "[idle: ready on use]"
+	}
+	return formatBadge(rep, false)
 }
 
 type updateAvailableMsg struct {

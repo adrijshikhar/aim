@@ -290,9 +290,12 @@ func TestInspection_StaleCacheWithPriorStatusOK(t *testing.T) {
 
 	// Test case where stale report had empty summary
 	staleNoSummary := usage.Report{
-		Agent:     "codex",
-		Profile:   "stale-no-summary",
-		Status:    usage.StatusOK,
+		Agent:   "codex",
+		Profile: "stale-no-summary",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{
+			{Name: "5-Hour", RemainingPct: 80},
+		},
 		Summary:   "",
 		FetchedAt: time.Now().Add(-30 * time.Minute),
 	}
@@ -415,5 +418,88 @@ func TestInspection_NilCacheStore(t *testing.T) {
 	}
 	if report.Summary != "Ready on use" {
 		t.Errorf("expected Summary == 'Ready on use', got %q", report.Summary)
+	}
+}
+
+func TestInspection_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	target := usage.TargetProfile{
+		Agent:   "codex",
+		Profile: "any-prof",
+	}
+
+	report := usage.InspectProfile(ctx, target, nil)
+	if report.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown when context is cancelled, got %q", report.Status)
+	}
+	if report.Error != context.Canceled.Error() {
+		t.Errorf("expected Error == %q, got %q", context.Canceled.Error(), report.Error)
+	}
+}
+
+func TestInspection_ExcessiveFileSizeCheck(t *testing.T) {
+	tmpDir := t.TempDir()
+	profDir := filepath.Join(tmpDir, "profiles", "huge-prof")
+	codexDir := filepath.Join(profDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+
+	// Create file larger than 1MB (1<<20 bytes)
+	hugeFile := filepath.Join(codexDir, "auth.json")
+	f, err := os.Create(hugeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate((1 << 20) + 1024); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	target := usage.TargetProfile{
+		Agent:      "codex",
+		Profile:    "huge-prof",
+		ProfileDir: profDir,
+	}
+
+	report := usage.InspectProfile(context.Background(), target, nil)
+	if report.Status != usage.StatusUnknown {
+		t.Errorf("expected StatusUnknown for >1MB file, got %q", report.Status)
+	}
+	if report.Error != "no credentials" {
+		t.Errorf("expected 'no credentials' error for huge file, got %q", report.Error)
+	}
+}
+
+func TestInspection_StaleCacheWithNonStatusOKAndWindows(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheStore := usage.NewCacheStore(tmpDir, 5*time.Minute)
+
+	staleWarning := usage.Report{
+		Agent:   "codex",
+		Profile: "stale-warning",
+		Status:  usage.StatusWarning,
+		Windows: []usage.LimitWindow{
+			{Name: "5-Hour", RemainingPct: 15},
+		},
+		Summary:   "5h: 15%",
+		FetchedAt: time.Now().Add(-30 * time.Minute),
+	}
+	_ = cacheStore.Put(staleWarning)
+
+	target := usage.TargetProfile{
+		Agent:   "codex",
+		Profile: "stale-warning",
+	}
+
+	report := usage.InspectProfile(context.Background(), target, cacheStore)
+	if report.Status != usage.StatusIdle {
+		t.Errorf("expected StatusIdle for stale non-StatusOK with windows, got %q", report.Status)
+	}
+	if report.Summary != "5h: 15%" {
+		t.Errorf("expected summary preserved, got %q", report.Summary)
+	}
+	if len(report.Windows) != 1 || report.Windows[0].RemainingPct != 15 {
+		t.Errorf("expected windows preserved, got %+v", report.Windows)
 	}
 }
