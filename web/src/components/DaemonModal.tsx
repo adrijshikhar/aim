@@ -530,7 +530,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                         )}
                         <span
                           className={cn(
-                            "font-semibold select-none shrink-0 text-[9.5px] px-1.5 py-0.2 rounded-xs uppercase tracking-wide",
+                            "font-semibold select-none shrink-0 text-[9.5px] px-1.5 py-0.5 rounded-sm uppercase tracking-wide",
                             level === 'ERROR' && "text-red-400 bg-red-950/50 border border-red-800/50",
                             level === 'WARN' && "text-yellow-400 bg-yellow-950/50 border border-yellow-700/50",
                             level === 'INFO' && "text-sky-400 bg-sky-950/40 border border-sky-800/40"

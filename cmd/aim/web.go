@@ -76,6 +76,20 @@ func writeWebPID(pid, port int) error {
 	return os.WriteFile(webPIDPath(), data, 0600)
 }
 
+func removeOwnWebPID() error {
+	info, err := readWebPID()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info != nil && info.PID != os.Getpid() {
+		return nil
+	}
+	return removeWebPID()
+}
+
 func removeWebPID() error {
 	err := os.Remove(webPIDPath())
 	if os.IsNotExist(err) {
@@ -234,7 +248,11 @@ func startWebBackground(port int, devMode, noOpen bool) error {
 	setSysProcAttr(child)
 
 	_ = os.MkdirAll(config.BaseDir(), 0755)
-	logFile, err := os.OpenFile(webLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logPath := webLogPath()
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 5*1024*1024 {
+		_ = os.Rename(logPath, logPath+".1")
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
 		child.Stdout = logFile
 		child.Stderr = logFile
@@ -244,6 +262,11 @@ func startWebBackground(port int, devMode, noOpen bool) error {
 	if err := child.Start(); err != nil {
 		return fmt.Errorf("failed to spawn web dashboard process: %w", err)
 	}
+
+	childErrChan := make(chan error, 1)
+	go func() {
+		childErrChan <- child.Wait()
+	}()
 
 	// 3. Poll /api/health until server is ready (up to 4 seconds)
 	serverURL := fmt.Sprintf("http://localhost:%d", port)
@@ -255,8 +278,13 @@ func startWebBackground(port int, devMode, noOpen bool) error {
 			ready = true
 			break
 		}
-		if !isProcessAlive(child.Process.Pid) {
+		select {
+		case err := <-childErrChan:
+			if err != nil {
+				return fmt.Errorf("web dashboard exited unexpectedly (%v). Check logs at %s", err, webLogPath())
+			}
 			return fmt.Errorf("web dashboard exited unexpectedly. Check logs at %s", webLogPath())
+		default:
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -304,7 +332,7 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 	if err := writeWebPID(os.Getpid(), actualPort); err != nil {
 		logger.Debug("[web] Failed to write PID file: %v", err)
 	}
-	defer removeWebPID()
+	defer removeOwnWebPID()
 
 	serverURL := fmt.Sprintf("http://localhost:%d", actualPort)
 	fmt.Printf("🚀 AIM Web Dashboard running at %s (PID %d)\n", serverURL, os.Getpid())

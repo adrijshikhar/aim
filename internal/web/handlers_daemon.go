@@ -3,6 +3,8 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/aim-cli/aim/internal/service"
@@ -83,8 +85,15 @@ func (s *Server) handleDaemonInstall(w http.ResponseWriter, r *http.Request) {
 		BinaryPath string `json:"binary_path,omitempty"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.BinaryPath != "" {
+		self, err := os.Executable()
+		if err != nil || filepath.Clean(req.BinaryPath) != filepath.Clean(self) {
+			writeJSONError(w, http.StatusBadRequest, "custom binary_path is not permitted via web API")
+			return
+		}
+	}
 
-	info, err := daemonSvc.Install(r.Context(), req.BinaryPath)
+	info, err := daemonSvc.Install(r.Context(), "")
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return

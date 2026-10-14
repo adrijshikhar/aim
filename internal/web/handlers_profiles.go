@@ -100,6 +100,10 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, err.Error())
 			return
 		}
+		if strings.Contains(err.Error(), "running") {
+			writeJSONError(w, http.StatusConflict, err.Error())
+			return
+		}
 		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "not allowed") {
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return

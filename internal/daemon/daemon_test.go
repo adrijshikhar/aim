@@ -159,6 +159,45 @@ func TestLogExecution(t *testing.T) {
 	}
 }
 
+func TestLogRotation(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "daemon.log")
+
+	// Create a large file exceeding 5MB
+	f, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("failed to create dummy log: %v", err)
+	}
+	if err := f.Truncate(5*1024*1024 + 100); err != nil {
+		f.Close()
+		t.Fatalf("failed to truncate dummy log: %v", err)
+	}
+	f.Close()
+
+	// Append a new entry, which should trigger rotation
+	if err := AppendDaemonLog(logPath, "INFO", "post rotation line"); err != nil {
+		t.Fatalf("AppendDaemonLog failed: %v", err)
+	}
+
+	// Verify daemon.log.1 exists and is > 5MB
+	rotatedInfo, err := os.Stat(logPath + ".1")
+	if err != nil {
+		t.Fatalf("expected rotated log file daemon.log.1 to exist: %v", err)
+	}
+	if rotatedInfo.Size() < 5*1024*1024 {
+		t.Errorf("expected rotated log to be > 5MB, got %d bytes", rotatedInfo.Size())
+	}
+
+	// Verify active daemon.log exists and contains the new entry
+	activeData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read active log: %v", err)
+	}
+	if !strings.Contains(string(activeData), "post rotation line") {
+		t.Errorf("expected new line in active log, got %s", string(activeData))
+	}
+}
+
 func TestReadLastRunFromLog(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "daemon.log")

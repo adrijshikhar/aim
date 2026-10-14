@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,21 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 )
+
+func xmlEscape(s string) string {
+	var buf bytes.Buffer
+	_ = xml.EscapeText(&buf, []byte(s))
+	return buf.String()
+}
+
+func systemdQuote(s string) string {
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	if strings.ContainsAny(s, " \t\"'\\") {
+		return fmt.Sprintf("%q", s)
+	}
+	return s
+}
 
 // LaunchAgentPath returns the destination plist path for macOS launchd.
 func LaunchAgentPath(homeDir string) string {
@@ -47,13 +63,13 @@ func GeneratePlist(cfg PlistConfig) ([]byte, error) {
 	buf.WriteString("<plist version=\"1.0\">\n<dict>\n")
 
 	// Label
-	buf.WriteString(fmt.Sprintf("\t<key>Label</key>\n\t<string>%s</string>\n", cfg.Label))
+	buf.WriteString(fmt.Sprintf("\t<key>Label</key>\n\t<string>%s</string>\n", xmlEscape(cfg.Label)))
 
 	// ProgramArguments
 	buf.WriteString("\t<key>ProgramArguments</key>\n\t<array>\n")
-	buf.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", cfg.BinaryPath))
+	buf.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", xmlEscape(cfg.BinaryPath)))
 	for _, arg := range cfg.Args {
-		buf.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", arg))
+		buf.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", xmlEscape(arg)))
 	}
 	buf.WriteString("\t</array>\n")
 
@@ -65,15 +81,15 @@ func GeneratePlist(cfg PlistConfig) ([]byte, error) {
 
 	// StandardOutPath & StandardErrorPath
 	if cfg.LogPath != "" {
-		buf.WriteString(fmt.Sprintf("\t<key>StandardOutPath</key>\n\t<string>%s</string>\n", cfg.LogPath))
-		buf.WriteString(fmt.Sprintf("\t<key>StandardErrorPath</key>\n\t<string>%s</string>\n", cfg.LogPath))
+		buf.WriteString(fmt.Sprintf("\t<key>StandardOutPath</key>\n\t<string>%s</string>\n", xmlEscape(cfg.LogPath)))
+		buf.WriteString(fmt.Sprintf("\t<key>StandardErrorPath</key>\n\t<string>%s</string>\n", xmlEscape(cfg.LogPath)))
 	}
 
 	// EnvironmentVariables
 	if len(cfg.EnvVars) > 0 {
 		buf.WriteString("\t<key>EnvironmentVariables</key>\n\t<dict>\n")
 		for k, v := range cfg.EnvVars {
-			buf.WriteString(fmt.Sprintf("\t\t<key>%s</key>\n\t\t<string>%s</string>\n", k, v))
+			buf.WriteString(fmt.Sprintf("\t\t<key>%s</key>\n\t\t<string>%s</string>\n", xmlEscape(k), xmlEscape(v)))
 		}
 		buf.WriteString("\t</dict>\n")
 	}
@@ -96,13 +112,16 @@ func GenerateSystemdService(cfg SystemdConfig) ([]byte, error) {
 	buf.WriteString("[Service]\n")
 	buf.WriteString("Type=oneshot\n")
 
-	cmdParts := []string{cfg.BinaryPath}
-	cmdParts = append(cmdParts, cfg.Args...)
+	cmdParts := []string{systemdQuote(cfg.BinaryPath)}
+	for _, arg := range cfg.Args {
+		cmdParts = append(cmdParts, systemdQuote(arg))
+	}
 	buf.WriteString(fmt.Sprintf("ExecStart=%s\n", strings.Join(cmdParts, " ")))
 
 	if cfg.LogPath != "" {
-		buf.WriteString(fmt.Sprintf("StandardOutput=append:%s\n", cfg.LogPath))
-		buf.WriteString(fmt.Sprintf("StandardError=append:%s\n", cfg.LogPath))
+		cleanLog := strings.ReplaceAll(strings.ReplaceAll(cfg.LogPath, "\n", ""), "\r", "")
+		buf.WriteString(fmt.Sprintf("StandardOutput=append:%s\n", cleanLog))
+		buf.WriteString(fmt.Sprintf("StandardError=append:%s\n", cleanLog))
 	}
 
 	return buf.Bytes(), nil
@@ -347,6 +366,8 @@ func Install(binaryPath, baseDir string, homeOverride ...string) (*ServiceInfo, 
 
 		// Unload existing service if already registered
 		_ = exec.Command("launchctl", "unload", plistPath).Run()
+		uid := os.Getuid()
+		_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", uid), plistPath).Run()
 
 		if err := os.WriteFile(plistPath, plistData, 0644); err != nil {
 			return nil, fmt.Errorf("failed to write plist file: %w", err)
