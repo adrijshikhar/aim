@@ -239,13 +239,21 @@ export async function createProfile(req: CreateProfileRequest): Promise<ProfileD
   return handleResponse<ProfileDTO>(res);
 }
 
-export async function deleteProfile(agent: string, name: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/profiles/${encodeURIComponent(agent)}/${encodeURIComponent(name)}`, {
+export async function deleteProfile(agent: string | undefined, name: string): Promise<void> {
+  const hasAgent = !!agent && agent.trim() !== '' && agent !== 'all';
+  const url = hasAgent
+    ? `${BASE_URL}/profiles/${encodeURIComponent(agent)}/${encodeURIComponent(name)}`
+    : `${BASE_URL}/profiles/${encodeURIComponent(name)}`;
+
+  const res = await fetch(url, {
     method: 'DELETE',
   });
   if (!res.ok && res.status === 404) {
     // Fallback if server uses query parameters
-    const fallbackRes = await fetch(`${BASE_URL}/profiles?agent=${encodeURIComponent(agent)}&name=${encodeURIComponent(name)}`, {
+    const query = hasAgent
+      ? `agent=${encodeURIComponent(agent)}&name=${encodeURIComponent(name)}`
+      : `name=${encodeURIComponent(name)}`;
+    const fallbackRes = await fetch(`${BASE_URL}/profiles?${query}`, {
       method: 'DELETE',
     });
     if (!fallbackRes.ok) {
@@ -318,9 +326,20 @@ export interface DaemonDTO {
   last_run_message?: string;
 }
 
+export interface DaemonLogsDTO {
+  log_path: string;
+  lines: string[];
+  total_lines: number;
+}
+
 export async function getDaemonStatus(): Promise<DaemonDTO> {
   const res = await fetch(`${BASE_URL}/daemon`);
   return handleResponse<DaemonDTO>(res);
+}
+
+export async function getDaemonLogs(tail = 200, offset = 0): Promise<DaemonLogsDTO> {
+  const res = await fetch(`${BASE_URL}/daemon/logs?tail=${tail}&offset=${offset}`);
+  return handleResponse<DaemonLogsDTO>(res);
 }
 
 export async function installDaemon(binaryPath?: string): Promise<DaemonDTO> {

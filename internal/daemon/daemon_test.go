@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func TestGeneratePlist(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "<string>dev.aim-cli.daemon</string>") {
+	if !strings.Contains(content, "<string>com.aim-cli.daemon</string>") {
 		t.Errorf("expected plist to contain service label, got:\n%s", content)
 	}
 	if !strings.Contains(content, "<string>/usr/local/bin/aim</string>") {
@@ -104,11 +105,40 @@ func TestStatus_NotInstalled(t *testing.T) {
 	}
 }
 
+func TestStatus_LegacyPlist(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("skipping macOS-specific launchd legacy test")
+	}
+	tmpHome := t.TempDir()
+	legacyDir := filepath.Join(tmpHome, "Library", "LaunchAgents")
+	if err := os.MkdirAll(legacyDir, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	legacyPlist := filepath.Join(legacyDir, LegacyServiceLabel+".plist")
+	if err := os.WriteFile(legacyPlist, []byte("<plist></plist>"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	info, err := Status(t.TempDir(), tmpHome)
+	if err != nil {
+		t.Fatalf("Status returned unexpected error: %v", err)
+	}
+	if !info.Installed {
+		t.Errorf("expected Installed to be true for legacy plist")
+	}
+	if info.Label != LegacyServiceLabel {
+		t.Errorf("expected Label to be %s, got %s", LegacyServiceLabel, info.Label)
+	}
+	if info.ConfigPath != legacyPlist {
+		t.Errorf("expected ConfigPath to be %s, got %s", legacyPlist, info.ConfigPath)
+	}
+}
+
 func TestLogExecution(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "daemon.log")
 
-	if err := AppendDaemonLog(logPath, "quota refresh completed for 2 profiles"); err != nil {
+	if err := AppendDaemonLog(logPath, "INFO", "quota refresh completed for 2 profiles"); err != nil {
 		t.Fatalf("AppendDaemonLog failed: %v", err)
 	}
 
@@ -120,9 +150,51 @@ func TestLogExecution(t *testing.T) {
 	if !strings.Contains(content, "quota refresh completed for 2 profiles") {
 		t.Errorf("expected log to contain message, got: %s", content)
 	}
-	// Verify timestamp exists
+	// Verify timestamp exists and level exists
+	if !strings.Contains(content, "[INFO]") {
+		t.Errorf("expected [INFO] level tag in log, got: %s", content)
+	}
 	if !strings.Contains(content, "[") || !strings.Contains(content, "]") {
 		t.Errorf("expected timestamp bracket in log, got: %s", content)
+	}
+}
+
+func TestLogRotation(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "daemon.log")
+
+	// Create a large file exceeding 5MB
+	f, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("failed to create dummy log: %v", err)
+	}
+	if err := f.Truncate(5*1024*1024 + 100); err != nil {
+		f.Close()
+		t.Fatalf("failed to truncate dummy log: %v", err)
+	}
+	f.Close()
+
+	// Append a new entry, which should trigger rotation
+	if err := AppendDaemonLog(logPath, "INFO", "post rotation line"); err != nil {
+		t.Fatalf("AppendDaemonLog failed: %v", err)
+	}
+
+	// Verify daemon.log.1 exists and is > 5MB
+	rotatedInfo, err := os.Stat(logPath + ".1")
+	if err != nil {
+		t.Fatalf("expected rotated log file daemon.log.1 to exist: %v", err)
+	}
+	if rotatedInfo.Size() < 5*1024*1024 {
+		t.Errorf("expected rotated log to be > 5MB, got %d bytes", rotatedInfo.Size())
+	}
+
+	// Verify active daemon.log exists and contains the new entry
+	activeData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read active log: %v", err)
+	}
+	if !strings.Contains(string(activeData), "post rotation line") {
+		t.Errorf("expected new line in active log, got %s", string(activeData))
 	}
 }
 
@@ -140,9 +212,9 @@ func TestReadLastRunFromLog(t *testing.T) {
 	}
 
 	// Add entry
-	_ = AppendDaemonLog(logPath, "first run")
+	_ = AppendDaemonLog(logPath, "INFO", "first run")
 	time.Sleep(10 * time.Millisecond)
-	_ = AppendDaemonLog(logPath, "second run completed successfully")
+	_ = AppendDaemonLog(logPath, "INFO", "second run completed successfully")
 
 	lastRun, msg = ReadLastDaemonRun(logPath)
 	if lastRun.IsZero() {
@@ -216,5 +288,51 @@ func TestRunOnce_Success(t *testing.T) {
 	}
 	if rep.Status != usage.StatusOK || len(rep.Windows) == 0 {
 		t.Errorf("cached report does not match expected: %+v", rep)
+	}
+}
+
+func TestReadDaemonLogs(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "daemon.log")
+
+	// Missing file returns empty without error
+	lines, total, err := ReadDaemonLogs(logPath, 10, 0)
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if len(lines) != 0 || total != 0 {
+		t.Errorf("expected 0 lines for missing file, got %d, total %d", len(lines), total)
+	}
+
+	// Append 5 lines: line1, line22, line333, line4444, line55555
+	for i := 1; i <= 5; i++ {
+		_ = AppendDaemonLog(logPath, "INFO", strings.Repeat("x", i))
+	}
+
+	// Latest 2 lines (offset 0)
+	lines, total, err = ReadDaemonLogs(logPath, 2, 0)
+	if err != nil {
+		t.Fatalf("ReadDaemonLogs failed: %v", err)
+	}
+	if total != 5 {
+		t.Errorf("expected total 5, got %d", total)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines returned, got %d", len(lines))
+	}
+	if !strings.Contains(lines[1], "xxxxx") {
+		t.Errorf("expected last line to contain xxxxx, got: %s", lines[1])
+	}
+
+	// Older 2 lines (offset 2)
+	lines, total, err = ReadDaemonLogs(logPath, 2, 2)
+	if err != nil {
+		t.Fatalf("ReadDaemonLogs failed with offset: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines returned with offset 2, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "xx") || !strings.Contains(lines[1], "xxx") {
+		t.Errorf("unexpected offset lines: %+v", lines)
 	}
 }

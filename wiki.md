@@ -418,9 +418,9 @@ AIM includes a native background daemon designed to execute lightweight periodic
 ### 12.1 Native OS Service Integration (No Resident Process)
 Rather than keeping a persistent Go runtime daemon in memory (which consumes RAM and risks memory leaks or hanging child processes), AIM registers a scheduled job with the host operating system's native service manager:
 - **macOS**: Registers a User LaunchAgent via `launchd`:
-  - Plist Location: `~/Library/LaunchAgents/dev.aim-cli.daemon.plist`
+  - Plist Location: `~/Library/LaunchAgents/com.aim-cli.daemon.plist`
   - Configuration: `StartInterval = 900` (15 minutes), `RunAtLoad = true`, executing `aim daemon run`.
-  - Service Label: `dev.aim-cli.daemon`
+  - Service Label: `com.aim-cli.daemon`
   - Logs: `~/.aim/daemon.log`
 - **Linux**: Registers a User Systemd Service and Timer via `systemctl --user`:
   - Unit Files: `~/.config/systemd/user/aim-daemon.service` and `~/.config/systemd/user/aim-daemon.timer`

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -19,8 +19,10 @@ import {
   Check,
   Copy,
   Folder,
+  Terminal,
 } from 'lucide-react';
-import { DaemonDTO, installDaemon, uninstallDaemon, runDaemonOnce } from '../lib/api';
+import { DaemonDTO, installDaemon, uninstallDaemon, runDaemonOnce, getDaemonLogs } from '../lib/api';
+import { cn } from '../lib/utils';
 import { useToast } from './ui/use-toast';
 
 interface DaemonModalProps {
@@ -29,6 +31,86 @@ interface DaemonModalProps {
   daemonInfo: DaemonDTO | null;
   onRefreshDaemon: () => Promise<void>;
 }
+
+interface ParsedLogLine {
+  timestamp: string;
+  level: 'INFO' | 'WARN' | 'ERROR';
+  message: string;
+}
+
+function parseLogLine(rawLine: string): ParsedLogLine {
+  const line = rawLine.trim();
+
+  // Pattern 1: Standard AIM format: [2026-10-14 01:05:00 UTC] [INFO] message
+  const standardMatch = line.match(/^\[(.*?)\]\s*\[(INFO|WARN|WARNING|ERROR|FATAL|DEBUG)\]\s*(.*)$/i);
+  if (standardMatch) {
+    const [, ts, lvl, msg] = standardMatch;
+    const upper = lvl.toUpperCase();
+    const level: 'INFO' | 'WARN' | 'ERROR' = upper.startsWith('WARN')
+      ? 'WARN'
+      : upper === 'ERROR' || upper === 'FATAL'
+      ? 'ERROR'
+      : 'INFO';
+    return {
+      timestamp: ts.endsWith('UTC') ? ts : `${ts} UTC`,
+      level,
+      message: msg,
+    };
+  }
+
+  // Pattern 2: Legacy AIM format: [2026-10-14 01:05:00 UTC] message
+  const legacyMatch = line.match(/^\[(.*?)\]\s*(.*)$/);
+  if (legacyMatch) {
+    const [, ts, msg] = legacyMatch;
+    const lower = msg.toLowerCase();
+    let level: 'INFO' | 'WARN' | 'ERROR' = 'INFO';
+    if ((!lower.includes('0 errors') && lower.includes('error')) || lower.includes('fatal') || lower.includes('failed') || lower.includes('panic')) {
+      level = 'ERROR';
+    } else if (lower.includes('warn') || lower.includes('0 configured') || lower.includes('timeout') || lower.includes('deadline exceeded')) {
+      level = 'WARN';
+    }
+    return {
+      timestamp: ts.endsWith('UTC') ? ts : `${ts} UTC`,
+      level,
+      message: msg,
+    };
+  }
+
+  // Pattern 3: Go standard log format: 2026/10/13 14:53:31 message
+  const goLogMatch = line.match(/^(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2})\s*(.*)$/);
+  if (goLogMatch) {
+    const [, rawTs, msg] = goLogMatch;
+    const ts = rawTs.replace(/\//g, '-') + ' UTC';
+    const lower = msg.toLowerCase();
+    let level: 'INFO' | 'WARN' | 'ERROR' = 'INFO';
+    if (lower.includes('error') || lower.includes('fatal') || lower.includes('failed')) {
+      level = 'ERROR';
+    } else if (lower.includes('warn') || lower.includes('deadline exceeded') || lower.includes('timeout')) {
+      level = 'WARN';
+    }
+    return {
+      timestamp: ts,
+      level,
+      message: msg,
+    };
+  }
+
+  // Fallback: No timestamp in line
+  const lower = line.toLowerCase();
+  let level: 'INFO' | 'WARN' | 'ERROR' = 'INFO';
+  if ((!lower.includes('0 errors') && lower.includes('error')) || lower.includes('failed')) {
+    level = 'ERROR';
+  } else if (lower.includes('warn') || lower.includes('timeout') || lower.includes('deadline exceeded')) {
+    level = 'WARN';
+  }
+  return {
+    timestamp: '',
+    level,
+    message: line,
+  };
+}
+
+const PAGE_SIZE = 200;
 
 export const DaemonModal: React.FC<DaemonModalProps> = ({
   open,
@@ -40,7 +122,104 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
   const [installing, setInstalling] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [copiedLogs, setCopiedLogs] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [totalLogLines, setTotalLogLines] = useState(0);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [loadingMoreLogs, setLoadingMoreLogs] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const isInitialLoadRef = useRef(true);
   const { toast } = useToast();
+
+  const fetchLogs = useCallback(async () => {
+    setLoadingLogs(true);
+    isInitialLoadRef.current = true;
+    try {
+      const data = await getDaemonLogs(PAGE_SIZE, 0);
+      setLogs(data.lines || []);
+      setTotalLogLines(data.total_lines || 0);
+    } catch (err) {
+      console.error('Failed to load daemon logs', err);
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, []);
+
+  const handleToggleLogs = () => {
+    const next = !showLogs;
+    setShowLogs(next);
+    if (next && logs.length === 0) {
+      fetchLogs();
+    }
+  };
+
+  const handleLoadMoreLogs = useCallback(async () => {
+    if (loadingMoreLogs || logs.length >= totalLogLines) return;
+    const container = terminalRef.current;
+    const prevScrollHeight = container ? container.scrollHeight : 0;
+    const prevScrollTop = container ? container.scrollTop : 0;
+
+    setLoadingMoreLogs(true);
+    try {
+      const data = await getDaemonLogs(PAGE_SIZE, logs.length);
+      if (data.lines && data.lines.length > 0) {
+        setLogs((prev) => [...data.lines, ...prev]);
+        // Preserve scroll position when older logs are prepended
+        requestAnimationFrame(() => {
+          if (terminalRef.current) {
+            const newScrollHeight = terminalRef.current.scrollHeight;
+            terminalRef.current.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+          }
+        });
+      }
+      setTotalLogLines(data.total_lines || 0);
+    } catch (err) {
+      console.error('Failed to load older daemon logs', err);
+    } finally {
+      setLoadingMoreLogs(false);
+    }
+  }, [loadingMoreLogs, logs.length, totalLogLines]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollTop <= 20 && !loadingMoreLogs && logs.length < totalLogLines && !loadingLogs) {
+      handleLoadMoreLogs();
+    }
+  };
+
+  useEffect(() => {
+    if (open) {
+      fetchLogs();
+    } else {
+      setShowLogs(false);
+    }
+  }, [open, fetchLogs]);
+
+  useEffect(() => {
+    if (logs.length > 0 && isInitialLoadRef.current && showLogs) {
+      if (terminalRef.current) {
+        terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+      }
+      isInitialLoadRef.current = false;
+    }
+  }, [logs, showLogs]);
+
+  useEffect(() => {
+    if (showLogs && logs.length > 0) {
+      requestAnimationFrame(() => {
+        if (terminalRef.current) {
+          terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+        }
+      });
+    }
+  }, [showLogs]);
+
+  const handleCopyLogs = () => {
+    navigator.clipboard.writeText(logs.join('\n'));
+    setCopiedLogs(true);
+    setTimeout(() => setCopiedLogs(false), 2000);
+  };
 
   const handleCopy = (key: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -58,6 +237,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         variant: 'success',
       });
       await onRefreshDaemon();
+      await fetchLogs();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to install daemon';
       toast({
@@ -80,6 +260,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         variant: 'success',
       });
       await onRefreshDaemon();
+      await fetchLogs();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to uninstall daemon';
       toast({
@@ -102,6 +283,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
         variant: 'success',
       });
       await onRefreshDaemon();
+      await fetchLogs();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to run daemon task';
       toast({
@@ -136,7 +318,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl bg-card border-border text-foreground p-6 shadow-2xl rounded-geist">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-card border-border text-foreground p-6 shadow-2xl rounded-geist">
         <DialogHeader className="space-y-1.5 pb-3 border-b border-border pr-8">
           <div className="flex items-center gap-2.5 flex-wrap">
             <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
@@ -191,8 +373,8 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
           <div className="grid grid-cols-2 gap-2 font-mono text-[11px] pt-1">
             <div className="p-2 rounded-geist bg-card border border-border">
               <span className="text-muted-foreground/70 block text-[10px] uppercase">Service Label</span>
-              <span className="text-foreground font-medium truncate block" title={daemonInfo?.label || 'dev.aim-cli.daemon'}>
-                {daemonInfo?.label || 'dev.aim-cli.daemon'}
+              <span className="text-foreground font-medium truncate block" title={daemonInfo?.label || 'com.aim-cli.daemon'}>
+                {daemonInfo?.label || 'com.aim-cli.daemon'}
               </span>
             </div>
             <div className="p-2 rounded-geist bg-card border border-border">
@@ -256,7 +438,126 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
           )}
         </div>
 
-        <DialogFooter className="pt-2 border-t border-border flex items-center justify-between sm:justify-between w-full">
+        {/* Execution Log Stream */}
+        <div className="rounded-geist border border-border bg-background p-3 text-xs space-y-2.5 transition-all">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 select-none">
+              <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground font-semibold">
+                Execution Logs
+              </span>
+              {totalLogLines > 0 && (
+                <span className="text-[10px] font-mono bg-secondary/70 text-muted-foreground border border-border px-1.5 py-0.5 rounded-geist leading-none inline-flex items-center">
+                  {showLogs && logs.length < totalLogLines
+                    ? `${logs.length} of ${totalLogLines} lines`
+                    : `${totalLogLines} lines`}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              {showLogs && (
+                <>
+                  <button
+                    type="button"
+                    onClick={fetchLogs}
+                    disabled={loadingLogs}
+                    title="Refresh logs"
+                    className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <RefreshCw className={cn("h-3 w-3", loadingLogs && "animate-spin")} />
+                    Refresh
+                  </button>
+                  {logs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleCopyLogs}
+                      title="Copy logs"
+                      className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      {copiedLogs ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
+                      {copiedLogs ? 'Copied' : 'Copy'}
+                    </button>
+                  )}
+                </>
+              )}
+              <button
+                type="button"
+                onClick={handleToggleLogs}
+                className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                {showLogs ? 'Collapse' : 'View Logs'}
+              </button>
+            </div>
+          </div>
+
+          {showLogs && (
+            <div
+              ref={terminalRef}
+              onScroll={handleScroll}
+              className="bg-[#050505] border border-[#222222] rounded-geist p-2.5 font-mono text-[11px] max-h-44 overflow-y-auto space-y-1 select-text scrollbar-thin"
+            >
+              {loadingLogs && logs.length === 0 ? (
+                <div className="py-6 text-center text-muted-foreground/60 flex items-center justify-center gap-2">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  <span>Loading daemon logs...</span>
+                </div>
+              ) : logs.length === 0 ? (
+                <div className="py-6 text-center text-muted-foreground/60">
+                  No daemon logs recorded yet. Trigger a sync below to generate execution records.
+                </div>
+              ) : (
+                <>
+                  {loadingMoreLogs && (
+                    <div className="py-2 text-center text-muted-foreground/60 flex items-center justify-center gap-1.5 border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
+                      <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                      <span>Loading earlier records...</span>
+                    </div>
+                  )}
+                  {logs.length >= totalLogLines && totalLogLines > 0 && (
+                    <div className="py-2 text-center text-muted-foreground/40 select-none border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
+                      — Beginning of execution logs ({totalLogLines} lines) —
+                    </div>
+                  )}
+                  {logs.map((rawLine, i) => {
+                    const { timestamp, level, message } = parseLogLine(rawLine);
+
+                    return (
+                      <div key={i} className="leading-relaxed break-all flex items-baseline gap-2 font-mono text-[11px] py-0.5">
+                        {timestamp && (
+                          <span className="text-[#666666] select-none shrink-0 font-mono text-[10px]">
+                            [{timestamp}]
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            "font-semibold select-none shrink-0 text-[9.5px] px-1.5 py-0.5 rounded-sm uppercase tracking-wide",
+                            level === 'ERROR' && "text-red-400 bg-red-950/50 border border-red-800/50",
+                            level === 'WARN' && "text-yellow-400 bg-yellow-950/50 border border-yellow-700/50",
+                            level === 'INFO' && "text-sky-400 bg-sky-950/40 border border-sky-800/40"
+                          )}
+                        >
+                          {level}
+                        </span>
+                        <span
+                          className={cn(
+                            "flex-1",
+                            level === 'ERROR' && "text-red-300 font-medium",
+                            level === 'WARN' && "text-yellow-300 font-medium",
+                            level === 'INFO' && "text-[#ededed]"
+                          )}
+                        >
+                          {message}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="pt-2 flex items-center justify-between sm:justify-between w-full">
           {isInstalled ? (
             <Button
               type="button"

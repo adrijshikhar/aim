@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,21 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 )
+
+func xmlEscape(s string) string {
+	var buf bytes.Buffer
+	_ = xml.EscapeText(&buf, []byte(s))
+	return buf.String()
+}
+
+func systemdQuote(s string) string {
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	if strings.ContainsAny(s, " \t\"'\\") {
+		return fmt.Sprintf("%q", s)
+	}
+	return s
+}
 
 // LaunchAgentPath returns the destination plist path for macOS launchd.
 func LaunchAgentPath(homeDir string) string {
@@ -47,13 +63,13 @@ func GeneratePlist(cfg PlistConfig) ([]byte, error) {
 	buf.WriteString("<plist version=\"1.0\">\n<dict>\n")
 
 	// Label
-	buf.WriteString(fmt.Sprintf("\t<key>Label</key>\n\t<string>%s</string>\n", cfg.Label))
+	buf.WriteString(fmt.Sprintf("\t<key>Label</key>\n\t<string>%s</string>\n", xmlEscape(cfg.Label)))
 
 	// ProgramArguments
 	buf.WriteString("\t<key>ProgramArguments</key>\n\t<array>\n")
-	buf.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", cfg.BinaryPath))
+	buf.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", xmlEscape(cfg.BinaryPath)))
 	for _, arg := range cfg.Args {
-		buf.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", arg))
+		buf.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", xmlEscape(arg)))
 	}
 	buf.WriteString("\t</array>\n")
 
@@ -65,15 +81,15 @@ func GeneratePlist(cfg PlistConfig) ([]byte, error) {
 
 	// StandardOutPath & StandardErrorPath
 	if cfg.LogPath != "" {
-		buf.WriteString(fmt.Sprintf("\t<key>StandardOutPath</key>\n\t<string>%s</string>\n", cfg.LogPath))
-		buf.WriteString(fmt.Sprintf("\t<key>StandardErrorPath</key>\n\t<string>%s</string>\n", cfg.LogPath))
+		buf.WriteString(fmt.Sprintf("\t<key>StandardOutPath</key>\n\t<string>%s</string>\n", xmlEscape(cfg.LogPath)))
+		buf.WriteString(fmt.Sprintf("\t<key>StandardErrorPath</key>\n\t<string>%s</string>\n", xmlEscape(cfg.LogPath)))
 	}
 
 	// EnvironmentVariables
 	if len(cfg.EnvVars) > 0 {
 		buf.WriteString("\t<key>EnvironmentVariables</key>\n\t<dict>\n")
 		for k, v := range cfg.EnvVars {
-			buf.WriteString(fmt.Sprintf("\t\t<key>%s</key>\n\t\t<string>%s</string>\n", k, v))
+			buf.WriteString(fmt.Sprintf("\t\t<key>%s</key>\n\t\t<string>%s</string>\n", xmlEscape(k), xmlEscape(v)))
 		}
 		buf.WriteString("\t</dict>\n")
 	}
@@ -96,13 +112,16 @@ func GenerateSystemdService(cfg SystemdConfig) ([]byte, error) {
 	buf.WriteString("[Service]\n")
 	buf.WriteString("Type=oneshot\n")
 
-	cmdParts := []string{cfg.BinaryPath}
-	cmdParts = append(cmdParts, cfg.Args...)
+	cmdParts := []string{systemdQuote(cfg.BinaryPath)}
+	for _, arg := range cfg.Args {
+		cmdParts = append(cmdParts, systemdQuote(arg))
+	}
 	buf.WriteString(fmt.Sprintf("ExecStart=%s\n", strings.Join(cmdParts, " ")))
 
 	if cfg.LogPath != "" {
-		buf.WriteString(fmt.Sprintf("StandardOutput=append:%s\n", cfg.LogPath))
-		buf.WriteString(fmt.Sprintf("StandardError=append:%s\n", cfg.LogPath))
+		cleanLog := strings.ReplaceAll(strings.ReplaceAll(cfg.LogPath, "\n", ""), "\r", "")
+		buf.WriteString(fmt.Sprintf("StandardOutput=append:%s\n", cleanLog))
+		buf.WriteString(fmt.Sprintf("StandardError=append:%s\n", cleanLog))
 	}
 
 	return buf.Bytes(), nil
@@ -133,11 +152,17 @@ func GenerateSystemdTimer(cfg SystemdConfig) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// AppendDaemonLog writes a timestamped record to the daemon log.
-func AppendDaemonLog(logPath, message string) error {
+// AppendDaemonLog writes a timestamped record with severity level (INFO, WARN, ERROR) to the daemon log.
+// Rotates the log file if it exceeds 5MB to prevent unbounded disk growth.
+func AppendDaemonLog(logPath, level, message string) error {
 	dir := filepath.Dir(logPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
+	}
+
+	// Check for size-based log rotation (> 5MB)
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 5*1024*1024 {
+		_ = os.Rename(logPath, logPath+".1")
 	}
 
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -146,9 +171,51 @@ func AppendDaemonLog(logPath, message string) error {
 	}
 	defer f.Close()
 
+	lvl := strings.ToUpper(strings.TrimSpace(level))
+	if lvl == "" {
+		lvl = "INFO"
+	}
+
 	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
-	_, err = fmt.Fprintf(f, "[%s] %s\n", timestamp, strings.TrimSpace(message))
+	_, err = fmt.Fprintf(f, "[%s] [%s] %s\n", timestamp, lvl, strings.TrimSpace(message))
 	return err
+}
+
+// ReadDaemonLogs returns up to maxLines lines from the daemon log, ending at total - offset.
+func ReadDaemonLogs(logPath string, maxLines, offset int) ([]string, int, error) {
+	if maxLines <= 0 {
+		maxLines = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, 0, nil
+		}
+		return nil, 0, err
+	}
+	if len(data) == 0 {
+		return []string{}, 0, nil
+	}
+	raw := strings.TrimRight(string(data), "\r\n")
+	if raw == "" {
+		return []string{}, 0, nil
+	}
+	allLines := strings.Split(raw, "\n")
+	total := len(allLines)
+
+	end := total - offset
+	if end <= 0 {
+		return []string{}, total, nil
+	}
+	start := end - maxLines
+	if start < 0 {
+		start = 0
+	}
+
+	return allLines[start:end], total, nil
 }
 
 // ReadLastDaemonRun parses the most recent execution timestamp and message from the daemon log.
@@ -169,6 +236,12 @@ func ReadLastDaemonRun(logPath string) (time.Time, string) {
 			if idx > 1 {
 				timeStr := line[1:idx]
 				msg := strings.TrimSpace(line[idx+1:])
+				// If message starts with [LEVEL], strip it for cleaner summary
+				if strings.HasPrefix(msg, "[") {
+					if endIdx := strings.Index(msg, "]"); endIdx > 1 {
+						msg = strings.TrimSpace(msg[endIdx+1:])
+					}
+				}
 				if t, err := time.Parse("2006-01-02 15:04:05 MST", timeStr); err == nil {
 					return t, msg
 				}
@@ -206,6 +279,18 @@ func Status(baseDir string, homeOverride ...string) (*ServiceInfo, error) {
 			out, err := exec.Command("launchctl", "list").Output()
 			if err == nil && strings.Contains(string(out), DefaultServiceLabel) {
 				info.Active = true
+			}
+		} else {
+			// Backward compatibility: detect legacy service label plist
+			legacyPlistPath := filepath.Join(home, "Library", "LaunchAgents", LegacyServiceLabel+".plist")
+			if _, err := os.Stat(legacyPlistPath); err == nil {
+				info.Installed = true
+				info.ConfigPath = legacyPlistPath
+				info.Label = LegacyServiceLabel
+				out, err := exec.Command("launchctl", "list").Output()
+				if err == nil && strings.Contains(string(out), LegacyServiceLabel) {
+					info.Active = true
+				}
 			}
 		}
 		return info, nil
@@ -251,6 +336,15 @@ func Install(binaryPath, baseDir string, homeOverride ...string) (*ServiceInfo, 
 			return nil, fmt.Errorf("failed to create LaunchAgents directory: %w", err)
 		}
 
+		// Unload and clean up legacy plist if present from earlier versions
+		legacyPlistPath := filepath.Join(home, "Library", "LaunchAgents", LegacyServiceLabel+".plist")
+		if _, err := os.Stat(legacyPlistPath); err == nil {
+			_ = exec.Command("launchctl", "unload", legacyPlistPath).Run()
+			uid := os.Getuid()
+			_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", uid), legacyPlistPath).Run()
+			_ = os.Remove(legacyPlistPath)
+		}
+
 		pathEnv := os.Getenv("PATH")
 		if pathEnv == "" {
 			pathEnv = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -272,6 +366,8 @@ func Install(binaryPath, baseDir string, homeOverride ...string) (*ServiceInfo, 
 
 		// Unload existing service if already registered
 		_ = exec.Command("launchctl", "unload", plistPath).Run()
+		uid := os.Getuid()
+		_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", uid), plistPath).Run()
 
 		if err := os.WriteFile(plistPath, plistData, 0644); err != nil {
 			return nil, fmt.Errorf("failed to write plist file: %w", err)
@@ -288,7 +384,7 @@ func Install(binaryPath, baseDir string, homeOverride ...string) (*ServiceInfo, 
 			}
 		}
 
-		_ = AppendDaemonLog(logPath, fmt.Sprintf("daemon service installed (binary: %s, interval: 15m)", binaryPath))
+		_ = AppendDaemonLog(logPath, "INFO", fmt.Sprintf("daemon service installed (binary: %s, interval: 15m)", binaryPath))
 		return Status(baseDir)
 	}
 
@@ -329,7 +425,7 @@ func Install(binaryPath, baseDir string, homeOverride ...string) (*ServiceInfo, 
 			return nil, fmt.Errorf("failed to enable systemd timer: %s (%w)", strings.TrimSpace(string(out)), err)
 		}
 
-		_ = AppendDaemonLog(logPath, fmt.Sprintf("daemon service installed (binary: %s, interval: 15m)", binaryPath))
+		_ = AppendDaemonLog(logPath, "INFO", fmt.Sprintf("daemon service installed (binary: %s, interval: 15m)", binaryPath))
 		return Status(baseDir)
 	}
 
@@ -356,7 +452,14 @@ func Uninstall(baseDir string, homeOverride ...string) error {
 			return fmt.Errorf("failed to remove plist file: %w", err)
 		}
 
-		_ = AppendDaemonLog(logPath, "daemon service uninstalled")
+		// Also clean up legacy plist if present
+		legacyPlistPath := filepath.Join(home, "Library", "LaunchAgents", LegacyServiceLabel+".plist")
+		_ = exec.Command("launchctl", "unload", legacyPlistPath).Run()
+		uid = os.Getuid()
+		_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", uid), legacyPlistPath).Run()
+		_ = os.Remove(legacyPlistPath)
+
+		_ = AppendDaemonLog(logPath, "INFO", "daemon service uninstalled")
 		return nil
 	}
 
@@ -366,7 +469,7 @@ func Uninstall(baseDir string, homeOverride ...string) error {
 		_ = os.Remove(SystemdServicePath(home))
 		_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
 
-		_ = AppendDaemonLog(logPath, "daemon service uninstalled")
+		_ = AppendDaemonLog(logPath, "INFO", "daemon service uninstalled")
 		return nil
 	}
 
@@ -401,7 +504,7 @@ func RunOnce(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManag
 	}
 
 	if len(targets) == 0 {
-		_ = AppendDaemonLog(logPath, "daemon run: 0 configured profiles found")
+		_ = AppendDaemonLog(logPath, "WARN", "daemon run: 0 configured profiles found")
 		return nil
 	}
 
@@ -418,8 +521,15 @@ func RunOnce(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManag
 		}
 	}
 
+	level := "INFO"
+	if errorCount > 0 && successCount == 0 {
+		level = "ERROR"
+	} else if errorCount > 0 {
+		level = "WARN"
+	}
+
 	msg := fmt.Sprintf("daemon run: quota refresh completed (%d updated, %d errors out of %d targets)",
 		successCount, errorCount, len(targets))
-	_ = AppendDaemonLog(logPath, msg)
+	_ = AppendDaemonLog(logPath, level, msg)
 	return nil
 }
