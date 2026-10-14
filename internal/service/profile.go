@@ -114,11 +114,18 @@ func (s *profileService) buildAdapterInfo(agentName, profileName string, adapter
 	}
 
 	var quotaPtr *QuotaDTO
-	if s.cache != nil && agentName != "" {
-		if rep, ok := s.cache.Get(agentName, profileName); ok {
+	if agentName != "" {
+		target := usage.TargetProfile{
+			Agent:      agentName,
+			Profile:    profileName,
+			ProfileDir: pDir,
+		}
+		rep := usage.InspectProfile(context.Background(), target, s.cache)
+		if rep.Status != usage.StatusUnknown || len(rep.Windows) > 0 {
 			quotaPtr = reportToQuotaDTO(rep)
-		} else if rep, ok := s.cache.GetStale(agentName, profileName); ok {
-			quotaPtr = reportToQuotaDTO(rep)
+		}
+		if !hasCreds && rep.Status == usage.StatusIdle {
+			hasCreds = true
 		}
 	}
 

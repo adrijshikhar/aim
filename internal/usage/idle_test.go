@@ -503,3 +503,49 @@ func TestInspection_StaleCacheWithNonStatusOKAndWindows(t *testing.T) {
 		t.Errorf("expected windows preserved, got %+v", report.Windows)
 	}
 }
+
+func TestInspection_ClaudeAiOauthStructure(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("metadata only without tokens returns no credentials", func(t *testing.T) {
+		profDir := filepath.Join(tmpDir, "profiles", "meta-only")
+		claudeDir := filepath.Join(profDir, ".claude")
+		_ = os.MkdirAll(claudeDir, 0700)
+		_ = os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"subscriptionType":"team"}}`), 0600)
+
+		target := usage.TargetProfile{
+			Agent:      "claude",
+			Profile:    "meta-only",
+			ProfileDir: profDir,
+		}
+
+		report := usage.InspectProfile(context.Background(), target, nil)
+		if report.Status != usage.StatusUnknown {
+			t.Errorf("expected StatusUnknown for metadata-only claudeAiOauth, got %q", report.Status)
+		}
+		if report.Error != "no credentials" {
+			t.Errorf("expected Error == 'no credentials', got %q", report.Error)
+		}
+	})
+
+	t.Run("valid token in claudeAiOauth returns StatusIdle", func(t *testing.T) {
+		profDir := filepath.Join(tmpDir, "profiles", "valid-claude")
+		claudeDir := filepath.Join(profDir, ".claude")
+		_ = os.MkdirAll(claudeDir, 0700)
+		_ = os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"sk-ant-123","subscriptionType":"team"}}`), 0600)
+
+		target := usage.TargetProfile{
+			Agent:      "claude",
+			Profile:    "valid-claude",
+			ProfileDir: profDir,
+		}
+
+		report := usage.InspectProfile(context.Background(), target, nil)
+		if report.Status != usage.StatusIdle {
+			t.Errorf("expected StatusIdle for valid claudeAiOauth, got %q", report.Status)
+		}
+		if report.Summary != "Ready on use" {
+			t.Errorf("expected Summary == 'Ready on use', got %q", report.Summary)
+		}
+	})
+}

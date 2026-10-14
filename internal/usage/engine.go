@@ -516,7 +516,11 @@ func hasJSONCredentials(raw any) bool {
 
 	// Check Claude oauth
 	if oauthObj, ok := m["claudeAiOauth"].(map[string]any); ok && len(oauthObj) > 0 {
-		return true
+		for _, k := range []string{"accessToken", "refreshToken", "access_token", "refresh_token", "token"} {
+			if s, ok := oauthObj[k].(string); ok && strings.TrimSpace(s) != "" {
+				return true
+			}
+		}
 	}
 
 	// Check direct token / key fields

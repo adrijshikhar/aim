@@ -1794,3 +1794,45 @@ func TestCLI_List_IdleProfileBadge(t *testing.T) {
 		t.Errorf("expected '[idle: ready on use]' in aim list output, got:\n%s", outAll)
 	}
 }
+
+func TestCLI_List_StaleCachePromotesToIdleWithoutPrewarm(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("stale-prof")
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("stale-prof", "mock")
+	_ = config.SaveConfig(cfg)
+
+	reg := agents.NewRegistry()
+	reg.Register(&mockAdapter{name: "mock", hasCreds: true})
+
+	cache := usage.NewCacheStore(tempDir, usage.DefaultTTL)
+	repStale := usage.Report{
+		Agent:   "mock",
+		Profile: "stale-prof",
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{
+			{Name: "5-Hour", RemainingPct: 70},
+		},
+		FetchedAt: time.Now().Add(-2 * time.Hour), // Older than DefaultTTL (15m)
+	}
+	_ = cache.Put(repStale)
+
+	// List should promote stale valid cache to idle badge without network or prewarm
+	outMock, _ := captureOutput(t, func() {
+		_ = runList(reg, pm, "mock")
+	})
+	if !strings.Contains(outMock, "[idle: ready on use]") {
+		t.Errorf("expected '[idle: ready on use]' for stale profile in aim list mock, got:\n%s", outMock)
+	}
+
+	outAll, _ := captureOutput(t, func() {
+		_ = runList(reg, pm, "")
+	})
+	if !strings.Contains(outAll, "[idle: ready on use]") {
+		t.Errorf("expected '[idle: ready on use]' for stale profile in aim list all, got:\n%s", outAll)
+	}
+}

@@ -253,6 +253,7 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 		baseDir = pm.BaseDir
 	}
 	refStore := oauth.NewRefusalStore(baseDir)
+	usageCache := usage.NewCacheStore(baseDir, usage.DefaultTTL)
 
 	for _, p := range profiles {
 		fmt.Fprintln(out)
@@ -264,7 +265,7 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 		if rec, ok := refStore.IsRefused(adapter.Name(), p); ok && rec != nil {
 			filtered := make([]agents.DiagnosticResult, 0, len(results))
 			for _, r := range results {
-				if r.Category == "Auth" && r.Status == "OK" {
+				if (r.Category == "Auth" || r.Category == "Token") && r.Status == "OK" {
 					continue
 				}
 				filtered = append(filtered, r)
@@ -279,53 +280,43 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 			if pm != nil {
 				profDir = pm.ProfileDir(p)
 			}
-			usageCache := usage.NewCacheStore(baseDir, usage.DefaultTTL)
 			target := usage.TargetProfile{
-				Agent:            adapter.Name(),
-				Profile:          p,
-				ProfileDir:       profDir,
-				HasCredentialsFn: adapter.HasCredentials,
+				Agent:      adapter.Name(),
+				Profile:    p,
+				ProfileDir: profDir,
 			}
 			rep := usage.InspectProfile(context.Background(), target, usageCache)
 
-			hasCreds := false
-			if adapter != nil {
-				hasCreds = adapter.HasCredentials(profDir)
-			}
-			if !hasCreds && rep.Status == usage.StatusIdle {
-				hasCreds = true
-			}
-
-			if hasCreds && rep.Status == usage.StatusIdle {
-				authFound := false
-				hasAuthCategory := false
-				for i := range results {
-					if results[i].Category == "Auth" {
-						hasAuthCategory = true
-						if results[i].Status == "OK" {
-							results[i].Message = "Credentials configured (Idle - will renew on next turn)"
-							authFound = true
-						}
+			authFound := false
+			hasAuthCategory := false
+			for i := range results {
+				if results[i].Category == "Auth" || results[i].Category == "Token" {
+					hasAuthCategory = true
+					if results[i].Status == "OK" {
+						results[i].Message = "Credentials configured (Idle - will renew on next turn)"
+						authFound = true
 					}
 				}
-				if !authFound && !hasAuthCategory {
-					insertIdx := len(results)
-					for i, r := range results {
-						if r.Category == "Binary" {
-							insertIdx = i + 1
-							break
-						}
+			}
+			if !authFound && !hasAuthCategory && rep.Status == usage.StatusIdle {
+				insertIdx := len(results)
+				for i, r := range results {
+					if r.Category == "Binary" {
+						insertIdx = i + 1
+						break
 					}
-					idleResult := agents.DiagnosticResult{
-						Category: "Auth",
-						Status:   "OK",
-						Message:  "Credentials configured (Idle - will renew on next turn)",
-					}
-					if insertIdx >= len(results) {
-						results = append(results, idleResult)
-					} else {
-						results = append(results[:insertIdx], append([]agents.DiagnosticResult{idleResult}, results[insertIdx:]...)...)
-					}
+				}
+				idleResult := agents.DiagnosticResult{
+					Category: "Auth",
+					Status:   "OK",
+					Message:  "Credentials configured (Idle - will renew on next turn)",
+				}
+				if insertIdx >= len(results) {
+					results = append(results, idleResult)
+				} else {
+					results = append(results, agents.DiagnosticResult{})
+					copy(results[insertIdx+1:], results[insertIdx:])
+					results[insertIdx] = idleResult
 				}
 			}
 		}
