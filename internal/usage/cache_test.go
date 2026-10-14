@@ -1244,4 +1244,3 @@ func TestRefreshAsync_ClearsRefusalOnSuccessfulFetch(t *testing.T) {
 		}
 	}
 }
-

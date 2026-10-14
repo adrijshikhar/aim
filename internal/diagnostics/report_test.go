@@ -16,11 +16,11 @@ type mockReportAdapter struct {
 	name string
 }
 
-func (m *mockReportAdapter) Name() string                                            { return m.name }
-func (m *mockReportAdapter) DisplayName() string                                     { return m.name }
-func (m *mockReportAdapter) Aliases() []string                                       { return nil }
-func (m *mockReportAdapter) BinaryName() string                                      { return m.name }
-func (m *mockReportAdapter) HasCredentials(profileDir string) bool                   { return true }
+func (m *mockReportAdapter) Name() string                          { return m.name }
+func (m *mockReportAdapter) DisplayName() string                   { return m.name }
+func (m *mockReportAdapter) Aliases() []string                     { return nil }
+func (m *mockReportAdapter) BinaryName() string                    { return m.name }
+func (m *mockReportAdapter) HasCredentials(profileDir string) bool { return true }
 func (m *mockReportAdapter) PrepareEnv(ctx context.Context, p, d string) (agents.LaunchEnv, error) {
 	return agents.LaunchEnv{}, nil
 }
@@ -87,4 +87,3 @@ func TestGenerateReport_IncludesOAuthRefusal(t *testing.T) {
 		t.Errorf("expected report to contain %q, but got:\n%s", expectedRow, report)
 	}
 }
-

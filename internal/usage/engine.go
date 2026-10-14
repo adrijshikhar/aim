@@ -270,4 +270,3 @@ func isHTTP401(lower string) bool {
 		strings.Contains(lower, "http 401") ||
 		strings.Contains(lower, "401 unauthorized")
 }
-

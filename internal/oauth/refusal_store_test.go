@@ -406,5 +406,3 @@ func TestRefusalStore_Prune_CustomMaxAge(t *testing.T) {
 		t.Errorf("expected 2-hour-old record to be pruned with 1-hour maxAge")
 	}
 }
-
-

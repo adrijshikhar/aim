@@ -312,6 +312,3 @@ func TestLogin_ClearsRefusalStore_Alias(t *testing.T) {
 		t.Fatalf("expected alias refusal to be cleared after login via alias, got: ok=%v, rec=%v", ok, rec)
 	}
 }
-
-
-
