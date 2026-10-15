@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/session/providers/agy"
@@ -211,7 +212,7 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 
 	if len(activeSessions) > 0 {
 		fmt.Fprintln(w, headerStyle.Render("ACTIVE SESSIONS"))
-		t := table.New().
+		t := presenter.NewTable(w).
 			Border(lipgloss.HiddenBorder()).
 			Headers("PROFILE", "AGENT", "SESSION ID", "DIR", "TITLE", "STARTED", "STATUS")
 
@@ -253,7 +254,7 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintln(w, headerStyle.Render("RECENT SESSIONS"))
-		t := table.New().
+		t := presenter.NewTable(w).
 			Border(lipgloss.HiddenBorder()).
 			Headers("PROFILE", "AGENT", "SESSION ID", "DIR", "TITLE", "LAST ACTIVE")
 

@@ -3,6 +3,7 @@ package presenter
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -10,7 +11,34 @@ import (
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/term"
 )
+
+// TerminalWidth returns the detected terminal width from the given writer or stdout,
+// defaulting to fallback (or 100 if fallback <= 0) when width cannot be determined.
+func TerminalWidth(w io.Writer, fallback int) int {
+	if fallback <= 0 {
+		fallback = 100
+	}
+	if f, ok := w.(*os.File); ok {
+		if width, _, err := term.GetSize(f.Fd()); err == nil && width > 0 {
+			return width
+		}
+	}
+	if width, _, err := term.GetSize(os.Stdout.Fd()); err == nil && width > 0 {
+		return width
+	}
+	return fallback
+}
+
+// NewTable returns a lipgloss Table configured with the detected terminal width
+// and automatic truncation (Wrap(false)) to prevent terminal line wrapping and border corruption.
+func NewTable(w io.Writer) *table.Table {
+	width := TerminalWidth(w, 100)
+	return table.New().
+		Width(width).
+		Wrap(false)
+}
 
 // RenderMCPListTable formats and writes the configured MCP servers list as a formatted Lipgloss table.
 func RenderMCPListTable(w io.Writer, agentName, profileName string, servers []agents.MCPServerInfo) {
@@ -22,7 +50,7 @@ func RenderMCPListTable(w io.Writer, agentName, profileName string, servers []ag
 		return
 	}
 
-	t := table.New().
+	t := NewTable(w).
 		Border(lipgloss.HiddenBorder()).
 		Headers("#", "NAME", "STATUS", "AUTH", "TYPE", "TARGET / COMMAND")
 
@@ -82,7 +110,7 @@ func RenderMCPListTable(w io.Writer, agentName, profileName string, servers []ag
 
 // PrintTable renders headers and data rows into a styled Lipgloss table.
 func PrintTable(w io.Writer, headers []string, rows [][]string, useColor bool) {
-	t := table.New().
+	t := NewTable(w).
 		Border(lipgloss.HiddenBorder()).
 		Headers(headers...).
 		Rows(rows...)
