@@ -80,6 +80,14 @@ function getInitialSessions(): SessionDTO[] {
   return [];
 }
 
+function normalizeCwd(raw?: string | null): string {
+  if (!raw) return '<none>';
+  const trimmed = raw.trim();
+  if (!trimmed) return '<none>';
+  if (trimmed === '/' || trimmed === '\\') return trimmed;
+  return trimmed.replace(/[/\\]+$/, '');
+}
+
 export function SessionsView({
   selectedProfile = 'all',
   onSelectProfile,
@@ -96,6 +104,7 @@ export function SessionsView({
   const [selectedProfiles, setSelectedProfiles] = React.useState<Set<string>>(
     selectedProfile && selectedProfile !== 'all' ? new Set([selectedProfile]) : new Set()
   );
+  const [selectedCwds, setSelectedCwds] = React.useState<Set<string>>(new Set());
   const [selectedStatuses, setSelectedStatuses] = React.useState<Set<string>>(new Set());
   const [resumingId, setResumingId] = React.useState<string | null>(null);
   const [flagModalSession, setFlagModalSession] = React.useState<SessionDTO | null>(null);
@@ -215,6 +224,15 @@ export function SessionsView({
     return map;
   }, [sessions]);
 
+  const cwdCounts = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    sessions.forEach((s) => {
+      const c = normalizeCwd(s.cwd);
+      map[c] = (map[c] || 0) + 1;
+    });
+    return map;
+  }, [sessions]);
+
   const statusCounts = React.useMemo(() => {
     const map: Record<string, number> = { active: 0, idle: 0 };
     sessions.forEach((s) => {
@@ -244,6 +262,44 @@ export function SessionsView({
     const list = Array.from(set).sort();
     return list.map((p) => ({ label: p, value: p }));
   }, [profiles, sessions]);
+
+  const cwdOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    sessions.forEach((s) => {
+      const c = normalizeCwd(s.cwd);
+      set.add(c);
+    });
+    const list = Array.from(set).sort();
+
+    // Check for duplicate basenames to disambiguate
+    const basenameCounts: Record<string, number> = {};
+    list.forEach((raw) => {
+      if (raw === '<none>') return;
+      const parts = raw.split(/[/\\]/).filter(Boolean);
+      const base = parts.length > 0 ? parts[parts.length - 1] : raw;
+      basenameCounts[base] = (basenameCounts[base] || 0) + 1;
+    });
+
+    return list.map((c) => {
+      if (c === '<none>') {
+        return {
+          label: '(No directory)',
+          value: '<none>',
+          icon: Folder,
+        };
+      }
+      const parts = c.split(/[/\\]/).filter(Boolean);
+      const basename = parts.length > 0 ? parts[parts.length - 1] : c;
+      const parent = parts.length > 1 ? parts[parts.length - 2] : null;
+      const isDuplicate = (basenameCounts[basename] || 0) > 1;
+      const label = isDuplicate && parent ? `${basename} (.../${parent})` : basename;
+      return {
+        label,
+        value: c,
+        icon: Folder,
+      };
+    });
+  }, [sessions]);
 
   const statusOptions = React.useMemo(
     () => [
@@ -285,6 +341,12 @@ export function SessionsView({
         if (!selectedProfiles.has(prof)) return false;
       }
 
+      // CWD multi-select
+      if (selectedCwds.size > 0) {
+        const c = normalizeCwd(s.cwd);
+        if (!selectedCwds.has(c)) return false;
+      }
+
       // Status multi-select
       if (selectedStatuses.size > 0) {
         const st = s.is_active ? 'active' : 'idle';
@@ -293,7 +355,7 @@ export function SessionsView({
 
       return true;
     });
-  }, [sessions, searchQuery, selectedEngines, selectedProfiles, selectedStatuses]);
+  }, [sessions, searchQuery, selectedEngines, selectedProfiles, selectedCwds, selectedStatuses]);
 
   const handleQuickResume = async (sess: SessionDTO) => {
     setResumingId(sess.id);
@@ -398,7 +460,7 @@ export function SessionsView({
         cell: ({ row }) => {
           const rawCwd = row.original.cwd || '';
           if (!rawCwd) return <span className="text-muted-foreground font-mono text-xs">-</span>;
-          const parts = rawCwd.split('/').filter(Boolean);
+          const parts = rawCwd.split(/[/\\]/).filter(Boolean);
           const basename = parts.length > 0 ? parts[parts.length - 1] : rawCwd;
           const parent = parts.length > 1 ? parts[parts.length - 2] : null;
           return (
@@ -575,12 +637,17 @@ export function SessionsView({
   });
 
   const hasActiveFilters =
-    searchQuery !== '' || selectedEngines.size > 0 || selectedProfiles.size > 0 || selectedStatuses.size > 0;
+    searchQuery !== '' ||
+    selectedEngines.size > 0 ||
+    selectedProfiles.size > 0 ||
+    selectedCwds.size > 0 ||
+    selectedStatuses.size > 0;
 
   const resetAllFilters = () => {
     setSearchQuery('');
     setSelectedEngines(new Set());
     setSelectedProfiles(new Set());
+    setSelectedCwds(new Set());
     setSelectedStatuses(new Set());
     if (onSelectProfile) onSelectProfile('all');
   };
@@ -646,6 +713,16 @@ export function SessionsView({
             counts={profileCounts}
           />
 
+          {/* CWD Multi-Select Popover */}
+          <DataTableFacetedFilter
+            title="CWD"
+            options={cwdOptions}
+            selectedValues={selectedCwds}
+            onSelect={setSelectedCwds}
+            counts={cwdCounts}
+            contentClassName="w-64"
+          />
+
           {/* Status Multi-Select Popover */}
           <DataTableFacetedFilter
             title="Status"
@@ -655,17 +732,7 @@ export function SessionsView({
             counts={statusCounts}
           />
 
-          {hasActiveFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={resetAllFilters}
-              className="h-8 px-2 text-xs font-mono text-[#a1a1a1] hover:text-[#ededed] rounded-geist"
-            >
-              <X className="mr-1 h-3.5 w-3.5" />
-              Reset
-            </Button>
-          )}
+          <div className="h-4 w-[1px] bg-border mx-0.5" />
 
           <Button
             variant="outline"
@@ -679,6 +746,150 @@ export function SessionsView({
           </Button>
         </div>
       </div>
+
+      {/* Active Filter Chips Sub-Row (Zero Layout Shift) */}
+      {hasActiveFilters && (
+        <div className="flex flex-wrap items-center gap-1.5 px-0.5 animate-in fade-in duration-150">
+          <span className="text-[11px] font-mono text-[#888888] mr-1">Active filters:</span>
+
+          {/* Search query chip */}
+          {searchQuery && (
+            <Badge
+              variant="outline"
+              className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+            >
+              <span className="text-muted-foreground font-sans text-[10px]">query:</span>
+              <span className="truncate max-w-[120px]">{searchQuery}</span>
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear query filter"
+                className="h-4 w-4 rounded-[2px] inline-flex items-center justify-center text-[#888888] hover:text-[#ededed] hover:bg-[#262626] transition-colors cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+
+          {/* Engine chips */}
+          {Array.from(selectedEngines).map((eng) => {
+            const label = engineOptions.find((o) => o.value === eng)?.label || eng;
+            return (
+              <Badge
+                key={`chip-eng-${eng}`}
+                variant="outline"
+                className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+              >
+                <span className="text-muted-foreground font-sans text-[10px]">engine:</span>
+                <span>{label}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = new Set(selectedEngines);
+                    next.delete(eng);
+                    setSelectedEngines(next);
+                  }}
+                  aria-label={`Remove ${label} engine filter`}
+                  className="h-4 w-4 rounded-[2px] inline-flex items-center justify-center text-[#888888] hover:text-[#ededed] hover:bg-[#262626] transition-colors cursor-pointer"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            );
+          })}
+
+          {/* Profile chips */}
+          {Array.from(selectedProfiles).map((prof) => (
+            <Badge
+              key={`chip-prof-${prof}`}
+              variant="outline"
+              className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+            >
+              <span className="text-muted-foreground font-sans text-[10px]">profile:</span>
+              <span className="truncate max-w-[120px]">{prof}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = new Set(selectedProfiles);
+                  next.delete(prof);
+                  setSelectedProfiles(next);
+                  if (onSelectProfile && next.size === 0) onSelectProfile('all');
+                }}
+                aria-label={`Remove ${prof} profile filter`}
+                className="h-4 w-4 rounded-[2px] inline-flex items-center justify-center text-[#888888] hover:text-[#ededed] hover:bg-[#262626] transition-colors cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+
+          {/* CWD chips */}
+          {Array.from(selectedCwds).map((cwdVal) => {
+            const opt = cwdOptions.find((o) => o.value === cwdVal);
+            const label = opt ? opt.label : cwdVal;
+            return (
+              <Badge
+                key={`chip-cwd-${cwdVal}`}
+                title={cwdVal === '<none>' ? 'No directory' : cwdVal}
+                variant="outline"
+                className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+              >
+                <span className="text-muted-foreground font-sans text-[10px]">cwd:</span>
+                <span className="truncate max-w-[160px]">{label}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = new Set(selectedCwds);
+                    next.delete(cwdVal);
+                    setSelectedCwds(next);
+                  }}
+                  aria-label={`Remove ${label} directory filter`}
+                  className="h-4 w-4 rounded-[2px] inline-flex items-center justify-center text-[#888888] hover:text-[#ededed] hover:bg-[#262626] transition-colors cursor-pointer"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            );
+          })}
+
+          {/* Status chips */}
+          {Array.from(selectedStatuses).map((st) => {
+            const label = statusOptions.find((o) => o.value === st)?.label || st;
+            return (
+              <Badge
+                key={`chip-st-${st}`}
+                variant="outline"
+                className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+              >
+                <span className="text-muted-foreground font-sans text-[10px]">status:</span>
+                <span>{label}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = new Set(selectedStatuses);
+                    next.delete(st);
+                    setSelectedStatuses(next);
+                  }}
+                  aria-label={`Remove ${label} status filter`}
+                  className="h-4 w-4 rounded-[2px] inline-flex items-center justify-center text-[#888888] hover:text-[#ededed] hover:bg-[#262626] transition-colors cursor-pointer"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            );
+          })}
+
+          {/* Clear all action */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={resetAllFilters}
+            className="h-6 px-2 text-[11px] font-mono text-[#888888] hover:text-[#ededed] hover:bg-[#1f1f1f] rounded-[4px] cursor-pointer"
+          >
+            Clear all
+          </Button>
+        </div>
+      )}
 
       {/* TanStack Table Container */}
       <div className="rounded-geist border border-border bg-[#111111] overflow-hidden shadow-sm">

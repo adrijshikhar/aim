@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -118,6 +119,22 @@ func (s *sessionService) ListSessions(ctx context.Context, filter SessionFilter)
 		}
 		if filter.Profile != "" && !strings.EqualFold(dto.Profile, filter.Profile) {
 			continue
+		}
+		if filter.Cwd != "" {
+			if strings.TrimSpace(dto.Cwd) == "" {
+				continue
+			}
+			normDTO := filepath.ToSlash(strings.TrimRight(strings.TrimSpace(dto.Cwd), "/\\"))
+			normFilter := filepath.ToSlash(strings.TrimRight(strings.TrimSpace(filter.Cwd), "/\\"))
+			if normDTO == "" {
+				normDTO = "/"
+			}
+			if normFilter == "" {
+				normFilter = "/"
+			}
+			if !strings.EqualFold(normDTO, normFilter) {
+				continue
+			}
 		}
 
 		if query != "" {

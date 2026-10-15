@@ -83,6 +83,7 @@ type SessionDTO struct {
 type SessionFilter struct {
 	Agent   string `json:"agent,omitempty"`
 	Profile string `json:"profile,omitempty"`
+	Cwd     string `json:"cwd,omitempty"`
 	Query   string `json:"query,omitempty"`
 	Limit   int    `json:"limit,omitempty"`
 	Force   bool   `json:"force,omitempty"`

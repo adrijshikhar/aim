@@ -19,6 +19,7 @@ interface DataTableFacetedFilterProps {
   selectedValues: Set<string>;
   onSelect: (values: Set<string>) => void;
   counts?: Record<string, number>;
+  contentClassName?: string;
 }
 
 export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
@@ -27,6 +28,7 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
   selectedValues,
   onSelect,
   counts,
+  contentClassName,
 }) => {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -79,7 +81,7 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-56 p-2 bg-[#111111] border-border" align="start">
+      <PopoverContent className={cn('w-56 p-2 bg-[#111111] border-border', contentClassName)} align="start">
         <div className="space-y-2">
           {options.length > 5 && (
             <div className="px-1 pt-1">
@@ -101,6 +103,7 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
                 return (
                   <div
                     key={opt.value}
+                    title={opt.value === '<none>' ? opt.label : opt.value}
                     role="menuitemcheckbox"
                     aria-checked={isSelected}
                     tabIndex={0}

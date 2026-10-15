@@ -489,7 +489,7 @@ func TestGetSessions(t *testing.T) {
 	ts, _ := setupTestServer(t, nil, sess, nil, false)
 
 	// GET /api/sessions with query params
-	url := ts.URL + "/api/sessions?agent=codex&profile=work&q=auth&limit=10"
+	url := ts.URL + "/api/sessions?agent=codex&profile=work&cwd=/repos/test&q=auth&limit=10"
 	resp, err := http.Get(url)
 	if err != nil {
 		t.Fatalf("GET /api/sessions failed: %v", err)
@@ -508,7 +508,7 @@ func TestGetSessions(t *testing.T) {
 		t.Fatalf("unexpected sessions: %+v", results)
 	}
 
-	if receivedFilter.Agent != "codex" || receivedFilter.Profile != "work" || receivedFilter.Query != "auth" || receivedFilter.Limit != 10 {
+	if receivedFilter.Agent != "codex" || receivedFilter.Profile != "work" || receivedFilter.Cwd != "/repos/test" || receivedFilter.Query != "auth" || receivedFilter.Limit != 10 {
 		t.Fatalf("filter mismatch: %+v", receivedFilter)
 	}
 }
