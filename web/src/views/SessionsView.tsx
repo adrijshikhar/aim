@@ -80,6 +80,14 @@ function getInitialSessions(): SessionDTO[] {
   return [];
 }
 
+function normalizeCwd(raw?: string | null): string {
+  if (!raw) return '<none>';
+  const trimmed = raw.trim();
+  if (!trimmed) return '<none>';
+  if (trimmed === '/' || trimmed === '\\') return trimmed;
+  return trimmed.replace(/[/\\]+$/, '');
+}
+
 export function SessionsView({
   selectedProfile = 'all',
   onSelectProfile,
@@ -219,7 +227,7 @@ export function SessionsView({
   const cwdCounts = React.useMemo(() => {
     const map: Record<string, number> = {};
     sessions.forEach((s) => {
-      const c = s.cwd?.trim() || '<none>';
+      const c = normalizeCwd(s.cwd);
       map[c] = (map[c] || 0) + 1;
     });
     return map;
@@ -258,7 +266,7 @@ export function SessionsView({
   const cwdOptions = React.useMemo(() => {
     const set = new Set<string>();
     sessions.forEach((s) => {
-      const c = s.cwd?.trim() || '<none>';
+      const c = normalizeCwd(s.cwd);
       set.add(c);
     });
     const list = Array.from(set).sort();
@@ -267,7 +275,7 @@ export function SessionsView({
     const basenameCounts: Record<string, number> = {};
     list.forEach((raw) => {
       if (raw === '<none>') return;
-      const parts = raw.split('/').filter(Boolean);
+      const parts = raw.split(/[/\\]/).filter(Boolean);
       const base = parts.length > 0 ? parts[parts.length - 1] : raw;
       basenameCounts[base] = (basenameCounts[base] || 0) + 1;
     });
@@ -280,7 +288,7 @@ export function SessionsView({
           icon: Folder,
         };
       }
-      const parts = c.split('/').filter(Boolean);
+      const parts = c.split(/[/\\]/).filter(Boolean);
       const basename = parts.length > 0 ? parts[parts.length - 1] : c;
       const parent = parts.length > 1 ? parts[parts.length - 2] : null;
       const isDuplicate = (basenameCounts[basename] || 0) > 1;
@@ -335,7 +343,7 @@ export function SessionsView({
 
       // CWD multi-select
       if (selectedCwds.size > 0) {
-        const c = s.cwd?.trim() || '<none>';
+        const c = normalizeCwd(s.cwd);
         if (!selectedCwds.has(c)) return false;
       }
 
@@ -452,7 +460,7 @@ export function SessionsView({
         cell: ({ row }) => {
           const rawCwd = row.original.cwd || '';
           if (!rawCwd) return <span className="text-muted-foreground font-mono text-xs">-</span>;
-          const parts = rawCwd.split('/').filter(Boolean);
+          const parts = rawCwd.split(/[/\\]/).filter(Boolean);
           const basename = parts.length > 0 ? parts[parts.length - 1] : rawCwd;
           const parent = parts.length > 1 ? parts[parts.length - 2] : null;
           return (

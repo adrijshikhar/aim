@@ -9,7 +9,7 @@ import (
 	"github.com/aim-cli/aim/internal/service"
 )
 
-// handleGetSessions handles GET /api/sessions with query params agent, profile, q, limit.
+// handleGetSessions handles GET /api/sessions with query params agent, profile, cwd, q, limit.
 func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 	if s.sessions == nil {
 		writeJSONError(w, http.StatusInternalServerError, "session service unavailable")

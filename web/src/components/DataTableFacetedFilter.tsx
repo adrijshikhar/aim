@@ -103,7 +103,7 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
                 return (
                   <div
                     key={opt.value}
-                    title={opt.value}
+                    title={opt.value === '<none>' ? opt.label : opt.value}
                     role="menuitemcheckbox"
                     aria-checked={isSelected}
                     tabIndex={0}
