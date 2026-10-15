@@ -29,11 +29,10 @@ func TestMCPCmd_Help(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "serve") {
-		t.Errorf("expected 'serve' subcommand in help output: %s", out)
-	}
-	if !strings.Contains(out, "install") {
-		t.Errorf("expected 'install' subcommand in help output: %s", out)
+	for _, sub := range []string{"serve", "doctor", "install", "uninstall", "list", "add", "remove"} {
+		if !strings.Contains(out, sub) {
+			t.Errorf("expected %q subcommand in help output: %s", sub, out)
+		}
 	}
 }
 
@@ -374,5 +373,211 @@ func TestMCPInstallCmd_CorruptConfigRefusesOverwrite(t *testing.T) {
 	content, _ := os.ReadFile(claudePath)
 	if string(content) != "{corrupt json" {
 		t.Errorf("file was modified despite corruption error: %s", string(content))
+	}
+}
+
+func TestMCPDoctorCmd_Execution(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "doctor"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Protocol:") {
+		t.Errorf("expected Protocol section in doctor output: %s", out)
+	}
+	if !strings.Contains(out, "[OK]") {
+		t.Errorf("expected passing status in doctor output: %s", out)
+	}
+}
+
+func TestMCPInstallAndUninstallCmd_MultiClient(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	// Create dummy Cursor dir
+	cursorDir := filepath.Join(tempDir, ".cursor")
+	_ = os.MkdirAll(cursorDir, 0700)
+
+	// 1. Install to cursor
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "install", "cursor"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp install cursor failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Cursor IDE") {
+		t.Errorf("expected Cursor confirmation: %s", out)
+	}
+
+	cursorConfig := filepath.Join(cursorDir, "mcp.json")
+	data, err := os.ReadFile(cursorConfig)
+	if err != nil {
+		t.Fatalf("failed to read cursor mcp.json: %v", err)
+	}
+	if !strings.Contains(string(data), `"aim"`) {
+		t.Errorf("expected aim entry in cursor mcp.json: %s", string(data))
+	}
+
+	// 2. Uninstall from cursor
+	out, _ = captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "uninstall", "cursor"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp uninstall cursor failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Removed aim") {
+		t.Errorf("expected uninstall confirmation: %s", out)
+	}
+
+	data, _ = os.ReadFile(cursorConfig)
+	if strings.Contains(string(data), `"aim"`) {
+		t.Errorf("aim should have been removed from cursor mcp.json: %s", string(data))
+	}
+}
+
+func TestMCPListCmd_Execution(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cursorDir := filepath.Join(tempDir, ".cursor")
+	_ = os.MkdirAll(cursorDir, 0700)
+	cursorCfg := filepath.Join(cursorDir, "mcp.json")
+	_ = os.WriteFile(cursorCfg, []byte(`{"mcpServers":{"demo":{"command":"echo","args":["hello"]}}}`), 0600)
+
+	// 1. Table output
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "list"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp list failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "demo") {
+		t.Errorf("expected 'demo' in mcp list table: %s", out)
+	}
+
+	// 2. JSON output
+	out, _ = captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "list", "--json"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp list --json failed: %v", err)
+		}
+	})
+
+	var parsed []map[string]any
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("expected valid JSON array from mcp list --json: %v\nOutput: %s", err, out)
+	}
+	if len(parsed) == 0 {
+		t.Errorf("expected at least 1 server in JSON output, got 0")
+	}
+}
+
+func TestMCPAddAndRemoveCmd_Execution(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cursorDir := filepath.Join(tempDir, ".cursor")
+	_ = os.MkdirAll(cursorDir, 0700)
+
+	// 1. Add server
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "add", "fetcher", "uvx", "mcp-server-fetch", "--clients", "cursor"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Added MCP server 'fetcher'") {
+		t.Errorf("expected add confirmation: %s", out)
+	}
+
+	cursorCfg := filepath.Join(cursorDir, "mcp.json")
+	data, _ := os.ReadFile(cursorCfg)
+	if !strings.Contains(string(data), `"fetcher"`) {
+		t.Errorf("expected fetcher in cursor config: %s", string(data))
+	}
+
+	// 2. Remove server
+	out, _ = captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "remove", "fetcher", "--clients", "cursor"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp remove failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Removed MCP server 'fetcher'") {
+		t.Errorf("expected remove confirmation: %s", out)
+	}
+
+	data, _ = os.ReadFile(cursorCfg)
+	if strings.Contains(string(data), `"fetcher"`) {
+		t.Errorf("fetcher should be removed from cursor config: %s", string(data))
+	}
+}
+
+func TestMCPCommands_InvalidProfileRefused(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	subcommands := [][]string{
+		{"mcp", "install", "--profile", "nonexistent_prof"},
+		{"mcp", "uninstall", "--profile", "nonexistent_prof"},
+		{"mcp", "list", "--profile", "nonexistent_prof"},
+		{"mcp", "add", "dummy", "echo", "hi", "--profile", "nonexistent_prof"},
+		{"mcp", "remove", "dummy", "--profile", "nonexistent_prof"},
+	}
+
+	for _, args := range subcommands {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			cmd := newRootCmd(reg, pm)
+			cmd.SetArgs(args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected error for nonexistent profile with %v, got nil", args)
+			}
+			if !strings.Contains(err.Error(), "does not exist") {
+				t.Errorf("expected 'does not exist' error, got: %v", err)
+			}
+		})
 	}
 }
