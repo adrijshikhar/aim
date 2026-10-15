@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.14.0](https://github.com/adrijshikhar/aim/compare/v0.13.0...v0.14.0) (2026-10-15)
+
+
+### Features
+
+* **inspection:** strict read-only profile and candidate inspection ([#89](https://github.com/adrijshikhar/aim/issues/89)) ([1c39c97](https://github.com/adrijshikhar/aim/commit/1c39c97b70946e0683e60fec243bf363453a0e13))
+* **oauth:** granular OAuth refusal diagnostics and 24h retry backoff ([#88](https://github.com/adrijshikhar/aim/issues/88)) ([9aada2a](https://github.com/adrijshikhar/aim/commit/9aada2ad0055ff9d0067f49f29637dec620a0a22))
+* **profile:** per-directory profile binding with .aim-profile and aim bind ([#85](https://github.com/adrijshikhar/aim/issues/85)) ([7dd192c](https://github.com/adrijshikhar/aim/commit/7dd192c89a007cf73e12ae77808b69653476335e))
+* **web:** add embedded web dashboard with multi-adapter profiles, sessions, and MCP management ([#80](https://github.com/adrijshikhar/aim/issues/80)) ([9a0dd63](https://github.com/adrijshikhar/aim/commit/9a0dd63ef34f102b24d7b7e529b4d68473746fb4))
+* **web:** add faceted CWD directory filter to sessions dashboard ([#90](https://github.com/adrijshikhar/aim/issues/90)) ([965bb93](https://github.com/adrijshikhar/aim/commit/965bb9352d1ccde79ab02102fbab452208252174))
+* **web:** daemonize web dashboard on port 18480, refine settings layout and quota discovery ([#87](https://github.com/adrijshikhar/aim/issues/87)) ([8649b09](https://github.com/adrijshikhar/aim/commit/8649b0985bd81654813b5ce5a39a441b10f6954a))
+
+
+### Bug Fixes
+
+* **profile:** sanitize profile binding name and fix comment parsing ([#86](https://github.com/adrijshikhar/aim/issues/86)) ([d1c02e5](https://github.com/adrijshikhar/aim/commit/d1c02e5d01645193d216ba11e25852e1c3e60f4e))
+
 ## [0.13.0](https://github.com/adrijshikhar/aim/compare/v0.12.0...v0.13.0) (2026-10-13)
 
 
