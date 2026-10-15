@@ -3,13 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
-	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
@@ -184,7 +182,7 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 			fmt.Println(emptyStyle.Render(fmt.Sprintf("  No profiles found for agent %q. Run: aim login %s <profile>", canonicalAgent, canonicalAgent)))
 			return nil
 		}
-		t := presenter.NewTable(os.Stdout).
+		t := table.New().
 			Border(lipgloss.HiddenBorder()).
 			Headers("#", "PROFILE", "QUOTA STATUS", "STORAGE PATH")
 
@@ -236,7 +234,7 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 		fmt.Println(emptyStyle.Render("  No profiles found. Run: aim login agy <profile>"))
 		return nil
 	}
-	t := presenter.NewTable(os.Stdout).
+	t := table.New().
 		Border(lipgloss.HiddenBorder()).
 		Headers("#", "PROFILE", "AGENTS", "QUOTA STATUS", "STORAGE PATH")
 
