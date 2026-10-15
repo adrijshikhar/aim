@@ -20,10 +20,10 @@ test('sessions table renders with filters and resume action', async ({ app, scre
   await searchInput.fill('');
 
   // Check filter buttons
-  await expect(screen.getByRole('button', { name: /Engine/i })).toBeVisible();
-  await expect(screen.getByRole('button', { name: /Profile/i })).toBeVisible();
-  await expect(screen.getByRole('button', { name: /CWD/i })).toBeVisible();
-  await expect(screen.getByRole('button', { name: /Status/i })).toBeVisible();
+  await expect(screen.getByRole('button', { name: /^Engine$/i })).toBeVisible();
+  await expect(screen.getByRole('button', { name: /^Profile$/i })).toBeVisible();
+  await expect(screen.getByRole('button', { name: /^CWD$/i })).toBeVisible();
+  await expect(screen.getByRole('button', { name: /^Status$/i })).toBeVisible();
 
   // Check table headers
   await expect(screen.getByRole('columnheader', { name: /AGENT/i })).toBeVisible();
