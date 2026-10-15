@@ -10,11 +10,11 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/mcp"
+	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
@@ -366,15 +366,6 @@ func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
 				return nil
 			}
 
-			termWidth := 100
-			if f, ok := out.(*os.File); ok {
-				if w, _, err := term.GetSize(f.Fd()); err == nil && w > 0 {
-					termWidth = w
-				}
-			} else if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil && w > 0 {
-				termWidth = w
-			}
-
 			var tableRows [][]string
 			for _, r := range rows {
 				cmdDisplay := r.Command
@@ -395,13 +386,11 @@ func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
 				})
 			}
 
-			t := table.New().
+			t := presenter.NewTable(out).
 				Border(lipgloss.RoundedBorder()).
 				BorderStyle(lipgloss.NewStyle().Foreground(tui.TextDim)).
 				Headers("SERVER", "CLIENT / SCOPE", "COMMAND / TARGET", "STATUS").
-				Rows(tableRows...).
-				Width(termWidth).
-				Wrap(false)
+				Rows(tableRows...)
 
 			t.StyleFunc(func(row, col int) lipgloss.Style {
 				if row == table.HeaderRow {

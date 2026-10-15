@@ -102,6 +102,33 @@ func TestPrintTable(t *testing.T) {
 	}
 }
 
+func TestTerminalWidth(t *testing.T) {
+	var buf bytes.Buffer
+	w := TerminalWidth(&buf, 120)
+	if w <= 0 {
+		t.Errorf("expected positive terminal width, got %d", w)
+	}
+
+	wDef := TerminalWidth(&buf, 0)
+	if wDef != 100 {
+		t.Errorf("expected default 100 when fallback is 0, got %d", wDef)
+	}
+}
+
+func TestNewTable(t *testing.T) {
+	var buf bytes.Buffer
+	tbl := NewTable(&buf)
+	if tbl == nil {
+		t.Fatal("expected non-nil table")
+	}
+
+	tbl.Headers("COL1", "COL2").Row("hello", "world")
+	rendered := tbl.Render()
+	if !strings.Contains(rendered, "COL1") || !strings.Contains(rendered, "hello") {
+		t.Errorf("rendered table missing expected content: %s", rendered)
+	}
+}
+
 func TestRenderCLIBar(t *testing.T) {
 	plain := RenderCLIBar(75, 10, usage.StatusOK, false)
 	if !strings.Contains(plain, "75%") {
