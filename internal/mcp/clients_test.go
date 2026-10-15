@@ -63,6 +63,14 @@ func TestClientDrivers_ConfigPaths(t *testing.T) {
 		t.Errorf("unexpected cursor path: %s", pCursor)
 	}
 
+	pCursorProf, err := cursor.ConfigPath(fakeHome, fakeProfile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pCursorProf != filepath.Join(fakeProfile, ".cursor", "mcp.json") {
+		t.Errorf("unexpected profile cursor path: %s", pCursorProf)
+	}
+
 	windsurf, _ := GetDriver(ClientWindsurf)
 	pWindsurf, err := windsurf.ConfigPath(fakeHome, "")
 	if err != nil {
@@ -72,7 +80,19 @@ func TestClientDrivers_ConfigPaths(t *testing.T) {
 		t.Errorf("unexpected windsurf path: %s", pWindsurf)
 	}
 
+	pWindsurfProf, err := windsurf.ConfigPath(fakeHome, fakeProfile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pWindsurfProf != filepath.Join(fakeProfile, ".codeium", "windsurf", "mcp_config.json") {
+		t.Errorf("unexpected profile windsurf path: %s", pWindsurfProf)
+	}
+
 	desktop, _ := GetDriver(ClientClaudeDesktop)
+	if _, err := desktop.ConfigPath(fakeHome, fakeProfile); err == nil {
+		t.Errorf("expected error when requesting profile-scoped path for claude-desktop, got nil")
+	}
+
 	pDesktop, err := desktop.ConfigPath(fakeHome, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -188,6 +208,15 @@ func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 	}
 	if _, ok := servers["github"]; !ok {
 		t.Errorf("github should remain")
+	}
+
+	// 6. Delete from empty file should not error
+	emptyFile := filepath.Join(tempDir, "empty.json")
+	if err := os.WriteFile(emptyFile, []byte(""), 0600); err != nil {
+		t.Fatalf("failed to create empty file: %v", err)
+	}
+	if err := cursor.DeleteServer(emptyFile, "nonexistent"); err != nil {
+		t.Errorf("expected no error deleting from empty file, got: %v", err)
 	}
 }
 

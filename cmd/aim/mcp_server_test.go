@@ -549,3 +549,35 @@ func TestMCPAddAndRemoveCmd_Execution(t *testing.T) {
 		t.Errorf("fetcher should be removed from cursor config: %s", string(data))
 	}
 }
+
+func TestMCPCommands_InvalidProfileRefused(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	subcommands := [][]string{
+		{"mcp", "install", "--profile", "nonexistent_prof"},
+		{"mcp", "uninstall", "--profile", "nonexistent_prof"},
+		{"mcp", "list", "--profile", "nonexistent_prof"},
+		{"mcp", "add", "dummy", "echo", "hi", "--profile", "nonexistent_prof"},
+		{"mcp", "remove", "dummy", "--profile", "nonexistent_prof"},
+	}
+
+	for _, args := range subcommands {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			cmd := newRootCmd(reg, pm)
+			cmd.SetArgs(args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected error for nonexistent profile with %v, got nil", args)
+			}
+			if !strings.Contains(err.Error(), "does not exist") {
+				t.Errorf("expected 'does not exist' error, got: %v", err)
+			}
+		})
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -177,6 +178,19 @@ func runProtocolSelfCheck(ctx context.Context, reg *agents.Registry, pm *profile
 		},
 	}
 
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = clientInW.CloseWithError(ctx.Err())
+			_ = clientOutR.CloseWithError(ctx.Err())
+			_ = serverInR.CloseWithError(ctx.Err())
+			_ = serverOutW.CloseWithError(ctx.Err())
+		case <-done:
+		}
+	}()
+
 	protoErr := ""
 	for _, step := range steps {
 		if ctx.Err() != nil {
@@ -276,9 +290,15 @@ func runClientAndBinaryAudit(homeDir string) []MCPDiagnosticResult {
 				continue
 			}
 
-			// Extract first token if command contains spaces and no args array
-			tokens := strings.Fields(cmdName)
-			binName := tokens[0]
+			// Extract binary name: if whole cmdName exists on disk, use it directly (e.g. "/path with spaces/bin"),
+			// otherwise extract first token.
+			binName := cmdName
+			if _, err := os.Stat(cmdName); err != nil {
+				tokens := strings.Fields(cmdName)
+				if len(tokens) > 0 {
+					binName = tokens[0]
+				}
+			}
 
 			auditKey := binName + "::" + sName
 			if auditedCommands[auditKey] {

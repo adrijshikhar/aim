@@ -37,6 +37,23 @@ Provides a read-only stdio MCP server for agent self-inspection (whoami, quota, 
 	return mcpCmd
 }
 
+func resolveProfileDir(pm *profile.ProfileManager, profileFlag string) (string, error) {
+	if profileFlag == "" {
+		return "", nil
+	}
+	if pm == nil {
+		return "", fmt.Errorf("profile manager not initialized")
+	}
+	pDir, err := pm.ResolveProfile(profileFlag)
+	if err != nil {
+		return "", fmt.Errorf("invalid profile %q: %w", profileFlag, err)
+	}
+	if !pm.ProfileExists(profileFlag) {
+		return "", fmt.Errorf("profile %q does not exist", profileFlag)
+	}
+	return pDir, nil
+}
+
 func newMCPServeCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var profileFlag string
 	var agentFlag string
@@ -50,13 +67,8 @@ Guarantees strict read-only operation: no profile switching, creation, or deleti
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if profileFlag != "" {
-				if pm != nil {
-					if _, err := pm.ResolveProfile(profileFlag); err != nil {
-						return fmt.Errorf("invalid profile %q: %w", profileFlag, err)
-					}
-					if !pm.ProfileExists(profileFlag) {
-						return fmt.Errorf("profile %q does not exist", profileFlag)
-					}
+				if _, err := resolveProfileDir(pm, profileFlag); err != nil {
+					return err
 				}
 				_ = os.Setenv("AIM_PROFILE", profileFlag)
 			}
@@ -66,7 +78,7 @@ Guarantees strict read-only operation: no profile switching, creation, or deleti
 
 			baseDir := config.BaseDir()
 			srv := mcp.NewServer(reg, pm, baseDir)
-			srv.SetSessionManager(NewDefaultSessionManager())
+			srv.SetSessionManager(getSessionManager(cmd.Context()))
 			return srv.Serve(cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
@@ -130,7 +142,6 @@ func newMCPDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 
 func newMCPInstallCmd(pm *profile.ProfileManager) *cobra.Command {
 	var profileFlag string
-	var yesFlag bool
 
 	installCmd := &cobra.Command{
 		Use:   "install [client]",
@@ -141,19 +152,9 @@ When run without arguments, scans and auto-detects installed clients.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			var profileDir string
-			if profileFlag != "" {
-				if pm == nil {
-					return fmt.Errorf("profile manager not initialized")
-				}
-				pDir, err := pm.ResolveProfile(profileFlag)
-				if err != nil {
-					return fmt.Errorf("invalid profile %q: %w", profileFlag, err)
-				}
-				if !pm.ProfileExists(profileFlag) {
-					return fmt.Errorf("profile %q does not exist", profileFlag)
-				}
-				profileDir = pDir
+			profileDir, err := resolveProfileDir(pm, profileFlag)
+			if err != nil {
+				return err
 			}
 
 			targetClient := ""
@@ -162,7 +163,9 @@ When run without arguments, scans and auto-detects installed clients.`,
 			}
 
 			var targets []mcp.ClientConfigDriver
-			if targetClient != "" && targetClient != "all" {
+			if targetClient == "all" {
+				targets = mcp.AllDrivers()
+			} else if targetClient != "" {
 				driver, ok := mcp.GetDriver(mcp.ClientID(targetClient))
 				if !ok {
 					fmt.Fprintf(cmd.OutOrStdout(), "Auto-install is currently supported for 'claude', 'claude-desktop', 'cursor', 'windsurf'.\nFor %s, register:\n  Command: aim\n  Args: [\"mcp\", \"serve\"]\n", targetClient)
@@ -201,7 +204,6 @@ When run without arguments, scans and auto-detects installed clients.`,
 	}
 
 	installCmd.Flags().StringVar(&profileFlag, "profile", "", "Target specific profile instead of global host config")
-	installCmd.Flags().BoolVarP(&yesFlag, "yes", "y", false, "Confirm installation to all detected clients without prompt")
 
 	return installCmd
 }
@@ -217,12 +219,9 @@ Supports 'claude', 'claude-desktop', 'cursor', 'windsurf', or 'all'.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			var profileDir string
-			if profileFlag != "" && pm != nil {
-				pDir, err := pm.ResolveProfile(profileFlag)
-				if err == nil {
-					profileDir = pDir
-				}
+			profileDir, err := resolveProfileDir(pm, profileFlag)
+			if err != nil {
+				return err
 			}
 
 			targetClient := "all"
@@ -252,10 +251,11 @@ Supports 'claude', 'claude-desktop', 'cursor', 'windsurf', or 'all'.`,
 					continue
 				}
 				if _, exists := servers["aim"]; exists {
-					if err := driver.DeleteServer(cfgPath, "aim"); err == nil {
-						fmt.Fprintf(cmd.OutOrStdout(), "Removed aim MCP server from %s at %s\n", driver.Name(), cfgPath)
-						removedCount++
+					if err := driver.DeleteServer(cfgPath, "aim"); err != nil {
+						return fmt.Errorf("failed to remove aim MCP server from %s at %s: %w", driver.Name(), cfgPath, err)
 					}
+					fmt.Fprintf(cmd.OutOrStdout(), "Removed aim MCP server from %s at %s\n", driver.Name(), cfgPath)
+					removedCount++
 				}
 			}
 
@@ -282,12 +282,9 @@ func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			var profileDir string
-			if profileFlag != "" && pm != nil {
-				pDir, err := pm.ResolveProfile(profileFlag)
-				if err == nil {
-					profileDir = pDir
-				}
+			profileDir, err := resolveProfileDir(pm, profileFlag)
+			if err != nil {
+				return err
 			}
 
 			type serverRow struct {
@@ -412,12 +409,9 @@ Example:
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			var profileDir string
-			if profileFlag != "" && pm != nil {
-				pDir, err := pm.ResolveProfile(profileFlag)
-				if err == nil {
-					profileDir = pDir
-				}
+			profileDir, err := resolveProfileDir(pm, profileFlag)
+			if err != nil {
+				return err
 			}
 
 			serverName := args[0]
@@ -467,12 +461,9 @@ func newMCPRemoveCmd(pm *profile.ProfileManager) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			var profileDir string
-			if profileFlag != "" && pm != nil {
-				pDir, err := pm.ResolveProfile(profileFlag)
-				if err == nil {
-					profileDir = pDir
-				}
+			profileDir, err := resolveProfileDir(pm, profileFlag)
+			if err != nil {
+				return err
 			}
 
 			serverName := args[0]
@@ -487,7 +478,14 @@ func newMCPRemoveCmd(pm *profile.ProfileManager) *cobra.Command {
 				if err != nil {
 					continue
 				}
-				if err := driver.DeleteServer(cfgPath, serverName); err == nil {
+				servers, err := driver.ReadServers(cfgPath)
+				if err != nil || servers == nil {
+					continue
+				}
+				if _, exists := servers[serverName]; exists {
+					if err := driver.DeleteServer(cfgPath, serverName); err != nil {
+						return fmt.Errorf("failed to remove MCP server %q from %s at %s: %w", serverName, driver.Name(), cfgPath, err)
+					}
 					fmt.Fprintf(cmd.OutOrStdout(), "Removed MCP server '%s' from %s at %s\n", serverName, driver.Name(), cfgPath)
 					removedCount++
 				}

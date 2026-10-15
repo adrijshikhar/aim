@@ -42,10 +42,30 @@ type ClientConfigDriver interface {
 }
 
 var allDrivers = []ClientConfigDriver{
-	&claudeCodeDriver{},
-	&claudeDesktopDriver{},
-	&cursorDriver{},
-	&windsurfDriver{},
+	&claudeCodeDriver{
+		baseJSONDriver: baseJSONDriver{
+			id:   ClientClaudeCode,
+			name: "Claude Code",
+		},
+	},
+	&claudeDesktopDriver{
+		baseJSONDriver: baseJSONDriver{
+			id:   ClientClaudeDesktop,
+			name: "Claude Desktop",
+		},
+	},
+	&cursorDriver{
+		baseJSONDriver: baseJSONDriver{
+			id:   ClientCursor,
+			name: "Cursor IDE",
+		},
+	},
+	&windsurfDriver{
+		baseJSONDriver: baseJSONDriver{
+			id:   ClientWindsurf,
+			name: "Windsurf IDE",
+		},
+	},
 }
 
 // AllDrivers returns all registered ClientConfigDriver implementations.
@@ -164,6 +184,10 @@ func (b *baseJSONDriver) DeleteServer(path string, name string) error {
 		return fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return nil
+	}
+
 	var root map[string]any
 	if err := json.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("failed to parse JSON at %s: %w", path, err)
@@ -196,11 +220,11 @@ func (b *baseJSONDriver) atomicWriteJSON(path string, data any) error {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	tmpFile := filepath.Join(dir, fmt.Sprintf(".%s.tmp.%d", filepath.Base(path), os.Getpid()))
-	f, err := os.OpenFile(tmpFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.CreateTemp(dir, fmt.Sprintf(".%s.tmp.*", filepath.Base(path)))
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
+	tmpFile := f.Name()
 
 	if _, err := f.Write(encoded); err != nil {
 		_ = f.Close()
@@ -232,33 +256,6 @@ func (b *baseJSONDriver) atomicWriteJSON(path string, data any) error {
 // Claude Code Driver
 type claudeCodeDriver struct {
 	baseJSONDriver
-}
-
-func init() {
-	allDrivers[0] = &claudeCodeDriver{
-		baseJSONDriver: baseJSONDriver{
-			id:   ClientClaudeCode,
-			name: "Claude Code",
-		},
-	}
-	allDrivers[1] = &claudeDesktopDriver{
-		baseJSONDriver: baseJSONDriver{
-			id:   ClientClaudeDesktop,
-			name: "Claude Desktop",
-		},
-	}
-	allDrivers[2] = &cursorDriver{
-		baseJSONDriver: baseJSONDriver{
-			id:   ClientCursor,
-			name: "Cursor IDE",
-		},
-	}
-	allDrivers[3] = &windsurfDriver{
-		baseJSONDriver: baseJSONDriver{
-			id:   ClientWindsurf,
-			name: "Windsurf IDE",
-		},
-	}
 }
 
 func (d *claudeCodeDriver) Detect(homeDir string) bool {
@@ -305,6 +302,9 @@ func (d *claudeDesktopDriver) Detect(homeDir string) bool {
 }
 
 func (d *claudeDesktopDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
+	if profileDir != "" {
+		return "", fmt.Errorf("claude-desktop does not support profile-scoped configurations")
+	}
 	switch runtime.GOOS {
 	case "darwin":
 		return filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"), nil
@@ -340,6 +340,9 @@ func (d *cursorDriver) Detect(homeDir string) bool {
 }
 
 func (d *cursorDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
+	if profileDir != "" {
+		return filepath.Join(profileDir, ".cursor", "mcp.json"), nil
+	}
 	return filepath.Join(homeDir, ".cursor", "mcp.json"), nil
 }
 
@@ -359,5 +362,8 @@ func (d *windsurfDriver) Detect(homeDir string) bool {
 }
 
 func (d *windsurfDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
+	if profileDir != "" {
+		return filepath.Join(profileDir, ".codeium", "windsurf", "mcp_config.json"), nil
+	}
 	return filepath.Join(homeDir, ".codeium", "windsurf", "mcp_config.json"), nil
 }
