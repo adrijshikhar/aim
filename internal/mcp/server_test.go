@@ -68,7 +68,16 @@ func TestMCPServer_InitializeAndListTools(t *testing.T) {
 		toolNames[tool.Name] = true
 	}
 
-	for _, expected := range []string{"aim_whoami", "aim_get_quota", "aim_list_profiles"} {
+	for _, expected := range []string{
+		"aim_whoami",
+		"aim_get_quota",
+		"aim_list_profiles",
+		"aim_get_sessions",
+		"aim_get_session_details",
+		"aim_get_active_binding",
+		"aim_diagnostics",
+		"aim_daemon_status",
+	} {
 		if !toolNames[expected] {
 			t.Errorf("expected tool %q in tools/list", expected)
 		}
@@ -685,3 +694,126 @@ func TestMCPServer_ToolCall_GetQuota_InvalidArgs(t *testing.T) {
 		t.Errorf("expected -32602 for invalid arguments, got %+v", resp.Error)
 	}
 }
+
+func TestMCPServer_ToolCall_NewTools(t *testing.T) {
+	tempDir := t.TempDir()
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	// Create a fake .aim-profile binding in tempDir
+	if err := os.WriteFile(filepath.Join(tempDir, ".aim-profile"), []byte("work\n"), 0600); err != nil {
+		t.Fatalf("failed to create .aim-profile: %v", err)
+	}
+
+	srv := aimmcp.NewServer(reg, pm, tempDir)
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"aim_get_active_binding","arguments":{"cwd":"` + tempDir + `"}}}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"aim_daemon_status","arguments":{}}}` + "\n" +
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"aim_diagnostics","arguments":{}}}` + "\n" +
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"aim_get_sessions","arguments":{"limit":5}}}` + "\n" +
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"aim_get_session_details","arguments":{"session_id":"nonexistent"}}}` + "\n"
+
+	var inBuf bytes.Buffer
+	inBuf.WriteString(input)
+	var outBuf bytes.Buffer
+
+	if err := srv.Serve(&inBuf, &outBuf); err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(outBuf.String()), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 responses, got %d: %s", len(lines), outBuf.String())
+	}
+
+	// 1. Check binding response
+	var bindingResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &bindingResp); err != nil {
+		t.Fatalf("failed to decode binding response: %v", err)
+	}
+	if bindingResp.Result.IsError || len(bindingResp.Result.Content) == 0 {
+		t.Fatalf("binding tool call returned error: %+v", bindingResp)
+	}
+	if !strings.Contains(bindingResp.Result.Content[0].Text, `"work"`) {
+		t.Errorf("expected binding to resolve profile 'work', got: %s", bindingResp.Result.Content[0].Text)
+	}
+
+	// 2. Check daemon status response
+	var daemonResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &daemonResp); err != nil {
+		t.Fatalf("failed to decode daemon response: %v", err)
+	}
+	if daemonResp.Result.IsError || len(daemonResp.Result.Content) == 0 {
+		t.Fatalf("daemon status returned error: %+v", daemonResp)
+	}
+	if !strings.Contains(daemonResp.Result.Content[0].Text, "installed") {
+		t.Errorf("expected daemon status to contain 'installed', got: %s", daemonResp.Result.Content[0].Text)
+	}
+
+	// 3. Check diagnostics response
+	var diagResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &diagResp); err != nil {
+		t.Fatalf("failed to decode diagnostics response: %v", err)
+	}
+	if diagResp.Result.IsError || len(diagResp.Result.Content) == 0 {
+		t.Fatalf("diagnostics tool returned error: %+v", diagResp)
+	}
+	if !strings.Contains(diagResp.Result.Content[0].Text, "results") {
+		t.Errorf("expected diagnostics output with results, got: %s", diagResp.Result.Content[0].Text)
+	}
+
+	// 4. Check sessions list response
+	var sessResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[3]), &sessResp); err != nil {
+		t.Fatalf("failed to decode sessions response: %v", err)
+	}
+	if sessResp.Result.IsError || len(sessResp.Result.Content) == 0 {
+		t.Fatalf("sessions list returned error: %+v", sessResp)
+	}
+
+	// 5. Check session details response (nonexistent session should report clean error or not found)
+	var detailResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[4]), &detailResp); err != nil {
+		t.Fatalf("failed to decode session detail response: %v", err)
+	}
+	if !detailResp.Result.IsError {
+		t.Errorf("expected isError true for nonexistent session, got false")
+	}
+}
+
