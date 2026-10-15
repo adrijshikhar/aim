@@ -309,16 +309,20 @@ func (d *claudeDesktopDriver) ConfigPath(homeDir string, profileDir string) (str
 	case "darwin":
 		return filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"), nil
 	case "windows":
-		appData := os.Getenv("APPDATA")
-		if appData == "" {
-			appData = filepath.Join(homeDir, "AppData", "Roaming")
+		appData := filepath.Join(homeDir, "AppData", "Roaming")
+		if homeDir == os.Getenv("USERPROFILE") {
+			if env := os.Getenv("APPDATA"); env != "" {
+				appData = env
+			}
 		}
 		return filepath.Join(appData, "Claude", "claude_desktop_config.json"), nil
 	default:
 		// Linux / other XDG
-		configDir := os.Getenv("XDG_CONFIG_HOME")
-		if configDir == "" {
-			configDir = filepath.Join(homeDir, ".config")
+		configDir := filepath.Join(homeDir, ".config")
+		if homeDir == os.Getenv("HOME") {
+			if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+				configDir = xdg
+			}
 		}
 		return filepath.Join(configDir, "Claude", "claude_desktop_config.json"), nil
 	}

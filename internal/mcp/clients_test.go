@@ -34,6 +34,8 @@ func TestClientDrivers_Registry(t *testing.T) {
 }
 
 func TestClientDrivers_ConfigPaths(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("APPDATA", "")
 	fakeHome := filepath.Join(string(filepath.Separator), "tmp", "fake-home")
 	fakeProfile := filepath.Join(string(filepath.Separator), "tmp", "fake-profile")
 
