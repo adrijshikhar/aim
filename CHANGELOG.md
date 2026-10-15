@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/adrijshikhar/aim/compare/v0.14.0...v0.15.0) (2026-10-15)
+
+
+### Features
+
+* **mcp:** expanded MCP server tools, protocol doctor, and client management suite ([#91](https://github.com/adrijshikhar/aim/issues/91)) ([5ac89ab](https://github.com/adrijshikhar/aim/commit/5ac89aba95f3f3c2dc6def44c50d6bf931e52436))
+
 ## [0.14.0](https://github.com/adrijshikhar/aim/compare/v0.13.0...v0.14.0) (2026-10-15)
 
 
