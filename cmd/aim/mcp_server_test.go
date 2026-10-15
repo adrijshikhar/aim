@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -497,6 +498,40 @@ func TestMCPListCmd_Execution(t *testing.T) {
 	}
 	if len(parsed) == 0 {
 		t.Errorf("expected at least 1 server in JSON output, got 0")
+	}
+}
+
+func TestMCPListCmd_TruncatesLongCommand(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	cursorDir := filepath.Join(tempDir, ".cursor")
+	_ = os.MkdirAll(cursorDir, 0700)
+	cursorCfg := filepath.Join(cursorDir, "mcp.json")
+	longCmd := "java -cp /very/long/path/to/some/dependency/wiremock-standalone.jar:/another/very/long/classpath/entry/here wiremock.Run --port 8080 --verbose --debug"
+	_ = os.WriteFile(cursorCfg, []byte(fmt.Sprintf(`{"mcpServers":{"wiremock":{"command":"%s"}}}`, longCmd)), 0600)
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "list"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp list failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "wiremock") {
+		t.Errorf("expected 'wiremock' in table output: %s", out)
+	}
+	if !strings.Contains(out, "…") && !strings.Contains(out, "...") {
+		t.Errorf("expected truncated string with ellipsis for long command: %s", out)
+	}
+	if strings.Contains(out, "--debug") {
+		t.Errorf("expected full command tail to be truncated away, but found in output: %s", out)
 	}
 }
 
