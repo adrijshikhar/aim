@@ -119,6 +119,9 @@ func (s *sessionService) ListSessions(ctx context.Context, filter SessionFilter)
 		if filter.Profile != "" && !strings.EqualFold(dto.Profile, filter.Profile) {
 			continue
 		}
+		if filter.Cwd != "" && !strings.EqualFold(strings.TrimRight(dto.Cwd, "/"), strings.TrimRight(filter.Cwd, "/")) {
+			continue
+		}
 
 		if query != "" {
 			match := strings.Contains(strings.ToLower(dto.ID), query) ||

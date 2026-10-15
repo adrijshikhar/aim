@@ -27,6 +27,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 	filter := service.SessionFilter{
 		Agent:   q.Get("agent"),
 		Profile: q.Get("profile"),
+		Cwd:     q.Get("cwd"),
 		Query:   q.Get("q"),
 		Limit:   limit,
 		Force:   q.Get("force") == "true" || q.Get("refresh") == "true",

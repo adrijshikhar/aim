@@ -96,6 +96,7 @@ export function SessionsView({
   const [selectedProfiles, setSelectedProfiles] = React.useState<Set<string>>(
     selectedProfile && selectedProfile !== 'all' ? new Set([selectedProfile]) : new Set()
   );
+  const [selectedCwds, setSelectedCwds] = React.useState<Set<string>>(new Set());
   const [selectedStatuses, setSelectedStatuses] = React.useState<Set<string>>(new Set());
   const [resumingId, setResumingId] = React.useState<string | null>(null);
   const [flagModalSession, setFlagModalSession] = React.useState<SessionDTO | null>(null);
@@ -215,6 +216,15 @@ export function SessionsView({
     return map;
   }, [sessions]);
 
+  const cwdCounts = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    sessions.forEach((s) => {
+      const c = s.cwd?.trim() || '<none>';
+      map[c] = (map[c] || 0) + 1;
+    });
+    return map;
+  }, [sessions]);
+
   const statusCounts = React.useMemo(() => {
     const map: Record<string, number> = { active: 0, idle: 0 };
     sessions.forEach((s) => {
@@ -244,6 +254,44 @@ export function SessionsView({
     const list = Array.from(set).sort();
     return list.map((p) => ({ label: p, value: p }));
   }, [profiles, sessions]);
+
+  const cwdOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    sessions.forEach((s) => {
+      const c = s.cwd?.trim() || '<none>';
+      set.add(c);
+    });
+    const list = Array.from(set).sort();
+
+    // Check for duplicate basenames to disambiguate
+    const basenameCounts: Record<string, number> = {};
+    list.forEach((raw) => {
+      if (raw === '<none>') return;
+      const parts = raw.split('/').filter(Boolean);
+      const base = parts.length > 0 ? parts[parts.length - 1] : raw;
+      basenameCounts[base] = (basenameCounts[base] || 0) + 1;
+    });
+
+    return list.map((c) => {
+      if (c === '<none>') {
+        return {
+          label: '(No directory)',
+          value: '<none>',
+          icon: Folder,
+        };
+      }
+      const parts = c.split('/').filter(Boolean);
+      const basename = parts.length > 0 ? parts[parts.length - 1] : c;
+      const parent = parts.length > 1 ? parts[parts.length - 2] : null;
+      const isDuplicate = (basenameCounts[basename] || 0) > 1;
+      const label = isDuplicate && parent ? `${basename} (.../${parent})` : basename;
+      return {
+        label,
+        value: c,
+        icon: Folder,
+      };
+    });
+  }, [sessions]);
 
   const statusOptions = React.useMemo(
     () => [
@@ -285,6 +333,12 @@ export function SessionsView({
         if (!selectedProfiles.has(prof)) return false;
       }
 
+      // CWD multi-select
+      if (selectedCwds.size > 0) {
+        const c = s.cwd?.trim() || '<none>';
+        if (!selectedCwds.has(c)) return false;
+      }
+
       // Status multi-select
       if (selectedStatuses.size > 0) {
         const st = s.is_active ? 'active' : 'idle';
@@ -293,7 +347,7 @@ export function SessionsView({
 
       return true;
     });
-  }, [sessions, searchQuery, selectedEngines, selectedProfiles, selectedStatuses]);
+  }, [sessions, searchQuery, selectedEngines, selectedProfiles, selectedCwds, selectedStatuses]);
 
   const handleQuickResume = async (sess: SessionDTO) => {
     setResumingId(sess.id);
@@ -575,12 +629,17 @@ export function SessionsView({
   });
 
   const hasActiveFilters =
-    searchQuery !== '' || selectedEngines.size > 0 || selectedProfiles.size > 0 || selectedStatuses.size > 0;
+    searchQuery !== '' ||
+    selectedEngines.size > 0 ||
+    selectedProfiles.size > 0 ||
+    selectedCwds.size > 0 ||
+    selectedStatuses.size > 0;
 
   const resetAllFilters = () => {
     setSearchQuery('');
     setSelectedEngines(new Set());
     setSelectedProfiles(new Set());
+    setSelectedCwds(new Set());
     setSelectedStatuses(new Set());
     if (onSelectProfile) onSelectProfile('all');
   };
@@ -644,6 +703,16 @@ export function SessionsView({
               }
             }}
             counts={profileCounts}
+          />
+
+          {/* CWD Multi-Select Popover */}
+          <DataTableFacetedFilter
+            title="CWD"
+            options={cwdOptions}
+            selectedValues={selectedCwds}
+            onSelect={setSelectedCwds}
+            counts={cwdCounts}
+            contentClassName="w-64"
           />
 
           {/* Status Multi-Select Popover */}

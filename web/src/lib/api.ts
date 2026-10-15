@@ -64,6 +64,7 @@ export interface SessionDTO {
 export interface SessionFilter {
   agent?: string;
   profile?: string;
+  cwd?: string;
   query?: string;
   limit?: number;
   force?: boolean;
@@ -268,6 +269,7 @@ export async function getSessions(filter?: SessionFilter): Promise<SessionDTO[]>
   const params = new URLSearchParams();
   if (filter?.agent) params.set('agent', filter.agent);
   if (filter?.profile) params.set('profile', filter.profile);
+  if (filter?.cwd) params.set('cwd', filter.cwd);
   if (filter?.query) {
     params.set('q', filter.query);
     params.set('query', filter.query);

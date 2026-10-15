@@ -504,6 +504,15 @@ func TestSessionService_ListSessions(t *testing.T) {
 		t.Fatalf("expected 1 work session, got %v", workOnly)
 	}
 
+	// Filter by cwd
+	cwdOnly, err := svc.ListSessions(ctx, service.SessionFilter{Agent: "claude", Cwd: "/projects/feature-a"})
+	if err != nil {
+		t.Fatalf("ListSessions with cwd failed: %v", err)
+	}
+	if len(cwdOnly) != 1 || cwdOnly[0].Cwd != "/projects/feature-a" {
+		t.Fatalf("expected 1 feature-a session, got %v", cwdOnly)
+	}
+
 	// Filter by query
 	crashOnly, err := svc.ListSessions(ctx, service.SessionFilter{Agent: "claude", Query: "crash"})
 	if err != nil {
