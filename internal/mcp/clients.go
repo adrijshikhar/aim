@@ -132,8 +132,13 @@ func (b *baseJSONDriver) ReadServers(path string) (map[string]RawMCPEntry, error
 func (b *baseJSONDriver) WriteServer(path string, name string, entry RawMCPEntry) error {
 	var root map[string]any
 	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read existing config at %s: %w", path, err)
+	}
 	if err == nil && len(data) > 0 {
-		_ = json.Unmarshal(data, &root)
+		if jsonErr := json.Unmarshal(data, &root); jsonErr != nil {
+			return fmt.Errorf("failed to parse existing config at %s: %w", path, jsonErr)
+		}
 	}
 	if root == nil {
 		root = make(map[string]any)

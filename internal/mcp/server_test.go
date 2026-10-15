@@ -816,4 +816,3 @@ func TestMCPServer_ToolCall_NewTools(t *testing.T) {
 		t.Errorf("expected isError true for nonexistent session, got false")
 	}
 }
-

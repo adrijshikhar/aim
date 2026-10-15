@@ -668,4 +668,3 @@ func (s *Server) callGetSessionDetails(id any, args json.RawMessage) JSONRPCResp
 		},
 	}
 }
-
