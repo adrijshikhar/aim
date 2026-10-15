@@ -11,8 +11,10 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/mcp"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
@@ -364,25 +366,58 @@ func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
 				return nil
 			}
 
+			termWidth := 100
+			if f, ok := out.(*os.File); ok {
+				if w, _, err := term.GetSize(f.Fd()); err == nil && w > 0 {
+					termWidth = w
+				}
+			} else if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil && w > 0 {
+				termWidth = w
+			}
+
 			var tableRows [][]string
 			for _, r := range rows {
 				cmdDisplay := r.Command
 				if r.Args != "" {
 					cmdDisplay += " " + r.Args
 				}
+				statusDisplay := r.Status
+				if r.Status == "enabled" {
+					statusDisplay = lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(r.Status)
+				} else {
+					statusDisplay = lipgloss.NewStyle().Foreground(tui.TextMuted).Render(r.Status)
+				}
 				tableRows = append(tableRows, []string{
 					r.Name,
 					r.Client,
 					cmdDisplay,
-					r.Status,
+					statusDisplay,
 				})
 			}
 
 			t := table.New().
 				Border(lipgloss.RoundedBorder()).
-				BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+				BorderStyle(lipgloss.NewStyle().Foreground(tui.TextDim)).
 				Headers("SERVER", "CLIENT / SCOPE", "COMMAND / TARGET", "STATUS").
-				Rows(tableRows...)
+				Rows(tableRows...).
+				Width(termWidth).
+				Wrap(false)
+
+			t.StyleFunc(func(row, col int) lipgloss.Style {
+				if row == table.HeaderRow {
+					return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+				}
+				switch col {
+				case 0:
+					return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+				case 1:
+					return lipgloss.NewStyle().Foreground(tui.AccentCyan)
+				case 2:
+					return lipgloss.NewStyle().Foreground(tui.TextPrimary)
+				default:
+					return lipgloss.NewStyle().Foreground(tui.TextSecondary)
+				}
+			})
 
 			fmt.Fprintln(out, t.Render())
 			return nil
