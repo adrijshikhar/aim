@@ -115,6 +115,13 @@ func TestTerminalWidth(t *testing.T) {
 	}
 }
 
+func TestIsTerminal(t *testing.T) {
+	var buf bytes.Buffer
+	if width, ok := IsTerminal(&buf); ok || width != 0 {
+		t.Errorf("expected IsTerminal(&buf) = (0, false), got (%d, %v)", width, ok)
+	}
+}
+
 func TestNewTable(t *testing.T) {
 	var buf bytes.Buffer
 	tbl := NewTable(&buf)
@@ -122,10 +129,15 @@ func TestNewTable(t *testing.T) {
 		t.Fatal("expected non-nil table")
 	}
 
-	tbl.Headers("COL1", "COL2").Row("hello", "world")
+	longPath := "/var/folders/g4/cr6bc0b13_q2kdrkwt3j1l0w0000gn/T/tmp.NUMIZeJ9Cr/custom store/profiles/plain/very/long/nested/path/to/configuration/file.json"
+	tbl.Headers("COL1", "COL2").Row("hello", longPath)
 	rendered := tbl.Render()
 	if !strings.Contains(rendered, "COL1") || !strings.Contains(rendered, "hello") {
 		t.Errorf("rendered table missing expected content: %s", rendered)
+	}
+	// For non-terminal output, full path must be preserved without truncation
+	if !strings.Contains(rendered, longPath) {
+		t.Errorf("rendered table unexpectedly truncated long path for non-terminal writer: %s", rendered)
 	}
 }
 

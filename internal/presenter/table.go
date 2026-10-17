@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -14,30 +15,58 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
+// IsTerminal returns true and the terminal width if the writer is an active terminal
+// or if an explicit terminal width is configured via COLUMNS or AIM_TERMINAL_WIDTH.
+// It returns 0, false if the writer is redirected, piped, or not an interactive terminal.
+func IsTerminal(w io.Writer) (int, bool) {
+	for _, envVar := range []string{"COLUMNS", "AIM_TERMINAL_WIDTH"} {
+		if val := strings.TrimSpace(os.Getenv(envVar)); val != "" {
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				return n, true
+			}
+		}
+	}
+	if f, ok := w.(*os.File); ok {
+		if term.IsTerminal(f.Fd()) {
+			if width, _, err := term.GetSize(f.Fd()); err == nil && width > 0 {
+				return width, true
+			}
+		}
+		return 0, false
+	}
+	if w == nil {
+		if term.IsTerminal(os.Stdout.Fd()) {
+			if width, _, err := term.GetSize(os.Stdout.Fd()); err == nil && width > 0 {
+				return width, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // TerminalWidth returns the detected terminal width from the given writer or stdout,
 // defaulting to fallback (or 100 if fallback <= 0) when width cannot be determined.
 func TerminalWidth(w io.Writer, fallback int) int {
 	if fallback <= 0 {
 		fallback = 100
 	}
-	if f, ok := w.(*os.File); ok {
-		if width, _, err := term.GetSize(f.Fd()); err == nil && width > 0 {
-			return width
-		}
-	}
-	if width, _, err := term.GetSize(os.Stdout.Fd()); err == nil && width > 0 {
+	if width, ok := IsTerminal(w); ok {
 		return width
 	}
 	return fallback
 }
 
-// NewTable returns a lipgloss Table configured with the detected terminal width
-// and automatic truncation (Wrap(false)) to prevent terminal line wrapping and border corruption.
+// NewTable returns a lipgloss Table configured for the given output writer.
+// When rendering to an interactive terminal, the table is bounded to the terminal width
+// with automatic truncation (Wrap(false)) to prevent line wrapping and border corruption.
+// When output is piped, redirected to a file, or non-terminal, table width is unconstrained
+// so full paths, URLs, and fields are preserved for scripting and pipeline consumption.
 func NewTable(w io.Writer) *table.Table {
-	width := TerminalWidth(w, 100)
-	return table.New().
-		Width(width).
-		Wrap(false)
+	t := table.New()
+	if width, ok := IsTerminal(w); ok {
+		return t.Width(width).Wrap(false)
+	}
+	return t
 }
 
 // RenderMCPListTable formats and writes the configured MCP servers list as a formatted Lipgloss table.

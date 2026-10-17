@@ -28,9 +28,9 @@ AIM operates across three distinct user interface paradigms. Agents must strictl
 Terminals have hard width constraints. Misaligned columns, broken borders, or wrapping cells look amateur and destroy usability. All agents must enforce the following invariants:
 
 ### 2.1 Always Use Bounded Tables (`presenter.NewTable`)
-- **PROHIBITED:** Never instantiate an unconstrained Lipgloss table with raw `table.New()` without setting width.
-- **MANDATORY:** Always construct CLI tables using `presenter.NewTable(w)` (or explicitly chain `.Width(presenter.TerminalWidth(w, 100)).Wrap(false)`).
-- **RATIONALE:** If a table's width is not constrained to the terminal window, long paths, URLs, or commands (e.g. 280+ character Java classpaths) will produce rows wider than the screen. The terminal emulator will wrap the line mid-row, pushing border characters (`│`) onto new lines and destroying table alignment.
+- **PROHIBITED:** Never instantiate an unconstrained Lipgloss table with raw `table.New()` for terminal rendering without width constraints.
+- **MANDATORY:** Always construct CLI tables using `presenter.NewTable(w)`. When writing to an interactive terminal, `NewTable` automatically bounds the table to the detected terminal width with `.Wrap(false)`. When writing to a pipe, subshell, or file (`!term.IsTerminal`), it leaves width unconstrained so full paths, URLs, and identifiers are preserved without ellipsis truncation (`…`).
+- **RATIONALE:** If a table's width is not constrained to the terminal window, long paths, URLs, or commands (e.g. 280+ character Java classpaths) will produce rows wider than the screen. The terminal emulator will wrap the line mid-row, pushing border characters (`│`) onto new lines and destroying table alignment. Conversely, when output is piped or redirected, truncating data breaks grep, scripts, and automation.
 
 ```go
 // ❌ BROKEN: Unconstrained table blows out terminal on long strings
