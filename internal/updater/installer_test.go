@@ -79,6 +79,15 @@ func TestDetectInstallMethod(t *testing.T) {
 			want:     InstallMethodStandalone,
 		},
 		{
+			name:     "usr local bin standalone even if HOMEBREW_PREFIX is usr local",
+			execPath: "/usr/local/bin/aim",
+			setup: func(t *testing.T) string {
+				t.Setenv("HOMEBREW_PREFIX", "/usr/local")
+				return "/usr/local/bin/aim"
+			},
+			want: InstallMethodStandalone,
+		},
+		{
 			name: "symlink into homebrew",
 			setup: func(t *testing.T) string {
 				tmp := t.TempDir()
@@ -232,5 +241,63 @@ func TestExtractBinary_NotFoundInArchive(t *testing.T) {
 	_, err := extractBinary(bytes.NewReader(tarballData), "aim")
 	if err == nil {
 		t.Fatalf("expected error when binary 'aim' is missing in archive, got nil")
+	}
+}
+
+func TestExtractBinary_SkipNonRegularFiles(t *testing.T) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	// Directory named "aim"
+	hdrDir := &tar.Header{
+		Name:     "aim",
+		Mode:     0755,
+		Typeflag: tar.TypeDir,
+	}
+	if err := tw.WriteHeader(hdrDir); err != nil {
+		t.Fatalf("failed to write dir header: %v", err)
+	}
+
+	// Real binary named "./aim"
+	realContent := []byte("real binary bytes")
+	hdrReg := &tar.Header{
+		Name:     "./aim",
+		Mode:     0755,
+		Typeflag: tar.TypeReg,
+		Size:     int64(len(realContent)),
+	}
+	if err := tw.WriteHeader(hdrReg); err != nil {
+		t.Fatalf("failed to write reg header: %v", err)
+	}
+	if _, err := tw.Write(realContent); err != nil {
+		t.Fatalf("failed to write reg content: %v", err)
+	}
+
+	_ = tw.Close()
+	_ = gw.Close()
+
+	extracted, err := extractBinary(bytes.NewReader(buf.Bytes()), "aim")
+	if err != nil {
+		t.Fatalf("extractBinary failed: %v", err)
+	}
+	if !bytes.Equal(extracted, realContent) {
+		t.Errorf("expected extracted content %q, got %q", string(realContent), string(extracted))
+	}
+}
+
+func TestFetchExpectedChecksum_AsteriskPrefix(t *testing.T) {
+	manifest := "abc12345  *aim_1.0.0_darwin_arm64.tar.gz\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(manifest))
+	}))
+	defer server.Close()
+
+	hash, err := fetchExpectedChecksum(context.Background(), server.Client(), server.URL, "aim_1.0.0_darwin_arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hash != "abc12345" {
+		t.Errorf("expected hash 'abc12345', got %q", hash)
 	}
 }

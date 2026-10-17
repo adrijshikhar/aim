@@ -62,7 +62,7 @@ func DetectInstallMethod(execPath string) InstallMethod {
 
 		// Custom or env HOMEBREW_PREFIX
 		if brewPrefix != "" && strings.HasPrefix(p, brewPrefix) {
-			if strings.Contains(normalized, "/Cellar/") || strings.Contains(normalized, "/Caskroom/") || strings.HasPrefix(normalized, filepath.ToSlash(filepath.Join(brewPrefix, "bin"))) {
+			if strings.Contains(normalized, "/Cellar/") || strings.Contains(normalized, "/Caskroom/") {
 				return InstallMethodHomebrew
 			}
 		}
@@ -89,16 +89,23 @@ func UpgradeHomebrew(ctx context.Context, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, brewBin, "upgrade", "adrijshikhar/tap/aim")
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Stdin = os.Stdin
+	if stdout != nil {
+		cmd.Stdin = os.Stdin
+	}
 
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		// Fallback attempt: brew upgrade aim
 		fallbackCmd := exec.CommandContext(ctx, brewBin, "upgrade", "aim")
 		fallbackCmd.Stdout = stdout
 		fallbackCmd.Stderr = stderr
-		fallbackCmd.Stdin = os.Stdin
+		if stdout != nil {
+			fallbackCmd.Stdin = os.Stdin
+		}
 		if fallbackErr := fallbackCmd.Run(); fallbackErr != nil {
-			return fmt.Errorf("brew upgrade failed: %w", err)
+			return fmt.Errorf("brew upgrade failed: %w", fallbackErr)
 		}
 	}
 	return nil
@@ -250,6 +257,11 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) error {
 	return nil
 }
 
+const (
+	maxAssetSize  = 250 * 1024 * 1024 // 250 MB
+	maxBinarySize = 250 * 1024 * 1024 // 250 MB
+)
+
 func fetchAssetData(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -267,7 +279,7 @@ func fetchAssetData(ctx context.Context, client *http.Client, url string) ([]byt
 		return nil, fmt.Errorf("unexpected HTTP status %d from %s", resp.StatusCode, url)
 	}
 
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, maxAssetSize))
 }
 
 func fetchExpectedChecksum(ctx context.Context, client *http.Client, url, targetFilename string) (string, error) {
@@ -285,8 +297,9 @@ func fetchExpectedChecksum(ctx context.Context, client *http.Client, url, target
 		fields := strings.Fields(line)
 		if len(fields) >= 2 {
 			hash := fields[0]
-			name := filepath.Base(fields[1])
-			if name == targetFilename || fields[1] == targetFilename {
+			rawName := strings.TrimPrefix(fields[1], "*")
+			name := strings.TrimPrefix(filepath.Base(rawName), "*")
+			if name == targetFilename || rawName == targetFilename {
 				return hash, nil
 			}
 		}
@@ -315,10 +328,14 @@ func extractBinary(r io.Reader, binaryName string) ([]byte, error) {
 			return nil, fmt.Errorf("tar reader error: %w", err)
 		}
 
+		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+			continue
+		}
+
 		cleanName := filepath.Clean(header.Name)
-		if filepath.Base(cleanName) == binaryName || cleanName == binaryName {
+		if cleanName == binaryName || cleanName == "./"+binaryName {
 			var buf bytes.Buffer
-			if _, err := io.Copy(&buf, tr); err != nil {
+			if _, err := io.Copy(&buf, io.LimitReader(tr, maxBinarySize)); err != nil {
 				return nil, fmt.Errorf("failed to read binary from archive: %w", err)
 			}
 			return buf.Bytes(), nil
