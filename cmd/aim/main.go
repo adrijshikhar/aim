@@ -18,7 +18,9 @@ import (
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
+	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/updater"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 	"github.com/posthog/posthog-go"
 )
@@ -187,7 +189,11 @@ func notifyUpdate(ctx context.Context, args []string) {
 			}
 		case config.AutoUpdatePrompt:
 			if isatty.IsTerminal(os.Stderr.Fd()) && isatty.IsTerminal(os.Stdin.Fd()) {
-				fmt.Fprintf(os.Stderr, "\n▲ A new version of aim is available: %s → %s\n  Update now? [y/N]: ", Version, cached.LatestVersion)
+				arrow := lipgloss.NewStyle().Foreground(tui.AccentCyan).Bold(true).Render("▲")
+				curVer := lipgloss.NewStyle().Foreground(tui.TextMuted).Render(Version)
+				latVer := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render(cached.LatestVersion)
+				prompt := lipgloss.NewStyle().Foreground(tui.TextPrimary).Render("  Update now? [y/N]: ")
+				fmt.Fprintf(os.Stderr, "\n%s A new version of aim is available: %s → %s\n%s", arrow, curVer, latVer, prompt)
 				reader := bufio.NewReader(os.Stdin)
 				input, err := reader.ReadString('\n')
 				if err == nil {

@@ -217,10 +217,7 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 			Headers("PROFILE", "AGENT", "SESSION ID", "DIR", "TITLE", "STARTED", "STATUS")
 
 		for _, s := range activeSessions {
-			title := truncateString(s.Title, 40)
-			if title == "" {
-				title = "(untitled)"
-			}
+			title := cleanTitle(s.Title)
 			started := formatTimeOrRelative(s.StartedAt, s.LastActiveAt)
 			statusStr := "ACTIVE"
 			if s.PID > 0 {
@@ -259,10 +256,7 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 			Headers("PROFILE", "AGENT", "SESSION ID", "DIR", "TITLE", "LAST ACTIVE")
 
 		for _, s := range recentSessions {
-			title := truncateString(s.Title, 46)
-			if title == "" {
-				title = "(untitled)"
-			}
+			title := cleanTitle(s.Title)
 			lastActive := formatRelativeTime(s.LastActiveAt)
 			dir := session.FormatDir(s.Cwd, 20)
 
@@ -285,6 +279,15 @@ func renderSessionsTable(w io.Writer, sessions []session.Session, activeOnly boo
 
 		fmt.Fprintln(w, t.Render())
 	}
+}
+
+func cleanTitle(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "(untitled)"
+	}
+	return s
 }
 
 func truncateString(s string, maxLen int) string {

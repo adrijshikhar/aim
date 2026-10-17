@@ -668,3 +668,135 @@ func TestConfig_GetAutoUpdate(t *testing.T) {
 		t.Errorf("expected env 'true' to map to %q, got %q", AutoUpdateAuto, got)
 	}
 }
+
+func TestConfig_TelemetryUnmarshal(t *testing.T) {
+	testCases := []struct {
+		name           string
+		json           string
+		expectDisabled bool
+	}{
+		{
+			name:           "telemetry boolean false disables telemetry",
+			json:           `{"telemetry": false}`,
+			expectDisabled: true,
+		},
+		{
+			name:           "telemetry boolean true enables telemetry",
+			json:           `{"telemetry": true}`,
+			expectDisabled: false,
+		},
+		{
+			name:           "telemetry string off disables telemetry",
+			json:           `{"telemetry": "off"}`,
+			expectDisabled: true,
+		},
+		{
+			name:           "telemetry string on enables telemetry",
+			json:           `{"telemetry": "on"}`,
+			expectDisabled: false,
+		},
+		{
+			name:           "telemetry_disabled explicit true disables telemetry",
+			json:           `{"telemetry_disabled": true}`,
+			expectDisabled: true,
+		},
+		{
+			name:           "telemetry_disabled explicit false enables telemetry",
+			json:           `{"telemetry_disabled": false}`,
+			expectDisabled: false,
+		},
+		{
+			name:           "telemetry_disabled takes precedence if both present",
+			json:           `{"telemetry": true, "telemetry_disabled": true}`,
+			expectDisabled: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg Config
+			if err := json.Unmarshal([]byte(tc.json), &cfg); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+			if cfg.TelemetryDisabled != tc.expectDisabled {
+				t.Errorf("expected TelemetryDisabled=%v, got %v", tc.expectDisabled, cfg.TelemetryDisabled)
+			}
+		})
+	}
+}
+
+func TestConfig_GetSet(t *testing.T) {
+	cfg := NewDefaultConfig()
+
+	// default_agent
+	if val, err := cfg.Get("default_agent"); err != nil || val != "agy" {
+		t.Errorf("expected 'agy', got %q, err: %v", val, err)
+	}
+	if err := cfg.Set("default_agent", "claude"); err != nil {
+		t.Fatalf("set default_agent failed: %v", err)
+	}
+	if val, _ := cfg.Get("default_agent"); val != "claude" {
+		t.Errorf("expected 'claude', got %q", val)
+	}
+	if err := cfg.Set("default_agent", ""); err == nil {
+		t.Errorf("expected error setting empty default_agent")
+	}
+
+	// default_profile
+	if err := cfg.Set("default_profile", "work"); err != nil {
+		t.Fatalf("set default_profile failed: %v", err)
+	}
+	if val, _ := cfg.Get("default_profile"); val != "work" {
+		t.Errorf("expected 'work', got %q", val)
+	}
+
+	// auto_update
+	if val, _ := cfg.Get("auto_update"); val != AutoUpdatePrompt {
+		t.Errorf("expected %q, got %q", AutoUpdatePrompt, val)
+	}
+	if err := cfg.Set("auto_update", "notify"); err != nil {
+		t.Fatalf("set auto_update failed: %v", err)
+	}
+	if val, _ := cfg.Get("auto_update"); val != AutoUpdateNotify {
+		t.Errorf("expected 'notify', got %q", val)
+	}
+	if err := cfg.Set("auto_update", "invalid_mode"); err == nil {
+		t.Errorf("expected error setting invalid auto_update mode")
+	}
+
+	// debug
+	if val, _ := cfg.Get("debug"); val != "false" {
+		t.Errorf("expected 'false', got %q", val)
+	}
+	if err := cfg.Set("debug", "true"); err != nil {
+		t.Fatalf("set debug failed: %v", err)
+	}
+	if val, _ := cfg.Get("debug"); val != "true" {
+		t.Errorf("expected 'true', got %q", val)
+	}
+
+	// telemetry
+	if val, _ := cfg.Get("telemetry"); val != "on" {
+		t.Errorf("expected 'on', got %q", val)
+	}
+	if err := cfg.Set("telemetry", "off"); err != nil {
+		t.Fatalf("set telemetry off failed: %v", err)
+	}
+	if val, _ := cfg.Get("telemetry"); val != "off" {
+		t.Errorf("expected 'off', got %q", val)
+	}
+	if !cfg.TelemetryDisabled {
+		t.Errorf("expected TelemetryDisabled true after set telemetry off")
+	}
+	if err := cfg.Set("telemetry", "invalid"); err == nil {
+		t.Errorf("expected error setting invalid telemetry value")
+	}
+
+	// unknown key
+	if _, err := cfg.Get("unknown_key"); err == nil {
+		t.Errorf("expected error getting unknown key")
+	}
+	if err := cfg.Set("unknown_key", "val"); err == nil {
+		t.Errorf("expected error setting unknown key")
+	}
+}
