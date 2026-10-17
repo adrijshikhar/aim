@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/updater"
+	"github.com/mattn/go-isatty"
 	"github.com/posthog/posthog-go"
 )
 
@@ -154,8 +157,10 @@ func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) i
 }
 
 func notifyUpdate(args []string) {
-	if len(args) > 0 && args[0] == "__complete" {
-		return
+	if len(args) > 0 {
+		if args[0] == "__complete" || args[0] == "update" {
+			return
+		}
 	}
 	for _, a := range args {
 		if a == "--json" || a == "-j" {
@@ -165,7 +170,35 @@ func notifyUpdate(args []string) {
 	updater.AwaitBackgroundCheck(300 * time.Millisecond)
 	cached := updater.CheckCached(Version, config.CacheDir())
 	if cached != nil && cached.UpdateAvailable {
-		fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'brew upgrade aim')\n", Version, cached.LatestVersion)
+		cfg, _ := config.LoadConfig()
+		mode := cfg.GetAutoUpdate()
+		switch mode {
+		case config.AutoUpdateOff:
+			return
+		case config.AutoUpdateAuto:
+			execPath, err := os.Executable()
+			if err == nil {
+				cmd := exec.Command(execPath, "update", "--background")
+				_ = cmd.Start()
+			}
+		case config.AutoUpdatePrompt:
+			if isatty.IsTerminal(os.Stdout.Fd()) && isatty.IsTerminal(os.Stdin.Fd()) {
+				fmt.Fprintf(os.Stderr, "\n▲ A new version of aim is available: %s → %s\n  Update now? [y/N]: ", Version, cached.LatestVersion)
+				reader := bufio.NewReader(os.Stdin)
+				input, err := reader.ReadString('\n')
+				if err == nil {
+					input = strings.TrimSpace(strings.ToLower(input))
+					if input == "y" || input == "yes" {
+						_ = runUpdate(context.Background(), false, false, false)
+						return
+					}
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'aim update')\n", Version, cached.LatestVersion)
+			}
+		case config.AutoUpdateNotify:
+			fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'aim update')\n", Version, cached.LatestVersion)
+		}
 	}
 }
 

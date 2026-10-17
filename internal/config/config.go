@@ -42,8 +42,16 @@ type Config struct {
 	CustomIgnoredKeychains []string                 `json:"custom_ignored_keychains,omitempty"`
 	Debug                  bool                     `json:"debug,omitempty"`
 	TelemetryDisabled      bool                     `json:"telemetry_disabled,omitempty"`
+	AutoUpdate             string                   `json:"auto_update,omitempty"`
 	Profiles               map[string]ProfileConfig `json:"profiles"`
 }
+
+const (
+	AutoUpdatePrompt = "prompt"
+	AutoUpdateNotify = "notify"
+	AutoUpdateAuto   = "auto"
+	AutoUpdateOff    = "off"
+)
 
 func RealHomeDir() string {
 	if custom := os.Getenv("AIM_REAL_HOME"); custom != "" {
@@ -208,8 +216,32 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		DefaultAgent:   "agy",
 		DefaultProfile: "",
+		AutoUpdate:     AutoUpdatePrompt,
 		Profiles:       make(map[string]ProfileConfig),
 	}
+}
+
+// GetAutoUpdate returns the active auto_update mode.
+// Priority: AIM_AUTO_UPDATE environment variable -> cfg.AutoUpdate -> AutoUpdatePrompt ("prompt").
+func (c *Config) GetAutoUpdate() string {
+	if env := strings.TrimSpace(strings.ToLower(os.Getenv("AIM_AUTO_UPDATE"))); env != "" {
+		switch env {
+		case AutoUpdatePrompt, AutoUpdateNotify, AutoUpdateAuto, AutoUpdateOff:
+			return env
+		case "false", "0", "disabled":
+			return AutoUpdateOff
+		case "true", "1", "enabled":
+			return AutoUpdateAuto
+		}
+	}
+	if c != nil {
+		mode := strings.TrimSpace(strings.ToLower(c.AutoUpdate))
+		switch mode {
+		case AutoUpdatePrompt, AutoUpdateNotify, AutoUpdateAuto, AutoUpdateOff:
+			return mode
+		}
+	}
+	return AutoUpdatePrompt
 }
 
 // MCPGlobalEnabled reports whether host MCP servers are merged into the

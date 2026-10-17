@@ -614,3 +614,57 @@ func TestSaveConfig_Concurrent(t *testing.T) {
 		}
 	}
 }
+
+func TestConfig_GetAutoUpdate(t *testing.T) {
+	// 1. nil config defaults to prompt
+	var nilCfg *Config
+	t.Setenv("AIM_AUTO_UPDATE", "")
+	if got := nilCfg.GetAutoUpdate(); got != AutoUpdatePrompt {
+		t.Errorf("expected default %q, got %q", AutoUpdatePrompt, got)
+	}
+
+	// 2. empty config defaults to prompt
+	cfg := NewDefaultConfig()
+	if got := cfg.GetAutoUpdate(); got != AutoUpdatePrompt {
+		t.Errorf("expected default %q, got %q", AutoUpdatePrompt, got)
+	}
+
+	// 3. config value takes effect
+	cfg.AutoUpdate = AutoUpdateNotify
+	if got := cfg.GetAutoUpdate(); got != AutoUpdateNotify {
+		t.Errorf("expected %q, got %q", AutoUpdateNotify, got)
+	}
+
+	cfg.AutoUpdate = AutoUpdateAuto
+	if got := cfg.GetAutoUpdate(); got != AutoUpdateAuto {
+		t.Errorf("expected %q, got %q", AutoUpdateAuto, got)
+	}
+
+	cfg.AutoUpdate = AutoUpdateOff
+	if got := cfg.GetAutoUpdate(); got != AutoUpdateOff {
+		t.Errorf("expected %q, got %q", AutoUpdateOff, got)
+	}
+
+	// 4. invalid config value falls back to prompt
+	cfg.AutoUpdate = "invalid_mode"
+	if got := cfg.GetAutoUpdate(); got != AutoUpdatePrompt {
+		t.Errorf("expected fallback to %q, got %q", AutoUpdatePrompt, got)
+	}
+
+	// 5. env var overrides config
+	t.Setenv("AIM_AUTO_UPDATE", "notify")
+	cfg.AutoUpdate = AutoUpdateAuto
+	if got := cfg.GetAutoUpdate(); got != AutoUpdateNotify {
+		t.Errorf("expected env override %q, got %q", AutoUpdateNotify, got)
+	}
+
+	t.Setenv("AIM_AUTO_UPDATE", "0")
+	if got := cfg.GetAutoUpdate(); got != AutoUpdateOff {
+		t.Errorf("expected env '0' to map to %q, got %q", AutoUpdateOff, got)
+	}
+
+	t.Setenv("AIM_AUTO_UPDATE", "true")
+	if got := cfg.GetAutoUpdate(); got != AutoUpdateAuto {
+		t.Errorf("expected env 'true' to map to %q, got %q", AutoUpdateAuto, got)
+	}
+}
