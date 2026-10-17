@@ -46,6 +46,145 @@ type Config struct {
 	Profiles               map[string]ProfileConfig `json:"profiles"`
 }
 
+func (c *Config) UnmarshalJSON(data []byte) error {
+	type alias Config
+	raw := struct {
+		alias
+		TelemetryDisabled *bool `json:"telemetry_disabled,omitempty"`
+		Telemetry         *any  `json:"telemetry,omitempty"`
+	}{
+		alias: alias(*c),
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*c = Config(raw.alias)
+
+	if raw.TelemetryDisabled != nil {
+		c.TelemetryDisabled = *raw.TelemetryDisabled
+	} else if raw.Telemetry != nil {
+		switch v := (*raw.Telemetry).(type) {
+		case bool:
+			c.TelemetryDisabled = !v
+		case string:
+			lower := strings.ToLower(strings.TrimSpace(v))
+			if lower == "off" || lower == "false" || lower == "0" || lower == "disabled" {
+				c.TelemetryDisabled = true
+			} else if lower == "on" || lower == "true" || lower == "1" || lower == "enabled" {
+				c.TelemetryDisabled = false
+			}
+		}
+	}
+	return nil
+}
+
+// Get returns the string representation of a known configuration key.
+func (c *Config) Get(key string) (string, error) {
+	if c == nil {
+		return "", errors.New("cannot read from nil config")
+	}
+	normKey := strings.ToLower(strings.TrimSpace(key))
+	switch normKey {
+	case "default_agent":
+		return c.DefaultAgent, nil
+	case "default_profile":
+		return c.DefaultProfile, nil
+	case "auto_update":
+		return c.GetAutoUpdate(), nil
+	case "debug":
+		if c.Debug {
+			return "true", nil
+		}
+		return "false", nil
+	case "telemetry":
+		if c.TelemetryDisabled {
+			return "off", nil
+		}
+		return "on", nil
+	case "telemetry_disabled":
+		if c.TelemetryDisabled {
+			return "true", nil
+		}
+		return "false", nil
+	default:
+		return "", fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, telemetry_disabled, debug)", key)
+	}
+}
+
+// Set mutates a known configuration key after validating the value.
+func (c *Config) Set(key, val string) error {
+	if c == nil {
+		return errors.New("cannot write to nil config")
+	}
+	val = strings.TrimSpace(val)
+	normKey := strings.ToLower(strings.TrimSpace(key))
+	switch normKey {
+	case "default_agent":
+		if val == "" {
+			return errors.New("default_agent cannot be empty")
+		}
+		c.DefaultAgent = strings.ToLower(val)
+		return nil
+	case "default_profile":
+		c.DefaultProfile = val
+		return nil
+	case "auto_update":
+		valLower := strings.ToLower(val)
+		switch valLower {
+		case AutoUpdatePrompt, AutoUpdateNotify, AutoUpdateAuto, AutoUpdateOff:
+			c.AutoUpdate = valLower
+			return nil
+		case "false", "0", "disabled":
+			c.AutoUpdate = AutoUpdateOff
+			return nil
+		case "true", "1", "enabled":
+			c.AutoUpdate = AutoUpdateAuto
+			return nil
+		default:
+			return fmt.Errorf("invalid auto_update mode %q (must be one of: prompt, notify, auto, off)", val)
+		}
+	case "debug":
+		b, err := parseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for debug %q: must be true or false", val)
+		}
+		c.Debug = b
+		return nil
+	case "telemetry":
+		valLower := strings.ToLower(val)
+		switch valLower {
+		case "off", "false", "0", "disabled":
+			c.TelemetryDisabled = true
+			return nil
+		case "on", "true", "1", "enabled":
+			c.TelemetryDisabled = false
+			return nil
+		default:
+			return fmt.Errorf("invalid telemetry setting %q (must be 'on' or 'off')", val)
+		}
+	case "telemetry_disabled":
+		b, err := parseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for telemetry_disabled %q: must be true or false", val)
+		}
+		c.TelemetryDisabled = b
+		return nil
+	default:
+		return fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, telemetry_disabled, debug)", key)
+	}
+}
+
+func parseBool(s string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "1", "yes", "on", "enabled":
+		return true, nil
+	case "false", "0", "no", "off", "disabled":
+		return false, nil
+	default:
+		return false, fmt.Errorf("cannot parse %q as boolean", s)
+	}
+}
+
 const (
 	AutoUpdatePrompt = "prompt"
 	AutoUpdateNotify = "notify"

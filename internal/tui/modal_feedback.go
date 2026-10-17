@@ -184,7 +184,7 @@ func (m Model) renderFeedbackModal() string {
 	for i, c := range feedbackCategories {
 		badge := fmt.Sprintf(" %s %s ", c.icon, c.label)
 		if i == m.feedbackModal.categoryIndex {
-			b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(tuiColorWhite).Background(AccentBlue).Render(badge))
+			b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(TextBright).Background(AccentBlue).Render(badge))
 		} else {
 			b.WriteString(lipgloss.NewStyle().Foreground(TextSecondary).Render(badge))
 		}
@@ -216,5 +216,3 @@ func (m Model) renderFeedbackModal() string {
 	box := FeedbackModalBoxStyle.Render(b.String())
 	return "\n" + box + "\n"
 }
-
-var tuiColorWhite = lipgloss.Color("#FFFFFF")

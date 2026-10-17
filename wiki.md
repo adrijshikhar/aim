@@ -97,6 +97,8 @@ Everything managed by AIM resides in `~/.aim/` (configurable via the `AIM_HOME` 
   "debug": false,
   "default_agent": "agy",
   "default_profile": "personal",
+  "auto_update": "prompt",
+  "telemetry": true,
   "custom_bridged_paths": [
     "Library/Application Support/custom-tool"
   ],
@@ -109,7 +111,9 @@ Everything managed by AIM resides in `~/.aim/` (configurable via the `AIM_HOME` 
       "env": {
         "ENV_OVERRIDE": "production"
       },
-      "args": ["--dangerously-skip-permissions"]
+      "args": ["--dangerously-skip-permissions"],
+      "mcp_global": true,
+      "plugins_global": true
     },
     "personal": {
       "agents": ["agy"]
@@ -118,12 +122,27 @@ Everything managed by AIM resides in `~/.aim/` (configurable via the `AIM_HOME` 
 }
 ```
 
+- **`default_agent`**: Default agent CLI to launch (e.g. `agy`, `claude`, `codex`, default: `agy`).
+- **`default_profile`**: Default profile activated when none is specified.
+- **`auto_update`**: Update check and install policy (`"prompt"`, `"notify"`, `"auto"`, `"off"`, default: `"prompt"`). Can also be overridden via `AIM_AUTO_UPDATE`.
+- **`telemetry`**: Anonymous usage metrics opt-in/opt-out (`true` / `false` or `"on"` / `"off"`, default: `true`). Can also be configured via `aim config set telemetry off`, `DO_NOT_TRACK=1`, or `AIM_TELEMETRY_DISABLED=1`.
 - **`debug`**: Enable verbose debug logging to stderr and `~/.aim/aim-debug.log` (`true` / `false`, default: `false`). Can also be toggled via `AIM_DEBUG=1` or `--debug`.
 - **`custom_bridged_paths`**: Additional host paths to bridge into every profile sandbox. Top-level dotfiles are already bridged, so this is for paths outside that scan, such as `Library/Application Support/<tool>`. Paths that escape the home or name agent state (`.aim`, `.claude`, `.claude.json*`, `.codex`, `.gemini`) are refused.
   A non-empty profile copy of a bridged path is kept as an override, so the host's is silently not used; `aim doctor` flags each such copy (and any link pointing elsewhere) with the `rm -rf` that restores sharing — it never deletes anything itself.
 - **`custom_ignored_keychains`**: List of additional macOS Keychain service names to scrub before and after agent execution to maintain strict profile isolation.
 - **`env`**: Profile-specific environment variables injected on launch.
 - **`args`**: Extra CLI arguments automatically passed to the agent binary when launched under this profile.
+- **`mcp_global`**: Boolean toggle (`true` / `false`, default: `true`). When set to `false`, host MCP servers are not merged into the profile.
+- **`plugins_global`**: Boolean toggle (`true` / `false`, default: `true`). When set to `false`, host plugin enablement is not merged into the profile.
+
+### Configuration CLI (`aim config`)
+
+AIM provides first-class CLI commands to query, inspect, and modify configuration without manual JSON editing:
+
+- **`aim config path`**: Print the absolute path to the active `config.json` file.
+- **`aim config list [--json]`**: Display all settings in a formatted terminal table or raw JSON.
+- **`aim config get <key> [--json]`**: Read a specific configuration key (e.g. `aim config get auto_update`, `aim config get telemetry`).
+- **`aim config set <key> <value>`**: Safely validate and atomically update a configuration setting (e.g. `aim config set telemetry off`, `aim config set auto_update notify`).
 
 ---
 
@@ -405,7 +424,7 @@ AIM implements privacy-by-design anonymous telemetry to understand command perfo
 Telemetry collection can be fully disabled at any time using standard conventions:
 1. `export DO_NOT_TRACK=1` (universal web/tool standard)
 2. `export AIM_TELEMETRY_DISABLED=1`
-3. `"telemetry": false` in `~/.aim/config.json`
+3. `"telemetry": false` (or `"telemetry_disabled": true`) in `~/.aim/config.json`, or via `aim config set telemetry off`
 
 When any opt-out tier is active, telemetry spooling is completely bypassed and zero bytes are written to disk or sent over the network. Test suites run with strict test isolation to prevent telemetry emission in development.
 

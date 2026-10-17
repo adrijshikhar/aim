@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
@@ -26,7 +29,7 @@ func newListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command
 			if len(args) > 0 {
 				agent = args[0]
 			}
-			return runList(reg, pm, agent)
+			return runListTo(cmd.OutOrStdout(), reg, pm, agent)
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) == 0 {
@@ -153,6 +156,10 @@ func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string,
 }
 
 func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string) error {
+	return runListTo(os.Stdout, reg, pm, agentName)
+}
+
+func runListTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName string) error {
 	if pm == nil {
 		return nil
 	}
@@ -176,13 +183,13 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 		if err != nil {
 			return err
 		}
-		fmt.Println(headerStyle.Render(fmt.Sprintf("=== Configured Profiles (%s) ===", canonicalAgent)))
+		fmt.Fprintln(out, headerStyle.Render(fmt.Sprintf("=== Configured Profiles (%s) ===", canonicalAgent)))
 		if len(profiles) == 0 {
 			emptyStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
-			fmt.Println(emptyStyle.Render(fmt.Sprintf("  No profiles found for agent %q. Run: aim login %s <profile>", canonicalAgent, canonicalAgent)))
+			fmt.Fprintln(out, emptyStyle.Render(fmt.Sprintf("  No profiles found for agent %q. Run: aim login %s <profile>", canonicalAgent, canonicalAgent)))
 			return nil
 		}
-		t := table.New().
+		t := presenter.NewTable(out).
 			Border(lipgloss.HiddenBorder()).
 			Headers("#", "PROFILE", "QUOTA STATUS", "STORAGE PATH")
 
@@ -219,7 +226,7 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 			}
 		})
 
-		fmt.Println(t.Render())
+		fmt.Fprintln(out, t.Render())
 		return nil
 	}
 
@@ -228,13 +235,13 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 	if err != nil {
 		return err
 	}
-	fmt.Println(headerStyle.Render("=== Configured Profiles ==="))
+	fmt.Fprintln(out, headerStyle.Render("=== Configured Profiles ==="))
 	if len(profiles) == 0 {
 		emptyStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
-		fmt.Println(emptyStyle.Render("  No profiles found. Run: aim login agy <profile>"))
+		fmt.Fprintln(out, emptyStyle.Render("  No profiles found. Run: aim login agy <profile>"))
 		return nil
 	}
-	t := table.New().
+	t := presenter.NewTable(out).
 		Border(lipgloss.HiddenBorder()).
 		Headers("#", "PROFILE", "AGENTS", "QUOTA STATUS", "STORAGE PATH")
 
@@ -298,6 +305,6 @@ func runList(reg *agents.Registry, pm *profile.ProfileManager, agentName string)
 		}
 	})
 
-	fmt.Println(t.Render())
+	fmt.Fprintln(out, t.Render())
 	return nil
 }
