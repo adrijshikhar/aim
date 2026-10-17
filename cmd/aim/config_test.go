@@ -184,4 +184,59 @@ func TestCLI_Config_GetSet(t *testing.T) {
 	if perm := fi.Mode().Perm(); perm != 0600 {
 		t.Errorf("expected config file permissions 0600, got %04o", perm)
 	}
+
+	// Test normalized display for numeric auto_update (0 -> off)
+	var setNormBuf bytes.Buffer
+	cmdSetNorm := newConfigCmd(reg, pm)
+	cmdSetNorm.SetOut(&setNormBuf)
+	cmdSetNorm.SetArgs([]string{"set", "auto_update", "0"})
+	if err := cmdSetNorm.Execute(); err != nil {
+		t.Fatalf("config set auto_update 0 failed: %v", err)
+	}
+	if !strings.Contains(setNormBuf.String(), "Set auto_update = off") {
+		t.Errorf("expected normalized value 'off' in output, got: %s", setNormBuf.String())
+	}
+
+	// Test advisory note for nonexistent profile
+	var setProfBuf bytes.Buffer
+	cmdSetProf := newConfigCmd(reg, pm)
+	cmdSetProf.SetOut(&setProfBuf)
+	cmdSetProf.SetArgs([]string{"set", "default_profile", "fresh_profile"})
+	if err := cmdSetProf.Execute(); err != nil {
+		t.Fatalf("config set default_profile failed: %v", err)
+	}
+	if !strings.Contains(setProfBuf.String(), "Profile \"fresh_profile\" does not exist yet") {
+		t.Errorf("expected advisory note about nonexistent profile, got: %s", setProfBuf.String())
+	}
+}
+
+func TestCLI_Config_Completions(t *testing.T) {
+	_, reg, pm := setupConfigTestEnv(t)
+	cmd := newConfigCmd(reg, pm)
+
+	// Test get completions
+	getCmd, _, err := cmd.Find([]string{"get"})
+	if err != nil {
+		t.Fatalf("failed to find get command: %v", err)
+	}
+	comps, _ := getCmd.ValidArgsFunction(getCmd, []string{}, "")
+	if len(comps) == 0 {
+		t.Errorf("expected non-empty key completions for config get")
+	}
+
+	// Test set completions for keys
+	setCmd, _, err := cmd.Find([]string{"set"})
+	if err != nil {
+		t.Fatalf("failed to find set command: %v", err)
+	}
+	comps, _ = setCmd.ValidArgsFunction(setCmd, []string{}, "")
+	if len(comps) == 0 {
+		t.Errorf("expected non-empty key completions for config set")
+	}
+
+	// Test set completions for auto_update values
+	valComps, _ := setCmd.ValidArgsFunction(setCmd, []string{"auto_update"}, "")
+	if len(valComps) != 4 {
+		t.Errorf("expected 4 auto_update completions, got: %v", valComps)
+	}
 }

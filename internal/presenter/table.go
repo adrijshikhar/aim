@@ -16,30 +16,41 @@ import (
 )
 
 // IsTerminal returns true and the terminal width if the writer is an active terminal
-// or if an explicit terminal width is configured via COLUMNS or AIM_TERMINAL_WIDTH.
+// or if an explicit simulation width is configured via AIM_TERMINAL_WIDTH.
 // It returns 0, false if the writer is redirected, piped, or not an interactive terminal.
 func IsTerminal(w io.Writer) (int, bool) {
-	for _, envVar := range []string{"COLUMNS", "AIM_TERMINAL_WIDTH"} {
-		if val := strings.TrimSpace(os.Getenv(envVar)); val != "" {
-			if n, err := strconv.Atoi(val); err == nil && n > 0 {
-				return n, true
-			}
+	// Explicit test / debug override for simulating terminal width on arbitrary writers
+	if val := strings.TrimSpace(os.Getenv("AIM_TERMINAL_WIDTH")); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n, true
 		}
 	}
+
+	var fd uintptr
 	if f, ok := w.(*os.File); ok {
-		if term.IsTerminal(f.Fd()) {
-			if width, _, err := term.GetSize(f.Fd()); err == nil && width > 0 {
-				return width, true
-			}
+		if !term.IsTerminal(f.Fd()) {
+			return 0, false
 		}
+		fd = f.Fd()
+	} else if w == nil {
+		if !term.IsTerminal(os.Stdout.Fd()) {
+			return 0, false
+		}
+		fd = os.Stdout.Fd()
+	} else {
+		// Non-file writer (bytes.Buffer, pipe, etc.) without test override
 		return 0, false
 	}
-	if w == nil {
-		if term.IsTerminal(os.Stdout.Fd()) {
-			if width, _, err := term.GetSize(os.Stdout.Fd()); err == nil && width > 0 {
-				return width, true
-			}
+
+	// For verified interactive terminals, respect COLUMNS if set, then term.GetSize
+	if val := strings.TrimSpace(os.Getenv("COLUMNS")); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n, true
 		}
+	}
+
+	if width, _, err := term.GetSize(fd); err == nil && width > 0 {
+		return width, true
 	}
 	return 0, false
 }

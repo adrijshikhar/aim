@@ -53,12 +53,26 @@ Subcommands:
 	}
 	listCmd.Flags().BoolVarP(&jsonFlag, "json", "j", false, "Output configuration as JSON")
 
+	configKeys := []string{"default_agent", "default_profile", "auto_update", "telemetry", "debug"}
+
 	getCmd := &cobra.Command{
 		Use:   "get <key>",
 		Short: "Get the value of a configuration key",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runConfigGet(cmd.OutOrStdout(), args[0], jsonFlag)
+		},
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 0 {
+				var matches []string
+				for _, k := range configKeys {
+					if strings.HasPrefix(k, toComplete) {
+						matches = append(matches, k)
+					}
+				}
+				return matches, cobra.ShellCompDirectiveNoFileComp
+			}
+			return nil, cobra.ShellCompDirectiveNoFileComp
 		},
 	}
 	getCmd.Flags().BoolVarP(&jsonFlag, "json", "j", false, "Output result as JSON")
@@ -69,6 +83,36 @@ Subcommands:
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runConfigSet(cmd.OutOrStdout(), reg, pm, args[0], args[1])
+		},
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 0 {
+				var matches []string
+				for _, k := range configKeys {
+					if strings.HasPrefix(k, toComplete) {
+						matches = append(matches, k)
+					}
+				}
+				return matches, cobra.ShellCompDirectiveNoFileComp
+			}
+			if len(args) == 1 {
+				key := strings.ToLower(strings.TrimSpace(args[0]))
+				switch key {
+				case "auto_update":
+					return []string{config.AutoUpdatePrompt, config.AutoUpdateNotify, config.AutoUpdateAuto, config.AutoUpdateOff}, cobra.ShellCompDirectiveNoFileComp
+				case "telemetry":
+					return []string{"on", "off"}, cobra.ShellCompDirectiveNoFileComp
+				case "debug":
+					return []string{"true", "false"}, cobra.ShellCompDirectiveNoFileComp
+				case "default_agent":
+					return completeAgents(reg, toComplete), cobra.ShellCompDirectiveNoFileComp
+				case "default_profile":
+					if pm != nil {
+						profs, _ := pm.ListProfiles()
+						return profs, cobra.ShellCompDirectiveNoFileComp
+					}
+				}
+			}
+			return nil, cobra.ShellCompDirectiveNoFileComp
 		},
 	}
 
@@ -182,10 +226,19 @@ func runConfigSet(out io.Writer, reg *agents.Registry, pm *profile.ProfileManage
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
+	displayVal, _ := cfg.Get(normKey)
+	if displayVal == "" {
+		displayVal = val
+	}
+
 	successBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
 	keyStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(normKey)
-	valStyle := lipgloss.NewStyle().Foreground(tui.TextBright).Bold(true).Render(val)
+	valStyle := lipgloss.NewStyle().Foreground(tui.TextBright).Bold(true).Render(displayVal)
 
 	fmt.Fprintf(out, "%s Set %s = %s\n", successBadge, keyStyle, valStyle)
+	if normKey == "default_profile" && pm != nil && val != "" && !pm.ProfileExists(val) {
+		noteBadge := lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("Note:")
+		fmt.Fprintf(out, "  %s Profile %q does not exist yet. Run 'aim login <agent> %s' to create it.\n", noteBadge, val, val)
+	}
 	return nil
 }

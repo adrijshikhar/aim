@@ -117,8 +117,23 @@ func TestTerminalWidth(t *testing.T) {
 
 func TestIsTerminal(t *testing.T) {
 	var buf bytes.Buffer
+	t.Setenv("AIM_TERMINAL_WIDTH", "")
+	t.Setenv("COLUMNS", "")
+
 	if width, ok := IsTerminal(&buf); ok || width != 0 {
 		t.Errorf("expected IsTerminal(&buf) = (0, false), got (%d, %v)", width, ok)
+	}
+
+	// COLUMNS alone must not cause non-terminal writers to be treated as terminals
+	t.Setenv("COLUMNS", "80")
+	if width, ok := IsTerminal(&buf); ok || width != 0 {
+		t.Errorf("expected COLUMNS=80 not to affect non-terminal buffer, got (%d, %v)", width, ok)
+	}
+
+	// AIM_TERMINAL_WIDTH provides explicit test simulation
+	t.Setenv("AIM_TERMINAL_WIDTH", "95")
+	if width, ok := IsTerminal(&buf); !ok || width != 95 {
+		t.Errorf("expected AIM_TERMINAL_WIDTH=95 to yield (95, true), got (%d, %v)", width, ok)
 	}
 }
 

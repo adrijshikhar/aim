@@ -509,7 +509,7 @@ func TestMCPListCmd_TruncatesLongCommand(t *testing.T) {
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
-	t.Setenv("COLUMNS", "100")
+	t.Setenv("AIM_TERMINAL_WIDTH", "100")
 
 	cursorDir := filepath.Join(tempDir, ".cursor")
 	_ = os.MkdirAll(cursorDir, 0700)

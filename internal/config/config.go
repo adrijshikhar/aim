@@ -48,10 +48,12 @@ type Config struct {
 
 func (c *Config) UnmarshalJSON(data []byte) error {
 	type alias Config
-	var raw struct {
+	raw := struct {
 		alias
 		TelemetryDisabled *bool `json:"telemetry_disabled,omitempty"`
 		Telemetry         *any  `json:"telemetry,omitempty"`
+	}{
+		alias: alias(*c),
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -105,7 +107,7 @@ func (c *Config) Get(key string) (string, error) {
 		}
 		return "false", nil
 	default:
-		return "", fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, debug)", key)
+		return "", fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, telemetry_disabled, debug)", key)
 	}
 }
 
@@ -168,7 +170,7 @@ func (c *Config) Set(key, val string) error {
 		c.TelemetryDisabled = b
 		return nil
 	default:
-		return fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, debug)", key)
+		return fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, telemetry_disabled, debug)", key)
 	}
 }
 

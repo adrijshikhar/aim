@@ -800,3 +800,25 @@ func TestConfig_GetSet(t *testing.T) {
 		t.Errorf("expected error setting unknown key")
 	}
 }
+
+func TestConfig_UnmarshalPreservesExistingDefaults(t *testing.T) {
+	cfg := NewDefaultConfig()
+	if cfg.DefaultAgent != "agy" || cfg.AutoUpdate != "prompt" {
+		t.Fatalf("unexpected initial defaults: agent=%q, update=%q", cfg.DefaultAgent, cfg.AutoUpdate)
+	}
+
+	// Unmarshal partial payload that only specifies telemetry
+	if err := json.Unmarshal([]byte(`{"telemetry": false}`), cfg); err != nil {
+		t.Fatalf("failed to unmarshal partial json: %v", err)
+	}
+
+	if cfg.DefaultAgent != "agy" {
+		t.Errorf("expected DefaultAgent 'agy' to be preserved, got %q", cfg.DefaultAgent)
+	}
+	if cfg.AutoUpdate != "prompt" {
+		t.Errorf("expected AutoUpdate 'prompt' to be preserved, got %q", cfg.AutoUpdate)
+	}
+	if !cfg.TelemetryDisabled {
+		t.Errorf("expected TelemetryDisabled=true from partial payload")
+	}
+}
