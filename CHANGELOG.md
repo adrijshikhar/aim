@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/adrijshikhar/aim/compare/v0.15.0...v0.16.0) (2026-10-17)
+
+
+### Features
+
+* **cli:** add aim update command with Homebrew and standalone auto-update support ([#96](https://github.com/adrijshikhar/aim/issues/96)) ([28623d0](https://github.com/adrijshikhar/aim/commit/28623d06d080aa0f657347238af1856965a216ca))
+* **config:** add aim config command, support telemetry unmarshaling, and standardize Lipgloss tables ([#97](https://github.com/adrijshikhar/aim/issues/97)) ([c71eed6](https://github.com/adrijshikhar/aim/commit/c71eed6f129c44db702aa3a767bf6033f2e76490))
+* **ui:** standardize Lipgloss tables via presenter.NewTable and add strict AGENTS.md guidelines ([#95](https://github.com/adrijshikhar/aim/issues/95)) ([36f9037](https://github.com/adrijshikhar/aim/commit/36f90378ff350c8c65bafed18809b3baa68b02c1))
+
+
+### Bug Fixes
+
+* **cli:** use native Lipgloss table width and truncation to prevent terminal wrapping ([#93](https://github.com/adrijshikhar/aim/issues/93)) ([a1ba6b8](https://github.com/adrijshikhar/aim/commit/a1ba6b8d84a366088f3874ed01a86145d2469264))
+
 ## [0.15.0](https://github.com/adrijshikhar/aim/compare/v0.14.0...v0.15.0) (2026-10-15)
 
 
