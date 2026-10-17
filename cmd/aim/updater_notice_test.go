@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -15,12 +16,10 @@ import (
 
 func TestUpdater_NoticeOnStderrWhenUpdateAvailable(t *testing.T) {
 	tempBase := t.TempDir()
-	origHome := os.Getenv("AIM_HOME")
-	defer func() { _ = os.Setenv("AIM_HOME", origHome) }()
-	_ = os.Setenv("AIM_HOME", tempBase)
+	t.Setenv("AIM_HOME", tempBase)
 
 	cacheDir := filepath.Join(tempBase, "cache")
-	_ = os.MkdirAll(cacheDir, 0755)
+	_ = os.MkdirAll(cacheDir, 0700)
 
 	// Write cached update info: current is 0.12.1, latest is 0.13.0
 	cacheData := updater.CacheData{
@@ -29,7 +28,7 @@ func TestUpdater_NoticeOnStderrWhenUpdateAvailable(t *testing.T) {
 		CheckedAt:     time.Now(),
 	}
 	data, _ := json.Marshal(cacheData)
-	_ = os.WriteFile(filepath.Join(cacheDir, "update_check.json"), data, 0644)
+	_ = os.WriteFile(filepath.Join(cacheDir, "update_check.json"), data, 0600)
 
 	pm := profile.NewProfileManager(tempBase)
 	reg := agents.NewRegistry()
@@ -52,12 +51,10 @@ func TestUpdater_NoticeOnStderrWhenUpdateAvailable(t *testing.T) {
 
 func TestUpdater_NoNoticeWhenJsonFlag(t *testing.T) {
 	tempBase := t.TempDir()
-	origHome := os.Getenv("AIM_HOME")
-	defer func() { _ = os.Setenv("AIM_HOME", origHome) }()
-	_ = os.Setenv("AIM_HOME", tempBase)
+	t.Setenv("AIM_HOME", tempBase)
 
 	cacheDir := filepath.Join(tempBase, "cache")
-	_ = os.MkdirAll(cacheDir, 0755)
+	_ = os.MkdirAll(cacheDir, 0700)
 
 	cacheData := updater.CacheData{
 		LatestVersion: "v0.13.0",
@@ -80,5 +77,102 @@ func TestUpdater_NoNoticeWhenJsonFlag(t *testing.T) {
 
 	if strings.Contains(errOut, "A new version of aim is available") {
 		t.Errorf("expected no update notice when --json flag passed, got:\n%s", errOut)
+	}
+}
+
+func TestUpdater_NoticeHonorsAutoUpdateOff(t *testing.T) {
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+	t.Setenv("AIM_AUTO_UPDATE", "off")
+
+	cacheDir := filepath.Join(tempBase, "cache")
+	_ = os.MkdirAll(cacheDir, 0700)
+
+	cacheData := updater.CacheData{
+		LatestVersion: "v0.13.0",
+		ReleaseURL:    "https://github.com/adrijshikhar/aim/releases/tag/v0.13.0",
+		CheckedAt:     time.Now(),
+	}
+	data, _ := json.Marshal(cacheData)
+	_ = os.WriteFile(filepath.Join(cacheDir, "update_check.json"), data, 0600)
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+
+	origVer := GetVersion()
+	defer func() { SetVersion(origVer) }()
+	SetVersion("0.12.1")
+
+	_, errOut := captureOutput(t, func() {
+		_ = dispatch([]string{"version"}, reg, pm)
+	})
+
+	if strings.Contains(errOut, "A new version of aim is available") {
+		t.Errorf("expected no update notice when AIM_AUTO_UPDATE=off, got:\n%s", errOut)
+	}
+}
+
+func TestUpdater_NoticeSuppressedOnUpdateSubcommand(t *testing.T) {
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	cacheDir := filepath.Join(tempBase, "cache")
+	_ = os.MkdirAll(cacheDir, 0700)
+
+	cacheData := updater.CacheData{
+		LatestVersion: "v0.13.0",
+		ReleaseURL:    "https://github.com/adrijshikhar/aim/releases/tag/v0.13.0",
+		CheckedAt:     time.Now(),
+	}
+	data, _ := json.Marshal(cacheData)
+	_ = os.WriteFile(filepath.Join(cacheDir, "update_check.json"), data, 0600)
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+
+	origVer := GetVersion()
+	defer func() { SetVersion(origVer) }()
+	SetVersion("0.12.1")
+
+	_, errOut := captureOutput(t, func() {
+		_ = dispatch([]string{"--debug", "update", "--check"}, reg, pm)
+	})
+
+	if strings.Contains(errOut, "A new version of aim is available: 0.12.1 → v0.13.0 (run 'aim update')") {
+		t.Errorf("expected notifyUpdate to be skipped for update subcommand, got:\n%s", errOut)
+	}
+}
+
+func TestUpdater_NoticeSuppressedOnContextCancel(t *testing.T) {
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	cacheDir := filepath.Join(tempBase, "cache")
+	_ = os.MkdirAll(cacheDir, 0700)
+
+	cacheData := updater.CacheData{
+		LatestVersion: "v0.13.0",
+		ReleaseURL:    "https://github.com/adrijshikhar/aim/releases/tag/v0.13.0",
+		CheckedAt:     time.Now(),
+	}
+	data, _ := json.Marshal(cacheData)
+	_ = os.WriteFile(filepath.Join(cacheDir, "update_check.json"), data, 0600)
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+
+	origVer := GetVersion()
+	defer func() { SetVersion(origVer) }()
+	SetVersion("0.12.1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, errOut := captureOutput(t, func() {
+		_ = dispatchWithContext(ctx, []string{"version"}, reg, pm)
+	})
+
+	if strings.Contains(errOut, "A new version of aim is available") {
+		t.Errorf("expected no update notice on canceled context, got:\n%s", errOut)
 	}
 }

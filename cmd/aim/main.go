@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/updater"
+	"github.com/mattn/go-isatty"
 	"github.com/posthog/posthog-go"
 )
 
@@ -104,7 +108,7 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 		ctx = context.Background()
 	}
 	err := rootCmd.ExecuteContext(ctx)
-	notifyUpdate(args)
+	notifyUpdate(ctx, args)
 
 	code := 0
 	if err != nil {
@@ -153,19 +157,52 @@ func dispatch(args []string, reg *agents.Registry, pm *profile.ProfileManager) i
 	return dispatchWithContext(context.Background(), args, reg, pm)
 }
 
-func notifyUpdate(args []string) {
-	if len(args) > 0 && args[0] == "__complete" {
+func notifyUpdate(ctx context.Context, args []string) {
+	if ctx != nil && ctx.Err() != nil {
 		return
 	}
 	for _, a := range args {
-		if a == "--json" || a == "-j" {
+		if a == "__complete" || a == "update" || a == "--json" || a == "-j" {
 			return
 		}
 	}
 	updater.AwaitBackgroundCheck(300 * time.Millisecond)
 	cached := updater.CheckCached(Version, config.CacheDir())
 	if cached != nil && cached.UpdateAvailable {
-		fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'brew upgrade aim')\n", Version, cached.LatestVersion)
+		cfg, _ := config.LoadConfig()
+		mode := cfg.GetAutoUpdate()
+		switch mode {
+		case config.AutoUpdateOff:
+			return
+		case config.AutoUpdateAuto:
+			lockFile := filepath.Join(config.CacheDir(), "last_auto_update")
+			if fi, err := os.Stat(lockFile); err == nil && time.Since(fi.ModTime()) < 30*time.Minute {
+				return
+			}
+			_ = os.WriteFile(lockFile, []byte(time.Now().Format(time.RFC3339)), 0600)
+			execPath, err := os.Executable()
+			if err == nil {
+				cmd := exec.Command(execPath, "update", "--background")
+				_ = cmd.Start()
+			}
+		case config.AutoUpdatePrompt:
+			if isatty.IsTerminal(os.Stderr.Fd()) && isatty.IsTerminal(os.Stdin.Fd()) {
+				fmt.Fprintf(os.Stderr, "\n▲ A new version of aim is available: %s → %s\n  Update now? [y/N]: ", Version, cached.LatestVersion)
+				reader := bufio.NewReader(os.Stdin)
+				input, err := reader.ReadString('\n')
+				if err == nil {
+					input = strings.TrimSpace(strings.ToLower(input))
+					if input == "y" || input == "yes" {
+						_ = runUpdate(ctx, false, false, false)
+						return
+					}
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'aim update')\n", Version, cached.LatestVersion)
+			}
+		case config.AutoUpdateNotify:
+			fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'aim update')\n", Version, cached.LatestVersion)
+		}
 	}
 }
 
