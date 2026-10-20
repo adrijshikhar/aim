@@ -279,6 +279,10 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 		if data, err := os.ReadFile(claudeJSONPath); err == nil {
 			files[".claude.json"] = base64.StdEncoding.EncodeToString(data)
 		}
+		claudeSubJSONPath := filepath.Join(profDir, ".claude", ".claude.json")
+		if data, err := os.ReadFile(claudeSubJSONPath); err == nil {
+			files[".claude/.claude.json"] = base64.StdEncoding.EncodeToString(data)
+		}
 	case "codex":
 		authPath := filepath.Join(profDir, ".config", "codex", "auth.json")
 		if data, err := os.ReadFile(authPath); err == nil {
