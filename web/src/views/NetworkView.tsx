@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   Activity,
   Calendar,
+  Settings,
 } from 'lucide-react';
 import {
   getShareStatus,
@@ -39,7 +40,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AgentBadge } from '@/components/AgentBadge';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
-import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -339,6 +340,13 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     }
   };
 
+  const isSharingEnabled = currentGlobalMode !== 'off';
+
+  const handleToggleP2P = async (checked: boolean) => {
+    const targetMode: ShareMode = checked ? 'request' : 'off';
+    await handleGlobalModeChange(targetMode);
+  };
+
   const handleAddPeer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!addHost.trim()) return;
@@ -482,104 +490,43 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           </p>
         </div>
 
-        {/* TOP RIGHT: Global Sharing Slider & Duration Policy Modal */}
-        <div className="rounded-geist bg-[#111111] border border-[#262626] p-2.5 px-3 shadow-md flex flex-col items-center justify-center w-[270px] shrink-0 select-none">
-          <div className="flex items-center justify-between w-full mb-1">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-[#777777] flex items-center gap-1">
-              <Radio className="h-3 w-3 text-accent-cyan" />
-              <span>Mesh Policy</span>
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setIsScheduleModalOpen(true)}
-                className="cursor-pointer text-[10px] font-mono px-1.5 py-0.5 rounded border border-[#333333] bg-[#181818] hover:bg-[#222222] text-[#abb2bf] hover:text-[#ededed] flex items-center gap-1 transition-colors"
-                title="Configure Time & Duration-Based Policy (e.g. 12am-8am auto-approve)"
-              >
-                <Calendar className="h-2.5 w-2.5 text-accent-cyan" />
-                <span>Schedule</span>
+        {/* TOP RIGHT: P2P Sharing On/Off Toggle & Settings Button */}
+        <div className="flex items-center gap-3 bg-[#111111] border border-[#262626] rounded-geist px-3.5 py-2 shrink-0 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <Radio className={cn('h-3.5 w-3.5 transition-colors', isSharingEnabled ? 'text-accent-cyan' : 'text-[#666666]')} />
+            <div className="flex flex-col">
+              <span className="text-xs font-mono font-medium text-foreground flex items-center gap-1.5">
+                <span>P2P Sharing</span>
                 {activeSchedulesCount > 0 && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" title="Active Schedule Override" />
                 )}
-              </button>
-              <span
-                className={cn(
-                  'text-xs font-mono font-bold tracking-tight transition-colors',
-                  effectiveGlobalMode === 'off' && 'text-[#888888]',
-                  effectiveGlobalMode === 'request' && 'text-[#52a8ff]',
-                  effectiveGlobalMode === 'auto' && 'text-[#46a758]'
-                )}
-              >
-                {effectiveGlobalMode === 'off' && 'Off'}
-                {effectiveGlobalMode === 'request' && 'Request'}
-                {effectiveGlobalMode === 'auto' && 'Auto'}
+              </span>
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {isSharingEnabled
+                  ? (effectiveGlobalMode === 'auto' ? 'Auto Approve' : 'Request Mode')
+                  : 'Disabled'}
               </span>
             </div>
           </div>
 
-          {/* Shadcn Default Slider */}
-          <div className="w-full px-1 py-2">
-            <Slider
-              min={0}
-              max={2}
-              step={1}
-              value={[currentGlobalMode === 'off' ? 0 : currentGlobalMode === 'request' ? 1 : 2]}
-              onValueChange={([val]) => {
-                const modes: ShareMode[] = ['off', 'request', 'auto'];
-                const target = modes[val];
-                if (target && target !== currentGlobalMode) {
-                  handleGlobalModeChange(target);
-                }
-              }}
+          <div className="flex items-center gap-2 pl-2.5 border-l border-[#222222]">
+            <Switch
+              checked={isSharingEnabled}
+              onCheckedChange={handleToggleP2P}
+              disabled={isShareUpdating}
+              aria-label="Toggle P2P profile sharing"
             />
-          </div>
 
-          {/* 3 Stop Interactive Labels */}
-          <div className="flex items-center justify-between w-full mt-1 px-1 text-[10px] font-mono">
-            <button
-              type="button"
-              onClick={() => handleGlobalModeChange('off')}
-              className={cn(
-                'cursor-pointer transition-colors',
-                currentGlobalMode === 'off'
-                  ? 'text-[#ededed] font-semibold'
-                  : 'text-[#666666] hover:text-[#aaaaaa]'
-              )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsScheduleModalOpen(true)}
+              className="h-7 w-7 p-0 rounded-geist border-[#2a2a2a] bg-[#141414] hover:bg-[#1f1f1f] text-muted-foreground hover:text-foreground flex items-center justify-center shrink-0 cursor-pointer"
+              title="P2P Sharing Settings & Schedules"
             >
-              Off
-            </button>
-            <button
-              type="button"
-              onClick={() => handleGlobalModeChange('request')}
-              className={cn(
-                'cursor-pointer transition-colors',
-                currentGlobalMode === 'request'
-                  ? 'text-[#52a8ff] font-semibold'
-                  : 'text-[#666666] hover:text-[#aaaaaa]'
-              )}
-            >
-              Request
-            </button>
-            <button
-              type="button"
-              onClick={() => handleGlobalModeChange('auto')}
-              className={cn(
-                'cursor-pointer transition-colors',
-                currentGlobalMode === 'auto'
-                  ? 'text-[#46a758] font-semibold'
-                  : 'text-[#666666] hover:text-[#aaaaaa]'
-              )}
-            >
-              Auto Approve
-            </button>
+              <Settings className="h-3.5 w-3.5" />
+            </Button>
           </div>
-
-          {effectiveGlobalMode !== currentGlobalMode && (
-            <div className="mt-1.5 pt-1 border-t border-[#202020] w-full text-[10px] font-mono text-center text-accent-cyan flex items-center justify-center gap-1">
-              <Clock className="h-2.5 w-2.5" />
-              <span>Active Schedule Override</span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1356,22 +1303,62 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Schedule-Based Sharing Policy Modal (Calendar & Duration Picker) */}
+      {/* P2P Sharing Settings Modal */}
       <Dialog open={isScheduleModalOpen} onOpenChange={setIsScheduleModalOpen}>
         <DialogContent className="max-w-lg bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
           <DialogHeader className="space-y-1 pb-3 border-b border-[#222222] pr-6">
             <div className="flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-accent-cyan" />
+              <Settings className="h-5 w-5 text-accent-cyan" />
               <DialogTitle className="text-base font-semibold text-[#ededed]">
-                Schedule Sharing Policy
+                P2P Sharing Settings & Policies
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-[#888888]">
-              Automate sharing policies for night windows (e.g. 12:00 AM – 8:00 AM) or calendar date ranges across global mesh or specific profiles.
+              Configure base mesh sharing policy, duration-based auto-approve windows, or calendar intervals.
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleSaveSchedulePolicy} className="space-y-4 pt-3">
+          {/* Section 1: Default Mesh Policy when ON */}
+          <div className="p-3 rounded-geist bg-[#141414] border border-[#222222] space-y-2 mt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono font-medium text-foreground">
+                Base Mesh Policy Mode
+              </span>
+              <span className="text-[10px] font-mono text-muted-foreground">
+                Applied when P2P Sharing is ON
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleGlobalModeChange('request')}
+                className={cn(
+                  'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center justify-between cursor-pointer',
+                  currentGlobalMode === 'request'
+                    ? 'bg-[#142334] border-[#1f4068] text-[#52a8ff] font-semibold'
+                    : 'bg-[#101010] border-[#222222] text-muted-foreground hover:bg-[#161616]'
+                )}
+              >
+                <span>Request Mode (Manual)</span>
+                <span className={cn('h-1.5 w-1.5 rounded-full', currentGlobalMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]')} />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGlobalModeChange('auto')}
+                className={cn(
+                  'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center justify-between cursor-pointer',
+                  currentGlobalMode === 'auto'
+                    ? 'bg-[#183925] border-[#235836] text-[#46a758] font-semibold'
+                    : 'bg-[#101010] border-[#222222] text-muted-foreground hover:bg-[#161616]'
+                )}
+              >
+                <span>Auto Approve (Instant)</span>
+                <span className={cn('h-1.5 w-1.5 rounded-full', currentGlobalMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]')} />
+              </button>
+            </div>
+          </div>
+
+          <form onSubmit={handleSaveSchedulePolicy} className="space-y-4 pt-1">
             {/* Scope & Policy Mode */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
