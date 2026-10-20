@@ -17,6 +17,7 @@ import (
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
@@ -95,6 +96,7 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 		ok := diagnoseAdapterTo(out, adapter, pm, cfg, reg, map[string]bool{})
 		diagnosePlatformTo(out, agentName, cfg)
 		diagnoseDaemonTo(out)
+		diagnoseVPNTo(out)
 		diagnoseUnclaimedTokensTo(out, baseDir, agentName)
 		diagnoseBindingTo(out)
 		return ok
@@ -109,6 +111,7 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 	}
 	diagnosePlatformTo(out, "", cfg)
 	diagnoseDaemonTo(out)
+	diagnoseVPNTo(out)
 	diagnoseUnclaimedTokensTo(out, baseDir, "")
 	diagnoseBindingTo(out)
 	return allOK
@@ -146,6 +149,22 @@ func diagnoseDaemonTo(out io.Writer) {
 		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Daemon:")
 		fmt.Fprintf(out, "  %s %s Installed but inactive (%s)\n", warnBadge, cat, info.ConfigPath)
 	}
+}
+
+func diagnoseVPNTo(out io.Writer) {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[P2P Sharing & VPN Tunnel]"))
+	vpn, err := share.DetectVPN()
+	cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("VPN Tunnel:")
+	if err != nil || vpn == nil || !vpn.Connected {
+		infoBadge := lipgloss.NewStyle().Bold(true).Foreground(tui.TextMuted).Width(8).Render("[INFO]")
+		fmt.Fprintf(out, "  %s %s Inactive (Connect to Pritunl/OpenVPN to enable P2P profile sharing)\n", infoBadge, cat)
+		return
+	}
+
+	okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
+	fmt.Fprintf(out, "  %s %s Active (%s - %s, broadcast: %s)\n",
+		okBadge, cat, vpn.InterfaceName, vpn.IP, vpn.BroadcastIP)
 }
 
 func diagnosePlatform(agentName string, cfg *config.Config) {
