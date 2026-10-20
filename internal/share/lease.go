@@ -28,8 +28,9 @@ func NewLeaseManager(profilesDir string) *LeaseManager {
 }
 
 func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseResponse) (string, error) {
-	// Sanitize sourcePeer for directory naming (e.g. replace dots or colons with dashes)
-	sanitizedPeer := strings.ReplaceAll(strings.ReplaceAll(sourcePeer, ".", "-"), ":", "-")
+	// Sanitize sourcePeer for clean directory naming: strip .local and replace dots/colons
+	cleanPeer := strings.TrimSuffix(strings.TrimSuffix(sourcePeer, ".local"), ".LOCAL")
+	sanitizedPeer := strings.ReplaceAll(strings.ReplaceAll(cleanPeer, ".", "-"), ":", "-")
 	localProfileName := fmt.Sprintf("p2p-%s-%s", sanitizedPeer, profileName)
 	targetDir := filepath.Join(m.profilesDir, localProfileName)
 

@@ -150,11 +150,29 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 			peer := parts[0]
 			profileName := parts[1]
 
+			store := share.NewStore(config.BaseDir())
+			targetHost := peer
+			for _, p := range store.GetPeers() {
+				shortHost := strings.TrimSuffix(strings.ToLower(p.HostName), ".local")
+				if strings.EqualFold(p.HostName, peer) || strings.EqualFold(shortHost, strings.ToLower(peer)) || p.VPNIP == peer {
+					if p.HostName != "" {
+						targetHost = p.HostName
+					} else {
+						targetHost = p.VPNIP
+					}
+					break
+				}
+			}
+
 			client := share.NewClient(4319)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			resp, err := client.RequestLease(ctx, peer, profileName, agent, hours)
+			resp, err := client.RequestLease(ctx, targetHost, profileName, agent, hours)
+			if err != nil && !strings.Contains(targetHost, ".") {
+				// Retry with .local for zero-conf mDNS resolution
+				resp, err = client.RequestLease(ctx, targetHost+".local", profileName, agent, hours)
+			}
 			if err != nil {
 				return fmt.Errorf("lease request failed: %w", err)
 			}
