@@ -28,10 +28,10 @@ func NewLeaseManager(profilesDir string) *LeaseManager {
 }
 
 func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseResponse) (string, error) {
-	// Sanitize sourcePeer for clean directory naming: strip .local and replace dots/colons
+	// Format as host:<profile_name> (e.g., Adrijs-MacBook-Pro:work)
 	cleanPeer := strings.TrimSuffix(strings.TrimSuffix(sourcePeer, ".local"), ".LOCAL")
-	sanitizedPeer := strings.ReplaceAll(strings.ReplaceAll(cleanPeer, ".", "-"), ":", "-")
-	localProfileName := fmt.Sprintf("p2p-%s-%s", sanitizedPeer, profileName)
+	sanitizedPeer := strings.ReplaceAll(cleanPeer, ".", "-")
+	localProfileName := fmt.Sprintf("%s:%s", sanitizedPeer, profileName)
 	targetDir := filepath.Join(m.profilesDir, localProfileName)
 
 	if err := os.MkdirAll(targetDir, 0700); err != nil {

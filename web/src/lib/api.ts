@@ -386,3 +386,96 @@ export async function getSessionTranscript(agent: string, id: string): Promise<S
   const res = await fetch(`${BASE_URL}/sessions/${encodeURIComponent(agent)}/${encodeURIComponent(id)}/transcript`);
   return handleResponse<SessionTranscriptDTO>(res);
 }
+
+export interface VPNStatusDTO {
+  connected: boolean;
+  interface_name: string;
+  ip: string;
+  broadcast_ip: string;
+}
+
+export interface SharedProfileConfigDTO {
+  name: string;
+  agent: string;
+  auto_approve: boolean;
+  max_lease_ttl: number;
+  enabled: boolean;
+}
+
+export interface PeerInfoDTO {
+  id: string;
+  hostname: string;
+  vpn_ip: string;
+  port: number;
+  last_seen: string;
+  profiles: string[];
+}
+
+export interface ActiveLeaseDTO {
+  local_profile: string;
+  source_peer: string;
+  source_profile: string;
+  agent: string;
+  granted_at: string;
+  expires_at: string;
+  is_expired: boolean;
+}
+
+export interface ShareStatusDTO {
+  vpn: VPNStatusDTO | null;
+  shared_profiles: SharedProfileConfigDTO[];
+  peers: PeerInfoDTO[];
+  active_leases: ActiveLeaseDTO[];
+}
+
+export async function getShareStatus(): Promise<ShareStatusDTO> {
+  const res = await fetch(`${BASE_URL}/share/status`);
+  return handleResponse<ShareStatusDTO>(res);
+}
+
+export async function toggleShareProfile(payload: {
+  name: string;
+  agent: string;
+  auto_approve: boolean;
+  ttl: string;
+  enabled: boolean;
+}): Promise<{ ok: boolean; enabled: boolean }> {
+  const res = await fetch(`${BASE_URL}/share/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ ok: boolean; enabled: boolean }>(res);
+}
+
+export async function addSharePeer(host: string): Promise<PeerInfoDTO> {
+  const res = await fetch(`${BASE_URL}/share/peers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host }),
+  });
+  return handleResponse<PeerInfoDTO>(res);
+}
+
+export async function requestShareLease(payload: {
+  peer: string;
+  profile: string;
+  agent: string;
+  hours: number;
+}): Promise<{ ok: boolean; local_profile?: string; expires_at?: string; status?: string; message?: string }> {
+  const res = await fetch(`${BASE_URL}/share/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ ok: boolean; local_profile?: string; expires_at?: string; status?: string; message?: string }>(res);
+}
+
+export async function releaseShareLease(profile: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${BASE_URL}/share/release`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profile }),
+  });
+  return handleResponse<{ ok: boolean }>(res);
+}

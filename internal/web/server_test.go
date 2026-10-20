@@ -1221,3 +1221,30 @@ func TestCrossOriginProtection(t *testing.T) {
 		t.Errorf("expected 200 OK for GET status, got %d", resp.StatusCode)
 	}
 }
+
+func TestShareEndpoints(t *testing.T) {
+	server := web.NewServer(&mockProfileService{}, nil, nil, 0, false)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	// GET /api/share/status
+	res, err := http.Get(ts.URL + "/api/share/status")
+	if err != nil {
+		t.Fatalf("GET /api/share/status failed: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", res.StatusCode)
+	}
+
+	// POST /api/share/toggle
+	body := strings.NewReader(`{"name":"work","agent":"claude","auto_approve":true,"ttl":"4h","enabled":true}`)
+	res2, err := http.Post(ts.URL+"/api/share/toggle", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /api/share/toggle failed: %v", err)
+	}
+	defer res2.Body.Close()
+	if res2.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", res2.StatusCode)
+	}
+}

@@ -29,8 +29,8 @@ func TestLeaseManagerInstallAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to install lease: %v", err)
 	}
-	if localName != "p2p-alice-work" {
-		t.Errorf("expected p2p-alice-work, got %s", localName)
+	if localName != "alice:work" {
+		t.Errorf("expected alice:work, got %s", localName)
 	}
 
 	credsFile := filepath.Join(profilesDir, localName, ".claude", ".credentials.json")

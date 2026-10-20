@@ -10,6 +10,8 @@ import {
   getSessions,
   getMcpServers,
   resumeSession,
+  getShareStatus,
+  toggleShareProfile,
 } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -44,6 +46,7 @@ import {
   LayoutGrid,
   List,
   Clock,
+  Radio,
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
@@ -386,6 +389,8 @@ export function ProfilesView({
     }
   };
 
+
+
   const handleTogglePluginsGlobal = async (profileName: string, currentVal: boolean) => {
     const nextVal = !currentVal;
     setUpdatingConfig(true);
@@ -411,6 +416,8 @@ export function ProfilesView({
     }
   };
 
+
+
   const getAgentBadge = (agent: string, size?: 'sm' | 'default') => {
     return <AgentBadge agent={agent} size={size} />;
   };
@@ -432,6 +439,60 @@ export function ProfilesView({
     if (!selectedProfile || selectedProfile === 'all') return null;
     return profiles.find((p) => p.name === selectedProfile) || null;
   }, [profiles, selectedProfile]);
+
+  const [shareConfig, setShareConfig] = React.useState<{
+    enabled: boolean;
+    auto_approve: boolean;
+    ttl: string;
+  }>({ enabled: false, auto_approve: false, ttl: '4h' });
+  const [isShareLoading, setIsShareLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!currentProfile) return;
+    getShareStatus()
+      .then((status) => {
+        const found = status.shared_profiles?.find((p) => p.name === currentProfile.name);
+        if (found) {
+          setShareConfig({
+            enabled: found.enabled,
+            auto_approve: found.auto_approve,
+            ttl: '4h',
+          });
+        } else {
+          setShareConfig({ enabled: false, auto_approve: false, ttl: '4h' });
+        }
+      })
+      .catch(() => {});
+  }, [currentProfile?.name]);
+
+  const handleToggleShare = async (enabled: boolean) => {
+    if (!currentProfile) return;
+    setIsShareLoading(true);
+    try {
+      await toggleShareProfile({
+        name: currentProfile.name,
+        agent: currentProfile.agent || 'claude',
+        auto_approve: shareConfig.auto_approve,
+        ttl: shareConfig.ttl,
+        enabled,
+      });
+      setShareConfig((prev) => ({ ...prev, enabled }));
+      toast({
+        title: enabled ? 'Profile Shared' : 'Sharing Disabled',
+        description: enabled
+          ? `Profile ${currentProfile.name} is now shared with teammates over VPN.`
+          : `Profile ${currentProfile.name} is no longer shared.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: 'Sharing update failed',
+        description: err.message || 'Could not update sharing state',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsShareLoading(false);
+    }
+  };
 
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [resumingId, setResumingId] = React.useState<string | null>(null);
@@ -1261,6 +1322,94 @@ export function ProfilesView({
                         onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
                       />
                     </div>
+                  </CardContent>
+                </Card>
+
+                {/* P2P Profile Sharing Card */}
+                <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                  <CardHeader className="p-5 pb-3">
+                    <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                      <Radio className="h-4 w-4 text-accent-cyan" />
+                      P2P Profile Sharing
+                    </CardTitle>
+                    <CardDescription className="text-xs text-[#888888] pt-1">
+                      Share this account's AI quota with teammates over the corporate VPN.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-5 pt-0 space-y-3">
+                    <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
+                      <label htmlFor="switch-p2p-share" className="space-y-0.5 cursor-pointer flex-1">
+                        <div className="text-xs font-semibold text-[#ededed]">Share Profile on VPN</div>
+                        <div className="text-[11px] text-[#666666]">
+                          Allows teammates on the VPN to discover and request leases for this profile.
+                        </div>
+                      </label>
+                      <Switch
+                        id="switch-p2p-share"
+                        size="sm"
+                        checked={shareConfig.enabled}
+                        disabled={isShareLoading}
+                        onCheckedChange={handleToggleShare}
+                      />
+                    </div>
+
+                    {shareConfig.enabled && (
+                      <>
+                        <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
+                          <label htmlFor="switch-p2p-auto" className="space-y-0.5 cursor-pointer flex-1">
+                            <div className="text-xs font-semibold text-[#ededed]">Auto-Approve Requests</div>
+                            <div className="text-[11px] text-[#666666]">
+                              Automatically grant leases without requiring manual confirmation.
+                            </div>
+                          </label>
+                          <Switch
+                            id="switch-p2p-auto"
+                            size="sm"
+                            checked={shareConfig.auto_approve}
+                            disabled={isShareLoading}
+                            onCheckedChange={(val) => {
+                              setShareConfig((prev) => ({ ...prev, auto_approve: val }));
+                              toggleShareProfile({
+                                name: currentProfile.name,
+                                agent: currentProfile.agent || 'claude',
+                                auto_approve: val,
+                                ttl: shareConfig.ttl,
+                                enabled: true,
+                              });
+                            }}
+                          />
+                        </div>
+
+                        <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4 text-xs">
+                          <div>
+                            <div className="text-xs font-semibold text-[#ededed]">Max Lease Duration</div>
+                            <div className="text-[11px] text-[#666666]">
+                              Borrower credentials automatically expire after this period.
+                            </div>
+                          </div>
+                          <select
+                            value={shareConfig.ttl}
+                            onChange={(e) => {
+                              const newTtl = e.target.value;
+                              setShareConfig((prev) => ({ ...prev, ttl: newTtl }));
+                              toggleShareProfile({
+                                name: currentProfile.name,
+                                agent: currentProfile.agent || 'claude',
+                                auto_approve: shareConfig.auto_approve,
+                                ttl: newTtl,
+                                enabled: true,
+                              });
+                            }}
+                            className="h-7 px-2 text-xs bg-[#141414] border border-[#2a2a2a] rounded-geist text-[#ededed] focus:outline-none"
+                          >
+                            <option value="1h">1 hour</option>
+                            <option value="2h">2 hours</option>
+                            <option value="4h">4 hours</option>
+                            <option value="8h">8 hours</option>
+                          </select>
+                        </div>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               </div>

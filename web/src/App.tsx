@@ -13,6 +13,7 @@ import { ProfilesView } from '@/views/ProfilesView';
 import { SessionsView } from '@/views/SessionsView';
 import { SessionDetailView } from '@/views/SessionDetailView';
 import { McpView } from '@/views/McpView';
+import { NetworkView } from '@/views/NetworkView';
 import { Sidebar } from '@/components/Sidebar';
 import { DaemonModal } from '@/components/DaemonModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
@@ -20,7 +21,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { SessionDetailSkeleton } from '@/components/Skeletons';
 import { ChevronRight } from 'lucide-react';
 
-type ViewType = 'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail';
+type ViewType = 'overview' | 'sessions' | 'mcp' | 'network' | 'profile-detail' | 'session-detail';
 
 function parseCurrentRoute(): {
   view: ViewType;
@@ -79,6 +80,17 @@ function parseCurrentRoute(): {
         profile: profileParam || 'all',
         tab: normalizedTab,
         mcpScope: scopeParam !== 'all' ? scopeParam : (profileParam && profileParam !== 'all' ? profileParam : 'all'),
+        sessionId: null,
+      };
+    }
+
+    // 4. Path-based route: /network (P2P Network Sharing)
+    if (rawPath === '/network') {
+      return {
+        view: 'network',
+        profile: profileParam || 'all',
+        tab: normalizedTab,
+        mcpScope: scopeParam,
         sessionId: null,
       };
     }
@@ -215,6 +227,8 @@ export function App() {
           if (mcpScope && mcpScope !== 'all') {
             params.set('scope', mcpScope);
           }
+        } else if (view === 'network') {
+          targetPath = '/network';
         }
 
         const queryString = params.toString();
@@ -344,7 +358,7 @@ export function App() {
   }, [fetchDaemonStatus, fetchProfiles]);
 
   // Navigation handlers
-  const handleSelectView = (view: 'overview' | 'sessions' | 'mcp') => {
+  const handleSelectView = (view: 'overview' | 'sessions' | 'mcp' | 'network') => {
     setViewedSession(null);
     setTargetSessionId(null);
     if (view === 'overview') {
@@ -359,6 +373,9 @@ export function App() {
       setSelectedMcpScope('all');
       setCurrentView('mcp');
       syncUrl('mcp', 'all', 'quota', 'all', null);
+    } else if (view === 'network') {
+      setCurrentView('network');
+      syncUrl('network', 'all', 'quota', 'all', null);
     }
   };
 
@@ -489,6 +506,12 @@ export function App() {
             )}
           </div>
         );
+      case 'network':
+        return (
+          <div className="flex items-center gap-1.5 text-sm font-mono">
+            <span className="text-foreground font-semibold">P2P Network Sharing</span>
+          </div>
+        );
     }
   };
 
@@ -575,6 +598,7 @@ export function App() {
                 profiles={profiles}
               />
             )}
+            {currentView === 'network' && <NetworkView />}
           </div>
         </main>
       </div>

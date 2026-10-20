@@ -148,6 +148,14 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("POST /api/daemon/uninstall", s.handleDaemonUninstall)
 	mux.HandleFunc("POST /api/daemon/run", s.handleDaemonRun)
 
+	// P2P Sharing & VPN Endpoints
+	mux.HandleFunc("GET /api/share/status", s.handleGetShareStatus)
+	mux.HandleFunc("POST /api/share/toggle", s.handleToggleShare)
+	mux.HandleFunc("GET /api/share/peers", s.handleGetSharePeers)
+	mux.HandleFunc("POST /api/share/peers", s.handleAddSharePeer)
+	mux.HandleFunc("POST /api/share/request", s.handleRequestShareLease)
+	mux.HandleFunc("POST /api/share/release", s.handleReleaseShareLease)
+
 	// Catch-all for undefined /api/ routes -> JSON 404
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 

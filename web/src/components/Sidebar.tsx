@@ -12,13 +12,13 @@ import { ProfileDTO, DaemonDTO } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface SidebarProps {
-  currentView: 'overview' | 'sessions' | 'mcp' | 'profile-detail' | 'session-detail';
+  currentView: 'overview' | 'sessions' | 'mcp' | 'network' | 'profile-detail' | 'session-detail';
   selectedProfile: string;
   profiles: ProfileDTO[];
   daemonInfo: DaemonDTO | null;
   version?: string;
   isOnline?: boolean;
-  onSelectView: (view: 'overview' | 'sessions' | 'mcp') => void;
+  onSelectView: (view: 'overview' | 'sessions' | 'mcp' | 'network') => void;
   onSelectProfile: (profileName: string) => void;
   onOpenAddProfile: () => void;
   onOpenDaemonModal: () => void;
@@ -108,6 +108,7 @@ export function Sidebar({
   const isOverviewActive = currentView === 'overview';
   const isSessionsActive = currentView === 'sessions' || currentView === 'session-detail';
   const isMcpActive = currentView === 'mcp';
+  const isNetworkActive = currentView === 'network';
 
   return (
     <aside className="w-64 border-r border-border bg-background flex flex-col h-full shrink-0 select-none">
@@ -200,6 +201,21 @@ export function Sidebar({
           >
             <Server className={`h-3.5 w-3.5 ${isMcpActive ? 'text-foreground' : 'text-muted-foreground'}`} />
             <span>MCP Catalog</span>
+          </button>
+
+          <button
+            role="tab"
+            aria-selected={isNetworkActive}
+            type="button"
+            onClick={() => onSelectView('network')}
+            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-geist text-xs font-sans transition-colors cursor-pointer text-left ${
+              isNetworkActive
+                ? 'bg-secondary text-foreground border border-border shadow-sm font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-card border border-transparent'
+            }`}
+          >
+            <Radio className={`h-3.5 w-3.5 ${isNetworkActive ? 'text-accent-cyan' : 'text-muted-foreground'}`} />
+            <span>P2P Network</span>
           </button>
         </div>
 
