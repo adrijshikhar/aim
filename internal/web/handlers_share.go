@@ -15,6 +15,7 @@ import (
 
 type ShareStatusResponse struct {
 	VPN            *share.VPNStatus            `json:"vpn"`
+	GlobalMode     string                      `json:"global_mode"`
 	SharedProfiles []share.SharedProfileConfig `json:"shared_profiles"`
 	Peers          []share.PeerInfo            `json:"peers"`
 	ActiveLeases   []ActiveLeaseInfo           `json:"active_leases"`
@@ -70,10 +71,34 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(ShareStatusResponse{
 		VPN:            vpn,
+		GlobalMode:     store.GetGlobalMode(),
 		SharedProfiles: shared,
 		Peers:          peers,
 		ActiveLeases:   activeLeases,
 	})
+}
+
+type SetGlobalModeRequest struct {
+	Mode string `json:"mode"`
+}
+
+func (s *Server) handleSetGlobalMode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req SetGlobalModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Mode == "" {
+		http.Error(w, "mode is required", http.StatusBadRequest)
+		return
+	}
+	store := share.NewStore(config.BaseDir())
+	if err := store.SetGlobalMode(req.Mode); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "mode": req.Mode})
 }
 
 type ToggleShareRequest struct {

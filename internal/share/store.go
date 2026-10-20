@@ -138,6 +138,41 @@ func (s *ShareStore) GetPeers() []PeerInfo {
 	return s.loadPeersLocked()
 }
 
+func (s *ShareStore) GetGlobalMode() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	data, err := os.ReadFile(filepath.Join(s.aimDir, "share_global.json"))
+	if err != nil {
+		return "off"
+	}
+	var m struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil || m.Mode == "" {
+		return "off"
+	}
+	return m.Mode
+}
+
+func (s *ShareStore) SetGlobalMode(mode string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if mode != "off" && mode != "request" && mode != "auto" {
+		mode = "off"
+	}
+	_ = os.MkdirAll(s.aimDir, 0700)
+	target := filepath.Join(s.aimDir, "share_global.json")
+	data, err := json.MarshalIndent(map[string]string{"mode": mode}, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d", target, time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, target)
+}
+
 func (s *ShareStore) loadPeersLocked() []PeerInfo {
 	data, err := os.ReadFile(s.peerFile)
 	if err != nil {

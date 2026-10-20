@@ -409,6 +409,7 @@ export interface PeerInfoDTO {
   port: number;
   last_seen: string;
   profiles: string[];
+  shared_profiles?: SharedProfileConfigDTO[];
 }
 
 export interface ActiveLeaseDTO {
@@ -423,6 +424,7 @@ export interface ActiveLeaseDTO {
 
 export interface ShareStatusDTO {
   vpn: VPNStatusDTO | null;
+  global_mode: 'off' | 'request' | 'auto';
   shared_profiles: SharedProfileConfigDTO[];
   peers: PeerInfoDTO[];
   active_leases: ActiveLeaseDTO[];
@@ -431,6 +433,15 @@ export interface ShareStatusDTO {
 export async function getShareStatus(): Promise<ShareStatusDTO> {
   const res = await fetch(`${BASE_URL}/share/status`);
   return handleResponse<ShareStatusDTO>(res);
+}
+
+export async function setGlobalShareMode(mode: 'off' | 'request' | 'auto'): Promise<{ ok: boolean; mode: string }> {
+  const res = await fetch(`${BASE_URL}/share/global`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  return handleResponse<{ ok: boolean; mode: string }>(res);
 }
 
 export async function toggleShareProfile(payload: {

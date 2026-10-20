@@ -25,10 +25,11 @@ func NewDiscovery(store *ShareStore, port int) *DiscoveryService {
 }
 
 type PingResponse struct {
-	NodeID   string   `json:"node_id"`
-	HostName string   `json:"hostname"`
-	VPNIP    string   `json:"vpn_ip"`
-	Profiles []string `json:"profiles"`
+	NodeID         string                `json:"node_id"`
+	HostName       string                `json:"hostname"`
+	VPNIP          string                `json:"vpn_ip"`
+	Profiles       []string              `json:"profiles"`
+	SharedProfiles []SharedProfileConfig `json:"shared_profiles,omitempty"`
 }
 
 func (d *DiscoveryService) PingPeerWithURL(ctx context.Context, rawURL string) (*PeerInfo, error) {
@@ -52,12 +53,13 @@ func (d *DiscoveryService) PingPeerWithURL(ctx context.Context, rawURL string) (
 	}
 
 	peer := &PeerInfo{
-		ID:       pr.NodeID,
-		HostName: pr.HostName,
-		VPNIP:    pr.VPNIP,
-		Port:     d.port,
-		LastSeen: time.Now(),
-		Profiles: pr.Profiles,
+		ID:             pr.NodeID,
+		HostName:       pr.HostName,
+		VPNIP:          pr.VPNIP,
+		Port:           d.port,
+		LastSeen:       time.Now(),
+		Profiles:       pr.Profiles,
+		SharedProfiles: pr.SharedProfiles,
 	}
 	_ = d.store.SavePeer(*peer)
 	return peer, nil

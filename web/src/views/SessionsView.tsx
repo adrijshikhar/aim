@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
+import { SelectDropdown } from '@/components/ui/select-dropdown';
 import {
   Terminal,
   Search,
@@ -1013,15 +1014,18 @@ export function SessionsView({
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <span>Rows per page:</span>
-              <select
-                value={table.getState().pagination.pageSize}
-                onChange={(e) => table.setPageSize(Number(e.target.value))}
-                className="h-7 px-2 text-xs font-mono rounded-geist border border-border bg-[#0a0a0a] text-[#ededed] hover:border-[#333333] focus:outline-none cursor-pointer"
-              >
-                <option value={15}>15</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-              </select>
+              <div className="w-20">
+                <SelectDropdown
+                  value={table.getState().pagination.pageSize}
+                  onChange={(val) => table.setPageSize(Number(val))}
+                  size="xs"
+                  options={[
+                    { value: 15, label: '15' },
+                    { value: 25, label: '25' },
+                    { value: 50, label: '50' },
+                  ]}
+                />
+              </div>
             </div>
 
             <div className="flex items-center gap-1">

@@ -11,12 +11,13 @@ type SharedProfileConfig struct {
 }
 
 type PeerInfo struct {
-	ID       string    `json:"id"`
-	HostName string    `json:"hostname"`
-	VPNIP    string    `json:"vpn_ip"`
-	Port     int       `json:"port"`
-	LastSeen time.Time `json:"last_seen"`
-	Profiles []string  `json:"profiles"`
+	ID             string                `json:"id"`
+	HostName       string                `json:"hostname"`
+	VPNIP          string                `json:"vpn_ip"`
+	Port           int                   `json:"port"`
+	LastSeen       time.Time             `json:"last_seen"`
+	Profiles       []string              `json:"profiles"`
+	SharedProfiles []SharedProfileConfig `json:"shared_profiles,omitempty"`
 }
 
 type LeaseRecord struct {

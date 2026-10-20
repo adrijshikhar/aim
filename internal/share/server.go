@@ -99,10 +99,11 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 	host, _ := os.Hostname()
 	resp := PingResponse{
-		NodeID:   s.nodeID,
-		HostName: host,
-		VPNIP:    r.Host,
-		Profiles: names,
+		NodeID:         s.nodeID,
+		HostName:       host,
+		VPNIP:          r.Host,
+		Profiles:       names,
+		SharedProfiles: profiles,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

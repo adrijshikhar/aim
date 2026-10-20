@@ -10,17 +10,15 @@ import {
   Check,
   Search,
   AlertTriangle,
-  UserCheck,
   Plus,
   X,
-  Share2,
 } from 'lucide-react';
 import {
   getShareStatus,
+  setGlobalShareMode,
   addSharePeer,
   requestShareLease,
   releaseShareLease,
-  toggleShareProfile,
   ShareStatusDTO,
   PeerInfoDTO,
   ProfileDTO,
@@ -31,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AgentBadge } from '@/components/AgentBadge';
+import { SelectDropdown } from '@/components/ui/select-dropdown';
 import {
   Dialog,
   DialogContent,
@@ -47,15 +46,14 @@ interface NetworkViewProps {
   profiles?: ProfileDTO[];
 }
 
-export function NetworkView({ profiles = [] }: NetworkViewProps) {
+export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
   const { toast } = useToast();
   const [data, setData] = React.useState<ShareStatusDTO | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [filterQuery, setFilterQuery] = React.useState('');
   const [copiedCmd, setCopiedCmd] = React.useState<string | null>(null);
 
-  // Top-right Sharing Slider state
-  const [selectedLocalProfile, setSelectedLocalProfile] = React.useState<string>('');
+  // Global Sharing Slider state
   const [isShareUpdating, setIsShareUpdating] = React.useState(false);
 
   // Connect Peer Modal state
@@ -66,6 +64,8 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   // Request Lease Modal state
   const [selectedPeer, setSelectedPeer] = React.useState<PeerInfoDTO | null>(null);
   const [selectedProfile, setSelectedProfile] = React.useState<string>('');
+  const [selectedAgent, setSelectedAgent] = React.useState<string>('claude');
+  const [selectedIsAuto, setSelectedIsAuto] = React.useState<boolean>(false);
   const [leaseHours, setLeaseHours] = React.useState<number>(4);
   const [isRequesting, setIsRequesting] = React.useState(false);
 
@@ -93,13 +93,6 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     return () => clearInterval(interval);
   }, [loadStatus]);
 
-  // Set default selected profile for sharing controls
-  React.useEffect(() => {
-    if (!selectedLocalProfile && profiles.length > 0) {
-      setSelectedLocalProfile(profiles[0].name);
-    }
-  }, [profiles, selectedLocalProfile]);
-
   // Keyboard shortcut for search
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -118,42 +111,22 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Compute sharing state of selected local profile
-  const currentSharedProfileConfig = React.useMemo(() => {
-    if (!data?.shared_profiles || !selectedLocalProfile) return null;
-    return data.shared_profiles.find((p) => p.name === selectedLocalProfile) || null;
-  }, [data?.shared_profiles, selectedLocalProfile]);
+  const currentGlobalMode: ShareMode = data?.global_mode || 'off';
 
-  const currentShareMode: ShareMode = React.useMemo(() => {
-    if (!currentSharedProfileConfig || !currentSharedProfileConfig.enabled) return 'off';
-    if (currentSharedProfileConfig.auto_approve) return 'auto';
-    return 'request';
-  }, [currentSharedProfileConfig]);
-
-  const handleSetShareMode = async (profileName: string, mode: ShareMode) => {
-    if (!profileName) return;
+  const handleGlobalModeChange = async (mode: ShareMode) => {
+    if (isShareUpdating) return;
     setIsShareUpdating(true);
-    const enabled = mode !== 'off';
-    const auto_approve = mode === 'auto';
-    const profObj = profiles.find((p) => p.name === profileName);
-    const agent = profObj?.agent || 'claude';
     try {
-      await toggleShareProfile({
-        name: profileName,
-        agent,
-        auto_approve,
-        ttl: '4h',
-        enabled,
-      });
+      await setGlobalShareMode(mode);
       const titles: Record<ShareMode, string> = {
-        off: 'Sharing Disabled',
-        request: 'Sharing Active (Request Approval)',
-        auto: 'Sharing Active (Auto-Approve)',
+        off: 'Global Sharing Disabled',
+        request: 'Global Sharing: Request Mode',
+        auto: 'Global Sharing: Auto Approve',
       };
       const descs: Record<ShareMode, string> = {
-        off: `Profile "${profileName}" is no longer shared on the VPN.`,
-        request: `Profile "${profileName}" is shared. Teammate lease requests require your approval.`,
-        auto: `Profile "${profileName}" is shared. Teammate lease requests are granted automatically.`,
+        off: 'Profile sharing is disabled on this node.',
+        request: 'Global sharing active. Teammate lease requests require approval.',
+        auto: 'Global sharing active. Teammate lease requests are granted automatically.',
       };
       toast({
         title: titles[mode],
@@ -162,7 +135,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
       });
       await loadStatus();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Could not update sharing state';
+      const msg = err instanceof Error ? err.message : 'Could not update global sharing mode';
       toast({
         title: 'Sharing update failed',
         description: msg,
@@ -206,14 +179,14 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
       const res = await requestShareLease({
         peer: selectedPeer.hostname,
         profile: selectedProfile,
-        agent: 'claude',
+        agent: selectedAgent,
         hours: leaseHours,
       });
 
       if (res.ok && res.local_profile) {
         toast({
           title: 'Lease Granted',
-          description: `Installed as ${res.local_profile}. Run with: aim run claude ${res.local_profile}`,
+          description: `Installed as ${res.local_profile}. Run with: aim run ${selectedAgent} ${res.local_profile}`,
           variant: 'success',
         });
         setSelectedPeer(null);
@@ -316,93 +289,89 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           </p>
         </div>
 
-        {/* TOP RIGHT CONTROLS: Profile Picker + 3-Level Slider + Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-auto shrink-0">
-          {/* 3-Level Segmented Slider for local profile sharing */}
-          <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
-            {profiles.length > 1 ? (
-              <div className="flex items-center gap-1.5 pl-2 pr-1 border-r border-[#262626] mr-1">
-                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
-                <select
-                  value={selectedLocalProfile}
-                  onChange={(e) => setSelectedLocalProfile(e.target.value)}
-                  className="bg-transparent text-xs font-mono text-[#ededed] focus:outline-none cursor-pointer pr-1"
-                  title="Select local profile to share"
-                >
-                  {profiles.map((p) => (
-                    <option key={p.name} value={p.name} className="bg-[#141414] text-[#ededed]">
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : profiles.length === 1 ? (
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1 border-r border-[#262626] mr-1">
-                <Share2 className="h-3 w-3 text-accent-cyan" />
-                {profiles[0].name}:
-              </span>
-            ) : (
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1 border-r border-[#262626] mr-1">
-                <Share2 className="h-3 w-3 text-accent-cyan" />
-                P2P:
-              </span>
-            )}
+        {/* TOP RIGHT CONTROLS: 3-Stop Global Sharing Slider + Action Buttons */}
+        <div className="flex flex-wrap items-center gap-3 self-start lg:self-auto shrink-0">
+          {/* True 3-Stop Gliding Capsule Slider for Global Profile Sharing */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono uppercase tracking-wider text-[#888888] flex items-center gap-1.5 hidden sm:inline-flex">
+              <Radio className="h-3.5 w-3.5 text-accent-cyan" />
+              <span>Global Sharing:</span>
+            </span>
+            <div
+              className={cn(
+                'relative flex items-center p-0.5 rounded-full bg-[#111111] border border-[#262626] h-8 w-[270px] select-none shadow-inner',
+                isShareUpdating && 'opacity-70 cursor-wait'
+              )}
+            >
+              {/* Physical Sliding Pill Capsule Thumb */}
+              <div
+                className={cn(
+                  'absolute top-0.5 bottom-0.5 rounded-full transition-all duration-300 ease-out shadow-md pointer-events-none',
+                  currentGlobalMode === 'off' &&
+                    'left-[2px] w-[calc((100%-4px)/3)] bg-[#222222] border border-[#383838]',
+                  currentGlobalMode === 'request' &&
+                    'left-[calc(2px+(100%-4px)/3)] w-[calc((100%-4px)/3)] bg-[#142334] border border-[#1f4068]',
+                  currentGlobalMode === 'auto' &&
+                    'left-[calc(2px+((100%-4px)/3)*2)] w-[calc((100%-4px)/3)] bg-[#183925] border border-[#235836]'
+                )}
+              />
 
-            {/* 3 Level Buttons: Off | Request | Auto Approve */}
-            <button
-              type="button"
-              disabled={isShareUpdating || !selectedLocalProfile}
-              onClick={() => handleSetShareMode(selectedLocalProfile, 'off')}
-              className={cn(
-                'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer',
-                currentShareMode === 'off'
-                  ? 'bg-[#262626] text-[#ededed] shadow-xs font-semibold'
-                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
-              )}
-              title="Profile is private and not shared on VPN"
-            >
-              Off
-            </button>
-            <button
-              type="button"
-              disabled={isShareUpdating || !selectedLocalProfile}
-              onClick={() => handleSetShareMode(selectedLocalProfile, 'request')}
-              className={cn(
-                'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5',
-                currentShareMode === 'request'
-                  ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold'
-                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
-              )}
-              title="Profile is shared; teammate lease requests require manual approval"
-            >
-              <span
+              {/* 3 Stop Interactive Options */}
+              <button
+                type="button"
+                disabled={isShareUpdating}
+                onClick={() => handleGlobalModeChange('off')}
                 className={cn(
-                  'h-1.5 w-1.5 rounded-full',
-                  currentShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
+                  'relative z-10 flex-1 h-full flex items-center justify-center text-xs font-mono transition-colors duration-200 cursor-pointer',
+                  currentGlobalMode === 'off'
+                    ? 'text-[#ededed] font-medium'
+                    : 'text-[#777777] hover:text-[#cccccc]'
                 )}
-              />
-              Request
-            </button>
-            <button
-              type="button"
-              disabled={isShareUpdating || !selectedLocalProfile}
-              onClick={() => handleSetShareMode(selectedLocalProfile, 'auto')}
-              className={cn(
-                'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5',
-                currentShareMode === 'auto'
-                  ? 'bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold'
-                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
-              )}
-              title="Profile is shared; teammate lease requests are auto-approved"
-            >
-              <span
+                title="Global sharing disabled (node is private)"
+              >
+                Off
+              </button>
+              <button
+                type="button"
+                disabled={isShareUpdating}
+                onClick={() => handleGlobalModeChange('request')}
                 className={cn(
-                  'h-1.5 w-1.5 rounded-full',
-                  currentShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
+                  'relative z-10 flex-1 h-full flex items-center justify-center gap-1.5 text-xs font-mono transition-colors duration-200 cursor-pointer',
+                  currentGlobalMode === 'request'
+                    ? 'text-[#52a8ff] font-medium'
+                    : 'text-[#777777] hover:text-[#cccccc]'
                 )}
-              />
-              Auto Approve
-            </button>
+                title="Global sharing enabled with manual request approval"
+              >
+                <span
+                  className={cn(
+                    'h-1.5 w-1.5 rounded-full transition-colors',
+                    currentGlobalMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#555555]'
+                  )}
+                />
+                Request
+              </button>
+              <button
+                type="button"
+                disabled={isShareUpdating}
+                onClick={() => handleGlobalModeChange('auto')}
+                className={cn(
+                  'relative z-10 flex-1 h-full flex items-center justify-center gap-1.5 text-xs font-mono transition-colors duration-200 cursor-pointer',
+                  currentGlobalMode === 'auto'
+                    ? 'text-[#46a758] font-medium'
+                    : 'text-[#777777] hover:text-[#cccccc]'
+                )}
+                title="Global sharing enabled with auto approve"
+              >
+                <span
+                  className={cn(
+                    'h-1.5 w-1.5 rounded-full transition-colors',
+                    currentGlobalMode === 'auto' ? 'bg-[#46a758]' : 'bg-[#555555]'
+                  )}
+                />
+                Auto Approve
+              </button>
+            </div>
           </div>
 
           {/* Refresh Action */}
@@ -676,30 +645,49 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
                         {peer.profiles && peer.profiles.length > 0 ? (
                           <div className="space-y-1.5">
-                            {peer.profiles.map((prof) => (
-                              <div
-                                key={prof}
-                                className="flex items-center justify-between gap-2 px-3 py-2 rounded-geist bg-[#141414] border border-[#222222] text-xs"
-                              >
-                                <div className="flex items-center gap-2 truncate">
-                                  <UserCheck className="h-3.5 w-3.5 text-accent-cyan shrink-0" />
-                                  <span className="font-mono text-foreground font-medium truncate">
-                                    {prof}
-                                  </span>
-                                </div>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSelectedPeer(peer);
-                                    setSelectedProfile(prof);
-                                  }}
-                                  className="h-6 px-2.5 text-xs font-mono rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#262626] text-foreground cursor-pointer shrink-0"
+                            {peer.profiles.map((prof) => {
+                              const sp = peer.shared_profiles?.find((p) => p.name === prof);
+                              const agent = sp?.agent || 'claude';
+                              const isAuto = sp ? sp.auto_approve : true;
+                              return (
+                                <div
+                                  key={prof}
+                                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-geist bg-[#141414] border border-[#222222] text-xs hover:border-[#333333] transition-colors"
                                 >
-                                  Borrow
-                                </Button>
-                              </div>
-                            ))}
+                                  <div className="flex items-center gap-2 truncate min-w-0">
+                                    <AgentBadge agent={agent} size="sm" />
+                                    <span className="font-mono text-foreground font-medium truncate">
+                                      {prof}
+                                    </span>
+                                    {sp && (
+                                      <span
+                                        className={cn(
+                                          'text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0',
+                                          isAuto
+                                            ? 'bg-[#183925]/50 text-[#46a758] border-[#235836]/60'
+                                            : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
+                                        )}
+                                      >
+                                        {isAuto ? 'Auto' : 'Request'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelectedPeer(peer);
+                                      setSelectedProfile(prof);
+                                      setSelectedAgent(agent);
+                                      setSelectedIsAuto(isAuto);
+                                    }}
+                                    className="h-6 px-2.5 text-xs font-mono rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#262626] text-foreground cursor-pointer shrink-0"
+                                  >
+                                    Borrow
+                                  </Button>
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="p-3 rounded-geist bg-[#141414] border border-[#1e1e1e] text-[11px] text-muted-foreground text-center italic">
@@ -718,20 +706,23 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
       {/* Connect Peer Dialog Modal */}
       <Dialog open={isConnectOpen} onOpenChange={setIsConnectOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
           <form onSubmit={handleAddPeer}>
-            <DialogHeader>
-              <DialogTitle className="text-base font-semibold text-foreground">
-                Connect Teammate Peer
-              </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Enter a teammate's hostname (e.g. <code>Adrijs-MacBook-Pro.local</code>) or their VPN tunnel IP (e.g. <code>10.8.16.9</code>).
+            <DialogHeader className="space-y-1 pb-3 border-b border-[#222222] pr-6">
+              <div className="flex items-center gap-2">
+                <Laptop className="h-4 w-4 text-[#61afef]" />
+                <DialogTitle className="text-base font-semibold text-[#ededed]">
+                  Connect Teammate Peer
+                </DialogTitle>
+              </div>
+              <DialogDescription className="text-xs text-[#888888]">
+                Enter a teammate&apos;s hostname (e.g. <code>Adrijs-MacBook-Pro.local</code>) or their VPN tunnel IP (e.g. <code>10.8.16.9</code>).
               </DialogDescription>
             </DialogHeader>
 
             <div className="py-4 space-y-3">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-foreground">
+                <label className="text-xs font-medium text-[#ededed]">
                   Teammate Hostname or IP
                 </label>
                 <Input
@@ -743,12 +734,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   className="h-9 text-xs font-mono bg-[#141414] border-[#262626] rounded-geist text-foreground"
                 />
               </div>
-              <p className="text-[11px] font-mono text-muted-foreground">
+              <p className="text-[11px] font-mono text-[#666666]">
                 AIM will verify connectivity over port :4319 and query available shared profiles.
               </p>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="pt-2 border-t border-[#222222]">
               <Button
                 type="button"
                 variant="outline"
@@ -771,7 +762,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Request Lease Dialog Modal */}
+      {/* Request Profile Lease Dialog Modal */}
       <Dialog
         open={!!(selectedPeer && selectedProfile)}
         onOpenChange={(open) => {
@@ -781,54 +772,87 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           }
         }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-base font-semibold text-foreground">
-              Request Profile Lease
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Borrow credentials from host{' '}
-              <span className="font-semibold text-foreground">{selectedPeer?.hostname}</span>
+        <DialogContent className="max-w-md bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
+          <DialogHeader className="space-y-1 pb-3 border-b border-[#222222] pr-6">
+            <div className="flex items-center gap-2">
+              <Radio className="h-4 w-4 text-accent-cyan" />
+              <DialogTitle className="text-base font-semibold text-[#ededed]">
+                Request Profile Lease
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-[#888888]">
+              Borrow credentials from teammate on internal VPN subnet.
             </DialogDescription>
           </DialogHeader>
 
           <div className="py-2 space-y-4">
-            <div className="space-y-2.5 bg-[#141414] p-3.5 rounded-geist border border-[#222222] text-xs font-mono">
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Remote Host:</span>
-                <span className="text-foreground font-semibold">{selectedPeer?.hostname}</span>
+            {/* Metadata Strip matching Geist standards */}
+            <div className="rounded-geist border border-[#262626] bg-[#0a0a0a] p-3 text-xs space-y-2">
+              <div className="flex items-center justify-between text-[#888888]">
+                <span>Remote Host</span>
+                <span className="font-mono text-[#ededed] font-medium flex items-center gap-1.5">
+                  <Laptop className="h-3.5 w-3.5 text-[#61afef]" />
+                  {selectedPeer?.hostname}
+                </span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Remote Profile:</span>
-                <span className="text-foreground font-semibold">{selectedProfile}</span>
+              <div className="flex items-center justify-between text-[#888888]">
+                <span>Offered Profile</span>
+                <div className="flex items-center gap-2">
+                  <AgentBadge agent={selectedAgent} size="sm" />
+                  <span className="font-mono text-[#ededed] font-medium">
+                    {selectedProfile}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between items-center pt-2 border-t border-[#222222]">
-                <span className="text-muted-foreground">Local Lease Identifier:</span>
-                <span className="text-accent-cyan font-bold">
+              <div className="flex items-center justify-between text-[#888888]">
+                <span>Approval Policy</span>
+                <span
+                  className={cn(
+                    'font-mono text-[11px] font-medium px-1.5 py-0.5 rounded border',
+                    selectedIsAuto
+                      ? 'bg-[#183925]/50 text-[#46a758] border-[#235836]/60'
+                      : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
+                  )}
+                >
+                  {selectedIsAuto ? 'Instant Auto-Approve' : 'Manual Approval Required'}
+                </span>
+              </div>
+              <div className="pt-2 border-t border-[#1f1f1f] flex items-center justify-between">
+                <span className="text-[#888888]">Local Profile ID</span>
+                <span className="font-mono font-bold text-accent-cyan">
                   {selectedPeer?.hostname}:{selectedProfile}
                 </span>
               </div>
             </div>
 
+            {/* Lease Duration with SelectDropdown */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">Lease Duration</label>
-              <select
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-[#ededed]">
+                  Lease Duration
+                </label>
+                <span className="text-[10px] text-[#666666] font-mono">
+                  Auto-purged after expiry
+                </span>
+              </div>
+              <SelectDropdown
                 value={leaseHours}
-                onChange={(e) => setLeaseHours(Number(e.target.value))}
-                className="w-full h-8 px-2.5 text-xs bg-[#161616] border border-[#262626] rounded-geist text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
-              >
-                <option value={1}>1 hour</option>
-                <option value={2}>2 hours</option>
-                <option value={4}>4 hours (Recommended)</option>
-                <option value={8}>8 hours (Full Workday)</option>
-              </select>
-              <p className="text-[11px] text-muted-foreground leading-relaxed pt-1">
-                Once approved, credentials operate 100% locally in your isolated profile directory. The teammate's laptop can sleep or disconnect without interrupting your active sessions.
+                onChange={(val) => setLeaseHours(Number(val))}
+                size="sm"
+                options={[
+                  { value: 1, label: '1 hour' },
+                  { value: 2, label: '2 hours' },
+                  { value: 4, label: '4 hours (Recommended)' },
+                  { value: 8, label: '8 hours (Full Workday)' },
+                ]}
+              />
+              <p className="text-[11px] text-[#666666] leading-relaxed pt-1">
+                Once granted, credentials operate 100% locally in your isolated profile directory. The teammate&apos;s machine can sleep or disconnect without interrupting your active sessions.
               </p>
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="pt-2 border-t border-[#222222]">
             <Button
               type="button"
               variant="outline"
@@ -848,7 +872,11 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               onClick={handleRequestLease}
               className="rounded-geist text-xs font-medium bg-foreground text-background hover:bg-foreground/90"
             >
-              {isRequesting ? 'Requesting...' : 'Confirm Lease'}
+              {isRequesting
+                ? 'Requesting...'
+                : selectedIsAuto
+                ? 'Instant Borrow'
+                : 'Confirm Lease'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -20,6 +20,7 @@ import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
+import { SelectDropdown } from '@/components/ui/select-dropdown';
 import {
   Plus,
   Trash2,
@@ -1516,27 +1517,29 @@ export function ProfilesView({
                               Borrower credentials automatically expire and are purged after this period.
                             </div>
                           </div>
-                          <select
-                            value={shareConfig.ttl}
-                            disabled={isShareLoading}
-                            onChange={(e) => {
-                              const newTtl = e.target.value;
-                              setShareConfig((prev) => ({ ...prev, ttl: newTtl }));
-                              toggleShareProfile({
-                                name: currentProfile.name,
-                                agent: currentProfile.agent || 'claude',
-                                auto_approve: currentShareMode === 'auto',
-                                ttl: newTtl,
-                                enabled: true,
-                              });
-                            }}
-                            className="h-8 px-2.5 text-xs bg-[#141414] border border-[#2a2a2a] rounded-geist text-[#ededed] focus:outline-none font-mono"
-                          >
-                            <option value="1h">1 hour</option>
-                            <option value="2h">2 hours</option>
-                            <option value="4h">4 hours (Recommended)</option>
-                            <option value="8h">8 hours (Workday)</option>
-                          </select>
+                          <div className="w-44 shrink-0">
+                            <SelectDropdown
+                              value={shareConfig.ttl}
+                              disabled={isShareLoading}
+                              onChange={(newTtl) => {
+                                setShareConfig((prev) => ({ ...prev, ttl: String(newTtl) }));
+                                toggleShareProfile({
+                                  name: currentProfile.name,
+                                  agent: currentProfile.agent || 'claude',
+                                  auto_approve: currentShareMode === 'auto',
+                                  ttl: String(newTtl),
+                                  enabled: true,
+                                });
+                              }}
+                              size="sm"
+                              options={[
+                                { value: '1h', label: '1 hour' },
+                                { value: '2h', label: '2 hours' },
+                                { value: '4h', label: '4 hours (Recommended)' },
+                                { value: '8h', label: '8 hours (Workday)' },
+                              ]}
+                            />
+                          </div>
                         </div>
                       </>
                     )}

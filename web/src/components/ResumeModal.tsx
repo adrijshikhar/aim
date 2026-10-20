@@ -11,6 +11,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Checkbox } from './ui/checkbox';
+import { SelectDropdown } from './ui/select-dropdown';
 import { Terminal, Copy, Check, RefreshCw, Folder, MessageSquare, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { SessionDTO, ResumeRequest, AdapterDTO, getAdapters, RunnableFlagDTO } from '../lib/api';
 
@@ -265,19 +266,20 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               </label>
               <span className="text-[10px] text-[#666666] font-mono">Environment Target</span>
             </div>
-            <select
+            <SelectDropdown
               id="terminal-select"
               value={selectedTerminal}
-              onChange={(e) => setSelectedTerminal(e.target.value)}
-              className="w-full h-8 px-2.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] focus:border-[#444444] focus:outline-none cursor-pointer"
-            >
-              <option value="default">Default System Terminal</option>
-              <option value="Ghostty">Ghostty</option>
-              <option value="iTerm">iTerm2</option>
-              <option value="Terminal">Terminal.app</option>
-              <option value="Kitty">Kitty</option>
-              <option value="Alacritty">Alacritty</option>
-            </select>
+              onChange={(val) => setSelectedTerminal(String(val))}
+              size="sm"
+              options={[
+                { value: 'default', label: 'Default System Terminal' },
+                { value: 'Ghostty', label: 'Ghostty' },
+                { value: 'iTerm', label: 'iTerm2' },
+                { value: 'Terminal', label: 'Terminal.app' },
+                { value: 'Kitty', label: 'Kitty' },
+                { value: 'Alacritty', label: 'Alacritty' },
+              ]}
+            />
           </div>
 
           {/* Section 1: AIM Direct Flags */}

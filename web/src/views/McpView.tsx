@@ -22,6 +22,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { SelectDropdown } from '@/components/ui/select-dropdown';
 
 const KNOWN_SERVER_TOOLS: Record<string, Array<{ name: string; description: string; params?: string[] }>> = {
   'claude-mem': [
@@ -244,22 +245,21 @@ export function McpView({
         </div>
 
         {/* Scope Dropdown Filter */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-[160px]">
           <span className="text-xs text-[#666666] font-mono hidden sm:inline">Scope:</span>
-          <select
+          <SelectDropdown
             value={selectedScope}
-            onChange={(e) => onSelectScope && onSelectScope(e.target.value)}
-            className="h-8 px-2.5 text-xs font-mono rounded-geist border border-border bg-card text-foreground hover:border-border/80 focus:outline-none focus:border-border/80 cursor-pointer"
-            title="Filter by Scope"
-          >
-            <option value="all">All Scopes</option>
-            <option value="global">Global Only</option>
-            {profileScopeOptions.map((name) => (
-              <option key={name} value={name}>
-                Profile: {name}
-              </option>
-            ))}
-          </select>
+            onChange={(val) => onSelectScope && onSelectScope(String(val))}
+            size="sm"
+            options={[
+              { value: 'all', label: 'All Scopes' },
+              { value: 'global', label: 'Global Only' },
+              ...profileScopeOptions.map((name) => ({
+                value: name,
+                label: `Profile: ${name}`,
+              })),
+            ]}
+          />
         </div>
       </div>
 

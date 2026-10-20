@@ -150,6 +150,7 @@ func (s *Server) setupRoutes() {
 
 	// P2P Sharing & VPN Endpoints
 	mux.HandleFunc("GET /api/share/status", s.handleGetShareStatus)
+	mux.HandleFunc("POST /api/share/global", s.handleSetGlobalMode)
 	mux.HandleFunc("POST /api/share/toggle", s.handleToggleShare)
 	mux.HandleFunc("GET /api/share/peers", s.handleGetSharePeers)
 	mux.HandleFunc("POST /api/share/peers", s.handleAddSharePeer)
