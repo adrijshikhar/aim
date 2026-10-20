@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/profile"
 )
 
 type PendingRequestInfo struct {
@@ -264,6 +266,7 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 
 	switch agent {
 	case "claude":
+		_ = profile.HarvestKeychainTokenToProfile("claude", profDir)
 		credsPath := filepath.Join(profDir, ".claude", ".credentials.json")
 		if data, err := os.ReadFile(credsPath); err == nil {
 			files[".claude/.credentials.json"] = base64.StdEncoding.EncodeToString(data)
@@ -271,6 +274,10 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 		authPath := filepath.Join(profDir, ".claude", "auth.json")
 		if data, err := os.ReadFile(authPath); err == nil {
 			files[".claude/auth.json"] = base64.StdEncoding.EncodeToString(data)
+		}
+		claudeJSONPath := filepath.Join(profDir, ".claude.json")
+		if data, err := os.ReadFile(claudeJSONPath); err == nil {
+			files[".claude.json"] = base64.StdEncoding.EncodeToString(data)
 		}
 	case "codex":
 		authPath := filepath.Join(profDir, ".config", "codex", "auth.json")
