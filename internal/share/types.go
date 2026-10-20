@@ -53,3 +53,25 @@ type LeaseResponse struct {
 	Payload     *SharePayload `json:"payload,omitempty"`
 	Message     string        `json:"message,omitempty"`
 }
+
+type GrantedLease struct {
+	LeaseID      string    `json:"lease_id"`
+	ProfileName  string    `json:"profile_name"`
+	Agent        string    `json:"agent"`
+	BorrowerID   string    `json:"borrower_id"`
+	BorrowerIP   string    `json:"borrower_ip"`
+	GrantedAt    time.Time `json:"granted_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	Revoked      bool      `json:"revoked"`
+	AutoApproved bool      `json:"auto_approved"`
+}
+
+type AuditEntry struct {
+	ID        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Action    string    `json:"action"` // "LEASE_REQUESTED", "LEASE_GRANTED", "LEASE_DENIED", "LEASE_REVOKED", "GLOBAL_MODE"
+	Actor     string    `json:"actor"`  // peer hostname or "local"
+	Profile   string    `json:"profile,omitempty"`
+	Agent     string    `json:"agent,omitempty"`
+	Details   string    `json:"details"`
+}

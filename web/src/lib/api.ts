@@ -422,17 +422,56 @@ export interface ActiveLeaseDTO {
   is_expired: boolean;
 }
 
+export interface GrantedLeaseDTO {
+  lease_id: string;
+  profile_name: string;
+  agent: string;
+  borrower_id: string;
+  borrower_ip: string;
+  granted_at: string;
+  expires_at: string;
+  revoked: boolean;
+  auto_approved: boolean;
+}
+
+export interface AuditEntryDTO {
+  id: string;
+  timestamp: string;
+  action: string;
+  actor: string;
+  profile?: string;
+  agent?: string;
+  details: string;
+}
+
 export interface ShareStatusDTO {
   vpn: VPNStatusDTO | null;
   global_mode: 'off' | 'request' | 'auto';
   shared_profiles: SharedProfileConfigDTO[];
   peers: PeerInfoDTO[];
   active_leases: ActiveLeaseDTO[];
+  granted_leases?: GrantedLeaseDTO[];
+  audit_logs?: AuditEntryDTO[];
 }
 
-export async function getShareStatus(): Promise<ShareStatusDTO> {
-  const res = await fetch(`${BASE_URL}/share/status`);
+export async function getShareStatus(refresh = false): Promise<ShareStatusDTO> {
+  const url = refresh ? `${BASE_URL}/share/status?refresh=true` : `${BASE_URL}/share/status`;
+  const res = await fetch(url);
   return handleResponse<ShareStatusDTO>(res);
+}
+
+export async function revokeShareLease(leaseId: string): Promise<{ ok: boolean; revoked: GrantedLeaseDTO }> {
+  const res = await fetch(`${BASE_URL}/share/revoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lease_id: leaseId }),
+  });
+  return handleResponse<{ ok: boolean; revoked: GrantedLeaseDTO }>(res);
+}
+
+export async function getShareAudit(): Promise<AuditEntryDTO[]> {
+  const res = await fetch(`${BASE_URL}/share/audit`);
+  return handleResponse<AuditEntryDTO[]>(res);
 }
 
 export async function setGlobalShareMode(mode: 'off' | 'request' | 'auto'): Promise<{ ok: boolean; mode: string }> {

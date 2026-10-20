@@ -12,10 +12,15 @@ import {
   AlertTriangle,
   Plus,
   X,
+  Share2,
+  ShieldAlert,
+  Activity,
 } from 'lucide-react';
 import {
   getShareStatus,
   setGlobalShareMode,
+  toggleShareProfile,
+  revokeShareLease,
   addSharePeer,
   requestShareLease,
   releaseShareLease,
@@ -46,7 +51,7 @@ interface NetworkViewProps {
   profiles?: ProfileDTO[];
 }
 
-export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
+export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const { toast } = useToast();
   const [data, setData] = React.useState<ShareStatusDTO | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -55,6 +60,9 @@ export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
 
   // Global Sharing Slider state
   const [isShareUpdating, setIsShareUpdating] = React.useState(false);
+
+  // Local Profile Override state (in VPN banner)
+  const [selectedLocalProfile, setSelectedLocalProfile] = React.useState<string>('');
 
   // Connect Peer Modal state
   const [isConnectOpen, setIsConnectOpen] = React.useState(false);
@@ -71,9 +79,9 @@ export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
 
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
-  const loadStatus = React.useCallback(async () => {
+  const loadStatus = React.useCallback(async (refresh = false) => {
     try {
-      const res = await getShareStatus();
+      const res = await getShareStatus(refresh);
       setData(res);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch share status';
@@ -88,10 +96,93 @@ export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
   }, [toast]);
 
   React.useEffect(() => {
-    loadStatus();
-    const interval = setInterval(loadStatus, 5000);
+    loadStatus(false);
+    const interval = setInterval(() => loadStatus(false), 5000);
     return () => clearInterval(interval);
   }, [loadStatus]);
+
+  React.useEffect(() => {
+    if (!selectedLocalProfile && profiles.length > 0) {
+      setSelectedLocalProfile(profiles[0].name);
+    }
+  }, [profiles, selectedLocalProfile]);
+
+  const currentLocalSharedConfig = React.useMemo(() => {
+    if (!data?.shared_profiles || !selectedLocalProfile) return null;
+    return data.shared_profiles.find((p) => p.name === selectedLocalProfile) || null;
+  }, [data?.shared_profiles, selectedLocalProfile]);
+
+  const currentLocalShareMode: ShareMode = React.useMemo(() => {
+    if (!currentLocalSharedConfig || !currentLocalSharedConfig.enabled) return 'off';
+    if (currentLocalSharedConfig.auto_approve) return 'auto';
+    return 'request';
+  }, [currentLocalSharedConfig]);
+
+  const handleSetLocalProfileShareMode = async (profileName: string, mode: ShareMode) => {
+    if (!profileName) return;
+    setIsShareUpdating(true);
+    const enabled = mode !== 'off';
+    const auto_approve = mode === 'auto';
+    const profObj = profiles.find((p) => p.name === profileName);
+    const agent = profObj?.agent || 'claude';
+    try {
+      await toggleShareProfile({
+        name: profileName,
+        agent,
+        auto_approve,
+        ttl: '4h',
+        enabled,
+      });
+      toast({
+        title: mode === 'off' ? 'Profile Private' : `Profile Shared (${mode === 'auto' ? 'Auto-Approve' : 'Request Mode'})`,
+        description: `Updated local sharing policy for "${profileName}"`,
+        variant: mode === 'off' ? 'default' : 'success',
+      });
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not update profile sharing';
+      toast({
+        title: 'Update failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsShareUpdating(false);
+    }
+  };
+
+  const handleManualRefresh = async () => {
+    setIsLoading(true);
+    try {
+      await loadStatus(true);
+      toast({
+        title: 'Network Refreshed',
+        description: 'Polled all discovered peers for latest profile statuses.',
+        variant: 'success',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRevokeLease = async (leaseId: string) => {
+    try {
+      await revokeShareLease(leaseId);
+      toast({
+        title: 'Lease Revoked',
+        description: `Revoked credential lease ${leaseId}. Teammate sandbox access disabled.`,
+        variant: 'success',
+      });
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to revoke lease';
+      toast({
+        title: 'Revoke failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    }
+  };
 
   // Keyboard shortcut for search
   React.useEffect(() => {
@@ -289,115 +380,113 @@ export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
           </p>
         </div>
 
-        {/* TOP RIGHT CONTROLS: 3-Stop Global Sharing Slider + Action Buttons */}
-        <div className="flex flex-wrap items-center gap-3 self-start lg:self-auto shrink-0">
-          {/* True 3-Stop Gliding Capsule Slider for Global Profile Sharing */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono uppercase tracking-wider text-[#888888] flex items-center gap-1.5 hidden sm:inline-flex">
-              <Radio className="h-3.5 w-3.5 text-accent-cyan" />
-              <span>Global Sharing:</span>
+        {/* TOP RIGHT: Global Sharing Slider (Screenshot 12.28.47 AM) */}
+        <div className="rounded-geist bg-[#111111] border border-[#262626] p-2.5 px-3 shadow-md flex flex-col items-center justify-center w-[250px] shrink-0 select-none">
+          <div className="flex items-center justify-between w-full mb-1">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[#777777] flex items-center gap-1">
+              <Radio className="h-3 w-3 text-accent-cyan" />
+              <span>Mesh Policy</span>
             </span>
-            <div
+            <span
               className={cn(
-                'relative flex items-center p-0.5 rounded-full bg-[#111111] border border-[#262626] h-8 w-[270px] select-none shadow-inner',
-                isShareUpdating && 'opacity-70 cursor-wait'
+                'text-xs font-mono font-bold tracking-tight transition-colors',
+                currentGlobalMode === 'off' && 'text-[#888888]',
+                currentGlobalMode === 'request' && 'text-[#52a8ff]',
+                currentGlobalMode === 'auto' && 'text-[#46a758]'
               )}
             >
-              {/* Physical Sliding Pill Capsule Thumb */}
-              <div
+              {currentGlobalMode === 'off' && 'Off'}
+              {currentGlobalMode === 'request' && 'Request'}
+              {currentGlobalMode === 'auto' && 'Auto Approve'}
+            </span>
+          </div>
+
+          {/* Physical Track Bar with Circular Knob */}
+          <div
+            className="relative w-full h-5 bg-[#181818] border border-[#2a2a2a] rounded-full flex items-center cursor-pointer shadow-inner px-1 my-1"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const x = e.clientX - rect.left;
+              const ratio = x / rect.width;
+              if (ratio < 0.33) handleGlobalModeChange('off');
+              else if (ratio < 0.67) handleGlobalModeChange('request');
+              else handleGlobalModeChange('auto');
+            }}
+          >
+            {/* Filled Progress Bar */}
+            <div
+              className={cn(
+                'absolute left-0 top-0 bottom-0 rounded-full transition-all duration-300 ease-out opacity-60 pointer-events-none',
+                currentGlobalMode === 'off' && 'w-0 bg-transparent',
+                currentGlobalMode === 'request' && 'w-1/2 bg-[#2563eb]',
+                currentGlobalMode === 'auto' && 'w-full bg-[#16a34a]'
+              )}
+            />
+
+            {/* 3 Stop Dots */}
+            <div className="absolute left-2.5 h-1.5 w-1.5 rounded-full bg-white/40 pointer-events-none" />
+            <div className="absolute left-1/2 -translate-x-1/2 h-1.5 w-1.5 rounded-full bg-white/40 pointer-events-none" />
+            <div className="absolute right-2.5 h-1.5 w-1.5 rounded-full bg-white/40 pointer-events-none" />
+
+            {/* White Circular Sliding Knob */}
+            <div
+              className={cn(
+                'absolute top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center transition-all duration-300 ease-out z-20 cursor-grab',
+                currentGlobalMode === 'off' && 'left-0',
+                currentGlobalMode === 'request' && 'left-1/2 -translate-x-1/2',
+                currentGlobalMode === 'auto' && 'left-[calc(100%-24px)]'
+              )}
+            >
+              <span
                 className={cn(
-                  'absolute top-0.5 bottom-0.5 rounded-full transition-all duration-300 ease-out shadow-md pointer-events-none',
-                  currentGlobalMode === 'off' &&
-                    'left-[2px] w-[calc((100%-4px)/3)] bg-[#222222] border border-[#383838]',
-                  currentGlobalMode === 'request' &&
-                    'left-[calc(2px+(100%-4px)/3)] w-[calc((100%-4px)/3)] bg-[#142334] border border-[#1f4068]',
-                  currentGlobalMode === 'auto' &&
-                    'left-[calc(2px+((100%-4px)/3)*2)] w-[calc((100%-4px)/3)] bg-[#183925] border border-[#235836]'
+                  'h-2.5 w-2.5 rounded-full transition-colors',
+                  currentGlobalMode === 'off' && 'bg-[#666666]',
+                  currentGlobalMode === 'request' && 'bg-[#0070f3]',
+                  currentGlobalMode === 'auto' && 'bg-[#10b981]'
                 )}
               />
-
-              {/* 3 Stop Interactive Options */}
-              <button
-                type="button"
-                disabled={isShareUpdating}
-                onClick={() => handleGlobalModeChange('off')}
-                className={cn(
-                  'relative z-10 flex-1 h-full flex items-center justify-center text-xs font-mono transition-colors duration-200 cursor-pointer',
-                  currentGlobalMode === 'off'
-                    ? 'text-[#ededed] font-medium'
-                    : 'text-[#777777] hover:text-[#cccccc]'
-                )}
-                title="Global sharing disabled (node is private)"
-              >
-                Off
-              </button>
-              <button
-                type="button"
-                disabled={isShareUpdating}
-                onClick={() => handleGlobalModeChange('request')}
-                className={cn(
-                  'relative z-10 flex-1 h-full flex items-center justify-center gap-1.5 text-xs font-mono transition-colors duration-200 cursor-pointer',
-                  currentGlobalMode === 'request'
-                    ? 'text-[#52a8ff] font-medium'
-                    : 'text-[#777777] hover:text-[#cccccc]'
-                )}
-                title="Global sharing enabled with manual request approval"
-              >
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 rounded-full transition-colors',
-                    currentGlobalMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#555555]'
-                  )}
-                />
-                Request
-              </button>
-              <button
-                type="button"
-                disabled={isShareUpdating}
-                onClick={() => handleGlobalModeChange('auto')}
-                className={cn(
-                  'relative z-10 flex-1 h-full flex items-center justify-center gap-1.5 text-xs font-mono transition-colors duration-200 cursor-pointer',
-                  currentGlobalMode === 'auto'
-                    ? 'text-[#46a758] font-medium'
-                    : 'text-[#777777] hover:text-[#cccccc]'
-                )}
-                title="Global sharing enabled with auto approve"
-              >
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 rounded-full transition-colors',
-                    currentGlobalMode === 'auto' ? 'bg-[#46a758]' : 'bg-[#555555]'
-                  )}
-                />
-                Auto Approve
-              </button>
             </div>
           </div>
 
-          {/* Refresh Action */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setIsLoading(true);
-              loadStatus();
-            }}
-            disabled={isLoading}
-            className="rounded-geist h-8 font-mono text-xs border-border bg-[#0c0c0c] text-foreground hover:bg-[#161616] cursor-pointer shrink-0"
-          >
-            <RotateCw className={`h-3.5 w-3.5 mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-
-          {/* Connect Peer Button (Solid White CTA) */}
-          <Button
-            size="sm"
-            onClick={() => setIsConnectOpen(true)}
-            className="bg-[#ffffff] text-[#000000] hover:bg-[#eaeaea] rounded-geist h-8 font-medium cursor-pointer shadow-sm transition-colors text-xs shrink-0"
-          >
-            <Plus className="h-3.5 w-3.5 mr-1 text-[#000000]" />
-            Connect Peer
-          </Button>
+          {/* 3 Stop Interactive Labels */}
+          <div className="flex items-center justify-between w-full mt-1 px-1 text-[10px] font-mono">
+            <button
+              type="button"
+              onClick={() => handleGlobalModeChange('off')}
+              className={cn(
+                'cursor-pointer transition-colors',
+                currentGlobalMode === 'off'
+                  ? 'text-[#ededed] font-semibold'
+                  : 'text-[#666666] hover:text-[#aaaaaa]'
+              )}
+            >
+              Off
+            </button>
+            <button
+              type="button"
+              onClick={() => handleGlobalModeChange('request')}
+              className={cn(
+                'cursor-pointer transition-colors',
+                currentGlobalMode === 'request'
+                  ? 'text-[#52a8ff] font-semibold'
+                  : 'text-[#666666] hover:text-[#aaaaaa]'
+              )}
+            >
+              Request
+            </button>
+            <button
+              type="button"
+              onClick={() => handleGlobalModeChange('auto')}
+              className={cn(
+                'cursor-pointer transition-colors',
+                currentGlobalMode === 'auto'
+                  ? 'text-[#46a758] font-semibold'
+                  : 'text-[#666666] hover:text-[#aaaaaa]'
+              )}
+            >
+              Auto Approve
+            </button>
+          </div>
         </div>
       </div>
 
@@ -442,7 +531,94 @@ export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Local Profile Override Sharing Control & Port Badge (Moved here per Screenshot 12.22.04 AM / 12.22.16 AM) */}
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
+          <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
+            {profiles.length > 1 ? (
+              <div className="flex items-center gap-1.5 pl-2 pr-1 border-r border-[#262626] mr-1">
+                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
+                <select
+                  value={selectedLocalProfile}
+                  onChange={(e) => setSelectedLocalProfile(e.target.value)}
+                  className="bg-transparent text-xs font-mono text-[#ededed] focus:outline-none cursor-pointer pr-1"
+                  title="Select local profile to configure sharing"
+                >
+                  {profiles.map((p) => (
+                    <option key={p.name} value={p.name} className="bg-[#141414] text-[#ededed]">
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : profiles.length === 1 ? (
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1 border-r border-[#262626] mr-1">
+                <Share2 className="h-3 w-3 text-accent-cyan" />
+                {profiles[0].name}:
+              </span>
+            ) : (
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1 border-r border-[#262626] mr-1">
+                <Share2 className="h-3 w-3 text-accent-cyan" />
+                P2P:
+              </span>
+            )}
+
+            {/* Off | Request | Auto Approve buttons */}
+            <button
+              type="button"
+              disabled={isShareUpdating || !selectedLocalProfile}
+              onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'off')}
+              className={cn(
+                'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer',
+                currentLocalShareMode === 'off'
+                  ? 'bg-[#262626] text-[#ededed] shadow-xs font-semibold'
+                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
+              )}
+              title="Profile is private and not shared on VPN"
+            >
+              Off
+            </button>
+            <button
+              type="button"
+              disabled={isShareUpdating || !selectedLocalProfile}
+              onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'request')}
+              className={cn(
+                'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1',
+                currentLocalShareMode === 'request'
+                  ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold'
+                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
+              )}
+              title="Profile is shared; teammate lease requests require manual approval"
+            >
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  currentLocalShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
+                )}
+              />
+              Request
+            </button>
+            <button
+              type="button"
+              disabled={isShareUpdating || !selectedLocalProfile}
+              onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'auto')}
+              className={cn(
+                'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1',
+                currentLocalShareMode === 'auto'
+                  ? 'bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold'
+                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
+              )}
+              title="Profile is shared; teammate lease requests are auto-approved"
+            >
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  currentLocalShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
+                )}
+              />
+              Auto Approve
+            </button>
+          </div>
+
           <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground px-2.5 py-1 rounded-geist border border-border bg-[#141414]">
             <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
             <span>P2P Port :4319</span>
@@ -542,10 +718,108 @@ export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
         </Card>
       )}
 
+      {/* Active Granted Leases Section (Teammates Borrowing Your Profiles) */}
+      {data && data.granted_leases && data.granted_leases.length > 0 && (
+        <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+          <CardHeader className="p-5 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Share2 className="h-4 w-4 text-accent-cyan" />
+                <CardTitle className="text-sm font-semibold text-foreground">
+                  Teammates Borrowing Your Profiles (Active Outbound Leases)
+                </CardTitle>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                >
+                  {data.granted_leases.filter((l) => !l.revoked && new Date(l.expires_at).getTime() > Date.now()).length} active
+                </Badge>
+              </div>
+              <span className="text-[11px] text-muted-foreground font-mono">
+                You can revoke access to your credentials at any time
+              </span>
+            </div>
+            <CardDescription className="text-xs text-muted-foreground pt-1">
+              Active sessions on teammate machines authenticated via your shared profile quotas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-5 pt-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {data.granted_leases.map((lease) => {
+                const isExpired = new Date(lease.expires_at).getTime() <= Date.now();
+                return (
+                  <div
+                    key={lease.lease_id}
+                    className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AgentBadge agent={lease.agent} size="sm" />
+                          <span className="text-xs font-mono font-bold text-foreground">
+                            {lease.profile_name}
+                          </span>
+                          <span
+                            className={cn(
+                              'text-[10px] font-mono px-1.5 py-0.5 rounded border',
+                              lease.auto_approved
+                                ? 'bg-[#183925]/50 text-[#46a758] border-[#235836]/60'
+                                : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
+                            )}
+                          >
+                            {lease.auto_approved ? 'Auto Approved' : 'Manual Approved'}
+                          </span>
+                        </div>
+                        <span
+                          className={cn(
+                            'text-[10px] font-mono px-2 py-0.5 rounded font-medium',
+                            lease.revoked
+                              ? 'bg-status-danger-bg text-status-danger border border-status-danger-border'
+                              : isExpired
+                              ? 'bg-[#1e1e1e] text-[#888888] border border-[#333333]'
+                              : 'bg-status-success-bg text-status-success border border-status-success-border'
+                          )}
+                        >
+                          {lease.revoked ? 'Revoked' : isExpired ? 'Expired' : formatExpiresIn(lease.expires_at)}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-mono">
+                        <Laptop className="h-3 w-3 text-[#61afef]" />
+                        <span>Borrower:</span>
+                        <span className="text-foreground font-semibold truncate max-w-[220px]" title={lease.borrower_id}>
+                          {lease.borrower_id}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
+                      <span className="text-[10px] font-mono text-[#666666]">
+                        Lease ID: {lease.lease_id}
+                      </span>
+                      {!lease.revoked && !isExpired && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRevokeLease(lease.lease_id)}
+                          className="h-6 px-2 text-[11px] text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                        >
+                          <ShieldAlert className="h-3 w-3 mr-1" />
+                          Revoke Lease
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Discovered Teammates & Shared Profiles Card */}
       <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
         <CardHeader className="p-5 pb-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
                 <Laptop className="h-4 w-4 text-[#61afef]" />
@@ -564,31 +838,57 @@ export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
               </CardDescription>
             </div>
 
-            {/* Search filter input with '/' keyboard shortcut */}
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
-              <Input
-                ref={searchInputRef}
-                type="text"
-                value={filterQuery}
-                onChange={(e) => setFilterQuery(e.target.value)}
-                placeholder="Filter teammates by hostname, IP, or profile..."
-                className="pl-8 pr-8 h-8 text-xs font-sans bg-[#0c0c0c] border-[#222222] text-[#ededed] placeholder:text-muted-foreground/50 rounded-geist focus:border-[#333333]"
-              />
-              {filterQuery ? (
-                <button
-                  type="button"
-                  onClick={() => setFilterQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                  title="Clear filter"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              ) : (
-                <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-[10px] font-mono text-muted-foreground pointer-events-none">
-                  /
-                </kbd>
-              )}
+            {/* Filter Input + Connect Peer + Refresh Button Group (Screenshot 12.21.08 AM) */}
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
+                <Input
+                  ref={searchInputRef}
+                  type="text"
+                  value={filterQuery}
+                  onChange={(e) => setFilterQuery(e.target.value)}
+                  placeholder="Filter teammates..."
+                  className="pl-8 pr-8 h-8 text-xs font-sans bg-[#0c0c0c] border-[#222222] text-[#ededed] placeholder:text-muted-foreground/50 rounded-geist focus:border-[#333333]"
+                />
+                {filterQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setFilterQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="Clear filter"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                ) : (
+                  <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-[10px] font-mono text-muted-foreground pointer-events-none">
+                    /
+                  </kbd>
+                )}
+              </div>
+
+              {/* Connect Peer Button beside filter */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsConnectOpen(true)}
+                className="h-8 px-2.5 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-xs font-mono flex items-center gap-1.5 shrink-0"
+              >
+                <Plus className="h-3.5 w-3.5 text-accent-cyan" />
+                <span>Connect Peer</span>
+              </Button>
+
+              {/* Refresh Button beside filter */}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isLoading}
+                onClick={handleManualRefresh}
+                className="h-8 px-2.5 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-xs font-mono flex items-center gap-1.5 shrink-0"
+                title="Live poll known peers on network"
+              >
+                <RotateCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin text-accent-cyan')} />
+                <span>Refresh</span>
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -697,6 +997,78 @@ export function NetworkView({ profiles: _profiles = [] }: NetworkViewProps) {
                       </CardContent>
                     </div>
                   </Card>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* P2P Activity & Audit Log Card */}
+      <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+        <CardHeader className="p-5 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-accent-cyan" />
+              <CardTitle className="text-sm font-semibold text-foreground">
+                P2P Sharing Audit Log
+              </CardTitle>
+              <Badge
+                variant="outline"
+                className="text-[10px] font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+              >
+                {data?.audit_logs?.length || 0} events
+              </Badge>
+            </div>
+            <span className="text-[11px] text-muted-foreground font-mono">
+              Tamper-evident mesh audit trail
+            </span>
+          </div>
+          <CardDescription className="text-xs text-muted-foreground pt-1">
+            Real-time audit log of all lease requests, approvals, revocations, and sharing policy switches.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-5 pt-0">
+          {!data?.audit_logs || data.audit_logs.length === 0 ? (
+            <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono">
+              No sharing events recorded yet.
+            </div>
+          ) : (
+            <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 font-mono text-xs">
+              {data.audit_logs.map((log) => {
+                const actionColors: Record<string, string> = {
+                  LEASE_GRANTED: 'text-[#46a758] bg-[#183925]/40 border-[#235836]',
+                  LEASE_REQUESTED: 'text-[#52a8ff] bg-[#142334]/40 border-[#1f4068]',
+                  LEASE_REVOKED: 'text-[#e06c75] bg-[#3a1d20]/40 border-[#5c282d]',
+                  LEASE_DENIED: 'text-[#e06c75] bg-[#3a1d20]/40 border-[#5c282d]',
+                  GLOBAL_MODE_CHANGED: 'text-[#c678dd] bg-[#2a1b33]/40 border-[#4a2b5a]',
+                  PROFILE_SHARING_ON: 'text-[#46a758] bg-[#183925]/40 border-[#235836]',
+                  PROFILE_SHARING_OFF: 'text-[#888888] bg-[#1e1e1e] border-[#333333]',
+                };
+                const color = actionColors[log.action] || 'text-muted-foreground border-border bg-[#141414]';
+                const timeStr = new Date(log.timestamp).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                });
+                return (
+                  <div
+                    key={log.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 px-2.5 rounded-geist bg-[#111111] border border-[#1f1f1f] text-[11px]"
+                  >
+                    <div className="flex items-center gap-2 truncate min-w-0">
+                      <span className="text-[#666666] shrink-0">{timeStr}</span>
+                      <span className={cn('px-1.5 py-0.5 rounded border text-[10px] shrink-0 uppercase font-semibold', color)}>
+                        {log.action.replace(/_/g, ' ')}
+                      </span>
+                      <span className="text-foreground truncate">{log.details}</span>
+                    </div>
+                    {log.actor && (
+                      <span className="text-[#666666] text-[10px] shrink-0 truncate max-w-[150px]">
+                        actor: {log.actor}
+                      </span>
+                    )}
+                  </div>
                 );
               })}
             </div>

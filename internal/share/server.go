@@ -154,14 +154,40 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		if hours <= 0 || time.Duration(hours)*time.Hour > matched.MaxLeaseTTL {
 			hours = int(matched.MaxLeaseTTL.Hours())
 		}
+		expiresAt := time.Now().Add(time.Duration(hours) * time.Hour)
 		resp := LeaseResponse{
 			Status:      "approved",
 			LeaseID:     leaseID,
 			ProfileName: matched.Name,
 			Agent:       matched.Agent,
-			ExpiresAt:   time.Now().Add(time.Duration(hours) * time.Hour),
+			ExpiresAt:   expiresAt,
 			Payload:     payload,
 		}
+
+		borrowerID := req.RequesterID
+		if borrowerID == "" {
+			borrowerID = r.RemoteAddr
+		}
+		_ = s.store.SaveGrantedLease(GrantedLease{
+			LeaseID:      leaseID,
+			ProfileName:  matched.Name,
+			Agent:        matched.Agent,
+			BorrowerID:   borrowerID,
+			BorrowerIP:   r.RemoteAddr,
+			GrantedAt:    time.Now(),
+			ExpiresAt:    expiresAt,
+			Revoked:      false,
+			AutoApproved: true,
+		})
+
+		_ = s.store.AppendAudit(AuditEntry{
+			Action:  "LEASE_GRANTED",
+			Actor:   borrowerID,
+			Profile: matched.Name,
+			Agent:   matched.Agent,
+			Details: fmt.Sprintf("Auto-approved lease %s (%s) for %dh to %s", leaseID, matched.Name, hours, borrowerID),
+		})
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 		return
@@ -182,6 +208,14 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.pending[reqID] = pr
 	s.pendingMu.Unlock()
+
+	_ = s.store.AppendAudit(AuditEntry{
+		Action:  "LEASE_REQUESTED",
+		Actor:   req.RequesterID,
+		Profile: matched.Name,
+		Agent:   matched.Agent,
+		Details: fmt.Sprintf("Lease request %s created by %s for %dh", reqID, req.RequesterID, req.RequestedHours),
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(LeaseResponse{
@@ -237,20 +271,43 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	if hours <= 0 || time.Duration(hours)*time.Hour > pr.matched.MaxLeaseTTL {
 		hours = int(pr.matched.MaxLeaseTTL.Hours())
 	}
+	expiresAt := time.Now().Add(time.Duration(hours) * time.Hour)
+	leaseID := generateID("ls")
 	resp := &LeaseResponse{
 		Status:      "approved",
-		LeaseID:     generateID("ls"),
+		LeaseID:     leaseID,
 		ProfileName: pr.matched.Name,
 		Agent:       pr.matched.Agent,
-		ExpiresAt:   time.Now().Add(time.Duration(hours) * time.Hour),
+		ExpiresAt:   expiresAt,
 		Payload:     payload,
 	}
+
+	_ = s.store.SaveGrantedLease(GrantedLease{
+		LeaseID:      leaseID,
+		ProfileName:  pr.matched.Name,
+		Agent:        pr.matched.Agent,
+		BorrowerID:   pr.info.Request.RequesterID,
+		BorrowerIP:   pr.info.Request.RequesterIP,
+		GrantedAt:    time.Now(),
+		ExpiresAt:    expiresAt,
+		Revoked:      false,
+		AutoApproved: false,
+	})
+
+	_ = s.store.AppendAudit(AuditEntry{
+		Action:  "LEASE_GRANTED",
+		Actor:   pr.info.Request.RequesterID,
+		Profile: pr.matched.Name,
+		Agent:   pr.matched.Agent,
+		Details: fmt.Sprintf("Manually approved lease %s (%s) for %dh", leaseID, pr.matched.Name, hours),
+	})
+
 	return resp, nil
 }
 
 func (s *Server) DenyRequest(reqID string) error {
 	s.pendingMu.Lock()
-	_, exists := s.pending[reqID]
+	pr, exists := s.pending[reqID]
 	if exists {
 		delete(s.pending, reqID)
 	}
@@ -258,6 +315,13 @@ func (s *Server) DenyRequest(reqID string) error {
 	if !exists {
 		return fmt.Errorf("request %s not found or expired", reqID)
 	}
+	_ = s.store.AppendAudit(AuditEntry{
+		Action:  "LEASE_DENIED",
+		Actor:   "local",
+		Profile: pr.matched.Name,
+		Agent:   pr.matched.Agent,
+		Details: fmt.Sprintf("Host denied request %s from %s", reqID, pr.info.Request.RequesterID),
+	})
 	return nil
 }
 

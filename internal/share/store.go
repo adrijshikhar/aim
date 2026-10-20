@@ -10,19 +10,23 @@ import (
 )
 
 type ShareStore struct {
-	aimDir    string
-	shareFile string
-	peerFile  string
-	leaseFile string
-	mu        sync.RWMutex
+	aimDir      string
+	shareFile   string
+	peerFile    string
+	leaseFile   string
+	grantedFile string
+	auditFile   string
+	mu          sync.RWMutex
 }
 
 func NewStore(aimDir string) *ShareStore {
 	return &ShareStore{
-		aimDir:    aimDir,
-		shareFile: filepath.Join(aimDir, "share.json"),
-		peerFile:  filepath.Join(aimDir, "peers.json"),
-		leaseFile: filepath.Join(aimDir, "leases.json"),
+		aimDir:      aimDir,
+		shareFile:   filepath.Join(aimDir, "share.json"),
+		peerFile:    filepath.Join(aimDir, "peers.json"),
+		leaseFile:   filepath.Join(aimDir, "leases.json"),
+		grantedFile: filepath.Join(aimDir, "granted_leases.json"),
+		auditFile:   filepath.Join(aimDir, "share_audit.json"),
 	}
 }
 
@@ -181,4 +185,139 @@ func (s *ShareStore) loadPeersLocked() []PeerInfo {
 	var peers []PeerInfo
 	_ = json.Unmarshal(data, &peers)
 	return peers
+}
+
+func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var leases []GrantedLease
+	if data, err := os.ReadFile(s.grantedFile); err == nil {
+		_ = json.Unmarshal(data, &leases)
+	}
+
+	found := false
+	for i := range leases {
+		if leases[i].LeaseID == lease.LeaseID {
+			leases[i] = lease
+			found = true
+			break
+		}
+	}
+	if !found {
+		leases = append(leases, lease)
+	}
+
+	_ = os.MkdirAll(s.aimDir, 0700)
+	data, err := json.MarshalIndent(leases, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.grantedFile)
+}
+
+func (s *ShareStore) GetGrantedLeases() []GrantedLease {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	data, err := os.ReadFile(s.grantedFile)
+	if err != nil {
+		return nil
+	}
+	var leases []GrantedLease
+	if err := json.Unmarshal(data, &leases); err != nil {
+		return nil
+	}
+	return leases
+}
+
+func (s *ShareStore) RevokeGrantedLease(leaseID string) (*GrantedLease, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var leases []GrantedLease
+	if data, err := os.ReadFile(s.grantedFile); err == nil {
+		_ = json.Unmarshal(data, &leases)
+	}
+
+	var revoked *GrantedLease
+	for i := range leases {
+		if leases[i].LeaseID == leaseID {
+			leases[i].Revoked = true
+			revoked = &leases[i]
+			break
+		}
+	}
+	if revoked == nil {
+		return nil, fmt.Errorf("lease %s not found", leaseID)
+	}
+
+	data, err := json.MarshalIndent(leases, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(tmp, s.grantedFile); err != nil {
+		return nil, err
+	}
+	return revoked, nil
+}
+
+func (s *ShareStore) AppendAudit(entry AuditEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if entry.ID == "" {
+		entry.ID = fmt.Sprintf("aud_%d", time.Now().UnixNano())
+	}
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now()
+	}
+
+	var logs []AuditEntry
+	if data, err := os.ReadFile(s.auditFile); err == nil {
+		_ = json.Unmarshal(data, &logs)
+	}
+
+	// Prepend so newest is first, bounded to 500 entries
+	logs = append([]AuditEntry{entry}, logs...)
+	if len(logs) > 500 {
+		logs = logs[:500]
+	}
+
+	_ = os.MkdirAll(s.aimDir, 0700)
+	data, err := json.MarshalIndent(logs, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d", s.auditFile, time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.auditFile)
+}
+
+func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	data, err := os.ReadFile(s.auditFile)
+	if err != nil {
+		return nil
+	}
+	var logs []AuditEntry
+	if err := json.Unmarshal(data, &logs); err != nil {
+		return nil
+	}
+	if limit > 0 && len(logs) > limit {
+		return logs[:limit]
+	}
+	return logs
 }

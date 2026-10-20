@@ -96,6 +96,38 @@ aim daemon status       # view operational status, service label, and last run t
 aim daemon uninstall    # stop and remove the background service
 ```
 
+### P2P Profile Sharing & Quota Pooling
+Pool AI assistant quotas across teammates over an internal VPN (Pritunl / OpenVPN) or local Wi-Fi mesh. Borrowed credentials run in an isolated local virtual environment as `host:<profile_name>`:
+
+```bash
+# 1. Start the P2P sharing server listener (port 4319)
+aim share serve
+
+# 2. Expose a local profile for teammates
+aim share enable work --agent claude --auto-approve --ttl 4h    # auto-approve mode
+aim share enable bby --agent agy --ttl 2h                       # manual request mode
+aim share disable work                                          # stop sharing a profile
+
+# 3. Connect to a teammate machine (by hostname or VPN IP)
+aim share peer add 10.8.19.251
+aim share peer add teammate-mac.local
+
+# 4. Discover online teammates and their exposed profiles
+aim share list
+
+# 5. Borrow a profile lease from a teammate
+aim share request teammate-mac.local/work --agent claude --hours 4
+
+# 6. Run coding assistant under the isolated borrowed profile
+aim run claude teammate-mac.local:work
+
+# 7. Check lease status, release early, or inspect active leases
+aim share status
+aim share release teammate-mac.local:work
+```
+
+You can also manage network mesh policies, live peer discovery, active borrower leases, and audit logs graphically via the Web Dashboard at `http://localhost:18480/network`.
+
 ### TUI
 
 Press `?` in the dashboard for every shortcut. The essentials: `↑`/`↓` select, `Enter` launch, `Tab` switch agent, `/` filter, `s` sessions, `q` quit. Full list in the [wiki](wiki.md#4-interactive-tui-dashboard).

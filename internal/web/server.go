@@ -156,6 +156,8 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("POST /api/share/peers", s.handleAddSharePeer)
 	mux.HandleFunc("POST /api/share/request", s.handleRequestShareLease)
 	mux.HandleFunc("POST /api/share/release", s.handleReleaseShareLease)
+	mux.HandleFunc("POST /api/share/revoke", s.handleRevokeShareLease)
+	mux.HandleFunc("GET /api/share/audit", s.handleGetShareAudit)
 
 	// Catch-all for undefined /api/ routes -> JSON 404
 	mux.HandleFunc("/api/", s.handleAPINotFound)

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -68,4 +70,42 @@ func (d *DiscoveryService) PingPeerWithURL(ctx context.Context, rawURL string) (
 func (d *DiscoveryService) PingPeer(ctx context.Context, ip string) (*PeerInfo, error) {
 	url := fmt.Sprintf("http://%s:%d", ip, d.port)
 	return d.PingPeerWithURL(ctx, url)
+}
+
+func (d *DiscoveryService) RefreshPeers(ctx context.Context) ([]PeerInfo, error) {
+	known := d.store.GetPeers()
+	if len(known) == 0 {
+		return nil, nil
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	updated := make([]PeerInfo, 0, len(known))
+
+	for _, p := range known {
+		wg.Add(1)
+		go func(peer PeerInfo) {
+			defer wg.Done()
+			target := peer.HostName
+			if target == "" {
+				target = peer.VPNIP
+			}
+			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			res, err := d.PingPeer(pingCtx, target)
+			if err != nil && !strings.Contains(target, ".") {
+				res, err = d.PingPeer(pingCtx, target+".local")
+			}
+			mu.Lock()
+			if err == nil && res != nil {
+				updated = append(updated, *res)
+			} else {
+				updated = append(updated, peer)
+			}
+			mu.Unlock()
+		}(p)
+	}
+
+	wg.Wait()
+	return updated, nil
 }

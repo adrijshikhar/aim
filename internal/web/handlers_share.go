@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,8 @@ type ShareStatusResponse struct {
 	SharedProfiles []share.SharedProfileConfig `json:"shared_profiles"`
 	Peers          []share.PeerInfo            `json:"peers"`
 	ActiveLeases   []ActiveLeaseInfo           `json:"active_leases"`
+	GrantedLeases  []share.GrantedLease        `json:"granted_leases"`
+	AuditLogs      []share.AuditEntry          `json:"audit_logs,omitempty"`
 }
 
 type ActiveLeaseInfo struct {
@@ -34,8 +37,19 @@ type ActiveLeaseInfo struct {
 func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 	vpn, _ := share.DetectVPN()
 	store := share.NewStore(config.BaseDir())
+
+	// Live refresh of known peers if requested or on poll
+	if r.URL.Query().Get("refresh") == "true" {
+		disc := share.NewDiscovery(store, 4319)
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		_, _ = disc.RefreshPeers(ctx)
+	}
+
 	shared := store.GetSharedProfiles()
 	peers := store.GetPeers()
+	granted := store.GetGrantedLeases()
+	audit := store.GetAuditLogs(50)
 
 	// Read active leased profiles on disk
 	var activeLeases []ActiveLeaseInfo
@@ -75,6 +89,8 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 		SharedProfiles: shared,
 		Peers:          peers,
 		ActiveLeases:   activeLeases,
+		GrantedLeases:  granted,
+		AuditLogs:      audit,
 	})
 }
 
@@ -97,6 +113,11 @@ func (s *Server) handleSetGlobalMode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "GLOBAL_MODE_CHANGED",
+		Actor:   "local",
+		Details: fmt.Sprintf("Host switched global sharing mode to %s", req.Mode),
+	})
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "mode": req.Mode})
 }
@@ -122,6 +143,12 @@ func (s *Server) handleToggleShare(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		_ = store.AppendAudit(share.AuditEntry{
+			Action:  "PROFILE_SHARING_OFF",
+			Actor:   "local",
+			Profile: req.Name,
+			Details: fmt.Sprintf("Disabled sharing for profile %s", req.Name),
+		})
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "enabled": false})
 		return
@@ -136,6 +163,13 @@ func (s *Server) handleToggleShare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "PROFILE_SHARING_ON",
+		Actor:   "local",
+		Profile: req.Name,
+		Agent:   req.Agent,
+		Details: fmt.Sprintf("Enabled sharing for profile %s (%s, auto_approve=%v, ttl=%s)", req.Name, req.Agent, req.AutoApprove, ttl),
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "enabled": true})
@@ -258,4 +292,45 @@ func (s *Server) handleReleaseShareLease(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+type RevokeLeasePayload struct {
+	LeaseID string `json:"lease_id"`
+}
+
+func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req RevokeLeasePayload
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LeaseID == "" {
+		http.Error(w, "lease_id is required", http.StatusBadRequest)
+		return
+	}
+
+	store := share.NewStore(config.BaseDir())
+	revoked, err := store.RevokeGrantedLease(req.LeaseID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "LEASE_REVOKED",
+		Actor:   "local",
+		Profile: revoked.ProfileName,
+		Agent:   revoked.Agent,
+		Details: fmt.Sprintf("Host revoked lease %s granted to %s", req.LeaseID, revoked.BorrowerID),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "revoked": revoked})
+}
+
+func (s *Server) handleGetShareAudit(w http.ResponseWriter, r *http.Request) {
+	store := share.NewStore(config.BaseDir())
+	logs := store.GetAuditLogs(100)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(logs)
 }
