@@ -139,16 +139,23 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 	var agent string
 
 	cmd := &cobra.Command{
-		Use:   "request <peer-ip-or-name>/<profile>",
+		Use:   "request <peer> <profile> (or <peer>:<profile> / <peer>/<profile>)",
 		Short: "Request a lease for a peer's profile",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			parts := strings.Split(args[0], "/")
-			if len(parts) != 2 {
-				return fmt.Errorf("format must be <peer-ip-or-name>/<profile>")
+			var peer, profileName string
+			if len(args) == 2 {
+				peer = args[0]
+				profileName = args[1]
+			} else if strings.Contains(args[0], "/") {
+				parts := strings.SplitN(args[0], "/", 2)
+				peer, profileName = parts[0], parts[1]
+			} else if strings.Contains(args[0], ":") {
+				parts := strings.SplitN(args[0], ":", 2)
+				peer, profileName = parts[0], parts[1]
+			} else {
+				return fmt.Errorf("format must be <peer> <profile>, <peer>/<profile>, or <peer>:<profile>")
 			}
-			peer := parts[0]
-			profileName := parts[1]
 
 			store := share.NewStore(config.BaseDir())
 			targetHost := peer
