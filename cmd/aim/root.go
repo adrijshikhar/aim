@@ -203,6 +203,7 @@ Flags:
 		newUpdateCmd(),
 		newConfigCmd(reg, pm),
 		newWebCmd(reg, pm),
+		newShareCmd(reg, pm),
 	)
 
 	return rootCmd
