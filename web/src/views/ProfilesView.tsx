@@ -440,12 +440,20 @@ export function ProfilesView({
     return profiles.find((p) => p.name === selectedProfile) || null;
   }, [profiles, selectedProfile]);
 
+  type ShareMode = 'off' | 'request' | 'auto';
+
   const [shareConfig, setShareConfig] = React.useState<{
     enabled: boolean;
     auto_approve: boolean;
     ttl: string;
   }>({ enabled: false, auto_approve: false, ttl: '4h' });
   const [isShareLoading, setIsShareLoading] = React.useState(false);
+
+  const currentShareMode: ShareMode = !shareConfig.enabled
+    ? 'off'
+    : shareConfig.auto_approve
+    ? 'auto'
+    : 'request';
 
   React.useEffect(() => {
     if (!currentProfile) return;
@@ -465,28 +473,40 @@ export function ProfilesView({
       .catch(() => {});
   }, [currentProfile?.name]);
 
-  const handleToggleShare = async (enabled: boolean) => {
+  const handleSetShareMode = async (mode: ShareMode) => {
     if (!currentProfile) return;
     setIsShareLoading(true);
+    const enabled = mode !== 'off';
+    const auto_approve = mode === 'auto';
     try {
       await toggleShareProfile({
         name: currentProfile.name,
         agent: currentProfile.agent || 'claude',
-        auto_approve: shareConfig.auto_approve,
+        auto_approve,
         ttl: shareConfig.ttl,
         enabled,
       });
-      setShareConfig((prev) => ({ ...prev, enabled }));
+      setShareConfig((prev) => ({ ...prev, enabled, auto_approve }));
+      const titles: Record<ShareMode, string> = {
+        off: 'Sharing Disabled',
+        request: 'Sharing Active (Request Approval)',
+        auto: 'Sharing Active (Auto-Approve)',
+      };
+      const descs: Record<ShareMode, string> = {
+        off: `Profile "${currentProfile.name}" is no longer shared on the VPN.`,
+        request: `Profile "${currentProfile.name}" is shared on VPN. Teammate lease requests require your approval.`,
+        auto: `Profile "${currentProfile.name}" is shared on VPN. Teammate lease requests are granted automatically.`,
+      };
       toast({
-        title: enabled ? 'Profile Shared' : 'Sharing Disabled',
-        description: enabled
-          ? `Profile ${currentProfile.name} is now shared with teammates over VPN.`
-          : `Profile ${currentProfile.name} is no longer shared.`,
+        title: titles[mode],
+        description: descs[mode],
+        variant: mode === 'off' ? 'default' : 'success',
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not update sharing state';
       toast({
         title: 'Sharing update failed',
-        description: err.message || 'Could not update sharing state',
+        description: msg,
         variant: 'destructive',
       });
     } finally {
@@ -809,7 +829,65 @@ export function ProfilesView({
               </span>
             </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <div className="flex flex-wrap items-center gap-2.5 self-end sm:self-auto shrink-0">
+              {/* 3-Level Segmented Slider for Profile Sharing (Right Top) */}
+              <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1">
+                  <Radio className="h-3 w-3 text-accent-cyan" />
+                  P2P:
+                </span>
+                <button
+                  type="button"
+                  disabled={isShareLoading}
+                  onClick={() => handleSetShareMode('off')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer",
+                    currentShareMode === 'off'
+                      ? "bg-[#262626] text-[#ededed] shadow-xs font-semibold"
+                      : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                  )}
+                  title="Profile is private and not shared on the VPN"
+                >
+                  Off
+                </button>
+                <button
+                  type="button"
+                  disabled={isShareLoading}
+                  onClick={() => handleSetShareMode('request')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                    currentShareMode === 'request'
+                      ? "bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold"
+                      : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                  )}
+                  title="Profile is shared; teammate lease requests require manual confirmation"
+                >
+                  <span className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    currentShareMode === 'request' ? "bg-[#52a8ff]" : "bg-[#666666]"
+                  )} />
+                  Request
+                </button>
+                <button
+                  type="button"
+                  disabled={isShareLoading}
+                  onClick={() => handleSetShareMode('auto')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                    currentShareMode === 'auto'
+                      ? "bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold"
+                      : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                  )}
+                  title="Profile is shared; teammate lease requests are automatically granted"
+                >
+                  <span className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#666666]"
+                  )} />
+                  Auto Approve
+                </button>
+              </div>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -1328,84 +1406,136 @@ export function ProfilesView({
                 {/* P2P Profile Sharing Card */}
                 <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
                   <CardHeader className="p-5 pb-3">
-                    <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
-                      <Radio className="h-4 w-4 text-accent-cyan" />
-                      P2P Profile Sharing
-                    </CardTitle>
-                    <CardDescription className="text-xs text-[#888888] pt-1">
-                      Share this account's AI quota with teammates over the corporate VPN.
-                    </CardDescription>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                          <Radio className="h-4 w-4 text-accent-cyan" />
+                          P2P Profile Sharing
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#888888] pt-1">
+                          Share this account's AI quota with teammates over the corporate VPN.
+                        </CardDescription>
+                      </div>
+
+                      {/* Right Top 3-Level Segmented Slider / Toggle */}
+                      <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] self-start sm:self-auto shrink-0">
+                        <button
+                          type="button"
+                          disabled={isShareLoading}
+                          onClick={() => handleSetShareMode('off')}
+                          className={cn(
+                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer",
+                            currentShareMode === 'off'
+                              ? "bg-[#262626] text-[#ededed] shadow-xs font-semibold"
+                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                          )}
+                          title="Disable profile sharing"
+                        >
+                          Off
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isShareLoading}
+                          onClick={() => handleSetShareMode('request')}
+                          className={cn(
+                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                            currentShareMode === 'request'
+                              ? "bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold"
+                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                          )}
+                          title="Share profile with manual approval requirement"
+                        >
+                          <span className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            currentShareMode === 'request' ? "bg-[#52a8ff]" : "bg-[#666666]"
+                          )} />
+                          Request
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isShareLoading}
+                          onClick={() => handleSetShareMode('auto')}
+                          className={cn(
+                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                            currentShareMode === 'auto'
+                              ? "bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold"
+                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                          )}
+                          title="Share profile with automatic lease approvals"
+                        >
+                          <span className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#666666]"
+                          )} />
+                          Auto Approve
+                        </button>
+                      </div>
+                    </div>
                   </CardHeader>
                   <CardContent className="p-5 pt-0 space-y-3">
-                    <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
-                      <label htmlFor="switch-p2p-share" className="space-y-0.5 cursor-pointer flex-1">
-                        <div className="text-xs font-semibold text-[#ededed]">Share Profile on VPN</div>
-                        <div className="text-[11px] text-[#666666]">
-                          Allows teammates on the VPN to discover and request leases for this profile.
+                    {currentShareMode === 'off' ? (
+                      <div className="p-3.5 rounded-geist bg-[#0f0f0f] border border-[#1f1f1f] text-xs text-[#888888] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-[#555555]" />
+                          <span>Profile sharing is currently disabled. Teammates on the VPN cannot discover or lease this account.</span>
                         </div>
-                      </label>
-                      <Switch
-                        id="switch-p2p-share"
-                        size="sm"
-                        checked={shareConfig.enabled}
-                        disabled={isShareLoading}
-                        onCheckedChange={handleToggleShare}
-                      />
-                    </div>
-
-                    {shareConfig.enabled && (
+                      </div>
+                    ) : (
                       <>
-                        <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4">
-                          <label htmlFor="switch-p2p-auto" className="space-y-0.5 cursor-pointer flex-1">
-                            <div className="text-xs font-semibold text-[#ededed]">Auto-Approve Requests</div>
-                            <div className="text-[11px] text-[#666666]">
-                              Automatically grant leases without requiring manual confirmation.
-                            </div>
-                          </label>
-                          <Switch
-                            id="switch-p2p-auto"
-                            size="sm"
-                            checked={shareConfig.auto_approve}
-                            disabled={isShareLoading}
-                            onCheckedChange={(val) => {
-                              setShareConfig((prev) => ({ ...prev, auto_approve: val }));
-                              toggleShareProfile({
-                                name: currentProfile.name,
-                                agent: currentProfile.agent || 'claude',
-                                auto_approve: val,
-                                ttl: shareConfig.ttl,
-                                enabled: true,
-                              });
-                            }}
-                          />
+                        <div className={cn(
+                          "p-3 rounded-geist border text-xs flex items-center justify-between gap-3",
+                          currentShareMode === 'auto'
+                            ? "bg-[#122619]/40 border-[#1d4d2d]/60 text-[#46a758]"
+                            : "bg-[#142334]/40 border-[#1f4068]/60 text-[#52a8ff]"
+                        )}>
+                          <div className="flex items-center gap-2">
+                            <span className={cn(
+                              "h-2 w-2 rounded-full shrink-0",
+                              currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#52a8ff]"
+                            )} />
+                            <span className="font-medium">
+                              {currentShareMode === 'auto'
+                                ? "Auto-Approve Enabled: Teammates on the VPN can discover and instantly borrow this profile without waiting for approval."
+                                : "Request Approval Required: Teammates can discover and request leases; each lease requires your manual confirmation."}
+                            </span>
+                          </div>
+                          <Badge variant="outline" className={cn(
+                            "text-[10px] font-mono uppercase tracking-wider py-0 px-1.5 shrink-0",
+                            currentShareMode === 'auto'
+                              ? "border-[#235836] text-[#46a758]"
+                              : "border-[#1f4068] text-[#52a8ff]"
+                          )}>
+                            {currentShareMode === 'auto' ? 'AUTO' : 'APPROVAL REQ'}
+                          </Badge>
                         </div>
 
                         <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4 text-xs">
                           <div>
-                            <div className="text-xs font-semibold text-[#ededed]">Max Lease Duration</div>
+                            <div className="text-xs font-semibold text-[#ededed]">Max Lease Duration (TTL)</div>
                             <div className="text-[11px] text-[#666666]">
-                              Borrower credentials automatically expire after this period.
+                              Borrower credentials automatically expire and are purged after this period.
                             </div>
                           </div>
                           <select
                             value={shareConfig.ttl}
+                            disabled={isShareLoading}
                             onChange={(e) => {
                               const newTtl = e.target.value;
                               setShareConfig((prev) => ({ ...prev, ttl: newTtl }));
                               toggleShareProfile({
                                 name: currentProfile.name,
                                 agent: currentProfile.agent || 'claude',
-                                auto_approve: shareConfig.auto_approve,
+                                auto_approve: currentShareMode === 'auto',
                                 ttl: newTtl,
                                 enabled: true,
                               });
                             }}
-                            className="h-7 px-2 text-xs bg-[#141414] border border-[#2a2a2a] rounded-geist text-[#ededed] focus:outline-none"
+                            className="h-8 px-2.5 text-xs bg-[#141414] border border-[#2a2a2a] rounded-geist text-[#ededed] focus:outline-none font-mono"
                           >
                             <option value="1h">1 hour</option>
                             <option value="2h">2 hours</option>
-                            <option value="4h">4 hours</option>
-                            <option value="8h">8 hours</option>
+                            <option value="4h">4 hours (Recommended)</option>
+                            <option value="8h">8 hours (Workday)</option>
                           </select>
                         </div>
                       </>
