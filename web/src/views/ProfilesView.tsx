@@ -831,63 +831,71 @@ export function ProfilesView({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5 self-end sm:self-auto shrink-0">
-              {/* 3-Level Segmented Slider for Profile Sharing (Right Top) */}
-              <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1">
-                  <Radio className="h-3 w-3 text-accent-cyan" />
-                  P2P:
-                </span>
-                <button
-                  type="button"
-                  disabled={isShareLoading}
-                  onClick={() => handleSetShareMode('off')}
-                  className={cn(
-                    "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer",
-                    currentShareMode === 'off'
-                      ? "bg-[#262626] text-[#ededed] shadow-xs font-semibold"
-                      : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                  )}
-                  title="Profile is private and not shared on the VPN"
-                >
-                  Off
-                </button>
-                <button
-                  type="button"
-                  disabled={isShareLoading}
-                  onClick={() => handleSetShareMode('request')}
-                  className={cn(
-                    "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
-                    currentShareMode === 'request'
-                      ? "bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold"
-                      : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                  )}
-                  title="Profile is shared; teammate lease requests require manual confirmation"
-                >
-                  <span className={cn(
-                    "h-1.5 w-1.5 rounded-full",
-                    currentShareMode === 'request' ? "bg-[#52a8ff]" : "bg-[#666666]"
-                  )} />
-                  Request
-                </button>
-                <button
-                  type="button"
-                  disabled={isShareLoading}
-                  onClick={() => handleSetShareMode('auto')}
-                  className={cn(
-                    "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
-                    currentShareMode === 'auto'
-                      ? "bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold"
-                      : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                  )}
-                  title="Profile is shared; teammate lease requests are automatically granted"
-                >
-                  <span className={cn(
-                    "h-1.5 w-1.5 rounded-full",
-                    currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#666666]"
-                  )} />
-                  Auto Approve
-                </button>
-              </div>
+              {/* If profile is a borrowed lease (contains ':'), do not show P2P share control */}
+              {currentProfile?.name.includes(':') ? (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-geist bg-[#142334]/60 border border-[#1f4068]/80 text-[#52a8ff] text-xs font-mono">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span>Borrowed Profile (Ephemeral Lease)</span>
+                </div>
+              ) : (
+                /* 3-Level Segmented Slider for Profile Sharing (Right Top) */
+                <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1">
+                    <Radio className="h-3 w-3 text-accent-cyan" />
+                    P2P:
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isShareLoading}
+                    onClick={() => handleSetShareMode('off')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer",
+                      currentShareMode === 'off'
+                        ? "bg-[#262626] text-[#ededed] shadow-xs font-semibold"
+                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                    )}
+                    title="Profile is private and not shared on the VPN"
+                  >
+                    Off
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isShareLoading}
+                    onClick={() => handleSetShareMode('request')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                      currentShareMode === 'request'
+                        ? "bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold"
+                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                    )}
+                    title="Profile is shared; teammate lease requests require manual confirmation"
+                  >
+                    <span className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      currentShareMode === 'request' ? "bg-[#52a8ff]" : "bg-[#666666]"
+                    )} />
+                    Request
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isShareLoading}
+                    onClick={() => handleSetShareMode('auto')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                      currentShareMode === 'auto'
+                        ? "bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold"
+                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                    )}
+                    title="Profile is shared; teammate lease requests are automatically granted"
+                  >
+                    <span className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#666666]"
+                    )} />
+                    Auto Approve
+                  </button>
+                </div>
+              )}
 
               <Button
                 variant="outline"

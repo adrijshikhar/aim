@@ -102,11 +102,16 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     return () => clearInterval(interval);
   }, [loadStatus]);
 
+  const ownProfiles = React.useMemo(
+    () => profiles.filter((p) => !p.name.includes(':')),
+    [profiles]
+  );
+
   React.useEffect(() => {
-    if (!selectedLocalProfile && profiles.length > 0) {
-      setSelectedLocalProfile(profiles[0].name);
+    if (ownProfiles.length > 0 && (!selectedLocalProfile || !ownProfiles.some((p) => p.name === selectedLocalProfile))) {
+      setSelectedLocalProfile(ownProfiles[0].name);
     }
-  }, [profiles, selectedLocalProfile]);
+  }, [ownProfiles, selectedLocalProfile]);
 
   const currentLocalSharedConfig = React.useMemo(() => {
     if (!data?.shared_profiles || !selectedLocalProfile) return null;
@@ -523,26 +528,26 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         {/* Local Profile Override Sharing Control & Port Badge (Moved here per Screenshot 12.22.04 AM / 12.22.16 AM) */}
         <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
           <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
-            {profiles.length > 1 ? (
-              <div className="flex items-center gap-1.5 pl-2 pr-1 border-r border-[#262626] mr-1">
-                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
-                <select
-                  value={selectedLocalProfile}
-                  onChange={(e) => setSelectedLocalProfile(e.target.value)}
-                  className="bg-transparent text-xs font-mono text-[#ededed] focus:outline-none cursor-pointer pr-1"
-                  title="Select local profile to configure sharing"
-                >
-                  {profiles.map((p) => (
-                    <option key={p.name} value={p.name} className="bg-[#141414] text-[#ededed]">
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+            {ownProfiles.length > 1 ? (
+              <div className="flex items-center gap-1.5 pl-1.5 pr-1 border-r border-[#262626] mr-1">
+                <Share2 className="h-3 w-3 text-accent-cyan shrink-0 ml-1" />
+                <div className="min-w-[90px] max-w-[130px]">
+                  <SelectDropdown
+                    value={selectedLocalProfile}
+                    onChange={(val) => setSelectedLocalProfile(String(val))}
+                    size="xs"
+                    triggerClassName="h-6 py-0 px-2 bg-transparent border-0 text-xs font-mono text-[#ededed] hover:bg-[#1a1a1a] shadow-none"
+                    options={ownProfiles.map((p) => ({
+                      value: p.name,
+                      label: p.name,
+                    }))}
+                  />
+                </div>
               </div>
-            ) : profiles.length === 1 ? (
+            ) : ownProfiles.length === 1 ? (
               <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1 border-r border-[#262626] mr-1">
                 <Share2 className="h-3 w-3 text-accent-cyan" />
-                {profiles[0].name}:
+                {ownProfiles[0].name}:
               </span>
             ) : (
               <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1 border-r border-[#262626] mr-1">
@@ -855,28 +860,27 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 )}
               </div>
 
-              {/* Connect Peer Button beside filter */}
+              {/* Connect Peer Icon Button (Screenshot 12.50.39 AM) */}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setIsConnectOpen(true)}
-                className="h-8 px-2.5 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-xs font-mono flex items-center gap-1.5 shrink-0"
+                className="h-8 w-8 p-0 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-foreground flex items-center justify-center shrink-0 cursor-pointer"
+                title="Connect Peer"
               >
-                <Plus className="h-3.5 w-3.5 text-accent-cyan" />
-                <span>Connect Peer</span>
+                <Plus className="h-4 w-4 text-accent-cyan" />
               </Button>
 
-              {/* Refresh Button beside filter */}
+              {/* Refresh Icon Button (Screenshot 12.50.39 AM) */}
               <Button
                 variant="outline"
                 size="sm"
                 disabled={isLoading}
                 onClick={handleManualRefresh}
-                className="h-8 px-2.5 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-xs font-mono flex items-center gap-1.5 shrink-0"
-                title="Live poll known peers on network"
+                className="h-8 w-8 p-0 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-foreground flex items-center justify-center shrink-0 cursor-pointer"
+                title="Refresh Teammates"
               >
                 <RotateCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin text-accent-cyan')} />
-                <span>Refresh</span>
               </Button>
             </div>
           </div>
