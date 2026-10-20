@@ -444,14 +444,28 @@ export interface AuditEntryDTO {
   details: string;
 }
 
+export interface SchedulePolicyDTO {
+  id: string;
+  enabled: boolean;
+  scope: string; // "global" or profile name
+  mode: 'auto' | 'request';
+  start_time: string; // "HH:MM" e.g. "00:00"
+  end_time: string; // "HH:MM" e.g. "08:00"
+  start_date?: string; // "YYYY-MM-DD"
+  end_date?: string; // "YYYY-MM-DD"
+  created_at?: string;
+}
+
 export interface ShareStatusDTO {
   vpn: VPNStatusDTO | null;
   global_mode: 'off' | 'request' | 'auto';
+  effective_global_mode?: 'off' | 'request' | 'auto';
   shared_profiles: SharedProfileConfigDTO[];
   peers: PeerInfoDTO[];
   active_leases: ActiveLeaseDTO[];
   granted_leases?: GrantedLeaseDTO[];
   audit_logs?: AuditEntryDTO[];
+  schedules?: SchedulePolicyDTO[];
 }
 
 export async function getShareStatus(refresh = false): Promise<ShareStatusDTO> {
@@ -526,6 +540,29 @@ export async function releaseShareLease(profile: string): Promise<{ ok: boolean 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ profile }),
+  });
+  return handleResponse<{ ok: boolean }>(res);
+}
+
+export async function getSchedules(): Promise<SchedulePolicyDTO[]> {
+  const res = await fetch(`${BASE_URL}/share/schedules`);
+  return handleResponse<SchedulePolicyDTO[]>(res);
+}
+
+export async function saveSchedule(schedule: Partial<SchedulePolicyDTO>): Promise<{ ok: boolean; schedule: SchedulePolicyDTO }> {
+  const res = await fetch(`${BASE_URL}/share/schedules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(schedule),
+  });
+  return handleResponse<{ ok: boolean; schedule: SchedulePolicyDTO }>(res);
+}
+
+export async function deleteSchedule(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${BASE_URL}/share/schedules`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
   });
   return handleResponse<{ ok: boolean }>(res);
 }

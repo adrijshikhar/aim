@@ -1,6 +1,9 @@
 package share
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type SharedProfileConfig struct {
 	Name        string        `json:"name"`
@@ -64,6 +67,60 @@ type GrantedLease struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 	Revoked      bool      `json:"revoked"`
 	AutoApproved bool      `json:"auto_approved"`
+}
+
+type SchedulePolicy struct {
+	ID        string    `json:"id"`
+	Enabled   bool      `json:"enabled"`
+	Scope     string    `json:"scope"`                // "global" or profile name e.g. "office"
+	Mode      string    `json:"mode"`                 // "auto" or "request"
+	StartTime string    `json:"start_time"`           // "HH:MM" e.g. "00:00"
+	EndTime   string    `json:"end_time"`             // "HH:MM" e.g. "08:00"
+	StartDate string    `json:"start_date,omitempty"` // "YYYY-MM-DD"
+	EndDate   string    `json:"end_date,omitempty"`   // "YYYY-MM-DD"
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (p *SchedulePolicy) IsActive(t time.Time) bool {
+	if !p.Enabled {
+		return false
+	}
+	// Case 1: Specific Date Range if StartDate and EndDate provided
+	if p.StartDate != "" && p.EndDate != "" {
+		startStr := p.StartDate + "T" + p.StartTime
+		endStr := p.EndDate + "T" + p.EndTime
+		if len(p.StartTime) == 5 {
+			startStr += ":00"
+		}
+		if len(p.EndTime) == 5 {
+			endStr += ":00"
+		}
+		start, err1 := time.ParseInLocation("2006-01-02T15:04:05", startStr, t.Location())
+		end, err2 := time.ParseInLocation("2006-01-02T15:04:05", endStr, t.Location())
+		if err1 == nil && err2 == nil {
+			return (t.Equal(start) || t.After(start)) && t.Before(end)
+		}
+	}
+
+	// Case 2: Daily time-of-day window (e.g. 00:00 to 08:00 or 12am to 8am)
+	if p.StartTime != "" && p.EndTime != "" {
+		var sh, sm, eh, em int
+		_, errS := fmt.Sscanf(p.StartTime, "%d:%d", &sh, &sm)
+		_, errE := fmt.Sscanf(p.EndTime, "%d:%d", &eh, &em)
+		if errS == nil && errE == nil {
+			nowMinutes := t.Hour()*60 + t.Minute()
+			startMinutes := sh*60 + sm
+			endMinutes := eh*60 + em
+
+			if startMinutes <= endMinutes {
+				return nowMinutes >= startMinutes && nowMinutes < endMinutes
+			}
+			// Overnight window, e.g. 22:00 to 06:00
+			return nowMinutes >= startMinutes || nowMinutes < endMinutes
+		}
+	}
+
+	return false
 }
 
 type AuditEntry struct {

@@ -3,6 +3,7 @@ package share
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 func TestServerAutoApproveRequest(t *testing.T) {
 	aimDir := t.TempDir()
 	store := NewStore(aimDir)
+	_ = store.SetGlobalMode("auto")
 	_ = store.EnableProfile("work", "claude", true, 4*time.Hour)
 
 	// Seed dummy credentials in profile
@@ -51,6 +53,7 @@ func TestServerAutoApproveRequest(t *testing.T) {
 func TestServerManualPendingRequestAndApproval(t *testing.T) {
 	aimDir := t.TempDir()
 	store := NewStore(aimDir)
+	_ = store.SetGlobalMode("request")
 	_ = store.EnableProfile("work", "claude", false, 4*time.Hour) // autoApprove = false
 
 	profilesDir := filepath.Join(aimDir, "profiles")
@@ -95,6 +98,7 @@ func TestServerManualPendingRequestAndApproval(t *testing.T) {
 func TestServerCodexCredentials(t *testing.T) {
 	aimDir := t.TempDir()
 	store := NewStore(aimDir)
+	_ = store.SetGlobalMode("auto")
 	_ = store.EnableProfile("office", "codex", true, 4*time.Hour)
 
 	profilesDir := filepath.Join(aimDir, "profiles")
@@ -125,5 +129,70 @@ func TestServerCodexCredentials(t *testing.T) {
 	}
 	if _, ok := resp.Payload.Files[".codex/config.toml"]; !ok {
 		t.Errorf("expected .codex/config.toml in files, got: %+v", resp.Payload.Files)
+	}
+}
+
+func TestServerGlobalModeOffEnforcement(t *testing.T) {
+	aimDir := t.TempDir()
+	store := NewStore(aimDir)
+	_ = store.SetGlobalMode("off") // Explicitly OFF
+	_ = store.EnableProfile("office", "codex", true, 4*time.Hour)
+
+	profilesDir := filepath.Join(aimDir, "profiles")
+	server := NewServer(store, profilesDir, "bob-node", 4319)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client := NewClient(4319)
+	client.baseURLOverride = ts.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Should be rejected with 403 Forbidden
+	_, err := client.RequestLease(ctx, "127.0.0.1", "office", "codex", 2)
+	if err == nil {
+		t.Fatalf("expected lease request to fail when global mode is off, but succeeded")
+	}
+
+	// Should advertise 0 profiles via ping
+	disc := NewDiscovery(store, 4319)
+	peer, err := disc.PingPeerWithURL(ctx, ts.URL)
+	if err != nil {
+		t.Fatalf("ping failed: %v", err)
+	}
+	if len(peer.Profiles) != 0 || len(peer.SharedProfiles) != 0 {
+		t.Fatalf("expected 0 profiles when global mode is off, got %d profiles, %d shared", len(peer.Profiles), len(peer.SharedProfiles))
+	}
+}
+
+func TestSchedulePolicyActive(t *testing.T) {
+	now := time.Now()
+	// Schedule from 1 hour ago to 1 hour in the future
+	startH := (now.Hour() - 1 + 24) % 24
+	endH := (now.Hour() + 1) % 24
+	sp := SchedulePolicy{
+		Enabled:   true,
+		Scope:     "global",
+		Mode:      "auto",
+		StartTime: fmt.Sprintf("%02d:00", startH),
+		EndTime:   fmt.Sprintf("%02d:00", endH),
+	}
+	if !sp.IsActive(now) {
+		t.Errorf("expected schedule to be active at %v, got false", now)
+	}
+
+	// Inactive schedule (1 hour in future to 2 hours in future)
+	futureStart := (now.Hour() + 1) % 24
+	futureEnd := (now.Hour() + 2) % 24
+	spFuture := SchedulePolicy{
+		Enabled:   true,
+		Scope:     "global",
+		Mode:      "auto",
+		StartTime: fmt.Sprintf("%02d:00", futureStart),
+		EndTime:   fmt.Sprintf("%02d:00", futureEnd),
+	}
+	if spFuture.IsActive(now) {
+		t.Errorf("expected future schedule to be inactive, got true")
 	}
 }

@@ -15,13 +15,15 @@ import (
 )
 
 type ShareStatusResponse struct {
-	VPN            *share.VPNStatus            `json:"vpn"`
-	GlobalMode     string                      `json:"global_mode"`
-	SharedProfiles []share.SharedProfileConfig `json:"shared_profiles"`
-	Peers          []share.PeerInfo            `json:"peers"`
-	ActiveLeases   []ActiveLeaseInfo           `json:"active_leases"`
-	GrantedLeases  []share.GrantedLease        `json:"granted_leases"`
-	AuditLogs      []share.AuditEntry          `json:"audit_logs,omitempty"`
+	VPN                 *share.VPNStatus            `json:"vpn"`
+	GlobalMode          string                      `json:"global_mode"`
+	EffectiveGlobalMode string                      `json:"effective_global_mode"`
+	SharedProfiles      []share.SharedProfileConfig `json:"shared_profiles"`
+	Peers               []share.PeerInfo            `json:"peers"`
+	ActiveLeases        []ActiveLeaseInfo           `json:"active_leases"`
+	GrantedLeases       []share.GrantedLease        `json:"granted_leases"`
+	AuditLogs           []share.AuditEntry          `json:"audit_logs,omitempty"`
+	Schedules           []share.SchedulePolicy      `json:"schedules,omitempty"`
 }
 
 type ActiveLeaseInfo struct {
@@ -84,13 +86,15 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(ShareStatusResponse{
-		VPN:            vpn,
-		GlobalMode:     store.GetGlobalMode(),
-		SharedProfiles: shared,
-		Peers:          peers,
-		ActiveLeases:   activeLeases,
-		GrantedLeases:  granted,
-		AuditLogs:      audit,
+		VPN:                 vpn,
+		GlobalMode:          store.GetGlobalMode(),
+		EffectiveGlobalMode: store.GetEffectiveGlobalMode(),
+		SharedProfiles:      shared,
+		Peers:               peers,
+		ActiveLeases:        activeLeases,
+		GrantedLeases:       granted,
+		AuditLogs:           audit,
+		Schedules:           store.GetSchedules(),
 	})
 }
 
@@ -333,4 +337,66 @@ func (s *Server) handleGetShareAudit(w http.ResponseWriter, r *http.Request) {
 	logs := store.GetAuditLogs(100)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(logs)
+}
+
+func (s *Server) handleGetSchedules(w http.ResponseWriter, r *http.Request) {
+	store := share.NewStore(config.BaseDir())
+	schedules := store.GetSchedules()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(schedules)
+}
+
+func (s *Server) handleSaveSchedule(w http.ResponseWriter, r *http.Request) {
+	var sched share.SchedulePolicy
+	if err := json.NewDecoder(r.Body).Decode(&sched); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if sched.Scope == "" {
+		sched.Scope = "global"
+	}
+	if sched.Mode == "" {
+		sched.Mode = "auto"
+	}
+
+	store := share.NewStore(config.BaseDir())
+	if err := store.SaveSchedule(sched); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "SCHEDULE_SAVED",
+		Actor:   "local",
+		Profile: sched.Scope,
+		Details: fmt.Sprintf("Schedule saved for %s (%s to %s, mode=%s, enabled=%v)", sched.Scope, sched.StartTime, sched.EndTime, sched.Mode, sched.Enabled),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "schedule": sched})
+}
+
+func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+
+	store := share.NewStore(config.BaseDir())
+	if err := store.DeleteSchedule(req.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "SCHEDULE_DELETED",
+		Actor:   "local",
+		Details: fmt.Sprintf("Schedule %s removed", req.ID),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }

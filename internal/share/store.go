@@ -10,23 +10,25 @@ import (
 )
 
 type ShareStore struct {
-	aimDir      string
-	shareFile   string
-	peerFile    string
-	leaseFile   string
-	grantedFile string
-	auditFile   string
-	mu          sync.RWMutex
+	aimDir       string
+	shareFile    string
+	peerFile     string
+	leaseFile    string
+	grantedFile  string
+	auditFile    string
+	scheduleFile string
+	mu           sync.RWMutex
 }
 
 func NewStore(aimDir string) *ShareStore {
 	return &ShareStore{
-		aimDir:      aimDir,
-		shareFile:   filepath.Join(aimDir, "share.json"),
-		peerFile:    filepath.Join(aimDir, "peers.json"),
-		leaseFile:   filepath.Join(aimDir, "leases.json"),
-		grantedFile: filepath.Join(aimDir, "granted_leases.json"),
-		auditFile:   filepath.Join(aimDir, "share_audit.json"),
+		aimDir:       aimDir,
+		shareFile:    filepath.Join(aimDir, "share.json"),
+		peerFile:     filepath.Join(aimDir, "peers.json"),
+		leaseFile:    filepath.Join(aimDir, "leases.json"),
+		grantedFile:  filepath.Join(aimDir, "granted_leases.json"),
+		auditFile:    filepath.Join(aimDir, "share_audit.json"),
+		scheduleFile: filepath.Join(aimDir, "share_schedules.json"),
 	}
 }
 
@@ -320,4 +322,121 @@ func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
 		return logs[:limit]
 	}
 	return logs
+}
+
+func (s *ShareStore) GetSchedules() []SchedulePolicy {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loadSchedulesLocked()
+}
+
+func (s *ShareStore) loadSchedulesLocked() []SchedulePolicy {
+	data, err := os.ReadFile(s.scheduleFile)
+	if err != nil {
+		return nil
+	}
+	var list []SchedulePolicy
+	_ = json.Unmarshal(data, &list)
+	return list
+}
+
+func (s *ShareStore) SaveSchedule(sched SchedulePolicy) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	list := s.loadSchedulesLocked()
+	found := false
+	if sched.ID == "" {
+		sched.ID = fmt.Sprintf("sch_%d", time.Now().UnixNano())
+	}
+	if sched.CreatedAt.IsZero() {
+		sched.CreatedAt = time.Now()
+	}
+	for i := range list {
+		if list[i].ID == sched.ID {
+			list[i] = sched
+			found = true
+			break
+		}
+	}
+	if !found {
+		list = append(list, sched)
+	}
+
+	return s.saveSchedulesLocked(list)
+}
+
+func (s *ShareStore) DeleteSchedule(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	list := s.loadSchedulesLocked()
+	var updated []SchedulePolicy
+	for _, sc := range list {
+		if sc.ID != id {
+			updated = append(updated, sc)
+		}
+	}
+	return s.saveSchedulesLocked(updated)
+}
+
+func (s *ShareStore) saveSchedulesLocked(list []SchedulePolicy) error {
+	_ = os.MkdirAll(s.aimDir, 0700)
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d", s.scheduleFile, time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.scheduleFile)
+}
+
+// GetEffectiveGlobalMode returns the active global mode considering scheduled policies.
+func (s *ShareStore) GetEffectiveGlobalMode() string {
+	now := time.Now()
+	// Check global schedules first
+	schedules := s.GetSchedules()
+	for _, sc := range schedules {
+		if sc.Scope == "global" && sc.IsActive(now) {
+			return sc.Mode
+		}
+	}
+	return s.GetGlobalMode()
+}
+
+// GetEffectiveProfileMode returns whether a profile is shareable and if it is auto-approved.
+func (s *ShareStore) GetEffectiveProfileMode(profileName string) (enabled bool, autoApprove bool) {
+	now := time.Now()
+	gMode := s.GetEffectiveGlobalMode()
+
+	// Check if this specific profile has an active schedule
+	schedules := s.GetSchedules()
+	for _, sc := range schedules {
+		if sc.Scope == profileName && sc.IsActive(now) {
+			return true, sc.Mode == "auto"
+		}
+	}
+
+	// If global mode is off and no active schedule overrides it:
+	if gMode == "off" {
+		return false, false
+	}
+
+	// Look up profile configuration in shared_profiles
+	profiles := s.GetSharedProfiles()
+	for _, p := range profiles {
+		if p.Name == profileName {
+			if !p.Enabled {
+				return false, false
+			}
+			if gMode == "auto" {
+				return true, true
+			}
+			return true, p.AutoApprove
+		}
+	}
+
+	return false, false
 }

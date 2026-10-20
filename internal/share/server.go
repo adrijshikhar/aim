@@ -93,10 +93,19 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	profiles := s.store.GetSharedProfiles()
+	gMode := s.store.GetEffectiveGlobalMode()
+	var profiles []SharedProfileConfig
 	var names []string
-	for _, p := range profiles {
-		names = append(names, p.Name)
+	if gMode != "off" {
+		for _, p := range s.store.GetSharedProfiles() {
+			enabled, autoApprove := s.store.GetEffectiveProfileMode(p.Name)
+			if enabled {
+				p.AutoApprove = autoApprove
+				p.Enabled = true
+				profiles = append(profiles, p)
+				names = append(names, p.Name)
+			}
+		}
 	}
 	host, _ := os.Hostname()
 	resp := PingResponse{
@@ -115,9 +124,26 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	profiles := s.store.GetSharedProfiles()
+	gMode := s.store.GetEffectiveGlobalMode()
+	if gMode == "off" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]SharedProfileConfig{})
+		return
+	}
+
+	allProfiles := s.store.GetSharedProfiles()
+	var exposed []SharedProfileConfig
+	for _, p := range allProfiles {
+		enabled, autoApprove := s.store.GetEffectiveProfileMode(p.Name)
+		if enabled {
+			p.AutoApprove = autoApprove
+			p.Enabled = true
+			exposed = append(exposed, p)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(profiles)
+	_ = json.NewEncoder(w).Encode(exposed)
 }
 
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +154,12 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	var req LeaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	enabled, autoApprove := s.store.GetEffectiveProfileMode(req.ProfileName)
+	if !enabled {
+		http.Error(w, fmt.Sprintf("profile %q is not currently available for sharing (host policy is off or restricted)", req.ProfileName), http.StatusForbidden)
 		return
 	}
 
@@ -143,6 +175,7 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "profile not shared or found", http.StatusNotFound)
 		return
 	}
+	matched.AutoApprove = autoApprove
 
 	if matched.AutoApprove {
 		payload, err := s.packageCredentials(matched.Name, matched.Agent)

@@ -15,6 +15,7 @@ import {
   Share2,
   ShieldAlert,
   Activity,
+  Calendar,
 } from 'lucide-react';
 import {
   getShareStatus,
@@ -24,9 +25,12 @@ import {
   addSharePeer,
   requestShareLease,
   releaseShareLease,
+  saveSchedule,
+  deleteSchedule,
   ShareStatusDTO,
   PeerInfoDTO,
   ProfileDTO,
+  SchedulePolicyDTO,
 } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -77,6 +81,17 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const [selectedIsAuto, setSelectedIsAuto] = React.useState<boolean>(false);
   const [leaseHours, setLeaseHours] = React.useState<number>(4);
   const [isRequesting, setIsRequesting] = React.useState(false);
+
+  // Schedule Modal state (Duration & Calendar Date-Time Picker)
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = React.useState(false);
+  const [schedScope, setSchedScope] = React.useState<string>('global');
+  const [schedMode, setSchedMode] = React.useState<'auto' | 'request'>('auto');
+  const [schedType, setSchedType] = React.useState<'recurring' | 'calendar'>('recurring');
+  const [schedStartTime, setSchedStartTime] = React.useState('00:00');
+  const [schedEndTime, setSchedEndTime] = React.useState('08:00');
+  const [schedStartDate, setSchedStartDate] = React.useState(() => new Date().toISOString().split('T')[0]);
+  const [schedEndDate, setSchedEndDate] = React.useState(() => new Date().toISOString().split('T')[0]);
+  const [isSavingSchedule, setIsSavingSchedule] = React.useState(false);
 
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -208,7 +223,88 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const isScheduleActiveNow = React.useCallback((s: SchedulePolicyDTO) => {
+    if (!s.enabled) return false;
+    const now = new Date();
+    if (s.start_date && s.end_date) {
+      const start = new Date(`${s.start_date}T${s.start_time}:00`);
+      const end = new Date(`${s.end_date}T${s.end_time}:00`);
+      return now >= start && now <= end;
+    }
+    if (s.start_time && s.end_time) {
+      const [sh, sm] = s.start_time.split(':').map(Number);
+      const [eh, em] = s.end_time.split(':').map(Number);
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      const startMin = sh * 60 + sm;
+      const endMin = eh * 60 + em;
+      if (startMin <= endMin) {
+        return nowMin >= startMin && nowMin < endMin;
+      }
+      return nowMin >= startMin || nowMin < endMin;
+    }
+    return false;
+  }, []);
+
+  const activeSchedulesCount = React.useMemo(() => {
+    return (data?.schedules || []).filter(isScheduleActiveNow).length;
+  }, [data?.schedules, isScheduleActiveNow]);
+
   const currentGlobalMode: ShareMode = data?.global_mode || 'off';
+  const effectiveGlobalMode: ShareMode = (data?.effective_global_mode || currentGlobalMode) as ShareMode;
+
+  const handleSaveSchedulePolicy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSchedule(true);
+    try {
+      const payload: Partial<SchedulePolicyDTO> = {
+        enabled: true,
+        scope: schedScope,
+        mode: schedMode,
+        start_time: schedStartTime,
+        end_time: schedEndTime,
+      };
+      if (schedType === 'calendar') {
+        payload.start_date = schedStartDate;
+        payload.end_date = schedEndDate;
+      }
+      await saveSchedule(payload);
+      toast({
+        title: 'Schedule Policy Saved',
+        description: `Configured ${schedScope === 'global' ? 'Global' : schedScope} ${schedMode === 'auto' ? 'Auto-Approve' : 'Request'} (${schedStartTime} - ${schedEndTime})`,
+        variant: 'success',
+      });
+      setIsScheduleModalOpen(false);
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to save schedule';
+      toast({
+        title: 'Save Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingSchedule(false);
+    }
+  };
+
+  const handleDeleteSchedulePolicy = async (id: string) => {
+    try {
+      await deleteSchedule(id);
+      toast({
+        title: 'Schedule Removed',
+        description: 'Scheduled sharing policy removed',
+        variant: 'success',
+      });
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete schedule';
+      toast({
+        title: 'Delete Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    }
+  };
 
   const handleGlobalModeChange = async (mode: ShareMode) => {
     if (isShareUpdating) return;
@@ -386,29 +482,43 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           </p>
         </div>
 
-        {/* TOP RIGHT: Global Sharing Slider (Screenshot 12.28.47 AM) */}
-        <div className="rounded-geist bg-[#111111] border border-[#262626] p-2.5 px-3 shadow-md flex flex-col items-center justify-center w-[250px] shrink-0 select-none">
+        {/* TOP RIGHT: Global Sharing Slider & Duration Policy Modal */}
+        <div className="rounded-geist bg-[#111111] border border-[#262626] p-2.5 px-3 shadow-md flex flex-col items-center justify-center w-[270px] shrink-0 select-none">
           <div className="flex items-center justify-between w-full mb-1">
             <span className="font-mono text-[10px] uppercase tracking-wider text-[#777777] flex items-center gap-1">
               <Radio className="h-3 w-3 text-accent-cyan" />
               <span>Mesh Policy</span>
             </span>
-            <span
-              className={cn(
-                'text-xs font-mono font-bold tracking-tight transition-colors',
-                currentGlobalMode === 'off' && 'text-[#888888]',
-                currentGlobalMode === 'request' && 'text-[#52a8ff]',
-                currentGlobalMode === 'auto' && 'text-[#46a758]'
-              )}
-            >
-              {currentGlobalMode === 'off' && 'Off'}
-              {currentGlobalMode === 'request' && 'Request'}
-              {currentGlobalMode === 'auto' && 'Auto Approve'}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setIsScheduleModalOpen(true)}
+                className="cursor-pointer text-[10px] font-mono px-1.5 py-0.5 rounded border border-[#333333] bg-[#181818] hover:bg-[#222222] text-[#abb2bf] hover:text-[#ededed] flex items-center gap-1 transition-colors"
+                title="Configure Time & Duration-Based Policy (e.g. 12am-8am auto-approve)"
+              >
+                <Calendar className="h-2.5 w-2.5 text-accent-cyan" />
+                <span>Schedule</span>
+                {activeSchedulesCount > 0 && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" />
+                )}
+              </button>
+              <span
+                className={cn(
+                  'text-xs font-mono font-bold tracking-tight transition-colors',
+                  effectiveGlobalMode === 'off' && 'text-[#888888]',
+                  effectiveGlobalMode === 'request' && 'text-[#52a8ff]',
+                  effectiveGlobalMode === 'auto' && 'text-[#46a758]'
+                )}
+              >
+                {effectiveGlobalMode === 'off' && 'Off'}
+                {effectiveGlobalMode === 'request' && 'Request'}
+                {effectiveGlobalMode === 'auto' && 'Auto'}
+              </span>
+            </div>
           </div>
 
-          {/* Shadcn / Radix Draggable 3-Stop Slider */}
-          <div className="w-full px-1 py-1.5">
+          {/* Shadcn Default Slider */}
+          <div className="w-full px-1 py-2">
             <Slider
               min={0}
               max={2}
@@ -421,24 +531,6 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   handleGlobalModeChange(target);
                 }
               }}
-              trackClassName="h-4 bg-[#181818] border border-[#2a2a2a] rounded-full"
-              rangeClassName={cn(
-                'transition-all duration-300',
-                currentGlobalMode === 'off' && 'bg-transparent',
-                currentGlobalMode === 'request' && 'bg-[#2563eb]/60',
-                currentGlobalMode === 'auto' && 'bg-[#16a34a]/60'
-              )}
-              thumbClassName="h-6 w-6 rounded-full bg-white shadow-md border-0 ring-1 ring-black/20 cursor-grab active:cursor-grabbing hover:scale-105 active:scale-95 transition-transform"
-              thumbChildren={
-                <span
-                  className={cn(
-                    'h-2.5 w-2.5 rounded-full transition-colors',
-                    currentGlobalMode === 'off' && 'bg-[#666666]',
-                    currentGlobalMode === 'request' && 'bg-[#0070f3]',
-                    currentGlobalMode === 'auto' && 'bg-[#10b981]'
-                  )}
-                />
-              }
             />
           </div>
 
@@ -481,6 +573,13 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               Auto Approve
             </button>
           </div>
+
+          {effectiveGlobalMode !== currentGlobalMode && (
+            <div className="mt-1.5 pt-1 border-t border-[#202020] w-full text-[10px] font-mono text-center text-accent-cyan flex items-center justify-center gap-1">
+              <Clock className="h-2.5 w-2.5" />
+              <span>Active Schedule Override</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -556,61 +655,71 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               </span>
             )}
 
-            {/* Off | Request | Auto Approve buttons */}
-            <button
-              type="button"
-              disabled={isShareUpdating || !selectedLocalProfile}
-              onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'off')}
-              className={cn(
-                'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer',
-                currentLocalShareMode === 'off'
-                  ? 'bg-[#262626] text-[#ededed] shadow-xs font-semibold'
-                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
-              )}
-              title="Profile is private and not shared on VPN"
-            >
-              Off
-            </button>
-            <button
-              type="button"
-              disabled={isShareUpdating || !selectedLocalProfile}
-              onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'request')}
-              className={cn(
-                'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1',
-                currentLocalShareMode === 'request'
-                  ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold'
-                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
-              )}
-              title="Profile is shared; teammate lease requests require manual approval"
-            >
-              <span
-                className={cn(
-                  'h-1.5 w-1.5 rounded-full',
-                  currentLocalShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
-                )}
-              />
-              Request
-            </button>
-            <button
-              type="button"
-              disabled={isShareUpdating || !selectedLocalProfile}
-              onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'auto')}
-              className={cn(
-                'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1',
-                currentLocalShareMode === 'auto'
-                  ? 'bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold'
-                  : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
-              )}
-              title="Profile is shared; teammate lease requests are auto-approved"
-            >
-              <span
-                className={cn(
-                  'h-1.5 w-1.5 rounded-full',
-                  currentLocalShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
-                )}
-              />
-              Auto Approve
-            </button>
+            {/* If Global Mesh Policy is OFF and no schedule override is active, show that sharing is disabled */}
+            {effectiveGlobalMode === 'off' ? (
+              <span className="text-[10px] font-mono text-[#888888] px-2.5 py-0.5 flex items-center gap-1.5" title="Mesh Policy is Off. Inbound profile sharing is globally disabled.">
+                <ShieldAlert className="h-3 w-3 text-[#e06c75]" />
+                <span>Sharing Disabled (Mesh Policy Off)</span>
+              </span>
+            ) : (
+              <>
+                {/* Off | Request | Auto Approve buttons */}
+                <button
+                  type="button"
+                  disabled={isShareUpdating || !selectedLocalProfile}
+                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'off')}
+                  className={cn(
+                    'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer',
+                    currentLocalShareMode === 'off'
+                      ? 'bg-[#262626] text-[#ededed] shadow-xs font-semibold'
+                      : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
+                  )}
+                  title="Profile is private and not shared on VPN"
+                >
+                  Off
+                </button>
+                <button
+                  type="button"
+                  disabled={isShareUpdating || !selectedLocalProfile}
+                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'request')}
+                  className={cn(
+                    'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1',
+                    currentLocalShareMode === 'request'
+                      ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold'
+                      : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
+                  )}
+                  title="Profile is shared; teammate lease requests require manual approval"
+                >
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 rounded-full',
+                      currentLocalShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
+                    )}
+                  />
+                  Request
+                </button>
+                <button
+                  type="button"
+                  disabled={isShareUpdating || !selectedLocalProfile}
+                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'auto')}
+                  className={cn(
+                    'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1',
+                    currentLocalShareMode === 'auto'
+                      ? 'bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold'
+                      : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
+                  )}
+                  title="Profile is shared; teammate lease requests are auto-approved"
+                >
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 rounded-full',
+                      currentLocalShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
+                    )}
+                  />
+                  Auto Approve
+                </button>
+              </>
+            )}
           </div>
 
           <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground px-2.5 py-1 rounded-geist border border-border bg-[#141414]">
@@ -628,7 +737,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-[#61afef]" />
                 <CardTitle className="text-sm font-semibold text-foreground">
-                  Active Borrowed Profiles
+                  Borrowed Profiles
                 </CardTitle>
                 <Badge
                   variant="outline"
@@ -637,12 +746,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   {data.active_leases.length} active
                 </Badge>
               </div>
-              <span className="text-[11px] text-muted-foreground">
-                Credentials running locally in sandbox
+              <span className="text-[11px] text-muted-foreground font-mono">
+                Sandboxed locally
               </span>
             </div>
             <CardDescription className="text-xs text-muted-foreground pt-1">
-              These profiles run 100% locally on your machine with zero dependency on the host's uptime.
+              External teammate profiles currently leased and sandboxed locally on this machine.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-5 pt-0">
@@ -720,7 +829,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               <div className="flex items-center gap-2">
                 <Share2 className="h-4 w-4 text-accent-cyan" />
                 <CardTitle className="text-sm font-semibold text-foreground">
-                  Teammates Borrowing Your Profiles (Active Outbound Leases)
+                  Active Borrowers
                 </CardTitle>
                 <Badge
                   variant="outline"
@@ -730,11 +839,11 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 </Badge>
               </div>
               <span className="text-[11px] text-muted-foreground font-mono">
-                You can revoke access to your credentials at any time
+                Revoke access instantly anytime
               </span>
             </div>
             <CardDescription className="text-xs text-muted-foreground pt-1">
-              Active sessions on teammate machines authenticated via your shared profile quotas.
+              Teammates currently authenticated with your shared profile credentials.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-5 pt-0">
@@ -1244,6 +1353,271 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 : 'Confirm Lease'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Schedule-Based Sharing Policy Modal (Calendar & Duration Picker) */}
+      <Dialog open={isScheduleModalOpen} onOpenChange={setIsScheduleModalOpen}>
+        <DialogContent className="max-w-lg bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
+          <DialogHeader className="space-y-1 pb-3 border-b border-[#222222] pr-6">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-accent-cyan" />
+              <DialogTitle className="text-base font-semibold text-[#ededed]">
+                Schedule Sharing Policy
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-[#888888]">
+              Automate sharing policies for night windows (e.g. 12:00 AM – 8:00 AM) or calendar date ranges across global mesh or specific profiles.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveSchedulePolicy} className="space-y-4 pt-3">
+            {/* Scope & Policy Mode */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                  Target Scope
+                </label>
+                <SelectDropdown
+                  value={schedScope}
+                  onChange={(val) => setSchedScope(String(val))}
+                  size="sm"
+                  options={[
+                    { value: 'global', label: 'Global (All Profiles)' },
+                    ...ownProfiles.map((p) => ({ value: p.name, label: `Profile: ${p.name}` })),
+                  ]}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                  Policy Mode in Window
+                </label>
+                <SelectDropdown
+                  value={schedMode}
+                  onChange={(val) => setSchedMode(val as 'auto' | 'request')}
+                  size="sm"
+                  options={[
+                    { value: 'auto', label: 'Auto Approve (Instant)' },
+                    { value: 'request', label: 'Request Mode (Manual)' },
+                  ]}
+                />
+              </div>
+            </div>
+
+            {/* Schedule Type Selection */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                Schedule Window Type
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSchedType('recurring')}
+                  className={cn(
+                    'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center gap-2 cursor-pointer',
+                    schedType === 'recurring'
+                      ? 'bg-[#181818] border-accent-cyan text-foreground font-semibold'
+                      : 'bg-[#121212] border-[#262626] text-muted-foreground hover:bg-[#161616]'
+                  )}
+                >
+                  <Clock className="h-3.5 w-3.5 text-accent-cyan" />
+                  <span>Daily Recurring Hours</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSchedType('calendar')}
+                  className={cn(
+                    'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center gap-2 cursor-pointer',
+                    schedType === 'calendar'
+                      ? 'bg-[#181818] border-accent-cyan text-foreground font-semibold'
+                      : 'bg-[#121212] border-[#262626] text-muted-foreground hover:bg-[#161616]'
+                  )}
+                >
+                  <Calendar className="h-3.5 w-3.5 text-accent-cyan" />
+                  <span>Calendar Date Range</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Recurring Time Pickers with Quick Chips */}
+            {schedType === 'recurring' ? (
+              <div className="space-y-2.5 p-3 rounded-geist bg-[#141414] border border-[#222222]">
+                <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                  <span>Recurring Daily Hours</span>
+                  {/* Preset quick chips */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setSchedStartTime('00:00'); setSchedEndTime('08:00'); }}
+                      className="px-1.5 py-0.5 rounded text-[10px] bg-[#1f1f1f] hover:bg-[#282828] text-accent-cyan transition-colors cursor-pointer"
+                    >
+                      12am - 8am
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSchedStartTime('22:00'); setSchedEndTime('06:00'); }}
+                      className="px-1.5 py-0.5 rounded text-[10px] bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      10pm - 6am
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSchedStartTime('09:00'); setSchedEndTime('18:00'); }}
+                      className="px-1.5 py-0.5 rounded text-[10px] bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      9am - 6pm
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-mono text-[#888888]">From Time</span>
+                    <input
+                      type="time"
+                      value={schedStartTime}
+                      onChange={(e) => setSchedStartTime(e.target.value)}
+                      required
+                      className="w-full h-8 px-2.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-mono text-[#888888]">To Time</span>
+                    <input
+                      type="time"
+                      value={schedEndTime}
+                      onChange={(e) => setSchedEndTime(e.target.value)}
+                      required
+                      className="w-full h-8 px-2.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Calendar Date & Time Picker */
+              <div className="space-y-2.5 p-3 rounded-geist bg-[#141414] border border-[#222222]">
+                <span className="text-[11px] font-mono text-muted-foreground block">
+                  Calendar Date & Time Interval
+                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-mono text-[#888888]">Start Date & Time</span>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="date"
+                        value={schedStartDate}
+                        onChange={(e) => setSchedStartDate(e.target.value)}
+                        required
+                        className="w-2/3 h-8 px-2 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                      />
+                      <input
+                        type="time"
+                        value={schedStartTime}
+                        onChange={(e) => setSchedStartTime(e.target.value)}
+                        required
+                        className="w-1/3 h-8 px-1.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-mono text-[#888888]">End Date & Time</span>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="date"
+                        value={schedEndDate}
+                        onChange={(e) => setSchedEndDate(e.target.value)}
+                        required
+                        className="w-2/3 h-8 px-2 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                      />
+                      <input
+                        type="time"
+                        value={schedEndTime}
+                        onChange={(e) => setSchedEndTime(e.target.value)}
+                        required
+                        className="w-1/3 h-8 px-1.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="pt-2 border-t border-[#222222]">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsScheduleModalOpen(false)}
+                className="h-8 rounded-geist border-border bg-[#1a1a1a] hover:bg-[#242424] text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={isSavingSchedule}
+                className="h-8 rounded-geist bg-[#0070f3] hover:bg-[#0060df] text-xs font-mono text-white flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>Save Schedule</span>
+              </Button>
+            </DialogFooter>
+          </form>
+
+          {/* Active Configured Schedules List */}
+          {data?.schedules && data.schedules.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-[#222222] space-y-2">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+                Existing Scheduled Policies ({data.schedules.length})
+              </span>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                {data.schedules.map((sc) => {
+                  const isActive = isScheduleActiveNow(sc);
+                  return (
+                    <div
+                      key={sc.id}
+                      className="p-2 rounded-geist bg-[#141414] border border-[#222222] flex items-center justify-between text-xs font-mono"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            'h-2 w-2 rounded-full shrink-0',
+                            isActive ? 'bg-[#10b981] animate-pulse' : 'bg-[#666666]'
+                          )}
+                          title={isActive ? 'Active Now' : 'Scheduled'}
+                        />
+                        <span className="font-bold text-foreground">
+                          {sc.scope === 'global' ? 'Global' : sc.scope}
+                        </span>
+                        <span
+                          className={cn(
+                            'text-[10px] px-1.5 py-0.2 rounded border',
+                            sc.mode === 'auto'
+                              ? 'bg-[#183925] text-[#46a758] border-[#235836]'
+                              : 'bg-[#142334] text-[#52a8ff] border-[#1f4068]'
+                          )}
+                        >
+                          {sc.mode === 'auto' ? 'Auto' : 'Request'}
+                        </span>
+                        <span className="text-muted-foreground text-[11px]">
+                          {sc.start_date ? `${sc.start_date} ` : ''}{sc.start_time} – {sc.end_date ? `${sc.end_date} ` : ''}{sc.end_time}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSchedulePolicy(sc.id)}
+                        className="text-muted-foreground hover:text-status-danger cursor-pointer p-1"
+                        title="Delete schedule"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
