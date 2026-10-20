@@ -91,3 +91,39 @@ func TestServerManualPendingRequestAndApproval(t *testing.T) {
 		t.Errorf("expected approved response with payload: %+v", approvedResp)
 	}
 }
+
+func TestServerCodexCredentials(t *testing.T) {
+	aimDir := t.TempDir()
+	store := NewStore(aimDir)
+	_ = store.EnableProfile("office", "codex", true, 4*time.Hour)
+
+	profilesDir := filepath.Join(aimDir, "profiles")
+	officeCodexDir := filepath.Join(profilesDir, "office", ".codex")
+	_ = os.MkdirAll(officeCodexDir, 0700)
+	_ = os.WriteFile(filepath.Join(officeCodexDir, "auth.json"), []byte(`{"access_token":"codex-tok"}`), 0600)
+	_ = os.WriteFile(filepath.Join(officeCodexDir, "config.toml"), []byte(`model = "o3-mini"`), 0600)
+
+	server := NewServer(store, profilesDir, "bob-node", 4319)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client := NewClient(4319)
+	client.baseURLOverride = ts.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := client.RequestLease(ctx, "127.0.0.1", "office", "codex", 2)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.Status != "approved" || resp.Payload == nil {
+		t.Fatalf("expected approved response with payload: %+v", resp)
+	}
+	if _, ok := resp.Payload.Files[".codex/auth.json"]; !ok {
+		t.Errorf("expected .codex/auth.json in files, got: %+v", resp.Payload.Files)
+	}
+	if _, ok := resp.Payload.Files[".codex/config.toml"]; !ok {
+		t.Errorf("expected .codex/config.toml in files, got: %+v", resp.Payload.Files)
+	}
+}

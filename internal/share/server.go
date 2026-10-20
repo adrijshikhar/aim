@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -332,31 +333,67 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 	switch agent {
 	case "claude":
 		_ = profile.HarvestKeychainTokenToProfile("claude", profDir)
-		credsPath := filepath.Join(profDir, ".claude", ".credentials.json")
-		if data, err := os.ReadFile(credsPath); err == nil {
-			files[".claude/.credentials.json"] = base64.StdEncoding.EncodeToString(data)
-		}
-		authPath := filepath.Join(profDir, ".claude", "auth.json")
-		if data, err := os.ReadFile(authPath); err == nil {
-			files[".claude/auth.json"] = base64.StdEncoding.EncodeToString(data)
-		}
-		claudeJSONPath := filepath.Join(profDir, ".claude.json")
-		if data, err := os.ReadFile(claudeJSONPath); err == nil {
-			files[".claude.json"] = base64.StdEncoding.EncodeToString(data)
-		}
-		claudeSubJSONPath := filepath.Join(profDir, ".claude", ".claude.json")
-		if data, err := os.ReadFile(claudeSubJSONPath); err == nil {
-			files[".claude/.claude.json"] = base64.StdEncoding.EncodeToString(data)
+		for _, rel := range []string{
+			".claude/.credentials.json",
+			".claude/auth.json",
+			".claude.json",
+			".claude/.claude.json",
+			".claude/settings.json",
+		} {
+			p := filepath.Join(profDir, filepath.FromSlash(rel))
+			if data, err := os.ReadFile(p); err == nil {
+				files[rel] = base64.StdEncoding.EncodeToString(data)
+			}
 		}
 	case "codex":
-		authPath := filepath.Join(profDir, ".config", "codex", "auth.json")
-		if data, err := os.ReadFile(authPath); err == nil {
-			files[".config/codex/auth.json"] = base64.StdEncoding.EncodeToString(data)
+		codexAuth := filepath.Join(profDir, ".codex", "auth.json")
+		if _, err := os.Stat(codexAuth); os.IsNotExist(err) {
+			realHome := config.RealHomeDir()
+			hostAuth := filepath.Join(realHome, ".codex", "auth.json")
+			if data, err := os.ReadFile(hostAuth); err == nil && len(data) > 0 {
+				_ = os.MkdirAll(filepath.Dir(codexAuth), 0700)
+				_ = os.WriteFile(codexAuth, data, 0600)
+			}
+		}
+		for _, rel := range []string{
+			".codex/auth.json",
+			".codex/config.toml",
+			".config/codex/auth.json",
+		} {
+			p := filepath.Join(profDir, filepath.FromSlash(rel))
+			if data, err := os.ReadFile(p); err == nil {
+				files[rel] = base64.StdEncoding.EncodeToString(data)
+			}
+		}
+	case "agy":
+		agyAuth := filepath.Join(profDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+		if _, err := os.Stat(agyAuth); os.IsNotExist(err) {
+			realHome := config.RealHomeDir()
+			hostAgy := filepath.Join(realHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+			if data, err := os.ReadFile(hostAgy); err == nil && len(data) > 0 {
+				_ = os.MkdirAll(filepath.Dir(agyAuth), 0700)
+				_ = os.WriteFile(agyAuth, data, 0600)
+			}
+		}
+		for _, rel := range []string{
+			".gemini/antigravity-cli/antigravity-oauth-token",
+			".gemini/antigravity-cli/config.json",
+			".config/gcloud/application_default_credentials.json",
+		} {
+			p := filepath.Join(profDir, filepath.FromSlash(rel))
+			if data, err := os.ReadFile(p); err == nil {
+				files[rel] = base64.StdEncoding.EncodeToString(data)
+			}
 		}
 	case "gemini":
-		oauthPath := filepath.Join(profDir, ".gemini", "oauth.json")
-		if data, err := os.ReadFile(oauthPath); err == nil {
-			files[".gemini/oauth.json"] = base64.StdEncoding.EncodeToString(data)
+		for _, rel := range []string{
+			".gemini/gemini-oauth-token",
+			".gemini/oauth.json",
+		} {
+			p := filepath.Join(profDir, filepath.FromSlash(rel))
+			if data, err := os.ReadFile(p); err == nil {
+				files[rel] = base64.StdEncoding.EncodeToString(data)
+			}
 		}
 	}
 

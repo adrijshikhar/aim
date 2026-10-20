@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AgentBadge } from '@/components/AgentBadge';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
+import { Slider } from '@/components/ui/slider';
 import {
   Dialog,
   DialogContent,
@@ -401,51 +402,39 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             </span>
           </div>
 
-          {/* Physical Track Bar with Circular Knob */}
-          <div
-            className="relative w-full h-5 bg-[#181818] border border-[#2a2a2a] rounded-full flex items-center cursor-pointer shadow-inner px-1 my-1"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const x = e.clientX - rect.left;
-              const ratio = x / rect.width;
-              if (ratio < 0.33) handleGlobalModeChange('off');
-              else if (ratio < 0.67) handleGlobalModeChange('request');
-              else handleGlobalModeChange('auto');
-            }}
-          >
-            {/* Filled Progress Bar */}
-            <div
-              className={cn(
-                'absolute left-0 top-0 bottom-0 rounded-full transition-all duration-300 ease-out opacity-60 pointer-events-none',
-                currentGlobalMode === 'off' && 'w-0 bg-transparent',
-                currentGlobalMode === 'request' && 'w-1/2 bg-[#2563eb]',
-                currentGlobalMode === 'auto' && 'w-full bg-[#16a34a]'
+          {/* Shadcn / Radix Draggable 3-Stop Slider */}
+          <div className="w-full px-1 py-1.5">
+            <Slider
+              min={0}
+              max={2}
+              step={1}
+              value={[currentGlobalMode === 'off' ? 0 : currentGlobalMode === 'request' ? 1 : 2]}
+              onValueChange={([val]) => {
+                const modes: ShareMode[] = ['off', 'request', 'auto'];
+                const target = modes[val];
+                if (target && target !== currentGlobalMode) {
+                  handleGlobalModeChange(target);
+                }
+              }}
+              trackClassName="h-4 bg-[#181818] border border-[#2a2a2a] rounded-full"
+              rangeClassName={cn(
+                'transition-all duration-300',
+                currentGlobalMode === 'off' && 'bg-transparent',
+                currentGlobalMode === 'request' && 'bg-[#2563eb]/60',
+                currentGlobalMode === 'auto' && 'bg-[#16a34a]/60'
               )}
+              thumbClassName="h-6 w-6 rounded-full bg-white shadow-md border-0 ring-1 ring-black/20 cursor-grab active:cursor-grabbing hover:scale-105 active:scale-95 transition-transform"
+              thumbChildren={
+                <span
+                  className={cn(
+                    'h-2.5 w-2.5 rounded-full transition-colors',
+                    currentGlobalMode === 'off' && 'bg-[#666666]',
+                    currentGlobalMode === 'request' && 'bg-[#0070f3]',
+                    currentGlobalMode === 'auto' && 'bg-[#10b981]'
+                  )}
+                />
+              }
             />
-
-            {/* 3 Stop Dots */}
-            <div className="absolute left-2.5 h-1.5 w-1.5 rounded-full bg-white/40 pointer-events-none" />
-            <div className="absolute left-1/2 -translate-x-1/2 h-1.5 w-1.5 rounded-full bg-white/40 pointer-events-none" />
-            <div className="absolute right-2.5 h-1.5 w-1.5 rounded-full bg-white/40 pointer-events-none" />
-
-            {/* White Circular Sliding Knob */}
-            <div
-              className={cn(
-                'absolute top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center transition-all duration-300 ease-out z-20 cursor-grab',
-                currentGlobalMode === 'off' && 'left-0',
-                currentGlobalMode === 'request' && 'left-1/2 -translate-x-1/2',
-                currentGlobalMode === 'auto' && 'left-[calc(100%-24px)]'
-              )}
-            >
-              <span
-                className={cn(
-                  'h-2.5 w-2.5 rounded-full transition-colors',
-                  currentGlobalMode === 'off' && 'bg-[#666666]',
-                  currentGlobalMode === 'request' && 'bg-[#0070f3]',
-                  currentGlobalMode === 'auto' && 'bg-[#10b981]'
-                )}
-              />
-            </div>
           </div>
 
           {/* 3 Stop Interactive Labels */}

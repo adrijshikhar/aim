@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -14,6 +15,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
 	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
@@ -140,6 +142,35 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		return 1
 	}
 	logger.Debug("[run] Profile %q directory: %s", opts.ProfileName, pDir)
+
+	if strings.Contains(profileName, ":") {
+		parts := strings.SplitN(profileName, ":", 2)
+		hostPart := parts[0]
+		profPart := parts[1]
+		mgr := share.NewLeaseManager(pm.ProfilesRoot())
+		leaseFile := filepath.Join(pDir, ".aim-lease.json")
+		if _, err := os.Stat(leaseFile); os.IsNotExist(err) {
+			logger.Debug("[run] Leased profile %q not found locally, attempting auto-lease from %s...", profileName, hostPart)
+			client := share.NewClient(4319)
+			reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			resp, reqErr := client.RequestLease(reqCtx, hostPart, profPart, adapter.Name(), 2)
+			if reqErr != nil && !strings.Contains(hostPart, ".") {
+				resp, reqErr = client.RequestLease(reqCtx, hostPart+".local", profPart, adapter.Name(), 2)
+			}
+			cancel()
+			if reqErr == nil && resp != nil && resp.Status == "approved" {
+				if _, installErr := mgr.InstallLease(hostPart, profPart, resp); installErr == nil {
+					fmt.Printf("%s Auto-acquired lease for %s from %s (expires %s)\n",
+						lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
+						profPart, hostPart, resp.ExpiresAt.Format("15:04:05"))
+				}
+			}
+		}
+		if mgr.IsLeaseExpired(profileName) {
+			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired. Please renew the lease via 'aim share request %s %s' or the web dashboard.\n", profileName, hostPart, profPart)
+			return 1
+		}
+	}
 
 	cfg, _ := config.LoadConfig()
 	if cfg != nil {
