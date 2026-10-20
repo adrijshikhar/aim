@@ -598,7 +598,7 @@ export function App() {
                 profiles={profiles}
               />
             )}
-            {currentView === 'network' && <NetworkView />}
+            {currentView === 'network' && <NetworkView profiles={profiles} />}
           </div>
         </main>
       </div>
