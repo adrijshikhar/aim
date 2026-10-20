@@ -15,10 +15,10 @@ import (
 )
 
 type PendingRequestInfo struct {
-	RequestID   string       `json:"request_id"`
-	Request     LeaseRequest `json:"request"`
-	CreatedAt   time.Time    `json:"created_at"`
-	ExpiresAt   time.Time    `json:"expires_at"`
+	RequestID string       `json:"request_id"`
+	Request   LeaseRequest `json:"request"`
+	CreatedAt time.Time    `json:"created_at"`
+	ExpiresAt time.Time    `json:"expires_at"`
 }
 
 type Server struct {
@@ -34,9 +34,9 @@ type Server struct {
 }
 
 type pendingRequest struct {
-	info      PendingRequestInfo
-	matched   *SharedProfileConfig
-	respCh    chan *LeaseResponse
+	info    PendingRequestInfo
+	matched *SharedProfileConfig
+	respCh  chan *LeaseResponse
 }
 
 func NewServer(store *ShareStore, profilesDir string, nodeID string, port int) *Server {
