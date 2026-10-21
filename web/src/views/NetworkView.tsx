@@ -598,29 +598,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             )}
           </div>
           <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-xs text-foreground tracking-tight">
-                {isVpnActive ? 'Corporate VPN Tunnel Active' : 'VPN Tunnel Offline'}
-              </span>
-              {isVpnActive ? (
-                <Badge
-                  variant="outline"
-                  className="badge-success text-[11px] font-sans px-2.5 py-0.5 flex items-center gap-1.5"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
-                  <span>Connected</span>
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  className="badge-warning text-[11px] font-sans px-2.5 py-0.5 flex items-center gap-1.5"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                  <span>Standby</span>
-                </Badge>
-              )}
-            </div>
-            <p className="text-[11px] font-mono text-muted-foreground">
+            <span className="font-medium text-sm text-foreground tracking-tight">
+              {isVpnActive ? 'Corporate VPN Tunnel Active' : 'VPN Tunnel Offline'}
+            </span>
+            <p className="text-xs font-mono text-muted-foreground">
               {isVpnActive
                 ? `Interface: ${vpn.interface_name} • IP: ${vpn.ip} • Subnet Broadcast: ${vpn.broadcast_ip}`
                 : 'Connect to Pritunl / OpenVPN to discover online teammates across your corporate subnet.'}
@@ -630,97 +611,99 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
         {/* Local Profile Override Sharing Control & Port Badge */}
         <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
-          <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] shadow-xs">
-            {ownProfiles.length > 1 ? (
-              <div className="flex items-center gap-1.5 pl-2 pr-1 border-r border-[#262626]">
-                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
-                <div className="min-w-[80px] max-w-[130px]">
-                  <SelectDropdown
-                    value={selectedLocalProfile}
-                    onChange={(val) => setSelectedLocalProfile(String(val))}
-                    size="xs"
-                    triggerClassName="h-6 py-0 px-1.5 bg-transparent border-0 text-xs font-mono font-medium text-foreground hover:bg-[#1a1a1a] shadow-none"
-                    options={ownProfiles.map((p) => ({
-                      value: p.name,
-                      label: p.name,
-                    }))}
-                  />
+          {effectiveGlobalMode !== 'off' && (
+            <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] shadow-xs">
+              {ownProfiles.length > 1 ? (
+                <div className="flex items-center gap-1.5 pl-2 pr-1 border-r border-[#262626]">
+                  <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
+                  <div className="min-w-[80px] max-w-[130px]">
+                    <SelectDropdown
+                      value={selectedLocalProfile}
+                      onChange={(val) => setSelectedLocalProfile(String(val))}
+                      size="xs"
+                      triggerClassName="h-6 py-0 px-1.5 bg-transparent border-0 text-xs font-mono font-medium text-foreground hover:bg-[#1a1a1a] shadow-none"
+                      options={ownProfiles.map((p) => ({
+                        value: p.name,
+                        label: p.name,
+                      }))}
+                    />
+                  </div>
                 </div>
-              </div>
-            ) : ownProfiles.length === 1 ? (
-              <div className="flex items-center gap-1.5 px-2.5 py-0.5 border-r border-[#262626]">
-                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
-                <span className="text-xs font-mono font-medium text-foreground">{ownProfiles[0].name}</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-2.5 py-0.5 border-r border-[#262626]">
-                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
-                <span className="text-xs font-mono font-medium text-foreground">Profile</span>
-              </div>
-            )}
+              ) : ownProfiles.length === 1 ? (
+                <div className="flex items-center gap-1.5 px-2.5 py-0.5 border-r border-[#262626]">
+                  <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
+                  <span className="text-xs font-mono font-medium text-foreground">{ownProfiles[0].name}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2.5 py-0.5 border-r border-[#262626]">
+                  <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
+                  <span className="text-xs font-mono font-medium text-foreground">Profile</span>
+                </div>
+              )}
 
-            {/* Segmented Mode Control: Off | Request | Auto */}
-            <div className="inline-flex items-center gap-0.5 pl-0.5">
-              <button
-                type="button"
-                disabled={isShareUpdating || !selectedLocalProfile}
-                onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'off')}
-                className={cn(
-                  'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium',
-                  currentLocalShareMode === 'off'
-                    ? 'bg-[#262626] text-[#ededed] shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
-                )}
-                title="Profile is private and not shared on the network"
-              >
-                Off
-              </button>
-
-              <button
-                type="button"
-                disabled={isShareUpdating || !selectedLocalProfile}
-                onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'request')}
-                className={cn(
-                  'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1.5',
-                  currentLocalShareMode === 'request'
-                    ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068]/60 shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
-                )}
-                title="Profile is shared; teammate lease requests require manual host approval"
-              >
-                <span
+              {/* Segmented Mode Control: Off | Request | Auto */}
+              <div className="inline-flex items-center gap-0.5 pl-0.5">
+                <button
+                  type="button"
+                  disabled={isShareUpdating || !selectedLocalProfile}
+                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'off')}
                   className={cn(
-                    'h-1.5 w-1.5 rounded-full',
-                    currentLocalShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
+                    'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium',
+                    currentLocalShareMode === 'off'
+                      ? 'bg-[#262626] text-[#ededed] shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
                   )}
-                />
-                Request
-              </button>
+                  title="Profile is private and not shared on the network"
+                >
+                  Off
+                </button>
 
-              <button
-                type="button"
-                disabled={isShareUpdating || !selectedLocalProfile}
-                onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'auto')}
-                className={cn(
-                  'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1.5',
-                  currentLocalShareMode === 'auto'
-                    ? 'bg-[#183925] text-[#46a758] border border-[#235836]/60 shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
-                )}
-                title="Profile is shared; teammate lease requests are automatically approved"
-              >
-                <span
+                <button
+                  type="button"
+                  disabled={isShareUpdating || !selectedLocalProfile}
+                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'request')}
                   className={cn(
-                    'h-1.5 w-1.5 rounded-full',
-                    currentLocalShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
+                    'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1.5',
+                    currentLocalShareMode === 'request'
+                      ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068]/60 shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
                   )}
-                />
-                Auto
-              </button>
+                  title="Profile is shared; teammate lease requests require manual host approval"
+                >
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 rounded-full',
+                      currentLocalShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
+                    )}
+                  />
+                  Request
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isShareUpdating || !selectedLocalProfile}
+                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'auto')}
+                  className={cn(
+                    'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1.5',
+                    currentLocalShareMode === 'auto'
+                      ? 'bg-[#183925] text-[#46a758] border border-[#235836]/60 shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                  )}
+                  title="Profile is shared; teammate lease requests are automatically approved"
+                >
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 rounded-full',
+                      currentLocalShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
+                    )}
+                  />
+                  Auto
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground px-2.5 py-1 rounded-geist border border-border bg-[#141414]">
+          <span className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground px-2.5 py-1 rounded-geist border border-border bg-[#141414]">
             <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
             <span>P2P Port :4319</span>
           </span>
@@ -739,7 +722,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 </CardTitle>
                 <Badge
                   variant="outline"
-                  className="text-[10px] font-mono py-0 px-1.5 text-muted-foreground"
+                  className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
                 >
                   {data.active_leases.filter((l) => !l.is_expired && new Date(l.expires_at).getTime() > currentTime).length} active
                 </Badge>
@@ -757,13 +740,13 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                       toast({ title: 'Cleaned up expired leases' });
                       await loadStatus();
                     }}
-                    className="h-6 px-2 text-[10px] font-mono text-muted-foreground hover:text-status-danger cursor-pointer"
+                    className="h-6 px-2 text-xs font-mono text-muted-foreground hover:text-status-danger cursor-pointer"
                   >
                     <Trash2 className="h-3 w-3 mr-1" />
                     Clean expired
                   </Button>
                 )}
-                <span className="text-[11px] text-muted-foreground font-mono">
+                <span className="text-xs text-muted-foreground font-mono">
                   Sandboxed locally
                 </span>
               </div>
@@ -792,7 +775,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                         </div>
                         <span
                           className={cn(
-                            'text-[10px] font-mono px-2 py-0.5 rounded font-medium',
+                            'text-xs font-mono px-2 py-0.5 rounded font-medium',
                             isExpired
                               ? 'bg-status-danger-bg text-status-danger border border-status-danger-border'
                               : 'bg-status-success-bg text-status-success border border-status-success-border'
@@ -801,7 +784,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                           {formatExpiresIn(lease.expires_at)}
                         </span>
                       </div>
-                      <div className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
+                      <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
                         <span>Source:</span>
                         <span className="text-foreground font-semibold">{lease.source_peer}</span>
                         <span className="text-[#666666]">/</span>
@@ -812,7 +795,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
                       <button
                         onClick={() => copyToClipboard(runCmd, lease.local_profile)}
-                        className="inline-flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                        className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
                         title="Click to copy command"
                       >
                         {copiedCmd === lease.local_profile ? (
@@ -827,7 +810,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleRelease(lease.local_profile)}
-                        className="h-6 px-2 text-[11px] text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                        className="h-6 px-2 text-xs text-status-danger hover:bg-status-danger-bg cursor-pointer"
                       >
                         <Trash2 className="h-3 w-3 mr-1" />
                         Release
@@ -853,12 +836,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 </CardTitle>
                 <Badge
                   variant="outline"
-                  className="text-[10px] font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                  className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
                 >
                   {activeGrantedLeases.length} active
                 </Badge>
               </div>
-              <span className="text-[11px] text-muted-foreground font-mono">
+              <span className="text-xs text-muted-foreground font-mono">
                 Revoke access instantly anytime
               </span>
             </div>
@@ -882,7 +865,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                         </span>
                         <span
                           className={cn(
-                            'text-[10px] font-mono px-1.5 py-0.5 rounded border',
+                            'text-xs font-mono px-1.5 py-0.5 rounded border',
                             lease.auto_approved
                               ? 'bg-[#183925]/50 text-[#46a758] border-[#235836]/60'
                               : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
@@ -891,11 +874,11 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                           {lease.auto_approved ? 'Auto Approved' : 'Manual Approved'}
                         </span>
                       </div>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded font-medium bg-status-success-bg text-status-success border border-status-success-border">
+                      <span className="text-xs font-mono px-2 py-0.5 rounded font-medium bg-status-success-bg text-status-success border border-status-success-border">
                         {formatExpiresIn(lease.expires_at)}
                       </span>
                     </div>
-                    <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-mono">
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
                       <Laptop className="h-3 w-3 text-[#61afef]" />
                       <span>Borrower:</span>
                       <span className="text-foreground font-semibold truncate max-w-[220px]" title={lease.borrower_id}>
@@ -905,14 +888,14 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   </div>
 
                   <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
-                    <span className="text-[10px] font-mono text-[#666666]">
+                    <span className="text-xs font-mono text-[#666666]">
                       Lease ID: {lease.lease_id}
                     </span>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => handleRevokeLease(lease.lease_id)}
-                      className="h-6 px-2 text-[11px] text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                      className="h-6 px-2 text-xs text-status-danger hover:bg-status-danger-bg cursor-pointer"
                     >
                       <ShieldAlert className="h-3 w-3 mr-1" />
                       Revoke Lease
@@ -937,7 +920,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 </CardTitle>
                 <Badge
                   variant="outline"
-                  className="text-[10px] font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                  className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
                 >
                   {filteredPeers.length} online
                 </Badge>
@@ -969,7 +952,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     <X className="h-3.5 w-3.5" />
                   </button>
                 ) : (
-                  <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-[10px] font-mono text-muted-foreground pointer-events-none">
+                  <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-xs font-mono text-muted-foreground pointer-events-none">
                     /
                   </kbd>
                 )}
@@ -1031,13 +1014,13 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                               <Laptop className="h-4 w-4 text-[#61afef] shrink-0" />
                               <span className="truncate">{peer.hostname}</span>
                             </CardTitle>
-                            <CardDescription className="text-[11px] font-mono text-muted-foreground truncate">
+                            <CardDescription className="text-xs font-mono text-muted-foreground truncate">
                               {peer.vpn_ip}
                             </CardDescription>
                           </div>
                           <Badge
                             variant="outline"
-                            className="badge-success text-[10px] font-sans px-2 py-0.5 shrink-0 flex items-center gap-1.5"
+                            className="badge-success text-xs font-sans px-2 py-0.5 shrink-0 flex items-center gap-1.5"
                           >
                             <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                             <span>Online</span>
@@ -1046,7 +1029,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                       </CardHeader>
 
                       <CardContent className="p-4 pt-2 space-y-2">
-                        <div className="flex items-center justify-between text-[10px] font-mono uppercase text-muted-foreground tracking-wider font-semibold">
+                        <div className="flex items-center justify-between text-xs font-mono uppercase text-muted-foreground tracking-wider font-medium">
                           <span>Offered Profiles</span>
                           <span>{profileCount} available</span>
                         </div>
@@ -1070,7 +1053,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                     {sp && (
                                       <span
                                         className={cn(
-                                          'text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0',
+                                          'text-xs font-mono px-1.5 py-0.5 rounded border shrink-0',
                                           isAuto
                                             ? 'bg-[#183925]/50 text-[#46a758] border-[#235836]/60'
                                             : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
@@ -1099,7 +1082,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                             })}
                           </div>
                         ) : (
-                          <div className="p-3 rounded-geist bg-[#141414] border border-[#1e1e1e] text-[11px] text-muted-foreground text-center italic">
+                          <div className="p-3 rounded-geist bg-[#141414] border border-[#1e1e1e] text-xs text-muted-foreground text-center italic">
                             No profiles currently shared
                           </div>
                         )}
@@ -1124,14 +1107,14 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               </CardTitle>
               <Badge
                 variant="outline"
-                className="text-[10px] font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
               >
                 {filteredAuditLogs.length === (data?.audit_logs?.length || 0)
                   ? `${filteredAuditLogs.length} events`
                   : `${filteredAuditLogs.length} of ${data?.audit_logs?.length || 0} events`}
               </Badge>
             </div>
-            <span className="text-[11px] text-muted-foreground font-mono">
+            <span className="text-xs text-muted-foreground font-mono">
               Tamper-evident mesh audit trail
             </span>
           </div>
@@ -1213,7 +1196,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   setAuditSearchQuery('');
                   setAuditActionFilter('all');
                 }}
-                className="h-6 px-2.5 text-[11px] font-mono cursor-pointer"
+                className="h-6 px-2.5 text-xs font-mono cursor-pointer"
               >
                 Clear filters
               </Button>
@@ -1241,17 +1224,17 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 return (
                   <div
                     key={log.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 px-2.5 rounded-geist bg-[#111111] border border-[#1f1f1f] text-[11px]"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 px-2.5 rounded-geist bg-[#111111] border border-[#1f1f1f] text-xs"
                   >
                     <div className="flex items-center gap-2 truncate min-w-0">
-                      <span className="text-[#666666] shrink-0">{timeStr}</span>
-                      <span className={cn('px-1.5 py-0.5 rounded border text-[10px] shrink-0 uppercase font-semibold', color)}>
+                      <span className="text-muted-foreground shrink-0">{timeStr}</span>
+                      <span className={cn('px-1.5 py-0.5 rounded border text-xs shrink-0 font-medium', color)}>
                         {log.action.replace(/_/g, ' ')}
                       </span>
                       <span className="text-foreground truncate">{log.details}</span>
                     </div>
                     {log.actor && (
-                      <span className="text-[#666666] text-[10px] shrink-0 truncate max-w-[150px]">
+                      <span className="text-muted-foreground text-xs shrink-0 truncate max-w-[150px]">
                         actor: {log.actor}
                       </span>
                     )}
@@ -1462,7 +1445,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               <span className="text-xs font-mono font-medium text-foreground">
                 Base Policy Mode
               </span>
-              <span className="text-[10px] font-mono text-muted-foreground">
+              <span className="text-xs font-mono text-muted-foreground">
                 Applied when Sharing is ON
               </span>
             </div>
@@ -1500,7 +1483,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             {/* Scope & Policy Mode */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
                   Target Scope
                 </label>
                 <SelectDropdown
@@ -1515,7 +1498,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
                   Policy Mode in Window
                 </label>
                 <SelectDropdown
@@ -1532,7 +1515,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
             {/* Schedule Type Selection */}
             <div className="space-y-1.5">
-              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
                 Schedule Window Type
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -1568,28 +1551,28 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             {/* Recurring Time Pickers with Quick Chips */}
             {schedType === 'recurring' ? (
               <div className="space-y-2.5 p-3 rounded-geist bg-[#141414] border border-[#222222]">
-                <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                <div className="flex items-center justify-between text-xs font-mono text-muted-foreground">
                   <span>Recurring Daily Hours</span>
                   {/* Preset quick chips */}
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => { setSchedStartTime('00:00'); setSchedEndTime('08:00'); }}
-                      className="px-1.5 py-0.5 rounded text-[10px] bg-[#1f1f1f] hover:bg-[#282828] text-accent-cyan transition-colors cursor-pointer"
+                      className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-accent-cyan transition-colors cursor-pointer"
                     >
                       12am - 8am
                     </button>
                     <button
                       type="button"
                       onClick={() => { setSchedStartTime('22:00'); setSchedEndTime('06:00'); }}
-                      className="px-1.5 py-0.5 rounded text-[10px] bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                      className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                     >
                       10pm - 6am
                     </button>
                     <button
                       type="button"
                       onClick={() => { setSchedStartTime('09:00'); setSchedEndTime('18:00'); }}
-                      className="px-1.5 py-0.5 rounded text-[10px] bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                      className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                     >
                       9am - 6pm
                     </button>
@@ -1598,7 +1581,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <span className="text-[10px] font-mono text-[#888888]">From Time</span>
+                    <span className="text-xs font-mono text-muted-foreground">From Time</span>
                     <input
                       type="time"
                       value={schedStartTime}
@@ -1608,7 +1591,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     />
                   </div>
                   <div className="space-y-1">
-                    <span className="text-[10px] font-mono text-[#888888]">To Time</span>
+                    <span className="text-xs font-mono text-muted-foreground">To Time</span>
                     <input
                       type="time"
                       value={schedEndTime}
@@ -1622,12 +1605,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             ) : (
               /* Calendar Date & Time Picker */
               <div className="space-y-2.5 p-3 rounded-geist bg-[#141414] border border-[#222222]">
-                <span className="text-[11px] font-mono text-muted-foreground block">
+                <span className="text-xs font-mono text-muted-foreground block">
                   Calendar Date & Time Interval
                 </span>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <span className="text-[10px] font-mono text-[#888888]">Start Date & Time</span>
+                    <span className="text-xs font-mono text-muted-foreground">Start Date & Time</span>
                     <div className="flex gap-1.5">
                       <input
                         type="date"
@@ -1646,7 +1629,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <span className="text-[10px] font-mono text-[#888888]">End Date & Time</span>
+                    <span className="text-xs font-mono text-muted-foreground">End Date & Time</span>
                     <div className="flex gap-1.5">
                       <input
                         type="date"
@@ -1693,7 +1676,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           {/* Active Configured Schedules List */}
           {data?.schedules && data.schedules.length > 0 && (
             <div className="mt-4 pt-3 border-t border-[#222222] space-y-2">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+              <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium block">
                 Existing Scheduled Policies ({data.schedules.length})
               </span>
               <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
@@ -1717,7 +1700,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                         </span>
                         <span
                           className={cn(
-                            'text-[10px] px-1.5 py-0.2 rounded border',
+                            'text-xs px-1.5 py-0.5 rounded border',
                             sc.mode === 'auto'
                               ? 'bg-[#183925] text-[#46a758] border-[#235836]'
                               : 'bg-[#142334] text-[#52a8ff] border-[#1f4068]'
@@ -1725,7 +1708,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                         >
                           {sc.mode === 'auto' ? 'Auto' : 'Request'}
                         </span>
-                        <span className="text-muted-foreground text-[11px]">
+                        <span className="text-xs text-muted-foreground">
                           {sc.start_date ? `${sc.start_date} ` : ''}{sc.start_time} – {sc.end_date ? `${sc.end_date} ` : ''}{sc.end_time}
                         </span>
                       </div>
