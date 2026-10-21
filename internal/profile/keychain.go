@@ -165,16 +165,23 @@ func PurgeIgnoredKeychains(agent string, customServices ...string) error {
 }
 
 var (
+	keychainMu               sync.RWMutex
 	deleteGenericPasswordFn  = deleteGenericPasswordReal
 	deleteInternetPasswordFn = deleteInternetPasswordReal
 )
 
 func deleteGenericPassword(service, account string) error {
-	return deleteGenericPasswordFn(service, account)
+	keychainMu.RLock()
+	fn := deleteGenericPasswordFn
+	keychainMu.RUnlock()
+	return fn(service, account)
 }
 
 func deleteInternetPassword(service, account string) error {
-	return deleteInternetPasswordFn(service, account)
+	keychainMu.RLock()
+	fn := deleteInternetPasswordFn
+	keychainMu.RUnlock()
+	return fn(service, account)
 }
 
 func deleteGenericPasswordReal(service, account string) error {
@@ -287,9 +294,16 @@ func getGenericPasswordReal(service, account string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func getGenericPasswordHook(service, account string) (string, error) {
+	keychainMu.RLock()
+	fn := getGenericPasswordFn
+	keychainMu.RUnlock()
+	return fn(service, account)
+}
+
 // GetGenericPassword retrieves a generic password from the macOS Keychain.
 func GetGenericPassword(service, account string) (string, error) {
-	return getGenericPasswordFn(service, account)
+	return getGenericPasswordHook(service, account)
 }
 
 // GetGenericPasswordWithContext retrieves a generic password from the macOS Keychain with context cancellation.
@@ -300,7 +314,7 @@ func GetGenericPasswordWithContext(ctx context.Context, service, account string)
 	}
 	ch := make(chan result, 1)
 	go func() {
-		val, err := getGenericPasswordFn(service, account)
+		val, err := getGenericPasswordHook(service, account)
 		ch <- result{val: val, err: err}
 	}()
 	select {
@@ -313,7 +327,7 @@ func GetGenericPasswordWithContext(ctx context.Context, service, account string)
 
 // DeleteGenericPassword deletes a generic password from the macOS Keychain.
 func DeleteGenericPassword(service, account string) error {
-	return deleteGenericPasswordFn(service, account)
+	return deleteGenericPassword(service, account)
 }
 
 // DeleteGenericPasswordWithContext deletes a generic password from the macOS Keychain with context cancellation.
@@ -323,7 +337,7 @@ func DeleteGenericPasswordWithContext(ctx context.Context, service, account stri
 	}
 	ch := make(chan result, 1)
 	go func() {
-		ch <- result{err: deleteGenericPasswordFn(service, account)}
+		ch <- result{err: deleteGenericPassword(service, account)}
 	}()
 	select {
 	case <-ctx.Done():
@@ -335,19 +349,27 @@ func DeleteGenericPasswordWithContext(ctx context.Context, service, account stri
 
 // SetKeychainPasswordGetterForTest replaces getGenericPasswordFn for testing.
 func SetKeychainPasswordGetterForTest(fn func(service, account string) (string, error)) func() {
+	keychainMu.Lock()
 	orig := getGenericPasswordFn
 	getGenericPasswordFn = fn
+	keychainMu.Unlock()
 	return func() {
+		keychainMu.Lock()
 		getGenericPasswordFn = orig
+		keychainMu.Unlock()
 	}
 }
 
 // SetKeychainPasswordDeleterForTest replaces deleteGenericPasswordFn for testing.
 func SetKeychainPasswordDeleterForTest(fn func(service, account string) error) func() {
+	keychainMu.Lock()
 	orig := deleteGenericPasswordFn
 	deleteGenericPasswordFn = fn
+	keychainMu.Unlock()
 	return func() {
+		keychainMu.Lock()
 		deleteGenericPasswordFn = orig
+		keychainMu.Unlock()
 	}
 }
 

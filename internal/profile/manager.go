@@ -291,6 +291,7 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 	}
 
 	if dirExists {
+		_ = PurgeProfileKeychain("claude", pDir)
 		if err := m.RemoveProfile(profileName); err != nil {
 			return err
 		}
