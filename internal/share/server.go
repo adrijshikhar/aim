@@ -577,6 +577,14 @@ func (s *Server) GetPendingRequests() []PendingRequestInfo {
 
 func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	s.pendingMu.Lock()
+	if resp, ok := s.approvedResults[reqID]; ok {
+		s.pendingMu.Unlock()
+		return resp, nil
+	}
+	if s.deniedResults[reqID] {
+		s.pendingMu.Unlock()
+		return nil, fmt.Errorf("request %s was denied", reqID)
+	}
 	pr, exists := s.pending[reqID]
 	if exists {
 		delete(s.pending, reqID)
@@ -636,10 +644,6 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		requestedHours = rec.RequestedHours
 	}
 
-	payload, err := s.packageCredentials(profileName, agent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read credentials: %w", err)
-	}
 	duration := time.Duration(requestedHours) * time.Hour
 	if duration <= 0 {
 		duration = 2 * time.Hour
@@ -652,6 +656,44 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	}
 	expiresAt := time.Now().Add(duration)
 	leaseID := generateID("ls")
+
+	// Atomically transition status from pending to approved in SQLite
+	// This prevents competing approvals/denials from creating multiple grants.
+	transitioned, err := s.store.TransitionRequestStatus(reqID, "pending", "approved", leaseID, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to transition request status: %w", err)
+	}
+	if !transitioned {
+		// Check current status
+		rec, _ := s.store.GetShareRequest(reqID)
+		if rec != nil && rec.Status == "approved" && rec.LeaseID != "" {
+			leases := s.store.GetGrantedLeases()
+			for _, gl := range leases {
+				if gl.LeaseID == rec.LeaseID {
+					payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
+					return &LeaseResponse{
+						Status:      "approved",
+						LeaseID:     gl.LeaseID,
+						ProfileName: gl.ProfileName,
+						Agent:       gl.Agent,
+						ExpiresAt:   gl.ExpiresAt,
+						Payload:     payload,
+					}, nil
+				}
+			}
+		}
+		if rec != nil {
+			return nil, fmt.Errorf("cannot approve request %s: current status is %s", reqID, rec.Status)
+		}
+		return nil, fmt.Errorf("request %s was already decided or cancelled", reqID)
+	}
+
+	payload, err := s.packageCredentials(profileName, agent)
+	if err != nil {
+		_ = s.store.UpdateRequestStatus(reqID, "pending", "", "Failed to read credentials: "+err.Error())
+		return nil, fmt.Errorf("failed to read credentials: %w", err)
+	}
+
 	resp := &LeaseResponse{
 		Status:      "approved",
 		LeaseID:     leaseID,
@@ -672,10 +714,9 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		Revoked:      false,
 		AutoApproved: false,
 	}); err != nil {
+		_ = s.store.UpdateRequestStatus(reqID, "pending", "", "Failed to record granted lease: "+err.Error())
 		return nil, fmt.Errorf("failed to record granted lease: %w", err)
 	}
-
-	_ = s.store.UpdateRequestStatus(reqID, "approved", leaseID, "")
 
 	s.pendingMu.Lock()
 	s.approvedResults[reqID] = resp
@@ -701,6 +742,14 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 
 func (s *Server) DenyRequest(reqID string) error {
 	s.pendingMu.Lock()
+	if s.deniedResults[reqID] {
+		s.pendingMu.Unlock()
+		return nil
+	}
+	if _, ok := s.approvedResults[reqID]; ok {
+		s.pendingMu.Unlock()
+		return fmt.Errorf("request %s was already approved", reqID)
+	}
 	pr, exists := s.pending[reqID]
 	if exists {
 		delete(s.pending, reqID)
@@ -725,15 +774,22 @@ func (s *Server) DenyRequest(reqID string) error {
 		if err != nil || rec == nil {
 			return fmt.Errorf("request %s not found", reqID)
 		}
-		if rec.Status != "pending" {
-			return fmt.Errorf("request %s has status %s", reqID, rec.Status)
-		}
 		actor = rec.PeerID
 		profile = rec.ProfileName
 		agent = rec.Agent
 	}
 
-	_ = s.store.UpdateRequestStatus(reqID, "denied", "", "Host denied request")
+	transitioned, err := s.store.TransitionRequestStatus(reqID, "pending", "denied", "", "Host denied request")
+	if err != nil {
+		return fmt.Errorf("failed to transition request status: %w", err)
+	}
+	if !transitioned {
+		rec, _ := s.store.GetShareRequest(reqID)
+		if rec != nil {
+			return fmt.Errorf("request %s cannot be denied: status is %s", reqID, rec.Status)
+		}
+		return fmt.Errorf("request %s was already decided", reqID)
+	}
 
 	_ = s.store.AppendAudit(AuditEntry{
 		Action:  "LEASE_DENIED",

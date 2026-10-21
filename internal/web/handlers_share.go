@@ -486,8 +486,26 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 	expiresAt := time.Now().Add(duration)
 	leaseID := share.GenerateID("ls")
 
+	// Atomically reserve transition from pending to approved before recording grant
+	transitioned, err := store.TransitionRequestStatus(req.RequestID, "pending", "approved", leaseID, "")
+	if err != nil {
+		http.Error(w, "failed to transition request: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !transitioned {
+		fresh, _ := store.GetShareRequest(req.RequestID)
+		if fresh != nil && fresh.Status == "approved" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "lease_id": fresh.LeaseID, "status": "approved"})
+			return
+		}
+		http.Error(w, "request was already decided or cancelled", http.StatusBadRequest)
+		return
+	}
+
 	payload, err := share.PackageProfileCredentials(filepath.Join(config.BaseDir(), "profiles"), rec.ProfileName, rec.Agent)
 	if err != nil {
+		_ = store.UpdateRequestStatus(req.RequestID, "pending", "", "failed to read credentials: "+err.Error())
 		http.Error(w, "failed to read credentials: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -503,11 +521,11 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 		Revoked:      false,
 		AutoApproved: false,
 	}); err != nil {
+		_ = store.UpdateRequestStatus(req.RequestID, "pending", "", "failed to record grant: "+err.Error())
 		http.Error(w, "failed to record granted lease: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	_ = store.UpdateRequestStatus(req.RequestID, "approved", leaseID, "")
 	_ = store.AppendAudit(share.AuditEntry{
 		Action:  "LEASE_APPROVED",
 		Actor:   "local",
@@ -569,12 +587,16 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if rec.Status != "pending" {
-		http.Error(w, fmt.Sprintf("cannot deny request %s: request has status %q", req.RequestID, rec.Status), http.StatusBadRequest)
+	transitioned, err := store.TransitionRequestStatus(req.RequestID, "pending", "denied", "", "Host denied request")
+	if err != nil {
+		http.Error(w, "failed to update request status: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !transitioned {
+		http.Error(w, fmt.Sprintf("cannot deny request %s: request is not pending (status %q)", req.RequestID, rec.Status), http.StatusBadRequest)
 		return
 	}
 
-	_ = store.UpdateRequestStatus(req.RequestID, "denied", "", "Host denied request")
 	_ = store.AppendAudit(share.AuditEntry{
 		Action:  "LEASE_DENIED",
 		Actor:   "local",
@@ -623,17 +645,24 @@ func (s *Server) handleCancelShareRequest(w http.ResponseWriter, r *http.Request
 		Details: fmt.Sprintf("Cancelled lease request %s for %s", req.RequestID, profile),
 	})
 
-	// Forward cancellation to remote peer if known
+	// Forward cancellation to remote peer synchronously so failures are not hidden
+	var remoteErr error
 	if peerHost != "" {
-		go func(host, reqID string) {
-			client := share.NewClient(4319)
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			_ = client.CancelLeaseRequest(ctx, host, reqID)
-		}(peerHost, req.RequestID)
+		client := share.NewClient(4319)
+		ctxCancel, cancelCtx := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancelCtx()
+		remoteErr = client.CancelLeaseRequest(ctxCancel, peerHost, req.RequestID)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	if remoteErr != nil {
+		_ = store.UpdateRequestStatus(req.RequestID, "cancelled", "", "Cancelled locally; remote notification failed: "+remoteErr.Error())
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":      true,
+			"warning": "Cancelled locally, but could not reach host: " + remoteErr.Error(),
+		})
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
@@ -688,10 +717,31 @@ func (s *Server) handlePollShareRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if resp.Status == "approved" {
+		// Re-check current record status before installation to prevent installing cancelled requests
+		freshRec, _ := store.GetShareRequest(req.RequestID)
+		if freshRec != nil && freshRec.Status == "cancelled" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "cancelled",
+				"message": "lease request was cancelled by borrower",
+			})
+			return
+		}
+		if freshRec != nil && freshRec.Status == "approved" && freshRec.LeaseID != "" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
 		mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
 		localName, err := mgr.InstallLease(rec.PeerID, rec.ProfileName, resp)
-		if err == nil {
-			_ = store.UpdateRequestStatus(req.RequestID, "approved", resp.LeaseID, "")
+		if err != nil {
+			http.Error(w, "failed to install lease credentials: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		transitioned, _ := store.TransitionRequestStatus(req.RequestID, "pending", "approved", resp.LeaseID, "")
+		if transitioned {
 			_ = store.AppendAudit(share.AuditEntry{
 				Action:  "LEASE_BORROWED",
 				Actor:   rec.PeerID,

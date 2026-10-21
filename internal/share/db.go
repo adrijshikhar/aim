@@ -395,7 +395,29 @@ func (s *ShareDB) UpdateRequestStatus(ctx context.Context, id string, status str
 	return err
 }
 
-// CancelRequest marks a request as cancelled.
+// TransitionRequestStatus atomically updates a request status from fromStatus to toStatus.
+// Returns (true, nil) if successfully transitioned, or (false, nil) if the request was not in fromStatus.
+func (s *ShareDB) TransitionRequestStatus(ctx context.Context, id, fromStatus, toStatus, leaseID, errMsg string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `
+	UPDATE share_requests
+	SET status = ?, lease_id = ?, error_message = ?
+	WHERE id = ? AND status = ?
+	`
+	res, err := s.db.ExecContext(ctx, query, toStatus, leaseID, errMsg, id, fromStatus)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// CancelRequest marks a request as cancelled only if it is currently pending.
 func (s *ShareDB) CancelRequest(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -403,7 +425,7 @@ func (s *ShareDB) CancelRequest(ctx context.Context, id string) error {
 	query := `
 	UPDATE share_requests
 	SET status = 'cancelled'
-	WHERE id = ?
+	WHERE id = ? AND status = 'pending'
 	`
 	_, err := s.db.ExecContext(ctx, query, id)
 	return err

@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -115,5 +117,9 @@ func (c *Client) CancelLeaseRequest(ctx context.Context, peerIP, requestID strin
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("remote host returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
 	return nil
 }

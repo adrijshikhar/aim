@@ -457,7 +457,18 @@ func (s *ShareStore) UpdateRequestStatus(id, status, leaseID, errMsg string) err
 	return nil
 }
 
-// CancelShareRequest marks a request as cancelled.
+// TransitionRequestStatus atomically updates status from fromStatus to toStatus.
+// Returns (true, nil) if successfully transitioned, or (false, nil) if the request was not in fromStatus.
+func (s *ShareStore) TransitionRequestStatus(id, fromStatus, toStatus, leaseID, errMsg string) (bool, error) {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return s.db.TransitionRequestStatus(ctx, id, fromStatus, toStatus, leaseID, errMsg)
+	}
+	return true, nil
+}
+
+// CancelShareRequest marks a request as cancelled if it is currently pending.
 func (s *ShareStore) CancelShareRequest(id string) error {
 	if s.db != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

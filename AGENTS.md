@@ -106,6 +106,10 @@ All Go code must meet the `cc-skills-golang` standard:
 - **PROHIBITED:** Never touch, replace, or wrap external tool binaries, launchers, or scripts (e.g., `codex`, `claude`, `cxstatusline`, `agy`) in user directories or profile directories.
 - **MANDATORY:** Test and execute binaries strictly in-place within the repository (e.g., `./aim <subcommand>`) or using isolated test fixtures. If a binary must be installed globally, ask the user or print the exact command for the user to run.
 
+### 3.5 Safe Process Management & Prohibition of Blanket Termination (NO KILLALL)
+- **PROHIBITED:** Never run `killall` (e.g., `killall aim`, `killall codex`, `killall claude`, `killall node`) or broad pattern kills (`pkill -f <pattern>`) on local or remote machines. Blanket process killers indiscriminately terminate the user's active foreground sessions, running agent jobs, and unrelated user tasks.
+- **MANDATORY:** Always manage processes targeting specific, verified process IDs (PIDs). Use standard application lifecycle subcommands (e.g., `./aim web stop`), read verified PID files (e.g., `web.pid`), or target specific port listeners (`lsof -ti :<port>`). Always verify the process command line before issuing termination signals.
+
 ---
 
 ## 4. Verification & Quality Gate

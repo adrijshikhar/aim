@@ -145,6 +145,59 @@ func TestShareDB_RequestsLifecycle(t *testing.T) {
 	}
 }
 
+func TestShareDB_TransitionRequestStatus(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := NewShareDB(tempDir)
+	if err != nil {
+		t.Fatalf("NewShareDB failed: %v", err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	req := ShareRequestRecord{
+		ID:             "req_trans_1",
+		Direction:      "incoming",
+		PeerID:         "peer-laptop",
+		PeerIP:         "10.8.19.100",
+		ProfileName:    "prod",
+		Agent:          "claude",
+		RequestedHours: 4,
+		Status:         "pending",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(30 * time.Minute),
+	}
+	if err := db.SaveRequest(ctx, req); err != nil {
+		t.Fatalf("SaveRequest failed: %v", err)
+	}
+
+	// First transition from pending to approved succeeds
+	ok, err := db.TransitionRequestStatus(ctx, "req_trans_1", "pending", "approved", "ls_1", "")
+	if err != nil {
+		t.Fatalf("TransitionRequestStatus failed: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected transition to succeed")
+	}
+
+	// Concurrent/subsequent transition from pending fails
+	ok2, err := db.TransitionRequestStatus(ctx, "req_trans_1", "pending", "approved", "ls_2", "")
+	if err != nil {
+		t.Fatalf("TransitionRequestStatus error: %v", err)
+	}
+	if ok2 {
+		t.Fatalf("expected duplicate transition from pending to fail")
+	}
+
+	// Cancelling an already approved request does not overwrite it
+	if err := db.CancelRequest(ctx, "req_trans_1"); err != nil {
+		t.Fatalf("CancelRequest error: %v", err)
+	}
+	rec, _ := db.GetRequest(ctx, "req_trans_1")
+	if rec.Status != "approved" {
+		t.Errorf("expected status to stay approved, got %s", rec.Status)
+	}
+}
+
 func TestShareDB_AuditLogs(t *testing.T) {
 	tempDir := t.TempDir()
 	db, err := NewShareDB(tempDir)

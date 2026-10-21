@@ -281,12 +281,20 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const handleCancelRequest = async (requestId: string) => {
     setCancellingReqId(requestId);
     try {
-      await cancelShareRequest(requestId);
-      toast({
-        title: 'Request Cancelled',
-        description: `Cancelled lease request ${requestId}`,
-        variant: 'default',
-      });
+      const res = await cancelShareRequest(requestId);
+      if (res?.warning) {
+        toast({
+          title: 'Request Cancelled Locally',
+          description: res.warning,
+          variant: 'default',
+        });
+      } else {
+        toast({
+          title: 'Request Cancelled',
+          description: `Cancelled lease request ${requestId}`,
+          variant: 'default',
+        });
+      }
       await loadStatus(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to cancel request';

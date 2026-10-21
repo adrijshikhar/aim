@@ -1302,4 +1302,61 @@ func TestShareEndpoints(t *testing.T) {
 	if resApproveExpired.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request when approving expired request, got %d", resApproveExpired.StatusCode)
 	}
+
+	// Test: Cancelling an outgoing request where remote peer is unreachable returns a warning (Greptile P2)
+	outgoingReq := share.ShareRequestRecord{
+		ID:             "req_out_cancel_1",
+		Direction:      "outgoing",
+		PeerID:         "peer-unreachable",
+		PeerIP:         "192.0.2.1", // Non-routable TEST-NET IP
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "pending",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
+	}
+	_ = store.SaveShareRequest(outgoingReq)
+
+	cancelBody := strings.NewReader(`{"request_id":"req_out_cancel_1"}`)
+	resCancel, err := http.Post(ts.URL+"/api/share/cancel", "application/json", cancelBody)
+	if err != nil {
+		t.Fatalf("POST /api/share/cancel failed: %v", err)
+	}
+	defer resCancel.Body.Close()
+	if resCancel.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200 from cancel, got %d", resCancel.StatusCode)
+	}
+	var cancelResp map[string]any
+	_ = json.NewDecoder(resCancel.Body).Decode(&cancelResp)
+	if cancelResp["warning"] == nil || cancelResp["warning"] == "" {
+		t.Errorf("expected warning about unreachable peer, got %v", cancelResp)
+	}
+
+	// Test: Polling a cancelled request returns cancelled status and does not install (Greptile P1)
+	cancelledPollReq := share.ShareRequestRecord{
+		ID:             "req_poll_cancelled_1",
+		Direction:      "outgoing",
+		PeerID:         "peer1",
+		PeerIP:         "127.0.0.1",
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "cancelled",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
+	}
+	_ = store.SaveShareRequest(cancelledPollReq)
+
+	pollBody := strings.NewReader(`{"request_id":"req_poll_cancelled_1"}`)
+	resPoll, err := http.Post(ts.URL+"/api/share/poll", "application/json", pollBody)
+	if err != nil {
+		t.Fatalf("POST /api/share/poll failed: %v", err)
+	}
+	defer resPoll.Body.Close()
+	var pollResp map[string]any
+	_ = json.NewDecoder(resPoll.Body).Decode(&pollResp)
+	if pollResp["status"] != "cancelled" {
+		t.Errorf("expected status 'cancelled', got %v", pollResp["status"])
+	}
 }
