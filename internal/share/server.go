@@ -730,7 +730,12 @@ func (s *Server) DenyRequest(reqID string) error {
 }
 
 func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, error) {
-	profDir := filepath.Join(s.profilesDir, profileName)
+	return PackageProfileCredentials(s.profilesDir, profileName, agent)
+}
+
+// PackageProfileCredentials extracts relevant agent credentials for the specified profile.
+func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePayload, error) {
+	profDir := filepath.Join(profilesDir, profileName)
 	files := make(map[string]string)
 
 	switch agent {
@@ -789,8 +794,13 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 	return &SharePayload{Files: files}, nil
 }
 
-func generateID(prefix string) string {
+// GenerateID produces a unique prefixed identifier with random bytes.
+func GenerateID(prefix string) string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
 	return prefix + "_" + hex.EncodeToString(b)
+}
+
+func generateID(prefix string) string {
+	return GenerateID(prefix)
 }

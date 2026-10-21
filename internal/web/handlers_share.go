@@ -428,21 +428,89 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 	body, _ := json.Marshal(req)
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+
+	// 1. First attempt to call the running P2P share daemon on port 4319
 	pReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:4319/api/share/approve", bytes.NewReader(body))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err == nil {
+		pReq.Header.Set("Content-Type", "application/json")
+		pResp, err := http.DefaultClient.Do(pReq)
+		if err == nil {
+			defer pResp.Body.Close()
+			if pResp.StatusCode == http.StatusOK {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(pResp.StatusCode)
+				_, _ = io.Copy(w, pResp.Body)
+				return
+			}
+		}
+	}
+
+	// 2. Direct fallback via Store if daemon on :4319 is unreachable or returned non-200
+	store := s.getShareStore()
+	rec, err := store.GetShareRequest(req.RequestID)
+	if err != nil || rec == nil {
+		http.Error(w, "request not found or expired", http.StatusNotFound)
 		return
 	}
-	pReq.Header.Set("Content-Type", "application/json")
-	pResp, err := http.DefaultClient.Do(pReq)
-	if err != nil {
-		http.Error(w, "failed to reach share host: "+err.Error(), http.StatusBadGateway)
+
+	if rec.Status == "approved" && rec.LeaseID != "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "lease_id": rec.LeaseID, "status": "approved"})
 		return
 	}
-	defer pResp.Body.Close()
+
+	duration := time.Duration(rec.RequestedHours) * time.Hour
+	if duration <= 0 {
+		duration = 2 * time.Hour
+	}
+	for _, p := range store.GetSharedProfiles() {
+		if p.Name == rec.ProfileName && p.MaxLeaseTTL > 0 && duration > p.MaxLeaseTTL {
+			duration = p.MaxLeaseTTL
+			break
+		}
+	}
+	expiresAt := time.Now().Add(duration)
+	leaseID := share.GenerateID("ls")
+
+	payload, err := share.PackageProfileCredentials(filepath.Join(config.BaseDir(), "profiles"), rec.ProfileName, rec.Agent)
+	if err != nil {
+		http.Error(w, "failed to read credentials: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := store.SaveGrantedLease(share.GrantedLease{
+		LeaseID:      leaseID,
+		ProfileName:  rec.ProfileName,
+		Agent:        rec.Agent,
+		BorrowerID:   rec.PeerID,
+		BorrowerIP:   rec.PeerIP,
+		GrantedAt:    time.Now(),
+		ExpiresAt:    expiresAt,
+		Revoked:      false,
+		AutoApproved: false,
+	}); err != nil {
+		http.Error(w, "failed to record granted lease: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	_ = store.UpdateRequestStatus(req.RequestID, "approved", leaseID, "")
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "LEASE_APPROVED",
+		Actor:   "local",
+		Profile: rec.ProfileName,
+		Agent:   rec.Agent,
+		Details: fmt.Sprintf("Host approved lease %s for request %s (peer %s, duration %v)", leaseID, req.RequestID, rec.PeerID, duration),
+	})
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(pResp.StatusCode)
-	_, _ = io.Copy(w, pResp.Body)
+	_ = json.NewEncoder(w).Encode(share.LeaseResponse{
+		Status:      "approved",
+		LeaseID:     leaseID,
+		ProfileName: rec.ProfileName,
+		Agent:       rec.Agent,
+		ExpiresAt:   expiresAt,
+		Payload:     payload,
+	})
 }
 
 func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) {
@@ -460,21 +528,42 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 	body, _ := json.Marshal(req)
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+
+	// 1. First attempt to call the running P2P share daemon on port 4319
 	pReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:4319/api/share/deny", bytes.NewReader(body))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err == nil {
+		pReq.Header.Set("Content-Type", "application/json")
+		pResp, err := http.DefaultClient.Do(pReq)
+		if err == nil {
+			defer pResp.Body.Close()
+			if pResp.StatusCode == http.StatusOK {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(pResp.StatusCode)
+				_, _ = io.Copy(w, pResp.Body)
+				return
+			}
+		}
+	}
+
+	// 2. Direct fallback via Store if daemon on :4319 is unreachable or returned non-200
+	store := s.getShareStore()
+	rec, err := store.GetShareRequest(req.RequestID)
+	if err != nil || rec == nil {
+		http.Error(w, "request not found", http.StatusNotFound)
 		return
 	}
-	pReq.Header.Set("Content-Type", "application/json")
-	pResp, err := http.DefaultClient.Do(pReq)
-	if err != nil {
-		http.Error(w, "failed to reach share host: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer pResp.Body.Close()
+
+	_ = store.UpdateRequestStatus(req.RequestID, "denied", "", "Host denied request")
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "LEASE_DENIED",
+		Actor:   "local",
+		Profile: rec.ProfileName,
+		Agent:   rec.Agent,
+		Details: fmt.Sprintf("Host denied request %s from %s", req.RequestID, rec.PeerID),
+	})
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(pResp.StatusCode)
-	_, _ = io.Copy(w, pResp.Body)
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 func (s *Server) handleCancelShareRequest(w http.ResponseWriter, r *http.Request) {
