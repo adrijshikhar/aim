@@ -628,18 +628,18 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           </div>
         </div>
 
-        {/* Local Profile Override Sharing Control & Port Badge (Moved here per Screenshot 12.22.04 AM / 12.22.16 AM) */}
+        {/* Local Profile Override Sharing Control & Port Badge */}
         <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
-          <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
+          <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] shadow-xs">
             {ownProfiles.length > 1 ? (
-              <div className="flex items-center gap-1.5 pl-1.5 pr-1 border-r border-[#262626] mr-1">
-                <Share2 className="h-3 w-3 text-accent-cyan shrink-0 ml-1" />
-                <div className="min-w-[90px] max-w-[130px]">
+              <div className="flex items-center gap-1.5 pl-2 pr-1 border-r border-[#262626]">
+                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
+                <div className="min-w-[80px] max-w-[130px]">
                   <SelectDropdown
                     value={selectedLocalProfile}
                     onChange={(val) => setSelectedLocalProfile(String(val))}
                     size="xs"
-                    triggerClassName="h-6 py-0 px-2 bg-transparent border-0 text-xs font-mono text-[#ededed] hover:bg-[#1a1a1a] shadow-none"
+                    triggerClassName="h-6 py-0 px-1.5 bg-transparent border-0 text-xs font-mono font-medium text-foreground hover:bg-[#1a1a1a] shadow-none"
                     options={ownProfiles.map((p) => ({
                       value: p.name,
                       label: p.name,
@@ -648,82 +648,76 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 </div>
               </div>
             ) : ownProfiles.length === 1 ? (
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1 border-r border-[#262626] mr-1">
-                <Share2 className="h-3 w-3 text-accent-cyan" />
-                {ownProfiles[0].name}:
-              </span>
+              <div className="flex items-center gap-1.5 px-2.5 py-0.5 border-r border-[#262626]">
+                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
+                <span className="text-xs font-mono font-medium text-foreground">{ownProfiles[0].name}</span>
+              </div>
             ) : (
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[#666666] px-2 flex items-center gap-1 border-r border-[#262626] mr-1">
-                <Share2 className="h-3 w-3 text-accent-cyan" />
-                P2P:
-              </span>
+              <div className="flex items-center gap-1.5 px-2.5 py-0.5 border-r border-[#262626]">
+                <Share2 className="h-3 w-3 text-accent-cyan shrink-0" />
+                <span className="text-xs font-mono font-medium text-foreground">Profile</span>
+              </div>
             )}
 
-            {/* If Global Mesh Policy is OFF and no schedule override is active, show that sharing is disabled */}
-            {effectiveGlobalMode === 'off' ? (
-              <span className="text-[10px] font-mono text-[#888888] px-2.5 py-0.5 flex items-center gap-1.5" title="Mesh Policy is Off. Inbound profile sharing is globally disabled.">
-                <ShieldAlert className="h-3 w-3 text-[#e06c75]" />
-                <span>Sharing Disabled (Mesh Policy Off)</span>
-              </span>
-            ) : (
-              <>
-                {/* Off | Request | Auto Approve buttons */}
-                <button
-                  type="button"
-                  disabled={isShareUpdating || !selectedLocalProfile}
-                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'off')}
+            {/* Segmented Mode Control: Off | Request | Auto */}
+            <div className="inline-flex items-center gap-0.5 pl-0.5">
+              <button
+                type="button"
+                disabled={isShareUpdating || !selectedLocalProfile}
+                onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'off')}
+                className={cn(
+                  'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium',
+                  currentLocalShareMode === 'off'
+                    ? 'bg-[#262626] text-[#ededed] shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                )}
+                title="Profile is private and not shared on the network"
+              >
+                Off
+              </button>
+
+              <button
+                type="button"
+                disabled={isShareUpdating || !selectedLocalProfile}
+                onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'request')}
+                className={cn(
+                  'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1.5',
+                  currentLocalShareMode === 'request'
+                    ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068]/60 shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                )}
+                title="Profile is shared; teammate lease requests require manual host approval"
+              >
+                <span
                   className={cn(
-                    'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer',
-                    currentLocalShareMode === 'off'
-                      ? 'bg-[#262626] text-[#ededed] shadow-xs font-semibold'
-                      : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
+                    'h-1.5 w-1.5 rounded-full',
+                    currentLocalShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
                   )}
-                  title="Profile is private and not shared on VPN"
-                >
-                  Off
-                </button>
-                <button
-                  type="button"
-                  disabled={isShareUpdating || !selectedLocalProfile}
-                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'request')}
+                />
+                Request
+              </button>
+
+              <button
+                type="button"
+                disabled={isShareUpdating || !selectedLocalProfile}
+                onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'auto')}
+                className={cn(
+                  'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1.5',
+                  currentLocalShareMode === 'auto'
+                    ? 'bg-[#183925] text-[#46a758] border border-[#235836]/60 shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                )}
+                title="Profile is shared; teammate lease requests are automatically approved"
+              >
+                <span
                   className={cn(
-                    'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1',
-                    currentLocalShareMode === 'request'
-                      ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold'
-                      : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
+                    'h-1.5 w-1.5 rounded-full',
+                    currentLocalShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
                   )}
-                  title="Profile is shared; teammate lease requests require manual approval"
-                >
-                  <span
-                    className={cn(
-                      'h-1.5 w-1.5 rounded-full',
-                      currentLocalShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
-                    )}
-                  />
-                  Request
-                </button>
-                <button
-                  type="button"
-                  disabled={isShareUpdating || !selectedLocalProfile}
-                  onClick={() => handleSetLocalProfileShareMode(selectedLocalProfile, 'auto')}
-                  className={cn(
-                    'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1',
-                    currentLocalShareMode === 'auto'
-                      ? 'bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold'
-                      : 'text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]'
-                  )}
-                  title="Profile is shared; teammate lease requests are auto-approved"
-                >
-                  <span
-                    className={cn(
-                      'h-1.5 w-1.5 rounded-full',
-                      currentLocalShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
-                    )}
-                  />
-                  Auto Approve
-                </button>
-              </>
-            )}
+                />
+                Auto
+              </button>
+            </div>
           </div>
 
           <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground px-2.5 py-1 rounded-geist border border-border bg-[#141414]">

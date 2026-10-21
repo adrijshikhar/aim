@@ -100,6 +100,12 @@ All Go code must meet the `cc-skills-golang` standard:
 - Commands like `aim list`, `aim doctor`, `aim mcp list`, `aim sessions`, and read-only API endpoints (`GET /api/profiles`) **must strictly never make network requests or rotate OAuth credentials**.
 - Use [`usage.InspectProfile(...)`](file:///Users/nemesis/Projects/my-projects/aim/internal/usage/engine.go) to inspect cached or on-disk profile health without triggering token refreshes or provider rate limits.
 
+### 3.4 Binary Paths & Shell Environment Isolation (STRICT NON-INTERFERENCE)
+- **PROHIBITED:** Never copy, move, symlink, or install binaries into system or user binary directories (`/opt/homebrew/bin`, `~/.local/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`) on local or remote machines. All build outputs must strictly remain within the repository root (e.g., `./aim`).
+- **PROHIBITED:** Never modify, append to, or overwrite user shell configuration files (`~/.zshrc`, `~/.bashrc`, `~/.config/fish/config.fish`, `~/.profile`, etc.) or change system PATHs.
+- **PROHIBITED:** Never touch, replace, or wrap external tool binaries, launchers, or scripts (e.g., `codex`, `claude`, `cxstatusline`, `agy`) in user directories or profile directories.
+- **MANDATORY:** Test and execute binaries strictly in-place within the repository (e.g., `./aim <subcommand>`) or using isolated test fixtures. If a binary must be installed globally, ask the user or print the exact command for the user to run.
+
 ---
 
 ## 4. Verification & Quality Gate
