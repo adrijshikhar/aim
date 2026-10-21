@@ -1,0 +1,66 @@
+{
+  "hasCompletedOnboarding": true,
+  "lastOnboardingVersion": "2.1.304",
+  "cachedUsageUtilization": {
+    "fetchedAtMs": 1788883937555,
+    "accountUuid": "00000000-0000-0000-0000-000000000000",
+    "utilization": {
+      "five_hour": {
+        "utilization": 3,
+        "resets_at": "2035-09-08T21:09:59.562576+00:00",
+        "limit_dollars": null,
+        "used_dollars": null,
+        "remaining_dollars": null,
+        "locked_reason": null
+      },
+      "seven_day": {
+        "utilization": 81,
+        "resets_at": "2035-09-09T01:59:59.562598+00:00",
+        "limit_dollars": null,
+        "used_dollars": null,
+        "remaining_dollars": null,
+        "locked_reason": null
+      },
+      "seven_day_oauth_apps": null,
+      "seven_day_opus": null,
+      "seven_day_sonnet": null,
+      "seven_day_cowork": null,
+      "seven_day_omelette": null,
+      "limits": [
+        {
+          "kind": "session",
+          "group": "session",
+          "percent": 3,
+          "severity": "normal",
+          "resets_at": "2035-09-08T21:09:59.562576+00:00",
+          "scope": null,
+          "is_active": false
+        },
+        {
+          "kind": "weekly_all",
+          "group": "weekly",
+          "percent": 81,
+          "severity": "warning",
+          "resets_at": "2035-09-09T01:59:59.562598+00:00",
+          "scope": null,
+          "is_active": false
+        },
+        {
+          "kind": "weekly_scoped",
+          "group": "weekly",
+          "percent": 100,
+          "severity": "critical",
+          "resets_at": "2035-09-09T01:59:59.562819+00:00",
+          "scope": {
+            "model": {
+              "id": null,
+              "display_name": "Fable"
+            },
+            "surface": null
+          },
+          "is_active": true
+        }
+      ]
+    }
+  }
+}
