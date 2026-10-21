@@ -8,6 +8,7 @@ import {
   Trash2,
   Copy,
   Check,
+  Download,
   Search,
   AlertTriangle,
   Plus,
@@ -935,15 +936,15 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 )}
               </div>
 
-              {/* Connect Peer Icon Button (Screenshot 12.50.39 AM) */}
+              {/* Connect Peer Icon Button */}
               <Button
-                variant="outline"
-                size="sm"
+                variant="default"
+                size="icon"
                 onClick={() => setIsConnectOpen(true)}
-                className="h-8 w-8 p-0 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-foreground flex items-center justify-center shrink-0 cursor-pointer"
+                className="h-8 w-8 rounded-geist bg-[#ededed] text-[#0a0a0a] hover:bg-white hover:text-black flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
                 title="Connect Peer"
               >
-                <Plus className="h-4 w-4 text-accent-cyan" />
+                <Plus className="h-4 w-4" />
               </Button>
 
               {/* Refresh Icon Button (Screenshot 12.50.39 AM) */}
@@ -1041,7 +1042,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                     )}
                                   </div>
                                   <Button
-                                    size="sm"
+                                    size="icon"
                                     variant="outline"
                                     onClick={() => {
                                       setSelectedPeer(peer);
@@ -1049,9 +1050,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                       setSelectedAgent(agent);
                                       setSelectedIsAuto(isAuto);
                                     }}
-                                    className="h-6 px-2.5 text-xs font-mono rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#262626] text-foreground cursor-pointer shrink-0"
+                                    className="h-6 w-6 p-0 rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#262626] text-muted-foreground hover:text-accent-cyan flex items-center justify-center cursor-pointer shrink-0"
+                                    title={`Borrow ${prof}`}
                                   >
-                                    Borrow
+                                    <Download className="h-3 w-3" />
                                   </Button>
                                 </div>
                               );
@@ -1079,7 +1081,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             <div className="flex items-center gap-2">
               <Activity className="h-4 w-4 text-accent-cyan" />
               <CardTitle className="text-sm font-semibold text-foreground">
-                P2P Sharing Audit Log
+                Audit Log
               </CardTitle>
               <Badge
                 variant="outline"
