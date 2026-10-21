@@ -238,23 +238,7 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 	}
 
 	mgr := getSessionManager(ctx)
-	var workingDir string
-	var targetCwd string
-	if mgr != nil && sess != nil {
-		if resolved, err := mgr.ResolveCwd(ctx, sess); err == nil && resolved != "" {
-			targetCwd = resolved
-		}
-	}
-	if targetCwd == "" && sess != nil && sess.Cwd != "" {
-		targetCwd = sess.Cwd
-	}
-	if targetCwd != "" {
-		if fi, err := os.Stat(targetCwd); err == nil && fi.IsDir() {
-			workingDir = targetCwd
-		} else {
-			logger.Debug("[resume] Catalyst target cwd %q does not exist or is not a directory", targetCwd)
-		}
-	}
+	workingDir := resolveSessionWorkingDir(ctx, mgr, sess)
 
 	code := executeRunWithOptions(ctx, reg, pm, RunOptions{
 		AgentName:   agent,
@@ -365,23 +349,7 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		profileName,
 	)
 
-	var workingDir string
-	var targetCwd string
-	if mgr != nil && sess != nil {
-		if resolved, err := mgr.ResolveCwd(ctx, sess); err == nil && resolved != "" {
-			targetCwd = resolved
-		}
-	}
-	if targetCwd == "" && sess != nil && sess.Cwd != "" {
-		targetCwd = sess.Cwd
-	}
-	if targetCwd != "" {
-		if fi, err := os.Stat(targetCwd); err == nil && fi.IsDir() {
-			workingDir = targetCwd
-		} else {
-			logger.Debug("[resume] session target cwd %q does not exist or is not a directory", targetCwd)
-		}
-	}
+	workingDir := resolveSessionWorkingDir(ctx, mgr, sess)
 
 	sessID := displayID
 	code := executeRunWithOptions(ctx, reg, pm, RunOptions{
@@ -437,4 +405,26 @@ func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, 
 		return nil, fmt.Errorf("failed to query sessions across profiles: %w", err)
 	}
 	return sess, nil
+}
+
+func resolveSessionWorkingDir(ctx context.Context, mgr *session.Manager, sess *session.Session) string {
+	if sess == nil {
+		return ""
+	}
+	var targetCwd string
+	if mgr != nil {
+		if resolved, err := mgr.ResolveCwd(ctx, sess); err == nil && resolved != "" {
+			targetCwd = resolved
+		}
+	}
+	if targetCwd == "" && sess.Cwd != "" {
+		targetCwd = sess.Cwd
+	}
+	if targetCwd != "" {
+		if fi, err := os.Stat(targetCwd); err == nil && fi.IsDir() {
+			return targetCwd
+		}
+		logger.Debug("[resume] session target cwd %q does not exist or is not a directory", targetCwd)
+	}
+	return ""
 }

@@ -485,7 +485,6 @@ func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, 
 		slug := filepath.Base(filepath.Dir(s.StoragePath))
 		cwd := SlugToPath(slug)
 		if cwd != "" {
-			s.Cwd = cwd
 			return cwd, nil
 		}
 	}

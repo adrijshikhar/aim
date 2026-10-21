@@ -240,6 +240,49 @@ func TestClaudeAdapter_HasCredentials_CustomProfile(t *testing.T) {
 	}
 }
 
+func TestClaudeAdapter_HarvestCredentials(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	profileName := "client-beta"
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, profileName)
+	claudeDir := filepath.Join(profileDir, ".claude")
+	_ = os.MkdirAll(claudeDir, 0700)
+
+	scopedService := profile.ClaudeScopedKeychainService(claudeDir)
+	validTokenJSON := `{"claudeAiOauth":{"accessToken":"scoped-token-xyz","refreshToken":"refresh-xyz"}}`
+
+	restore := profile.SetKeychainPasswordGetterForTest(func(service, account string) (string, error) {
+		if service == scopedService {
+			return validTokenJSON, nil
+		}
+		return "", errors.New("not found")
+	})
+	defer restore()
+
+	a := NewAdapter()
+	err := a.HarvestCredentials(context.Background(), profileName, profileDir)
+	if err != nil {
+		t.Fatalf("HarvestCredentials failed: %v", err)
+	}
+
+	credPath := filepath.Join(claudeDir, ".credentials.json")
+	data, err := os.ReadFile(credPath)
+	if err != nil {
+		t.Fatalf("expected .credentials.json to be created, but got err: %v", err)
+	}
+	if string(data) != validTokenJSON {
+		t.Errorf("expected credentials file content %s, got %s", validTokenJSON, string(data))
+	}
+
+	fi, err := os.Stat(credPath)
+	if err != nil {
+		t.Fatalf("stat on credentials file failed: %v", err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("expected 0600 permissions on credentials file, got %v", fi.Mode().Perm())
+	}
+}
+
 func TestClaudeAdapter_PurgeCredentials(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
 	profileName := "work"

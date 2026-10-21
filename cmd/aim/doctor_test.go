@@ -414,4 +414,9 @@ func TestDoctorCmd_CachedUsageProvider(t *testing.T) {
 	if !cachedAdapter.cachedUsageCalled {
 		t.Errorf("expected GetCachedUsage to be called during doctor run")
 	}
+
+	outStr := buf.String()
+	if !strings.Contains(outStr, "AIM Doctor Diagnostics") {
+		t.Errorf("expected doctor output to contain 'AIM Doctor Diagnostics', got:\n%s", outStr)
+	}
 }

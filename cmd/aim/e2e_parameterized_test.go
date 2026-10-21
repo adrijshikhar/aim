@@ -864,7 +864,10 @@ func TestParameterized_MultiAgent_CachedUsageProvider(t *testing.T) {
 
 		_ = os.WriteFile(filepath.Join(claudeSubdir, ".credentials.json"), []byte(`{"sessionKey":"sk-ant-test"}`), 0600)
 
-		fixturePath := filepath.Join(getGitRepoRoot(), "internal", "agents", "claude", "testdata", "claude_cached_usage.json")
+		fixturePath := filepath.Join("..", "..", "internal", "agents", "claude", "testdata", "claude_cached_usage.json")
+		if _, err := os.Stat(fixturePath); err != nil {
+			fixturePath = filepath.Join(getGitRepoRoot(), "internal", "agents", "claude", "testdata", "claude_cached_usage.json")
+		}
 		fixtureData, err := os.ReadFile(fixturePath)
 		if err != nil {
 			t.Fatalf("failed to read golden fixture: %v", err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -70,6 +71,13 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 
 	if agentName != "" {
+		if reg != nil {
+			if ad, err := reg.Get(agentName); err == nil {
+				if purger, ok := ad.(agents.CredentialPurger); ok {
+					_ = purger.PurgeCredentials(context.Background(), profileName, pm.ProfileDir(profileName))
+				}
+			}
+		}
 		account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agentName)
 		cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg)
 		if err != nil {
@@ -90,6 +98,14 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 			fmt.Printf("%s Removed agent %s from profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
 		}
 		return 0
+	}
+
+	if reg != nil {
+		for _, ad := range reg.All() {
+			if purger, ok := ad.(agents.CredentialPurger); ok {
+				_ = purger.PurgeCredentials(context.Background(), profileName, pm.ProfileDir(profileName))
+			}
+		}
 	}
 
 	if err := pm.DeleteProfile(profileName, cfg); err != nil {

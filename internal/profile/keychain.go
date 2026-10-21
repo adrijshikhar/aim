@@ -555,9 +555,9 @@ func PurgeAgentKeychain(agent string) error {
 // PurgeProfileKeychain deletes agent credentials scoped specifically to a profile.
 // If purgers are provided, the first non-nil purger is used; otherwise it delegates
 // cleanly based on known agent keychain scoping.
-func PurgeProfileKeychain(agent, profileDir string, purgers ...any) error {
-	for _, p := range purgers {
-		if cp, ok := p.(agents.CredentialPurger); ok && cp != nil {
+func PurgeProfileKeychain(agent, profileDir string, purgers ...agents.CredentialPurger) error {
+	for _, cp := range purgers {
+		if cp != nil {
 			return cp.PurgeCredentials(context.Background(), filepath.Base(profileDir), profileDir)
 		}
 	}

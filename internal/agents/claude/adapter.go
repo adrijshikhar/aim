@@ -303,7 +303,7 @@ func seedClaudeJSON(hostHome, profileDir string) {
 		return
 	}
 
-	for _, key := range []string{"oauthAccount", "mcpServers"} {
+	for _, key := range []string{"oauthAccount", "mcpServers", "cachedUsageUtilization"} {
 		if data, err = merge.DeleteJSONKeyBytes(data, key); err != nil {
 			logger.Warn("[claude] Failed to strip %s from seeded .claude.json: %v", key, err)
 			return
@@ -482,7 +482,7 @@ func parseClaudeResetTimestamp(v any, now time.Time) (time.Time, time.Duration) 
 		} else if n, err := strconv.ParseInt(s, 10, 64); err == nil {
 			if n > 1e11 {
 				t = time.UnixMilli(n)
-			} else {
+			} else if n > 0 {
 				t = time.Unix(n, 0)
 			}
 		} else {

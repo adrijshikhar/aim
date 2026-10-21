@@ -803,9 +803,7 @@ func TestResumeCmd_DirectoryAware_And_SessionResumer(t *testing.T) {
 		pm := profile.NewProfileManager(tempDir)
 		_, _ = pm.EnsureProfile("default")
 
-		oldWd, _ := os.Getwd()
-		_ = os.Chdir(tempDir)
-		defer os.Chdir(oldWd)
+		t.Chdir(tempDir)
 
 		var buf bytes.Buffer
 		cmd := newRootCmd(reg, pm)
