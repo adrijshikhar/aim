@@ -115,7 +115,7 @@ export function SelectDropdown<T extends string | number>({
                     <div className="flex flex-col truncate">
                       <span className="truncate">{opt.label}</span>
                       {opt.description && (
-                        <span className="text-[10px] text-[#666666] truncate">
+                        <span className="text-xs text-muted-foreground truncate">
                           {opt.description}
                         </span>
                       )}

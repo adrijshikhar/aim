@@ -115,7 +115,7 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
             {displayFileName}
           </span>
           {fullDisplayPath && fullDisplayPath !== displayFileName && (
-            <span className="text-[#666666] text-[10px] truncate hidden sm:inline" title={fullDisplayPath}>
+            <span className="text-muted-foreground text-xs truncate hidden sm:inline" title={fullDisplayPath}>
               {fullDisplayPath}
             </span>
           )}
@@ -123,27 +123,27 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
           {/* Semantic Badges from Theme */}
           <div className="flex items-center gap-1.5 ml-1">
             {totalAdditions > 0 && (
-              <span className="badge-success text-[10px] px-1.5 py-0.5">
+              <span className="badge-success text-xs px-1.5 py-0.5">
                 +{totalAdditions}
               </span>
             )}
             {totalDeletions > 0 && (
-              <span className="badge-danger text-[10px] px-1.5 py-0.5">
+              <span className="badge-danger text-xs px-1.5 py-0.5">
                 -{totalDeletions}
               </span>
             )}
             {parsedFiles.length === 1 && parsedFiles[0].isRename && (
-              <span className="badge-warning text-[10px] px-1.5 py-0.5">
+              <span className="badge-warning text-xs px-1.5 py-0.5">
                 renamed {parsedFiles[0].similarityIndex ? `(${parsedFiles[0].similarityIndex}%)` : ''}
               </span>
             )}
             {parsedFiles.length === 1 && parsedFiles[0].isBinary && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">
+              <span className="text-xs px-1.5 py-0.5 rounded font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">
                 binary
               </span>
             )}
             {topTruncationNotice && (
-              <span className="badge-warning text-[10px] px-1.5 py-0.5 inline-flex items-center gap-1">
+              <span className="badge-warning text-xs px-1.5 py-0.5 inline-flex items-center gap-1">
                 <AlertTriangle className="h-2.5 w-2.5" />
                 truncated {topTruncationNotice}
               </span>
@@ -157,7 +157,7 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
             variant="ghost"
             size="sm"
             onClick={handleCopy}
-            className="h-6 px-2 text-[10px] font-sans text-[#888888] hover:text-[#ededed] hover:bg-[#222222] rounded-[4px] gap-1"
+            className="h-6 px-2 text-xs font-sans text-muted-foreground hover:text-foreground hover:bg-[#222222] rounded-[4px] gap-1"
           >
             {copied ? (
               <>
@@ -183,28 +183,28 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                 <div key={fileIdx} className="divide-y divide-[#181818]/40">
                   {/* File Sub-header if multi-file */}
                   {parsedFiles.length > 1 && (
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-[#111111] border-b border-[#222222] text-[#888888] text-[10px]">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-[#111111] border-b border-[#222222] text-muted-foreground text-xs">
                       <FileCode className="h-3 w-3 text-[#52a8ff]" />
                       <span className="text-[#cccccc] font-medium">
                         {file.to?.replace(/^b\//, '') || file.from?.replace(/^a\//, '') || `File ${fileIdx + 1}`}
                       </span>
                       {file.new && (
-                        <span className="badge-success text-[9px] px-1 py-0.5 rounded">
+                        <span className="badge-success text-xs px-1 py-0.5 rounded">
                           <PlusCircle className="h-2.5 w-2.5" /> new file
                         </span>
                       )}
                       {file.deleted && (
-                        <span className="badge-danger text-[9px] px-1 py-0.5 rounded">
+                        <span className="badge-danger text-xs px-1 py-0.5 rounded">
                           <MinusCircle className="h-2.5 w-2.5" /> deleted
                         </span>
                       )}
                       {file.isRename && (
-                        <span className="badge-warning text-[9px] px-1 py-0.5 rounded">
+                        <span className="badge-warning text-xs px-1 py-0.5 rounded">
                           renamed {file.similarityIndex ? `(${file.similarityIndex}%)` : ''}
                         </span>
                       )}
                       {file.isBinary && (
-                        <span className="text-[9px] px-1 py-0.5 rounded font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                        <span className="text-xs px-1 py-0.5 rounded font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">
                           binary
                         </span>
                       )}
@@ -232,7 +232,7 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                   {file.chunks.map((chunk, chunkIdx) => (
                     <div key={chunkIdx}>
                       {/* Hunk Header */}
-                      <div className="diff-hunk-header px-3 py-1 font-mono text-[10px] tracking-tight">
+                      <div className="diff-hunk-header px-3 py-1 font-mono text-xs tracking-tight">
                         {chunk.content}
                       </div>
 
@@ -261,7 +261,7 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                             return (
                               <div
                                 key={changeIdx}
-                                className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border-y border-amber-500/20 text-amber-400 font-mono text-[10px]"
+                                className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border-y border-amber-500/20 text-amber-400 font-mono text-xs"
                               >
                                 <AlertTriangle className="h-3 w-3 shrink-0" />
                                 <span>{change.content.trim()}</span>
@@ -280,7 +280,7 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                               key={changeIdx}
                               className={`flex items-start transition-colors min-h-[20px] ${
                                 isAdd
-                                  ? 'diff-line-add'
+                                   ? 'diff-line-add'
                                   : isDel
                                   ? 'diff-line-del'
                                   : 'text-[#a1a1a1] hover:bg-white/[0.02] bg-[#0d0d0d]'
@@ -293,10 +293,10 @@ export function DiffViewer({ diffText, filePath, defaultCollapsed = false }: Dif
                                   isAdd ? 'bg-[#0f1a14]' : isDel ? 'bg-[#1c0f12]' : 'bg-[#0d0d0d]'
                                 )}
                               >
-                                <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
+                                <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-xs text-muted-foreground/60 font-mono">
                                   {oldNum ?? ''}
                                 </div>
-                                <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-[10px] text-[#555555]">
+                                <div className="w-10 shrink-0 text-right pr-2 py-0.5 text-xs text-muted-foreground/60 font-mono">
                                   {newNum ?? ''}
                                 </div>
                                 {/* Sign indicator */}

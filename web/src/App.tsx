@@ -9,17 +9,28 @@ import {
   ProfileDTO,
   SessionDTO,
 } from '@/lib/api';
-import { ProfilesView } from '@/views/ProfilesView';
-import { SessionsView } from '@/views/SessionsView';
-import { SessionDetailView } from '@/views/SessionDetailView';
-import { McpView } from '@/views/McpView';
-import { NetworkView } from '@/views/NetworkView';
 import { Sidebar } from '@/components/Sidebar';
 import { DaemonModal } from '@/components/DaemonModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
 import { Toaster } from '@/components/ui/toaster';
-import { SessionDetailSkeleton } from '@/components/Skeletons';
+import { SessionDetailSkeleton, ViewLoadingSkeleton } from '@/components/Skeletons';
 import { ChevronRight } from 'lucide-react';
+
+const ProfilesView = React.lazy(() =>
+  import('@/views/ProfilesView').then((m) => ({ default: m.ProfilesView }))
+);
+const SessionsView = React.lazy(() =>
+  import('@/views/SessionsView').then((m) => ({ default: m.SessionsView }))
+);
+const SessionDetailView = React.lazy(() =>
+  import('@/views/SessionDetailView').then((m) => ({ default: m.SessionDetailView }))
+);
+const McpView = React.lazy(() =>
+  import('@/views/McpView').then((m) => ({ default: m.McpView }))
+);
+const NetworkView = React.lazy(() =>
+  import('@/views/NetworkView').then((m) => ({ default: m.NetworkView }))
+);
 
 type ViewType = 'overview' | 'sessions' | 'mcp' | 'network' | 'profile-detail' | 'session-detail';
 
@@ -543,62 +554,64 @@ export function App() {
         {/* Stage Content */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 min-h-0 bg-background">
           <div className="max-w-7xl mx-auto">
-            {currentView === 'overview' && (
-              <ProfilesView
-                selectedProfile="all"
-                profiles={profiles}
-                onSelectProfile={handleSelectProfile}
-                onNavigateToSessions={handleNavigateToSessions}
-                onNavigateToMcp={handleNavigateToMcp}
-                onProfilesLoaded={setProfiles}
-              />
-            )}
-            {currentView === 'profile-detail' && (
-              <ProfilesView
-                selectedProfile={selectedProfile}
-                profiles={profiles}
-                activeTab={activeProfileTab}
-                onTabChange={handleProfileTabChange}
-                onSelectProfile={handleSelectProfile}
-                onNavigateToSessions={handleNavigateToSessions}
-                onNavigateToMcp={handleNavigateToMcp}
-                onProfilesLoaded={setProfiles}
-                onViewSession={handleViewSession}
-              />
-            )}
-            <div className={currentView === 'sessions' ? 'block' : 'hidden'}>
-              <SessionsView
-                selectedProfile={selectedProfile}
-                onSelectProfile={setSelectedProfile}
-                profiles={profiles}
-                onViewSession={handleViewSession}
-              />
-            </div>
-            {currentView === 'session-detail' && (
-              viewedSession ? (
-                <SessionDetailView
-                  key={viewedSession.id}
-                  session={viewedSession}
-                  onBack={handleBackFromSession}
+            <React.Suspense fallback={<ViewLoadingSkeleton />}>
+              {currentView === 'overview' && (
+                <ProfilesView
+                  selectedProfile="all"
+                  profiles={profiles}
+                  onSelectProfile={handleSelectProfile}
+                  onNavigateToSessions={handleNavigateToSessions}
+                  onNavigateToMcp={handleNavigateToMcp}
+                  onProfilesLoaded={setProfiles}
                 />
-              ) : (
-                <SessionDetailSkeleton
-                  targetSessionId={targetSessionId}
-                  onBack={handleBackFromSession}
+              )}
+              {currentView === 'profile-detail' && (
+                <ProfilesView
+                  selectedProfile={selectedProfile}
+                  profiles={profiles}
+                  activeTab={activeProfileTab}
+                  onTabChange={handleProfileTabChange}
+                  onSelectProfile={handleSelectProfile}
+                  onNavigateToSessions={handleNavigateToSessions}
+                  onNavigateToMcp={handleNavigateToMcp}
+                  onProfilesLoaded={setProfiles}
+                  onViewSession={handleViewSession}
                 />
-              )
-            )}
-            {currentView === 'mcp' && (
-              <McpView
-                selectedScope={selectedMcpScope}
-                onSelectScope={(scope) => {
-                  setSelectedMcpScope(scope);
-                  syncUrl('mcp', 'all', 'quota', scope, null, true);
-                }}
-                profiles={profiles}
-              />
-            )}
-            {currentView === 'network' && <NetworkView profiles={profiles} />}
+              )}
+              <div className={currentView === 'sessions' ? 'block' : 'hidden'}>
+                <SessionsView
+                  selectedProfile={selectedProfile}
+                  onSelectProfile={setSelectedProfile}
+                  profiles={profiles}
+                  onViewSession={handleViewSession}
+                />
+              </div>
+              {currentView === 'session-detail' && (
+                viewedSession ? (
+                  <SessionDetailView
+                    key={viewedSession.id}
+                    session={viewedSession}
+                    onBack={handleBackFromSession}
+                  />
+                ) : (
+                  <SessionDetailSkeleton
+                    targetSessionId={targetSessionId}
+                    onBack={handleBackFromSession}
+                  />
+                )
+              )}
+              {currentView === 'mcp' && (
+                <McpView
+                  selectedScope={selectedMcpScope}
+                  onSelectScope={(scope) => {
+                    setSelectedMcpScope(scope);
+                    syncUrl('mcp', 'all', 'quota', scope, null, true);
+                  }}
+                  profiles={profiles}
+                />
+              )}
+              {currentView === 'network' && <NetworkView profiles={profiles} />}
+            </React.Suspense>
           </div>
         </main>
       </div>

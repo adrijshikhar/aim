@@ -225,14 +225,14 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
             </DialogTitle>
             <Badge
               variant="outline"
-              className="text-[10px] font-mono bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] px-1.5 py-0.5 rounded-geist"
+              className="text-xs font-mono bg-[#0a0a0a] text-[#a1a1a1] border-[#262626] px-1.5 py-0.5 rounded-geist"
             >
               {session.agent} / {session.profile || 'default'}
             </Badge>
             {forkTurnIndex !== null && forkTurnIndex !== undefined && (
               <Badge
                 variant="outline"
-                className="text-[10px] font-mono bg-amber-500/10 text-amber-400 border-amber-500/30 px-1.5 py-0.5 rounded-geist"
+                className="text-xs font-mono bg-amber-500/10 text-amber-400 border-amber-500/30 px-1.5 py-0.5 rounded-geist"
               >
                 Fork at Turn #{forkTurnIndex}
               </Badge>
@@ -264,7 +264,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               <label htmlFor="terminal-select" className="text-[11px] font-semibold text-[#ededed] uppercase tracking-wider font-mono">
                 Terminal Target
               </label>
-              <span className="text-[10px] text-[#666666] font-mono">Environment Target</span>
+              <span className="text-xs text-muted-foreground font-mono">Environment Target</span>
             </div>
             <SelectDropdown
               id="terminal-select"
@@ -288,7 +288,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               <span className="text-[11px] font-semibold text-[#ededed] uppercase tracking-wider font-mono">
                 1. AIM Direct Flags (Orchestrator)
               </span>
-              <span className="text-[10px] text-[#666666] font-mono">Profile &amp; Context</span>
+              <span className="text-xs text-muted-foreground font-mono">Profile &amp; Context</span>
             </div>
 
             <div className="grid grid-cols-2 gap-1.5">
@@ -316,12 +316,12 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                       <div className="flex items-center gap-1">
                         <span className="font-mono text-[11px] font-bold text-[#ededed] block">{f.flag}</span>
                         {isForkingTurn && (
-                          <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 border-amber-500/30 text-amber-300 bg-amber-500/10">
+                          <Badge variant="outline" className="text-xs font-mono px-1 py-0 border-amber-500/30 text-amber-300 bg-amber-500/10">
                             Turn #{forkTurnIndex}
                           </Badge>
                         )}
                       </div>
-                      <p className="text-[10px] text-[#888888] leading-tight truncate">{f.name}</p>
+                      <p className="text-xs text-muted-foreground leading-tight truncate">{f.name}</p>
                     </div>
                   </label>
                 );
@@ -336,7 +336,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                 <span className="text-[11px] font-semibold text-[#ededed] uppercase tracking-wider font-mono">
                   2. {session.agent} Flags (Passthrough via --)
                 </span>
-                <span className="text-[10px] text-[#666666] font-mono">Native CLI</span>
+                <span className="text-xs text-muted-foreground font-mono">Native CLI</span>
               </div>
 
               <div className="space-y-1.5">
@@ -367,14 +367,14 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
                           {rf.dangerous && (
                             <Badge
                               variant="outline"
-                              className="text-[9px] font-mono border-amber-500/30 text-amber-300 bg-amber-500/10 px-1 py-0 flex items-center gap-1"
+                              className="text-xs font-mono border-amber-500/30 text-amber-300 bg-amber-500/10 px-1 py-0 flex items-center gap-1"
                             >
                               <ShieldAlert className="h-2.5 w-2.5 text-amber-400" />
                               Skip Prompts
                             </Badge>
                           )}
                         </div>
-                        <p className="text-[10px] text-[#888888] leading-tight truncate">{rf.description}</p>
+                        <p className="text-xs text-muted-foreground leading-tight truncate">{rf.description}</p>
                       </div>
                     </label>
                   );
@@ -389,7 +389,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
               <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5">
                 <p className="font-medium text-amber-200 text-[11px]">Autonomous Tool Execution Active</p>
-                <p className="text-[10px] text-amber-300/80 leading-normal">
+                <p className="text-xs text-amber-300/80 leading-normal">
                   Tool execution, bash commands, and file edits will run automatically without interactive confirmation prompts.
                 </p>
               </div>
@@ -400,12 +400,12 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
           <div className="space-y-1 pt-1 border-t border-[#262626]">
             <div className="flex items-center justify-between text-[11px] text-[#a1a1a1]">
               <label htmlFor="custom-args" className="font-sans cursor-pointer">Additional Flags:</label>
-              <span className="text-[10px] text-[#666666] font-mono">Appended after --</span>
+              <span className="text-xs text-muted-foreground font-mono">Appended after --</span>
             </div>
             <Input
               id="custom-args"
               placeholder="e.g. --model claude-3-5-sonnet"
-              className="h-7 text-xs font-mono rounded-geist border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
+              className="h-7 text-xs font-mono rounded-geist border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-muted-foreground focus:border-[#333333]"
               value={customArgs}
               onChange={(e) => setCustomArgs(e.target.value)}
             />
@@ -413,7 +413,7 @@ export const ResumeModal: React.FC<ResumeModalProps> = ({
 
           {/* Live Command Preview Box */}
           <div className="space-y-1 pt-1">
-            <span className="text-[10px] font-mono text-[#888888]">Terminal Command:</span>
+            <span className="text-xs font-mono text-muted-foreground">Terminal Command:</span>
             <div className="relative rounded-geist border border-[#262626] bg-[#0a0a0a] px-2.5 py-1.5 font-mono text-[11px] text-[#ededed] flex items-center justify-between gap-2">
               <div className="select-all text-[11px] text-[#ededed] overflow-x-auto whitespace-pre flex-1 py-0.5">
                 {buildCommandString()}

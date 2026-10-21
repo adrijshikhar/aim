@@ -73,7 +73,7 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
               <div className="mx-1.5 h-3.5 w-[1px] bg-border" />
               <Badge
                 variant="secondary"
-                className="h-4 px-1.5 text-[10px] font-mono bg-[#262626] text-[#ededed] border-0 rounded-[4px]"
+                className="h-4 px-1.5 text-xs font-mono bg-[#262626] text-[#ededed] border-0 rounded-[4px]"
               >
                 {selectedCount}
               </Badge>
@@ -132,7 +132,7 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
                       <span className="truncate font-mono text-xs text-foreground/90">{opt.label}</span>
                     </div>
                     {count !== undefined && (
-                      <span className="ml-auto pl-2 text-[10px] font-mono text-muted-foreground">{count}</span>
+                      <span className="ml-auto pl-2 text-xs font-mono text-muted-foreground">{count}</span>
                     )}
                   </div>
                 );
@@ -141,7 +141,7 @@ export const DataTableFacetedFilter: React.FC<DataTableFacetedFilterProps> = ({
           </div>
           {selectedCount > 0 && (
             <div className="pt-1.5 border-t border-border flex items-center justify-between">
-              <span className="text-[10px] font-mono text-muted-foreground pl-1">{selectedCount} selected</span>
+              <span className="text-xs font-mono text-muted-foreground pl-1">{selectedCount} selected</span>
               <Button
                 variant="ghost"
                 size="sm"

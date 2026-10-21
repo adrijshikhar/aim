@@ -105,6 +105,17 @@ export function SessionDetailSkeleton({
   );
 }
 
+export function ViewLoadingSkeleton() {
+  return (
+    <div className="flex items-center justify-center p-16 text-xs font-sans text-muted-foreground animate-in fade-in duration-200">
+      <div className="flex items-center gap-2.5">
+        <GeistSpinner size={16} />
+        <span>Loading view…</span>
+      </div>
+    </div>
+  );
+}
+
 export function ProfileDetailSkeleton({ profileName }: { profileName?: string }) {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">

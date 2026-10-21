@@ -631,8 +631,8 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                 {headline}
               </h1>
               {session.is_active && (
-                <Badge className="badge-success text-[10px] font-mono px-2 py-0.5 rounded-[4px] flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                <Badge className="badge-success text-xs font-mono px-2 py-0.5 rounded-[4px] flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid motion-reduce:animate-none" />
                   Active Process
                 </Badge>
               )}
@@ -762,7 +762,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
             </span>
             <Badge
               variant="outline"
-              className="text-[10px] font-mono bg-[#0a0a0a] border-border text-[#a1a1a1] px-1.5 py-0.5 rounded-[4px]"
+              className="text-xs font-mono bg-[#0a0a0a] border-border text-[#a1a1a1] px-1.5 py-0.5 rounded-[4px]"
             >
               {allTurns.length} turns
             </Badge>
@@ -891,7 +891,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                   </span>
                 </span>
                 {turnSearch && (
-                  <Badge variant="outline" className="text-[10px] font-sans border-[#262626] text-[#ededed] bg-[#141414] px-1.5 py-0">
+                  <Badge variant="outline" className="text-xs font-sans border-[#262626] text-[#ededed] bg-[#141414] px-1.5 py-0">
                     Filtered
                   </Badge>
                 )}
@@ -945,14 +945,14 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                         <span className={cn('font-semibold', isUser ? 'text-[#e6f1fe]' : 'text-[#ededed]')}>
                           {isUser ? 'User Prompt' : `${session.agent} Response`}
                         </span>
-                        <span className="text-[10px] font-mono text-[#666666]">
+                        <span className="text-xs font-mono text-[#666666]">
                           Turn #{turn.turn_index}
                         </span>
                       </div>
 
                       <div className="flex items-center gap-2">
                         {turn.timestamp && (
-                          <span className="text-[10px] font-mono text-[#666666]">
+                          <span className="text-xs font-mono text-[#666666]">
                             {new Date(turn.timestamp).toLocaleTimeString()}
                           </span>
                         )}
@@ -965,7 +965,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                             setTargetForkTurn(turn.turn_index);
                             setResumeModalOpen(true);
                           }}
-                          className="h-6 px-2 text-[10px] font-sans text-[#c08532] hover:text-[#e09e42] hover:bg-[#c08532]/10 border border-[#c08532]/30 bg-[#c08532]/5 rounded-[3px] flex items-center gap-1 transition-colors cursor-pointer"
+                          className="h-6 px-2 text-xs font-sans text-[#c08532] hover:text-[#e09e42] hover:bg-[#c08532]/10 border border-[#c08532]/30 bg-[#c08532]/5 rounded-[3px] flex items-center gap-1 transition-colors cursor-pointer"
                           title={`Resume or fork session starting from Turn #${turn.turn_index}`}
                         >
                           <GitFork className="h-2.5 w-2.5 text-[#c08532]" />
@@ -1007,7 +1007,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                               <Sparkles className="h-3 w-3 text-[#dfa88f]" />
                               <span className="font-medium">Reasoning &amp; Thinking Process</span>
                             </span>
-                            <span className="text-[10px] font-mono text-[#dfa88f]/80 px-1.5 py-0.5 rounded border border-[#dfa88f]/30 bg-[#dfa88f]/10">
+                            <span className="text-xs font-mono text-[#dfa88f]/80 px-1.5 py-0.5 rounded border border-[#dfa88f]/30 bg-[#dfa88f]/10">
                               {isThinkingOpen ? 'collapse' : `~${Math.round(turn.thinking!.length / 4)} tok`}
                             </span>
                           </button>
@@ -1061,7 +1061,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                     <span className="text-[#ededed] font-medium shrink-0">{tool.tool_name}</span>
                                     <Badge
                                       variant="outline"
-                                      className={cn('text-[9px] font-mono px-1 py-0 rounded-[2px] uppercase tracking-wider shrink-0', cfg.tagClass)}
+                                      className={cn('text-[11px] font-mono px-1.5 py-0.5 rounded-[3px] uppercase tracking-wider shrink-0', cfg.tagClass)}
                                     >
                                       {cfg.category}
                                     </Badge>
@@ -1077,7 +1077,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                   <div className="flex items-center gap-2 shrink-0">
                                     <Badge
                                       variant={tool.status === 'error' ? 'destructive' : 'success'}
-                                      className="text-[9px] font-mono px-1.5 py-0 rounded-[3px]"
+                                      className="text-[11px] font-mono px-1.5 py-0.5 rounded-[3px]"
                                     >
                                       {tool.status || 'ok'}
                                     </Badge>
@@ -1093,7 +1093,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                   <div id={`tool-panel-${toolKey}`} className="p-3 border-t border-[#1c1c1c] space-y-2 text-xs font-mono bg-[#050505]">
                                     {tool.arguments && (
                                       <div className="space-y-1">
-                                        <span className="text-[10px] text-[#666666] uppercase tracking-wider">
+                                        <span className="text-xs text-[#666666] uppercase tracking-wider font-mono">
                                           Arguments:
                                         </span>
                                         <pre className="p-2 rounded-[3px] bg-[#0c0c0c] border border-[#1f1f1f] text-[11px] text-[#a1a1a1] overflow-x-auto whitespace-pre-wrap max-h-48">
@@ -1110,14 +1110,14 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                     {tool.output && (
                                       <div className="space-y-1.5">
                                         <div className="flex items-center justify-between">
-                                          <span className="text-[10px] text-[#666666] uppercase tracking-wider font-mono">
+                                          <span className="text-xs text-[#666666] uppercase tracking-wider font-mono">
                                             Output:
                                           </span>
                                           <div className="flex items-center gap-1.5">
                                             <button
                                               type="button"
                                               onClick={() => copyToolOutput(toolKey, tool.output!)}
-                                              className="text-[10px] text-muted-foreground hover:text-[#ededed] px-1.5 py-0.5 rounded border border-border/50 hover:bg-[#161616] transition-colors flex items-center gap-1 cursor-pointer"
+                                              className="text-xs text-muted-foreground hover:text-[#ededed] px-1.5 py-0.5 rounded border border-border/50 hover:bg-[#161616] transition-colors flex items-center gap-1 cursor-pointer"
                                               title="Copy output"
                                             >
                                               {copiedOutputs[toolKey] ? (
@@ -1135,7 +1135,7 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
                                             <button
                                               type="button"
                                               onClick={() => toggleOutputExpand(toolKey)}
-                                              className="text-[10px] text-muted-foreground hover:text-[#ededed] px-1.5 py-0.5 rounded border border-border/50 hover:bg-[#161616] transition-colors cursor-pointer"
+                                              className="text-xs text-muted-foreground hover:text-[#ededed] px-1.5 py-0.5 rounded border border-border/50 hover:bg-[#161616] transition-colors cursor-pointer"
                                             >
                                               {expandedOutputs[toolKey] ? 'Collapse height' : 'Expand full output'}
                                             </button>

@@ -428,7 +428,7 @@ export function SessionsView({
           <div className="flex items-center gap-1.5">
             <AgentBadge agent={row.original.agent} />
             {row.original.is_active && (
-              <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" title="Active Process" />
+              <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" title="Active Process" />
             )}
           </div>
         ),
@@ -443,7 +443,7 @@ export function SessionsView({
             <Badge
               variant="outline"
               className={cn(
-                'text-[10px] font-mono border-0 rounded-[4px] px-1.5 py-0.5 truncate max-w-[80px]',
+                'text-xs font-mono border-0 rounded-[4px] px-1.5 py-0.5 truncate max-w-[80px]',
                 prof === '<host>'
                   ? 'bg-[#181818] text-[#888888]'
                   : 'bg-[#1a1a1a] text-[#ededed] border border-[#2a2a2a]'
@@ -469,7 +469,7 @@ export function SessionsView({
               <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
               <div className="truncate flex items-baseline gap-0.5 text-xs">
                 {parent && (
-                  <span className="text-muted-foreground/60 shrink-0">
+                  <span className="text-muted-foreground shrink-0">
                     .../{parent}/
                   </span>
                 )}
@@ -503,7 +503,7 @@ export function SessionsView({
             <div className="space-y-0.5 min-w-0 pr-2">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span
-                  className="font-mono text-[10px] text-muted-foreground bg-[#141414] px-1.5 py-0.5 rounded border border-[#242424] shrink-0 select-all"
+                  className="font-mono text-xs text-muted-foreground bg-[#141414] px-1.5 py-0.5 rounded border border-[#242424] shrink-0 select-all"
                   title={`ID: ${row.original.id}`}
                 >
                   {row.original.id.slice(0, 8)}
@@ -659,12 +659,12 @@ export function SessionsView({
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         {/* Search input with autofocus shortcut and clear button */}
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-[#666666]" />
+          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             ref={searchInputRef}
             aria-label="Search sessions by goal, cwd, title, or profile"
             placeholder="Search sessions by goal, cwd, title, or profile..."
-            className="pl-9 pr-8 h-8 text-xs rounded-geist border-border bg-[#0a0a0a] text-[#ededed] placeholder:text-[#666666] focus:border-[#333333]"
+            className="pl-9 pr-8 h-8 text-xs rounded-geist border-border bg-[#0a0a0a] text-[#ededed] placeholder:text-muted-foreground focus:border-[#333333]"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -680,7 +680,7 @@ export function SessionsView({
             </button>
           ) : (
             <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-              <kbd className="text-[10px] font-mono px-1.5 py-0.5 border border-border bg-[#111111] text-[#a1a1a1] rounded">
+              <kbd className="text-xs font-mono px-1.5 py-0.5 border border-border bg-[#111111] text-[#a1a1a1] rounded">
                 /
               </kbd>
             </div>
@@ -757,9 +757,9 @@ export function SessionsView({
           {searchQuery && (
             <Badge
               variant="outline"
-              className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+              className="h-6 pl-2 pr-1 text-xs font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
             >
-              <span className="text-muted-foreground font-sans text-[10px]">query:</span>
+              <span className="text-muted-foreground font-sans text-xs">query:</span>
               <span className="truncate max-w-[120px]">{searchQuery}</span>
               <button
                 type="button"
@@ -779,9 +779,9 @@ export function SessionsView({
               <Badge
                 key={`chip-eng-${eng}`}
                 variant="outline"
-                className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+                className="h-6 pl-2 pr-1 text-xs font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
               >
-                <span className="text-muted-foreground font-sans text-[10px]">engine:</span>
+                <span className="text-muted-foreground font-sans text-xs">engine:</span>
                 <span>{label}</span>
                 <button
                   type="button"
@@ -804,9 +804,9 @@ export function SessionsView({
             <Badge
               key={`chip-prof-${prof}`}
               variant="outline"
-              className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+              className="h-6 pl-2 pr-1 text-xs font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
             >
-              <span className="text-muted-foreground font-sans text-[10px]">profile:</span>
+              <span className="text-muted-foreground font-sans text-xs">profile:</span>
               <span className="truncate max-w-[120px]">{prof}</span>
               <button
                 type="button"
@@ -833,9 +833,9 @@ export function SessionsView({
                 key={`chip-cwd-${cwdVal}`}
                 title={cwdVal === '<none>' ? 'No directory' : cwdVal}
                 variant="outline"
-                className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+                className="h-6 pl-2 pr-1 text-xs font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
               >
-                <span className="text-muted-foreground font-sans text-[10px]">cwd:</span>
+                <span className="text-muted-foreground font-sans text-xs">cwd:</span>
                 <span className="truncate max-w-[160px]">{label}</span>
                 <button
                   type="button"
@@ -860,9 +860,9 @@ export function SessionsView({
               <Badge
                 key={`chip-st-${st}`}
                 variant="outline"
-                className="h-6 pl-2 pr-1 text-[11px] font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
+                className="h-6 pl-2 pr-1 text-xs font-mono bg-[#161616] text-[#ededed] border-border rounded-[4px] inline-flex items-center gap-1.5"
               >
-                <span className="text-muted-foreground font-sans text-[10px]">status:</span>
+                <span className="text-muted-foreground font-sans text-xs">status:</span>
                 <span>{label}</span>
                 <button
                   type="button"

@@ -83,7 +83,7 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
             value={confirmInput}
             onChange={(e) => setConfirmInput(e.target.value)}
             placeholder={target.name}
-            className="w-full h-8 px-2.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-[#555555] focus:border-[#444444] focus:outline-none"
+            className="w-full h-8 px-2.5 text-xs font-mono rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] placeholder:text-muted-foreground focus:border-[#444444] focus:outline-none"
             autoComplete="off"
             disabled={isDeleting}
           />

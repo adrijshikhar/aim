@@ -92,7 +92,14 @@
 
   /* Minimalist UI <kbd> styling */
   kbd {
-    @apply inline-flex items-center justify-center font-mono text-[10px] font-medium px-1.5 py-0.5 rounded border border-border bg-secondary text-muted-foreground shadow-sm;
+    @apply inline-flex items-center justify-center font-mono text-xs font-medium px-1.5 py-0.5 rounded border border-border bg-secondary text-muted-foreground shadow-sm;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-pulse,
+    .animate-ping {
+      animation: none !important;
+    }
   }
 
   /* Cool Blue Selection */

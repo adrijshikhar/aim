@@ -161,16 +161,16 @@ export function FileCodeBlock({
             {fileName}
           </span>
           {lineRangeStr && (
-            <span className="px-1.5 py-0.5 rounded bg-[#1c1c1c] border border-[#2a2a2a] text-[10px] font-mono text-[#a1a1a1]">
+            <span className="px-1.5 py-0.5 rounded bg-[#1c1c1c] border border-[#2a2a2a] text-xs font-mono text-[#a1a1a1]">
               {lineRangeStr}
             </span>
           )}
-          <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 text-[10px] font-mono font-medium">
+          <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 text-xs font-mono font-medium">
             {langInfo.badge}
           </span>
           {displayPath && (
             <span
-              className="text-[10px] font-mono text-[#777777] truncate max-w-[280px] hidden sm:inline"
+              className="text-xs font-mono text-muted-foreground truncate max-w-[280px] hidden sm:inline"
               title={filePath}
             >
               {displayPath}
@@ -180,12 +180,12 @@ export function FileCodeBlock({
 
         <div className="flex items-center gap-2 shrink-0">
           {statsStr && (
-            <span className="text-[10px] font-mono text-[#666666] hidden md:inline">
+            <span className="text-xs font-mono text-muted-foreground hidden md:inline">
               {statsStr}
             </span>
           )}
           {completedAt && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-[#666666] hidden lg:inline">
+            <span className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hidden lg:inline">
               <Clock className="h-2.5 w-2.5 text-[#555555]" />
               {completedAt}
             </span>
@@ -195,7 +195,7 @@ export function FileCodeBlock({
             variant="ghost"
             size="sm"
             onClick={handleCopyCleanCode}
-            className="h-6 px-2 text-[10px] font-sans text-muted-foreground hover:text-foreground hover:bg-[#222222] rounded-[3px] gap-1 cursor-pointer"
+            className="h-6 px-2 text-xs font-sans text-muted-foreground hover:text-foreground hover:bg-[#222222] rounded-[3px] gap-1 cursor-pointer"
             title="Copy clean code (without line numbers)"
           >
             {copied ? (
@@ -238,7 +238,7 @@ export function FileCodeBlock({
 
       {/* Footer / Stats bar */}
       {(shouldShowExpandToggle || truncatedNote) && (
-        <div className="flex items-center justify-between px-3 py-1.5 bg-[#101010] border-t border-[#1f1f1f] text-[10px] font-mono text-[#777777]">
+        <div className="flex items-center justify-between px-3 py-1.5 bg-[#101010] border-t border-[#1f1f1f] text-xs font-mono text-muted-foreground">
           <div className="flex items-center gap-1.5 truncate">
             {truncatedNote ? (
               <span className="truncate">{truncatedNote}</span>
@@ -250,7 +250,7 @@ export function FileCodeBlock({
             <button
               type="button"
               onClick={() => setIsExpanded(!isExpanded)}
-              className="text-muted-foreground hover:text-foreground text-[10px] font-sans hover:underline cursor-pointer"
+              className="text-muted-foreground hover:text-foreground text-xs font-sans hover:underline cursor-pointer"
             >
               {isExpanded ? 'Collapse height' : 'Expand full height'}
             </button>
@@ -369,7 +369,7 @@ function FencedCodeBlock({ text, language }: FencedCodeBlockProps) {
   return (
     <div className="rounded-[6px] border border-border bg-[#0c0c0c] overflow-hidden my-2.5 shadow-sm">
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#141414] border-b border-border">
-        <span className="text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-wider">
+        <span className="text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">
           {language || 'code'}
         </span>
         <Button
@@ -377,7 +377,7 @@ function FencedCodeBlock({ text, language }: FencedCodeBlockProps) {
           variant="ghost"
           size="sm"
           onClick={handleCopy}
-          className="h-5 px-1.5 text-[10px] font-sans text-muted-foreground hover:text-foreground hover:bg-[#222222] rounded-[3px] gap-1"
+          className="h-5 px-1.5 text-xs font-sans text-muted-foreground hover:text-foreground hover:bg-[#222222] rounded-[3px] gap-1"
         >
           {copied ? (
             <>
@@ -535,14 +535,14 @@ function StructuredTextBlock({ text }: { text: string }) {
         {hasMetadata && (
           <div className="flex flex-wrap items-center gap-2 p-2 rounded-[5px] bg-[#111111] border border-[#222222] text-[11px] font-sans text-[#a1a1a1]">
             {toolAction && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono text-[10px]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono text-xs">
                 <FileEdit className="h-3 w-3" />
                 {toolAction}
               </span>
             )}
             {exitCode !== null && (
               <span
-                className={`inline-flex items-center gap-1 font-mono text-[10px] font-medium ${
+                className={`inline-flex items-center gap-1 font-mono text-xs font-medium ${
                   exitCode === 0 ? 'badge-success' : 'badge-danger'
                 }`}
               >
@@ -551,7 +551,7 @@ function StructuredTextBlock({ text }: { text: string }) {
               </span>
             )}
             {metadataLines.some((m) => m.startsWith('Completed At:')) && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-[#777777]">
+              <span className="inline-flex items-center gap-1 text-xs text-[#777777]">
                 <Clock className="h-2.5 w-2.5 text-[#555555]" />
                 {metadataLines.find((m) => m.startsWith('Completed At:'))?.replace('Completed At: ', '')}
               </span>
@@ -572,14 +572,14 @@ function StructuredTextBlock({ text }: { text: string }) {
         {hasMetadata && (
           <div className="flex flex-wrap items-center gap-2 p-2 rounded-[5px] bg-[#111111] border border-[#222222] text-[11px] font-sans text-[#a1a1a1]">
             {toolAction && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono text-[10px]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono text-xs">
                 <FileEdit className="h-3 w-3" />
                 {toolAction}
               </span>
             )}
             {exitCode !== null && (
               <span
-                className={`inline-flex items-center gap-1 font-mono text-[10px] font-medium ${
+                className={`inline-flex items-center gap-1 font-mono text-xs font-medium ${
                   exitCode === 0 ? 'badge-success' : 'badge-danger'
                 }`}
               >
@@ -588,7 +588,7 @@ function StructuredTextBlock({ text }: { text: string }) {
               </span>
             )}
             {metadataLines.some((m) => m.startsWith('Completed At:')) && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-[#777777]">
+              <span className="inline-flex items-center gap-1 text-xs text-[#777777]">
                 <Clock className="h-2.5 w-2.5 text-[#555555]" />
                 {metadataLines.find((m) => m.startsWith('Completed At:'))?.replace('Completed At: ', '')}
               </span>
@@ -623,14 +623,14 @@ function StructuredTextBlock({ text }: { text: string }) {
       {hasMetadata && (
         <div className="flex flex-wrap items-center gap-2 p-2 rounded-[5px] bg-[#111111] border border-[#222222] text-[11px] font-sans text-[#a1a1a1]">
           {toolAction && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono text-[10px]">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono text-xs">
               <FileEdit className="h-3 w-3" />
               {toolAction}
             </span>
           )}
           {exitCode !== null && (
             <span
-              className={`inline-flex items-center gap-1 font-mono text-[10px] font-medium ${
+              className={`inline-flex items-center gap-1 font-mono text-xs font-medium ${
                 exitCode === 0 ? 'badge-success' : 'badge-danger'
               }`}
             >
@@ -639,7 +639,7 @@ function StructuredTextBlock({ text }: { text: string }) {
             </span>
           )}
           {metadataLines.some((m) => m.startsWith('Completed At:')) && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-[#777777]">
+            <span className="inline-flex items-center gap-1 text-xs text-[#777777]">
               <Clock className="h-2.5 w-2.5 text-[#555555]" />
               {metadataLines.find((m) => m.startsWith('Completed At:'))?.replace('Completed At: ', '')}
             </span>

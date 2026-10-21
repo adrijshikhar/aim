@@ -199,7 +199,7 @@ export function McpView({
             <h3 className="font-semibold text-sm text-foreground">
               Model Context Protocol (MCP) Catalog
             </h3>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground">
+            <span className="text-xs font-mono px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground">
               {filteredServers.length} {filteredServers.length === 1 ? 'server' : 'servers'}
             </span>
           </div>
@@ -225,10 +225,10 @@ export function McpView({
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Search input */}
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground/60" />
+          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search MCP servers by name, command, or env..."
-            className="pl-9 pr-8 h-8 text-xs font-sans rounded-geist border-border bg-card text-foreground placeholder:text-muted-foreground/50 focus:border-border"
+            className="pl-9 pr-8 h-8 text-xs font-sans rounded-geist border-border bg-card text-foreground placeholder:text-muted-foreground focus:border-border"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -236,7 +236,7 @@ export function McpView({
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-2 text-[#666666] hover:text-[#ededed] cursor-pointer"
+              className="absolute right-2.5 top-2 text-muted-foreground hover:text-[#ededed] cursor-pointer"
               title="Clear search"
             >
               <X className="h-3.5 w-3.5" />
@@ -246,7 +246,7 @@ export function McpView({
 
         {/* Scope Dropdown Filter */}
         <div className="flex items-center gap-2 min-w-[160px]">
-          <span className="text-xs text-[#666666] font-mono hidden sm:inline">Scope:</span>
+          <span className="text-xs text-muted-foreground font-mono hidden sm:inline">Scope:</span>
           <SelectDropdown
             value={selectedScope}
             onChange={(val) => onSelectScope && onSelectScope(String(val))}
@@ -266,12 +266,12 @@ export function McpView({
       {/* Active Filter Chips */}
       {hasActiveFilters && (
         <div className="flex flex-wrap items-center gap-2 pt-0.5 text-xs">
-          <span className="flex items-center gap-1 text-muted-foreground text-[11px] font-mono">
+          <span className="flex items-center gap-1 text-muted-foreground text-xs font-mono">
             <Filter className="h-3 w-3" /> Filters:
           </span>
 
           {selectedScope && selectedScope !== 'all' && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-border bg-secondary/50 text-muted-foreground font-mono text-[11px]">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-border bg-secondary/50 text-muted-foreground font-mono text-xs">
               scope: <strong className="text-foreground">{selectedScope}</strong>
               <button
                 type="button"
@@ -285,7 +285,7 @@ export function McpView({
           )}
 
           {searchQuery && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-border bg-secondary/50 text-muted-foreground font-mono text-[11px]">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-geist border border-border bg-secondary/50 text-muted-foreground font-mono text-xs">
               query: &ldquo;<strong className="text-foreground">{searchQuery}</strong>&rdquo;
               <button
                 type="button"
@@ -301,7 +301,7 @@ export function McpView({
           <button
             type="button"
             onClick={resetFilters}
-            className="text-[11px] font-mono text-muted-foreground hover:text-foreground underline ml-1 cursor-pointer"
+            className="text-xs font-mono text-muted-foreground hover:text-foreground underline ml-1 cursor-pointer"
           >
             Reset all
           </button>
@@ -344,16 +344,16 @@ export function McpView({
                     </div>
 
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border border-border bg-secondary/40 text-muted-foreground">
+                      <span className="text-xs font-mono px-1.5 py-0.5 rounded-[3px] border border-border bg-secondary/40 text-muted-foreground">
                         stdio
                       </span>
-                      <span className="badge-success text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] flex items-center gap-1">
+                      <span className="badge-success text-xs font-mono px-1.5 py-0.5 rounded-[3px] flex items-center gap-1">
                         <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                         Active
                       </span>
                       <Badge
                         variant="outline"
-                        className="text-[11px] font-mono flex items-center gap-1.5 rounded-geist px-2 py-0.5 border-border bg-secondary/40 text-muted-foreground"
+                        className="text-xs font-mono flex items-center gap-1.5 rounded-geist px-2 py-0.5 border-border bg-secondary/40 text-muted-foreground"
                       >
                         {isGlobal ? (
                           <>
@@ -374,7 +374,7 @@ export function McpView({
                 <CardContent className="space-y-3 pb-4 p-5 pt-0">
                   {/* Command & Args */}
                   <div className="space-y-1">
-                    <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                    <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                       <Terminal className="h-3 w-3 text-muted-foreground/70" /> Command
                     </span>
                     <div className="font-mono text-xs p-2 rounded-geist bg-background border border-border text-foreground overflow-x-auto whitespace-pre">
@@ -386,10 +386,10 @@ export function McpView({
                   {/* Environment Variables if present */}
                   {srv.env && Object.keys(srv.env).length > 0 && (
                     <div className="space-y-1">
-                      <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                      <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                         <Layers className="h-3 w-3 text-muted-foreground/70" /> Environment
                       </span>
-                      <div className="space-y-1 font-mono text-[11px] bg-background p-2 rounded-geist border border-border">
+                      <div className="space-y-1 font-mono text-xs bg-background p-2 rounded-geist border border-border">
                         {Object.entries(srv.env).map(([k, v]) => (
                           <div key={k} className="flex justify-between text-muted-foreground">
                             <span className="text-foreground font-medium">{k}:</span>
@@ -417,12 +417,12 @@ export function McpView({
                               [cardKey]: !prev[cardKey],
                             }))
                           }
-                          className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"
                         >
                           <span className="flex items-center gap-1.5">
                             <Wrench className="h-3 w-3 text-muted-foreground" />
                             <span>Registered Tools</span>
-                            <span className="text-[10px] text-muted-foreground/70">
+                            <span className="text-xs text-muted-foreground">
                               ({toolsList.length})
                             </span>
                           </span>
@@ -440,7 +440,7 @@ export function McpView({
                                 className="p-2 rounded-[3px] bg-secondary/30 border border-border/60 space-y-1"
                               >
                                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                                  <div className="font-mono text-[11px] font-semibold text-foreground">
+                                   <div className="font-mono text-xs font-semibold text-foreground">
                                     {t.name}
                                   </div>
                                   {t.params && t.params.length > 0 && (
@@ -448,7 +448,7 @@ export function McpView({
                                       {t.params.map((p) => (
                                         <span
                                           key={p}
-                                          className="text-[9px] font-mono px-1 py-0 rounded bg-secondary text-muted-foreground border border-border"
+                                          className="text-xs font-mono px-1 py-0 rounded bg-secondary text-muted-foreground border border-border"
                                         >
                                           {p}
                                         </span>
@@ -456,7 +456,7 @@ export function McpView({
                                     </div>
                                   )}
                                 </div>
-                                <div className="text-[10px] text-muted-foreground font-sans leading-relaxed">
+                                <div className="text-xs text-muted-foreground font-sans leading-relaxed">
                                   {t.description}
                                 </div>
                               </div>
