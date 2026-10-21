@@ -505,23 +505,19 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           </p>
         </div>
 
-        {/* TOP RIGHT: P2P Sharing On/Off Toggle & Settings Button */}
-        <div className="flex items-center gap-3 bg-[#111111] border border-[#262626] rounded-geist px-3.5 py-2 shrink-0 shadow-xs">
-          <div className="flex items-center gap-2.5">
+        {/* TOP RIGHT: Sharing On/Off Toggle & Settings Button */}
+        <div className="flex items-center gap-3 bg-[#111111] border border-[#262626] rounded-geist px-3 py-1.5 shrink-0 shadow-xs">
+          <div
+            className="flex items-center gap-2"
+            title={isSharingEnabled ? `Sharing is ON (${effectiveGlobalMode === 'auto' ? 'Auto Approve' : 'Request Mode'})` : 'Sharing is Disabled'}
+          >
             <Radio className={cn('h-3.5 w-3.5 transition-colors', isSharingEnabled ? 'text-accent-cyan' : 'text-[#666666]')} />
-            <div className="flex flex-col">
-              <span className="text-xs font-mono font-medium text-foreground flex items-center gap-1.5">
-                <span>P2P Sharing</span>
-                {activeSchedulesCount > 0 && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" title="Active Schedule Override" />
-                )}
-              </span>
-              <span className="text-[10px] font-mono text-muted-foreground">
-                {isSharingEnabled
-                  ? (effectiveGlobalMode === 'auto' ? 'Auto Approve' : 'Request Mode')
-                  : 'Disabled'}
-              </span>
-            </div>
+            <span className="text-xs font-mono font-medium text-foreground flex items-center gap-1.5">
+              <span>Sharing</span>
+              {activeSchedulesCount > 0 && (
+                <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" title="Active Schedule Override" />
+              )}
+            </span>
           </div>
 
           <div className="flex items-center gap-2 pl-2.5 border-l border-[#222222]">
@@ -529,7 +525,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               checked={isSharingEnabled}
               onCheckedChange={handleToggleP2P}
               disabled={isShareUpdating}
-              aria-label="Toggle P2P profile sharing"
+              aria-label="Toggle profile sharing"
             />
 
             <Button
@@ -537,7 +533,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               size="sm"
               onClick={() => setIsScheduleModalOpen(true)}
               className="h-7 w-7 p-0 rounded-geist border-[#2a2a2a] bg-[#141414] hover:bg-[#1f1f1f] text-muted-foreground hover:text-foreground flex items-center justify-center shrink-0 cursor-pointer"
-              title="P2P Sharing Settings & Schedules"
+              title="Sharing Settings & Schedules"
             >
               <Settings className="h-3.5 w-3.5" />
             </Button>
@@ -1333,7 +1329,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             <div className="flex items-center gap-2">
               <Settings className="h-5 w-5 text-accent-cyan" />
               <DialogTitle className="text-base font-semibold text-[#ededed]">
-                P2P Sharing Settings & Policies
+                Sharing Settings & Policies
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-[#888888]">
@@ -1345,10 +1341,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           <div className="p-3 rounded-geist bg-[#141414] border border-[#222222] space-y-2 mt-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono font-medium text-foreground">
-                Base Mesh Policy Mode
+                Base Policy Mode
               </span>
               <span className="text-[10px] font-mono text-muted-foreground">
-                Applied when P2P Sharing is ON
+                Applied when Sharing is ON
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
