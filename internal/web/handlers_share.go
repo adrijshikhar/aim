@@ -1,9 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,6 +24,7 @@ type ShareStatusResponse struct {
 	Peers               []share.PeerInfo            `json:"peers"`
 	ActiveLeases        []ActiveLeaseInfo           `json:"active_leases"`
 	GrantedLeases       []share.GrantedLease        `json:"granted_leases"`
+	PendingRequests     []share.PendingRequestInfo  `json:"pending_requests,omitempty"`
 	AuditLogs           []share.AuditEntry          `json:"audit_logs,omitempty"`
 	Schedules           []share.SchedulePolicy      `json:"schedules,omitempty"`
 }
@@ -84,6 +87,20 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Query active pending approval requests from P2P daemon on :4319
+	var pendingRequests []share.PendingRequestInfo
+	ctxPending, cancelPending := context.WithTimeout(r.Context(), 500*time.Millisecond)
+	defer cancelPending()
+	pReq, err := http.NewRequestWithContext(ctxPending, http.MethodGet, "http://127.0.0.1:4319/api/share/pending", nil)
+	if err == nil {
+		if pResp, err := http.DefaultClient.Do(pReq); err == nil {
+			if pResp.StatusCode == http.StatusOK {
+				_ = json.NewDecoder(pResp.Body).Decode(&pendingRequests)
+			}
+			pResp.Body.Close()
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(ShareStatusResponse{
 		VPN:                 vpn,
@@ -93,6 +110,7 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 		Peers:               peers,
 		ActiveLeases:        activeLeases,
 		GrantedLeases:       granted,
+		PendingRequests:     pendingRequests,
 		AuditLogs:           audit,
 		Schedules:           store.GetSchedules(),
 	})
@@ -330,6 +348,70 @@ func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "revoked": revoked})
+}
+
+func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+	body, _ := json.Marshal(req)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	pReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:4319/api/share/approve", bytes.NewReader(body))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	pReq.Header.Set("Content-Type", "application/json")
+	pResp, err := http.DefaultClient.Do(pReq)
+	if err != nil {
+		http.Error(w, "failed to reach share host: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer pResp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(pResp.StatusCode)
+	_, _ = io.Copy(w, pResp.Body)
+}
+
+func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+	body, _ := json.Marshal(req)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	pReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:4319/api/share/deny", bytes.NewReader(body))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	pReq.Header.Set("Content-Type", "application/json")
+	pResp, err := http.DefaultClient.Do(pReq)
+	if err != nil {
+		http.Error(w, "failed to reach share host: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer pResp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(pResp.StatusCode)
+	_, _ = io.Copy(w, pResp.Body)
 }
 
 func (s *Server) handleGetShareAudit(w http.ResponseWriter, r *http.Request) {

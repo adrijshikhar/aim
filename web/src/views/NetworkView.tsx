@@ -15,6 +15,9 @@ import {
   ShieldAlert,
   Activity,
   Calendar,
+  Inbox,
+  FileCheck,
+  Ban,
 } from 'lucide-react';
 import {
   getShareStatus,
@@ -26,6 +29,8 @@ import {
   releaseShareLease,
   saveSchedule,
   deleteSchedule,
+  approveShareRequest,
+  denyShareRequest,
   ShareStatusDTO,
   PeerInfoDTO,
   ProfileDTO,
@@ -89,6 +94,9 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const [schedEndDate, setSchedEndDate] = React.useState(() => new Date().toISOString().split('T')[0]);
   const [isSavingSchedule, setIsSavingSchedule] = React.useState(false);
   const [currentTime, setCurrentTime] = React.useState(() => Date.now());
+
+  // Requests Tab Filter state
+  const [requestsFilter, setRequestsFilter] = React.useState<'all' | 'pending' | 'approved' | 'revoked'>('all');
 
   // Audit Log filter state
   const [auditSearchQuery, setAuditSearchQuery] = React.useState('');
@@ -172,6 +180,44 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleApproveRequest = async (requestId: string) => {
+    try {
+      await approveShareRequest(requestId);
+      toast({
+        title: 'Lease Approved',
+        description: `Granted credentials for request ${requestId}`,
+        variant: 'success',
+      });
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to approve request';
+      toast({
+        title: 'Approval Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDenyRequest = async (requestId: string) => {
+    try {
+      await denyShareRequest(requestId);
+      toast({
+        title: 'Request Denied',
+        description: `Declined lease request ${requestId}`,
+        variant: 'default',
+      });
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to deny request';
+      toast({
+        title: 'Denial Failed',
+        description: msg,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -431,6 +477,15 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     return `${hours}h ${mins}m remaining`;
   };
 
+  const pendingRequests = data?.pending_requests || [];
+
+  const revokedOrExpiredLeases = React.useMemo(() => {
+    if (!data?.granted_leases) return [];
+    return data.granted_leases.filter(
+      (l) => l.revoked || new Date(l.expires_at).getTime() <= currentTime
+    );
+  }, [data?.granted_leases, currentTime]);
+
   const activeGrantedLeases = React.useMemo(() => {
     if (!data?.granted_leases) return [];
     return data.granted_leases.filter(
@@ -527,19 +582,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               </span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
-            Borrow high-tier Claude & AI assistant quotas from teammates on the internal VPN (Pritunl / OpenVPN) or local Wi-Fi. Borrowed profiles are isolated locally as{' '}
-            <code className="text-[#56b6c2] font-mono px-1.5 py-0.5 rounded bg-[#111111] border border-[#262626] text-xs">
-              host:&lt;profile_name&gt;
-            </code>
-            .
-          </p>
         </div>
 
         {/* TOP RIGHT: Global Sharing 3-Level Segmented Control & Settings */}
         <div className="flex items-center gap-2 shrink-0">
-          <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] shadow-xs">
-            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground px-2 flex items-center gap-1.5">
+          <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] shadow-xs shrink-0">
+            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground px-2 flex items-center gap-1.5 shrink-0">
               <Radio className={cn('h-3 w-3', effectiveGlobalMode !== 'off' ? 'text-accent-cyan' : 'text-muted-foreground')} />
               <span>Global:</span>
             </span>
@@ -549,14 +597,15 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               disabled={isShareUpdating}
               onClick={() => handleGlobalModeChange('off')}
               className={cn(
-                'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium',
+                'px-2.5 py-1 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium flex items-center gap-1.5 border',
                 effectiveGlobalMode === 'off'
-                  ? 'bg-[#262626] text-[#ededed] shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                  ? 'bg-[#262626] text-[#ededed] border-[#383838] shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
               )}
               title="Global sharing is OFF — machine is private and unreachable by teammates"
             >
-              Off
+              <span className={cn('h-1.5 w-1.5 rounded-full', effectiveGlobalMode === 'off' ? 'bg-[#999999]' : 'bg-[#555555]')} />
+              <span>Off</span>
             </button>
 
             <button
@@ -564,17 +613,17 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               disabled={isShareUpdating}
               onClick={() => handleGlobalModeChange('request')}
               className={cn(
-                'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1.5',
+                'px-2.5 py-1 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium flex items-center gap-1.5 border',
                 effectiveGlobalMode === 'request'
-                  ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                  ? 'bg-[#142334] text-[#52a8ff] border-[#1f4068] shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
               )}
               title="Global sharing is in Request mode — teammate lease requests require manual approval"
             >
               <span
                 className={cn(
                   'h-1.5 w-1.5 rounded-full',
-                  effectiveGlobalMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]'
+                  effectiveGlobalMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#555555]'
                 )}
               />
               <span>Request</span>
@@ -585,23 +634,22 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               disabled={isShareUpdating}
               onClick={() => handleGlobalModeChange('auto')}
               className={cn(
-                'px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1.5',
+                'px-2.5 py-1 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium flex items-center gap-1.5 border',
                 effectiveGlobalMode === 'auto'
-                  ? 'bg-[#183925] text-[#98c379] border border-[#235836] shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                  ? 'bg-[#183925] text-[#98c379] border-[#235836] shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
               )}
               title="Global sharing is in Auto mode — teammate lease requests are automatically approved"
             >
               <span
                 className={cn(
                   'h-1.5 w-1.5 rounded-full',
-                  effectiveGlobalMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]'
+                  effectiveGlobalMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#555555]'
                 )}
               />
               <span>Auto Approve</span>
             </button>
           </div>
-
         </div>
       </div>
 
@@ -617,6 +665,20 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   {filteredPeers.length}
                 </span>
               )}
+            </TabsTrigger>
+
+            <TabsTrigger value="requests" className="gap-2 text-xs flex-1 sm:flex-initial">
+              <Inbox className="h-3.5 w-3.5 text-[#e5c07b]" />
+              <span>Requests</span>
+              {pendingRequests.length > 0 ? (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#142334] text-[#52a8ff] border border-[#1f4068] font-bold animate-pulse">
+                  {pendingRequests.length}
+                </span>
+              ) : (activeGrantedLeases.length + (data?.active_leases?.length || 0)) > 0 ? (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
+                  {activeGrantedLeases.length + (data?.active_leases?.length || 0)}
+                </span>
+              ) : null}
             </TabsTrigger>
 
             <TabsTrigger value="my-sharing" className="gap-2 text-xs flex-1 sm:flex-initial">
@@ -959,6 +1021,324 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           </section>
         </TabsContent>
 
+        {/* TAB 2: REQUESTS (Pending, Approved, Revoked / Expired) */}
+        <TabsContent value="requests" className="space-y-5 focus-visible:outline-none">
+          {/* Sub-filter row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border/40">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('all')}
+                className={cn(
+                  'px-3 py-1 rounded-geist text-xs font-mono transition-colors cursor-pointer border',
+                  requestsFilter === 'all'
+                    ? 'bg-[#222222] text-[#ededed] border-[#383838] font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-[#141414] border-transparent'
+                )}
+              >
+                All Requests ({pendingRequests.length + activeGrantedLeases.length + (data?.active_leases?.length || 0) + revokedOrExpiredLeases.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('pending')}
+                className={cn(
+                  'px-3 py-1 rounded-geist text-xs font-mono transition-colors cursor-pointer border flex items-center gap-1.5',
+                  requestsFilter === 'pending'
+                    ? 'bg-[#142334] text-[#52a8ff] border-[#1f4068] font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-[#141414] border-transparent'
+                )}
+              >
+                <span className={cn('h-1.5 w-1.5 rounded-full', pendingRequests.length > 0 ? 'bg-[#52a8ff]' : 'bg-[#555555]')} />
+                <span>Pending ({pendingRequests.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('approved')}
+                className={cn(
+                  'px-3 py-1 rounded-geist text-xs font-mono transition-colors cursor-pointer border flex items-center gap-1.5',
+                  requestsFilter === 'approved'
+                    ? 'bg-[#183925] text-[#98c379] border-[#235836] font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-[#141414] border-transparent'
+                )}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-[#30a46c]" />
+                <span>Approved ({activeGrantedLeases.length + (data?.active_leases?.length || 0)})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('revoked')}
+                className={cn(
+                  'px-3 py-1 rounded-geist text-xs font-mono transition-colors cursor-pointer border flex items-center gap-1.5',
+                  requestsFilter === 'revoked'
+                    ? 'bg-[#331c1e] text-[#e06c75] border-[#552528] font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-[#141414] border-transparent'
+                )}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-[#e06c75]" />
+                <span>Revoked / Expired ({revokedOrExpiredLeases.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Pending Requests Section */}
+          {(requestsFilter === 'all' || requestsFilter === 'pending') && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-[#e5c07b]" />
+                <h3 className="text-xs font-mono uppercase tracking-wider font-semibold text-foreground">
+                  Incoming Requests Pending Approval ({pendingRequests.length})
+                </h3>
+              </div>
+
+              {pendingRequests.length === 0 ? (
+                requestsFilter === 'pending' && (
+                  <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
+                    No pending approval requests. Teammate requests will appear here when sharing in Request mode.
+                  </div>
+                )
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {pendingRequests.map((pr) => (
+                    <div
+                      key={pr.request_id}
+                      className="p-4 rounded-geist border border-[#2a2a2a] bg-[#111111] flex flex-col justify-between gap-3 shadow-sm hover:border-[#3a3a3a] transition-colors"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <AgentBadge agent={pr.request.agent} size="sm" />
+                            <span className="font-mono font-bold text-xs text-foreground">
+                              {pr.request.profile_name}
+                            </span>
+                          </div>
+                          <Badge variant="outline" className="text-xs font-mono border-status-warning-border bg-status-warning-bg text-status-warning">
+                            Pending Approval
+                          </Badge>
+                        </div>
+
+                        <div className="space-y-1 text-xs font-mono text-muted-foreground">
+                          <div className="flex items-center gap-1.5">
+                            <Laptop className="h-3 w-3 text-[#61afef]" />
+                            <span className="text-foreground font-semibold">{pr.request.requester_id}</span>
+                            <span className="text-[#666666]">({pr.request.requester_ip})</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[#888888] pt-1">
+                            <span>Requested Duration:</span>
+                            <span className="text-foreground font-semibold">{pr.request.requested_hours} hours</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#1f1f1f]">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDenyRequest(pr.request_id)}
+                          className="h-7 px-2.5 text-xs font-mono text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                        >
+                          <Ban className="h-3.5 w-3.5 mr-1" />
+                          Deny
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleApproveRequest(pr.request_id)}
+                          className="h-7 px-3 text-xs font-mono bg-[#183925] hover:bg-[#204a31] text-[#98c379] border border-[#235836] font-medium cursor-pointer shadow-xs"
+                        >
+                          <FileCheck className="h-3.5 w-3.5 mr-1" />
+                          Approve
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Approved Requests / Active Leases Section */}
+          {(requestsFilter === 'all' || requestsFilter === 'approved') && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <FileCheck className="h-4 w-4 text-[#98c379]" />
+                <h3 className="text-xs font-mono uppercase tracking-wider font-semibold text-foreground">
+                  Active Approved Leases ({activeGrantedLeases.length + (data?.active_leases?.length || 0)})
+                </h3>
+              </div>
+
+              {activeGrantedLeases.length === 0 && (!data?.active_leases || data.active_leases.length === 0) ? (
+                requestsFilter === 'approved' && (
+                  <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
+                    No active approved leases.
+                  </div>
+                )
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Granted to teammates */}
+                  {activeGrantedLeases.map((lease) => (
+                    <div
+                      key={lease.lease_id}
+                      className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <AgentBadge agent={lease.agent} size="sm" />
+                            <span className="text-xs font-mono font-bold text-foreground">
+                              {lease.profile_name}
+                            </span>
+                            <span
+                              className={cn(
+                                'text-xs font-mono px-1.5 py-0.5 rounded border',
+                                lease.auto_approved
+                                  ? 'bg-[#183925]/50 text-[#98c379] border-[#235836]/60'
+                                  : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
+                              )}
+                            >
+                              {lease.auto_approved ? 'Auto Approved' : 'Manual Approved'}
+                            </span>
+                          </div>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded font-medium bg-status-success-bg text-status-success border border-status-success-border">
+                            {formatExpiresIn(lease.expires_at)}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
+                          <Laptop className="h-3 w-3 text-[#61afef]" />
+                          <span>Borrower:</span>
+                          <span className="text-foreground font-semibold truncate max-w-[220px]" title={lease.borrower_id}>
+                            {lease.borrower_id}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
+                        <span className="text-xs font-mono text-[#666666]">
+                          Lease ID: {lease.lease_id}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRevokeLease(lease.lease_id)}
+                          className="h-6 px-2 text-xs text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                        >
+                          <ShieldAlert className="h-3 w-3 mr-1" />
+                          Revoke Lease
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Borrowed by you */}
+                  {data?.active_leases?.map((lease) => {
+                    const isExpired = lease.is_expired || new Date(lease.expires_at).getTime() <= currentTime;
+                    const runCmd = `aim run ${lease.agent} ${lease.local_profile}`;
+                    return (
+                      <div
+                        key={lease.local_profile}
+                        className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono font-bold text-accent-cyan tracking-tight">
+                                {lease.local_profile}
+                              </span>
+                              <AgentBadge agent={lease.agent} size="sm" />
+                            </div>
+                            <span
+                              className={cn(
+                                'text-xs font-mono px-2 py-0.5 rounded font-medium',
+                                isExpired
+                                  ? 'bg-status-danger-bg text-status-danger border border-status-danger-border'
+                                  : 'bg-status-success-bg text-status-success border border-status-success-border'
+                              )}
+                            >
+                              {formatExpiresIn(lease.expires_at)}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
+                            <span>Host:</span>
+                            <span className="text-foreground font-semibold">{lease.source_peer}</span>
+                            <span className="text-[#666666]">/</span>
+                            <span className="text-foreground">{lease.source_profile}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
+                          <button
+                            onClick={() => copyToClipboard(runCmd, lease.local_profile)}
+                            className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                            title="Click to copy command"
+                          >
+                            {copiedCmd === lease.local_profile ? (
+                              <Check className="h-3 w-3 text-status-success" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                            <code>{runCmd}</code>
+                          </button>
+
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRelease(lease.local_profile)}
+                            className="h-6 px-2 text-xs text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                          >
+                            <Trash2 className="h-3 w-3 mr-1" />
+                            Release
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Revoked / Expired Leases Section */}
+          {(requestsFilter === 'all' || requestsFilter === 'revoked') && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Ban className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-xs font-mono uppercase tracking-wider font-semibold text-foreground">
+                  Revoked & Expired Leases ({revokedOrExpiredLeases.length})
+                </h3>
+              </div>
+
+              {revokedOrExpiredLeases.length === 0 ? (
+                requestsFilter === 'revoked' && (
+                  <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
+                    No revoked or expired leases.
+                  </div>
+                )
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {revokedOrExpiredLeases.map((lease) => (
+                    <div
+                      key={lease.lease_id}
+                      className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0c0c0c] flex items-center justify-between gap-3 text-xs font-mono opacity-80"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <AgentBadge agent={lease.agent} size="sm" />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-foreground truncate">{lease.profile_name}</div>
+                          <div className="text-muted-foreground text-xs truncate">borrower: {lease.borrower_id}</div>
+                        </div>
+                      </div>
+                      <Badge variant="outline" className={cn("text-xs font-mono", lease.revoked ? "border-status-danger-border text-status-danger bg-status-danger-bg" : "border-border text-muted-foreground")}>
+                        {lease.revoked ? 'Revoked' : 'Expired'}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </TabsContent>
+
         {/* TAB 2: MY SHARING */}
         <TabsContent value="my-sharing" className="space-y-6 focus-visible:outline-none">
           {effectiveGlobalMode === 'off' && (
@@ -1115,13 +1495,8 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <AgentBadge agent={p.agent} size="sm" />
-                        <div className="min-w-0">
-                          <div className="font-semibold text-xs text-foreground truncate">
-                            {p.name}
-                          </div>
-                          <div className="text-xs font-mono text-muted-foreground truncate">
-                            {isShared ? (mode === 'auto' ? 'Auto-Approve' : 'Manual Approval') : 'Private (Not Shared)'}
-                          </div>
+                        <div className="font-semibold text-xs text-foreground truncate">
+                          {p.name}
                         </div>
                       </div>
 
@@ -1132,44 +1507,45 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                           disabled={isShareUpdating}
                           onClick={() => handleSetLocalProfileShareMode(p.name, 'off')}
                           className={cn(
-                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium',
+                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium border flex items-center gap-1',
                             mode === 'off'
-                              ? 'bg-[#262626] text-[#ededed] shadow-xs'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                              ? 'bg-[#262626] text-[#ededed] border-[#383838] shadow-xs'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
                           )}
                           title="Keep this profile private"
                         >
-                          Off
+                          <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'off' ? 'bg-[#999999]' : 'bg-[#555555]')} />
+                          <span>Off</span>
                         </button>
                         <button
                           type="button"
                           disabled={isShareUpdating}
                           onClick={() => handleSetLocalProfileShareMode(p.name, 'request')}
                           className={cn(
-                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1',
+                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium flex items-center gap-1 border',
                             mode === 'request'
-                              ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                              ? 'bg-[#142334] text-[#52a8ff] border-[#1f4068] shadow-xs'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
                           )}
                           title="Require manual lease request confirmation"
                         >
-                          <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]')} />
-                          Req
+                          <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#555555]')} />
+                          <span>Req</span>
                         </button>
                         <button
                           type="button"
                           disabled={isShareUpdating}
                           onClick={() => handleSetLocalProfileShareMode(p.name, 'auto')}
                           className={cn(
-                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1',
+                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium flex items-center gap-1 border',
                             mode === 'auto'
-                              ? 'bg-[#183925] text-[#98c379] border border-[#235836] shadow-xs'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                              ? 'bg-[#183925] text-[#98c379] border-[#235836] shadow-xs'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
                           )}
                           title="Auto-approve lease requests for this profile"
                         >
-                          <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]')} />
-                          Auto
+                          <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#555555]')} />
+                          <span>Auto</span>
                         </button>
                       </div>
                     </div>
@@ -1453,8 +1829,8 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         {/* TAB 3: AUDIT LOG */}
         <TabsContent value="audit" className="space-y-4 focus-visible:outline-none">
           {/* P2P Activity & Audit Log Card */}
-          <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-            <CardHeader className="p-5 pb-3 space-y-3">
+          <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist flex flex-col h-[calc(100vh-230px)] min-h-[500px]">
+            <CardHeader className="p-5 pb-3 space-y-3 shrink-0">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Activity className="h-4 w-4 text-accent-cyan" />
@@ -1537,13 +1913,13 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-5 pt-0">
+            <CardContent className="p-5 pt-0 flex-1 min-h-0 flex flex-col">
               {!data?.audit_logs || data.audit_logs.length === 0 ? (
-                <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono">
+                <div className="flex-1 flex items-center justify-center p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono">
                   No sharing events recorded yet.
                 </div>
               ) : filteredAuditLogs.length === 0 ? (
-                <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono space-y-2">
+                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono space-y-2">
                   <p>No audit events match the selected filters.</p>
                   <Button
                     variant="outline"
@@ -1558,7 +1934,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   </Button>
                 </div>
               ) : (
-                <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 font-mono text-xs">
+                <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 font-mono text-xs min-h-0">
                   {filteredAuditLogs.map((log) => {
                     const actionColors: Record<string, string> = {
                       LEASE_GRANTED: 'text-[#98c379] bg-[#183925]/40 border-[#235836]',

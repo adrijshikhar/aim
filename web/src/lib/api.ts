@@ -434,6 +434,19 @@ export interface GrantedLeaseDTO {
   auto_approved: boolean;
 }
 
+export interface PendingRequestDTO {
+  request_id: string;
+  request: {
+    requester_id: string;
+    requester_ip: string;
+    profile_name: string;
+    agent: string;
+    requested_hours: number;
+  };
+  created_at: string;
+  expires_at: string;
+}
+
 export interface AuditEntryDTO {
   id: string;
   timestamp: string;
@@ -464,6 +477,7 @@ export interface ShareStatusDTO {
   peers: PeerInfoDTO[];
   active_leases: ActiveLeaseDTO[];
   granted_leases?: GrantedLeaseDTO[];
+  pending_requests?: PendingRequestDTO[];
   audit_logs?: AuditEntryDTO[];
   schedules?: SchedulePolicyDTO[];
 }
@@ -472,6 +486,24 @@ export async function getShareStatus(refresh = false): Promise<ShareStatusDTO> {
   const url = refresh ? `${BASE_URL}/share/status?refresh=true` : `${BASE_URL}/share/status`;
   const res = await fetch(url);
   return handleResponse<ShareStatusDTO>(res);
+}
+
+export async function approveShareRequest(requestId: string): Promise<any> {
+  const res = await fetch(`${BASE_URL}/share/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId }),
+  });
+  return handleResponse(res);
+}
+
+export async function denyShareRequest(requestId: string): Promise<any> {
+  const res = await fetch(`${BASE_URL}/share/deny`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId }),
+  });
+  return handleResponse(res);
 }
 
 export async function revokeShareLease(leaseId: string): Promise<{ ok: boolean; revoked: GrantedLeaseDTO }> {

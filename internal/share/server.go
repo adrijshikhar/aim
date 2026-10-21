@@ -86,6 +86,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/share/profiles", s.handleListProfiles)
 	s.mux.HandleFunc("/api/share/request", s.handleRequest)
 	s.mux.HandleFunc("/api/share/pending", s.handlePending)
+	s.mux.HandleFunc("/api/share/approve", s.handleApprove)
+	s.mux.HandleFunc("/api/share/deny", s.handleDeny)
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -267,6 +269,47 @@ func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
 	pending := s.GetPendingRequests()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(pending)
+}
+
+func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+	resp, err := s.ApproveRequest(req.RequestID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleDeny(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.DenyRequest(req.RequestID); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 func (s *Server) GetPendingRequests() []PendingRequestInfo {
