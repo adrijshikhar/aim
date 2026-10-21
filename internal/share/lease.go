@@ -48,20 +48,6 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		return "", fmt.Errorf("failed to create ephemeral profile dir: %w", err)
 	}
 
-	// Write metadata
-	meta := LeaseMeta{
-		LeaseID:       resp.LeaseID,
-		SourcePeer:    sourcePeer,
-		SourceProfile: profileName,
-		Agent:         resp.Agent,
-		GrantedAt:     time.Now(),
-		ExpiresAt:     resp.ExpiresAt,
-	}
-	metaData, err := json.MarshalIndent(meta, "", "  ")
-	if err == nil {
-		_ = os.WriteFile(filepath.Join(cleanTargetDir, ".aim-lease.json"), metaData, 0600)
-	}
-
 	allowedPrefixes := []string{
 		".claude",
 		".codex",
@@ -70,7 +56,13 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		".config/gcloud",
 	}
 
-	// Write credential files with strict path validation
+	type stagedFile struct {
+		fullPath string
+		content  []byte
+	}
+	var staged []stagedFile
+
+	// Validate all payload files before modifying disk or writing metadata
 	if resp.Payload != nil && resp.Payload.Files != nil {
 		for relPath, b64 := range resp.Payload.Files {
 			cleanRel := filepath.Clean(relPath)
@@ -94,17 +86,43 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 				return "", fmt.Errorf("path traversal in credential path: %s", relPath)
 			}
 
-			if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
-				return "", fmt.Errorf("failed to create dir for %s: %w", relPath, err)
-			}
 			decoded, err := base64.StdEncoding.DecodeString(b64)
 			if err != nil {
-				continue
+				return "", fmt.Errorf("invalid base64 encoding in file %s: %w", relPath, err)
 			}
-			if err := os.WriteFile(fullPath, decoded, 0600); err != nil {
-				return "", fmt.Errorf("failed to write %s: %w", relPath, err)
-			}
+			staged = append(staged, stagedFile{fullPath: fullPath, content: decoded})
 		}
+	}
+
+	// Write credential files
+	for _, f := range staged {
+		if err := os.MkdirAll(filepath.Dir(f.fullPath), 0700); err != nil {
+			return "", fmt.Errorf("failed to create dir for %s: %w", f.fullPath, err)
+		}
+		if err := os.WriteFile(f.fullPath, f.content, 0600); err != nil {
+			return "", fmt.Errorf("failed to write %s: %w", f.fullPath, err)
+		}
+	}
+
+	// Publish metadata ONLY after all files are verified and written
+	meta := LeaseMeta{
+		LeaseID:       resp.LeaseID,
+		SourcePeer:    sourcePeer,
+		SourceProfile: profileName,
+		Agent:         resp.Agent,
+		GrantedAt:     time.Now(),
+		ExpiresAt:     resp.ExpiresAt,
+	}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to encode lease metadata: %w", err)
+	}
+	tmpMeta := filepath.Join(cleanTargetDir, fmt.Sprintf(".aim-lease.tmp.%d", time.Now().UnixNano()))
+	if err := os.WriteFile(tmpMeta, metaData, 0600); err != nil {
+		return "", fmt.Errorf("failed to write lease metadata: %w", err)
+	}
+	if err := os.Rename(tmpMeta, filepath.Join(cleanTargetDir, ".aim-lease.json")); err != nil {
+		return "", fmt.Errorf("failed to publish lease metadata: %w", err)
 	}
 
 	return localProfileName, nil

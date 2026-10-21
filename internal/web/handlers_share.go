@@ -795,7 +795,7 @@ func (s *Server) handleSaveSchedule(w http.ResponseWriter, r *http.Request) {
 	store := s.getShareStore()
 	if sched.Scope != "global" && sched.Scope != "" {
 		// Ensure profile is registered in shared_profiles so teammates can discover & borrow it
-		all := store.GetSharedProfiles()
+		all := store.GetAllSharedProfiles()
 		exists := false
 		for _, p := range all {
 			if p.Name == sched.Scope {
@@ -805,19 +805,27 @@ func (s *Server) handleSaveSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		if !exists {
 			agent := "claude"
-			profRoot := filepath.Join(config.BaseDir(), "profiles", sched.Scope)
-			if entries, err := os.ReadDir(profRoot); err == nil {
-				for _, e := range entries {
-					if strings.HasPrefix(e.Name(), ".claude") {
-						agent = "claude"
-					} else if strings.HasPrefix(e.Name(), ".codex") {
-						agent = "codex"
-					} else if strings.HasPrefix(e.Name(), ".gemini") {
-						agent = "gemini"
-					}
+			cfg, _ := config.LoadConfig()
+			if cfg != nil {
+				if ags := cfg.GetProfileAgents(sched.Scope); len(ags) > 0 {
+					agent = ags[0]
 				}
 			}
-			_ = store.EnableProfile(sched.Scope, agent, sched.Mode == "auto", 4*time.Hour)
+			if agent == "" || agent == "claude" {
+				profRoot := filepath.Join(config.BaseDir(), "profiles", sched.Scope)
+				if _, err := os.Stat(filepath.Join(profRoot, ".gemini", "antigravity-cli")); err == nil {
+					agent = "agy"
+				} else if _, err := os.Stat(filepath.Join(profRoot, ".gemini")); err == nil {
+					agent = "gemini"
+				} else if _, err := os.Stat(filepath.Join(profRoot, ".codex")); err == nil {
+					agent = "codex"
+				} else if _, err := os.Stat(filepath.Join(profRoot, ".claude")); err == nil {
+					agent = "claude"
+				}
+			}
+			// Register profile with enabled=false so it does not stay permanently exposed
+			// outside the scheduled window when global sharing mode is request/auto.
+			_ = store.RegisterProfile(sched.Scope, agent, false, sched.Mode == "auto", 4*time.Hour)
 		}
 	}
 

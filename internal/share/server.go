@@ -139,7 +139,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 	var profiles []SharedProfileConfig
 	var names []string
-	for _, p := range s.store.GetSharedProfiles() {
+	for _, p := range s.store.GetAllSharedProfiles() {
 		enabled, autoApprove := s.store.GetEffectiveProfileMode(p.Name)
 		if enabled {
 			p.AutoApprove = autoApprove
@@ -165,7 +165,7 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	allProfiles := s.store.GetSharedProfiles()
+	allProfiles := s.store.GetAllSharedProfiles()
 	var exposed []SharedProfileConfig
 	for _, p := range allProfiles {
 		enabled, autoApprove := s.store.GetEffectiveProfileMode(p.Name)
@@ -201,7 +201,7 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profiles := s.store.GetSharedProfiles()
+	profiles := s.store.GetAllSharedProfiles()
 	var matched *SharedProfileConfig
 	for _, p := range profiles {
 		if p.Name == req.ProfileName {
@@ -389,6 +389,10 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 			leases := s.store.GetGrantedLeases()
 			for _, gl := range leases {
 				if gl.LeaseID == rec.LeaseID {
+					if gl.Revoked || time.Now().After(gl.ExpiresAt) {
+						http.Error(w, "lease has expired or was revoked", http.StatusGone)
+						return
+					}
 					payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
 					w.Header().Set("Content-Type", "application/json")
 					_ = json.NewEncoder(w).Encode(LeaseResponse{
@@ -648,7 +652,7 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	if duration <= 0 {
 		duration = 2 * time.Hour
 	}
-	for _, p := range s.store.GetSharedProfiles() {
+	for _, p := range s.store.GetAllSharedProfiles() {
 		if p.Name == profileName && p.MaxLeaseTTL > 0 && duration > p.MaxLeaseTTL {
 			duration = p.MaxLeaseTTL
 			break
@@ -866,9 +870,9 @@ func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePa
 	return &SharePayload{Files: files}, nil
 }
 
-// GenerateID produces a unique prefixed identifier with random bytes.
+// GenerateID produces a unique prefixed identifier with 128-bit cryptographic random bytes.
 func GenerateID(prefix string) string {
-	b := make([]byte, 4)
+	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return prefix + "_" + hex.EncodeToString(b)
 }

@@ -139,3 +139,65 @@ func TestShareStoreGrantedLeasesPruning(t *testing.T) {
 		t.Fatalf("expected 2 leases retained in history after revoke, got %d", len(historyAfterRevoke))
 	}
 }
+
+func TestShareStoreActiveLeasesNotDroppedByHistoryCap(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewStore(tempDir)
+	now := time.Now()
+
+	// Add an active lease first
+	activeLease := GrantedLease{
+		LeaseID:     "ls_vital_active",
+		ProfileName: "work",
+		Agent:       "claude",
+		GrantedAt:   now,
+		ExpiresAt:   now.Add(2 * time.Hour),
+		Revoked:     false,
+	}
+	if err := store.SaveGrantedLease(activeLease); err != nil {
+		t.Fatalf("failed to save active lease: %v", err)
+	}
+
+	// Add 120 expired leases
+	for i := 0; i < 120; i++ {
+		expLease := GrantedLease{
+			LeaseID:     "ls_exp_" + string(rune('a'+(i%26))) + string(rune('0'+(i/26))),
+			ProfileName: "work",
+			Agent:       "claude",
+			GrantedAt:   now.Add(-2 * time.Hour),
+			ExpiresAt:   now.Add(-1 * time.Hour),
+			Revoked:     false,
+		}
+		if err := store.SaveGrantedLease(expLease); err != nil {
+			t.Fatalf("failed to save expired lease: %v", err)
+		}
+	}
+
+	// Active lease must NOT have been dropped by history truncation
+	actives := store.GetActiveGrantedLeases()
+	if len(actives) != 1 || actives[0].LeaseID != "ls_vital_active" {
+		t.Fatalf("expected active lease to be retained, got: %+v", actives)
+	}
+}
+
+func TestShareStoreRegisterProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewStore(tempDir)
+
+	if err := store.RegisterProfile("agy_work", "agy", false, true, 4*time.Hour); err != nil {
+		t.Fatalf("RegisterProfile failed: %v", err)
+	}
+
+	all := store.GetAllSharedProfiles()
+	if len(all) != 1 {
+		t.Fatalf("expected 1 profile in GetAllSharedProfiles, got %d", len(all))
+	}
+	if all[0].Name != "agy_work" || all[0].Enabled != false || all[0].Agent != "agy" {
+		t.Fatalf("unexpected profile registered: %+v", all[0])
+	}
+
+	// But GetSharedProfiles() should only return enabled profiles (0)
+	if len(store.GetSharedProfiles()) != 0 {
+		t.Fatalf("expected 0 profiles in GetSharedProfiles, got %d", len(store.GetSharedProfiles()))
+	}
+}

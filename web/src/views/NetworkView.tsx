@@ -929,14 +929,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={async () => {
-                          const expired = data.active_leases.filter((l) => l.is_expired || new Date(l.expires_at).getTime() <= currentTime);
-                          for (const l of expired) {
-                            await releaseShareLease(l.local_profile).catch(() => {});
-                          }
-                          toast({ title: 'Cleaned up expired leases' });
-                          await loadStatus();
-                        }}
+                        onClick={handleCleanExpired}
                         className="h-6 px-2 text-xs font-mono text-muted-foreground hover:text-status-danger cursor-pointer"
                       >
                         <Trash2 className="h-3 w-3 mr-1" />

@@ -73,6 +73,42 @@ func (s *ShareStore) EnableProfile(profileName, agent string, autoApprove bool, 
 	return s.saveSharesLocked(configs)
 }
 
+// RegisterProfile records or updates profile sharing settings without forcibly enabling it if it was disabled.
+func (s *ShareStore) RegisterProfile(profileName, agent string, enabled bool, autoApprove bool, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	configs := s.loadSharesLocked()
+	found := false
+	for i := range configs {
+		if configs[i].Name == profileName {
+			configs[i].Agent = agent
+			configs[i].AutoApprove = autoApprove
+			if ttl > 0 {
+				configs[i].MaxLeaseTTL = ttl
+			} else if configs[i].MaxLeaseTTL <= 0 {
+				configs[i].MaxLeaseTTL = 4 * time.Hour
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		effTTL := ttl
+		if effTTL <= 0 {
+			effTTL = 4 * time.Hour
+		}
+		configs = append(configs, SharedProfileConfig{
+			Name:        profileName,
+			Agent:       agent,
+			AutoApprove: autoApprove,
+			MaxLeaseTTL: effTTL,
+			Enabled:     enabled,
+		})
+	}
+	return s.saveSharesLocked(configs)
+}
+
 func (s *ShareStore) DisableProfile(profileName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -90,6 +126,20 @@ func (s *ShareStore) DisableProfile(profileName string) error {
 func (s *ShareStore) GetSharedProfiles() []SharedProfileConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	all := s.loadSharesLocked()
+	active := make([]SharedProfileConfig, 0, len(all))
+	for _, c := range all {
+		if c.Enabled {
+			active = append(active, c)
+		}
+	}
+	return active
+}
+
+// GetAllSharedProfiles returns all registered profiles, including those with Enabled=false.
+func (s *ShareStore) GetAllSharedProfiles() []SharedProfileConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.loadSharesLocked()
 }
 
@@ -100,13 +150,10 @@ func (s *ShareStore) loadSharesLocked() []SharedProfileConfig {
 	}
 	var configs []SharedProfileConfig
 	_ = json.Unmarshal(data, &configs)
-	active := make([]SharedProfileConfig, 0)
-	for _, c := range configs {
-		if c.Enabled {
-			active = append(active, c)
-		}
+	if configs == nil {
+		return []SharedProfileConfig{}
 	}
-	return active
+	return configs
 }
 
 func (s *ShareStore) saveSharesLocked(configs []SharedProfileConfig) error {
@@ -233,12 +280,28 @@ func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 	if !found {
 		retained = append(retained, lease)
 	}
-	if len(retained) > 100 {
-		retained = retained[len(retained)-100:]
+
+	// Retain all active leases. Limit only expired or revoked leases to the 100 newest.
+	now := time.Now()
+	var active []GrantedLease
+	var inactive []GrantedLease
+	for _, l := range retained {
+		if !l.Revoked && now.Before(l.ExpiresAt) {
+			active = append(active, l)
+		} else {
+			inactive = append(inactive, l)
+		}
+	}
+	if len(inactive) > 100 {
+		inactive = inactive[len(inactive)-100:]
 	}
 
+	finalList := make([]GrantedLease, 0, len(active)+len(inactive))
+	finalList = append(finalList, active...)
+	finalList = append(finalList, inactive...)
+
 	_ = os.MkdirAll(s.aimDir, 0700)
-	data, err := json.MarshalIndent(retained, "", "  ")
+	data, err := json.MarshalIndent(finalList, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -587,7 +650,7 @@ func (s *ShareStore) GetEffectiveProfileMode(profileName string) (enabled bool, 
 	}
 
 	// Look up profile configuration in shared_profiles
-	profiles := s.GetSharedProfiles()
+	profiles := s.GetAllSharedProfiles()
 	for _, p := range profiles {
 		if p.Name == profileName {
 			if !p.Enabled {

@@ -74,6 +74,9 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected InstallLease to reject path traversal, but succeeded")
 	}
+	if mgr.HasLease("work") {
+		t.Fatalf("expected .aim-lease.json NOT to exist after rejected install")
+	}
 
 	// Attempt unauthorized file write (e.g. .ssh/id_rsa)
 	resp2 := &LeaseResponse{
@@ -92,6 +95,9 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 	_, err = mgr.InstallLease("attacker", "work", resp2)
 	if err == nil {
 		t.Fatalf("expected InstallLease to reject non-credential file .ssh/authorized_keys, but succeeded")
+	}
+	if mgr.HasLease("work") {
+		t.Fatalf("expected .aim-lease.json NOT to exist after rejected unauthorized file write")
 	}
 }
 
