@@ -989,7 +989,9 @@ func TestClaudeAdapter_GetUsage_PrioritizesCached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(claudeDir, ".claude.json"), goldenData, 0600); err != nil {
+	// Use recent timestamp so cache is fresh (< 15 minutes old)
+	goldenStr := strings.Replace(string(goldenData), "1788883937555", fmt.Sprintf("%d", time.Now().UnixMilli()), 1)
+	if err := os.WriteFile(filepath.Join(claudeDir, ".claude.json"), []byte(goldenStr), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1003,5 +1005,88 @@ func TestClaudeAdapter_GetUsage_PrioritizesCached(t *testing.T) {
 	}
 	if _, err := os.Stat(canaryPath); err == nil {
 		t.Fatalf("Live CLI executable was invoked when cache was present and valid!")
+	}
+}
+
+func TestClaudeAdapter_GetUsage_StaleCache_FallsBackToLive(t *testing.T) {
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, "profiles", "stale_fallback")
+	claudeDir := filepath.Join(profileDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(claudeDir, "auth.json"), []byte(`{"apiKey":"test"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create mock binary that outputs live usage
+	binDir := filepath.Join(tempDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mockScript := filepath.Join(binDir, "claude")
+	content := "#!/bin/sh\necho 'Current session: 50% used · resets in 2h'\necho 'Weekly usage: 20% used · resets in 3d'\n"
+	if err := os.WriteFile(mockScript, []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	goldenData, err := os.ReadFile("testdata/claude_cached_usage.json")
+	if err != nil {
+		t.Fatalf("failed to read testdata: %v", err)
+	}
+	// Make fetchedAtMs 2 hours ago so it is stale (> 15 minutes)
+	staleMs := time.Now().Add(-2 * time.Hour).UnixMilli()
+	goldenStr := strings.Replace(string(goldenData), "1788883937555", fmt.Sprintf("%d", staleMs), 1)
+	if err := os.WriteFile(filepath.Join(claudeDir, ".claude.json"), []byte(goldenStr), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewAdapter()
+	report, err := a.GetUsage(context.Background(), "stale_fallback", profileDir)
+	if err != nil {
+		t.Fatalf("GetUsage returned unexpected error: %v", err)
+	}
+	if report.FromCache {
+		t.Errorf("expected report.FromCache=false when cache is stale")
+	}
+	if len(report.Windows) == 0 {
+		t.Fatalf("expected windows from live output")
+	}
+}
+
+func TestClaudeAdapter_GetCachedUsage_SkipsEmptyConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, "profiles", "skip_empty")
+	claudeDir := filepath.Join(profileDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// .claude/.claude.json only has onboarding flag (seeded file, NO cachedUsageUtilization)
+	if err := os.WriteFile(filepath.Join(claudeDir, ".claude.json"), []byte(`{"hasCompletedOnboarding":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Root .claude.json has valid quota telemetry
+	goldenData, err := os.ReadFile("testdata/claude_cached_usage.json")
+	if err != nil {
+		t.Fatalf("failed to read testdata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, ".claude.json"), goldenData, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewAdapter()
+	report, err := a.GetCachedUsage(context.Background(), "skip_empty", profileDir)
+	if err != nil {
+		t.Fatalf("GetCachedUsage returned error: %v", err)
+	}
+	if report == nil {
+		t.Fatalf("expected non-nil report")
+	}
+	if len(report.Windows) != 3 {
+		t.Errorf("expected 3 windows from root .claude.json, got %d", len(report.Windows))
 	}
 }

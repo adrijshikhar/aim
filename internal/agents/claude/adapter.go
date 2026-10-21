@@ -679,45 +679,59 @@ func (a *Adapter) GetCachedUsage(ctx context.Context, profileName, profileDir st
 		filepath.Join(profileDir, ".claude.json"),
 	}
 
-	var data []byte
-	var readErr error
+	now := time.Now()
+	var (
+		bestWindows   []usage.LimitWindow
+		bestFetchedAt time.Time
+		lastParseErr  error
+		readErr       error
+	)
+
 	for _, p := range paths {
-		if d, err := os.ReadFile(p); err == nil && len(d) > 0 {
-			data = d
+		d, err := os.ReadFile(p)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) && readErr == nil {
+				readErr = err
+			}
+			continue
+		}
+		if len(d) == 0 {
+			continue
+		}
+		windows, fetchedAt, parseErr := ParseClaudeCachedUsage(d, now)
+		if parseErr != nil {
+			lastParseErr = parseErr
+			continue
+		}
+		if len(windows) > 0 {
+			bestWindows = windows
+			bestFetchedAt = fetchedAt
 			break
-		} else if err != nil && !errors.Is(err, os.ErrNotExist) && readErr == nil {
-			readErr = err
 		}
 	}
 
-	if len(data) == 0 {
+	if len(bestWindows) == 0 {
+		if lastParseErr != nil {
+			return nil, lastParseErr
+		}
 		return nil, readErr
 	}
 
-	now := time.Now()
-	windows, fetchedAt, err := ParseClaudeCachedUsage(data, now)
-	if err != nil {
-		return nil, err
-	}
-	if len(windows) == 0 {
-		return nil, nil
-	}
-
-	status := usage.CalculateStatus(windows)
+	status := usage.CalculateStatus(bestWindows)
 	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
 
 	report := &usage.Report{
 		Agent:        a.Name(),
 		Profile:      profileName,
 		Status:       status,
-		Windows:      windows,
+		Windows:      bestWindows,
 		Credits:      "0",
 		AccountEmail: acc.Email,
 		AccountName:  acc.Name,
 		AuthMethod:   acc.AuthMethod,
-		FetchedAt:    fetchedAt,
+		FetchedAt:    bestFetchedAt,
 		FromCache:    true,
-		Summary:      formatClaudeUsageSummary(windows, acc.AuthMethod),
+		Summary:      formatClaudeUsageSummary(bestWindows, acc.AuthMethod),
 	}
 
 	return report, nil
@@ -823,13 +837,49 @@ func (a *Adapter) GetLiveUsage(ctx context.Context, profileName, profileDir stri
 	return report, nil
 }
 
-// GetUsage returns the usage report for the Claude Code agent,
-// preferring cached usage from disk if available, and falling back to live CLI query.
-func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
-	if rep, err := a.GetCachedUsage(ctx, profileName, profileDir); err == nil && rep != nil && len(rep.Windows) > 0 {
-		return rep, nil
+func isClaudeReportFresh(rep *usage.Report, now time.Time) bool {
+	if rep == nil || len(rep.Windows) == 0 {
+		return false
 	}
-	return a.GetLiveUsage(ctx, profileName, profileDir)
+	if rep.FetchedAt.IsZero() {
+		return false
+	}
+	age := now.Sub(rep.FetchedAt)
+	if age < 0 {
+		age = -age
+	}
+	if age > 15*time.Minute {
+		return false
+	}
+	for _, w := range rep.Windows {
+		if !w.ResetsAt.IsZero() && now.After(w.ResetsAt) {
+			return false
+		}
+	}
+	return true
+}
+
+// GetUsage returns the usage report for the Claude Code agent,
+// preferring fresh cached usage from disk if available, and falling back to live CLI query.
+func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	cached, cachedErr := a.GetCachedUsage(ctx, profileName, profileDir)
+	if cachedErr == nil && isClaudeReportFresh(cached, time.Now()) {
+		return cached, nil
+	}
+
+	live, liveErr := a.GetLiveUsage(ctx, profileName, profileDir)
+	if liveErr == nil && live != nil {
+		return live, nil
+	}
+
+	if cached != nil && len(cached.Windows) > 0 {
+		return cached, nil
+	}
+
+	if liveErr != nil {
+		return nil, liveErr
+	}
+	return nil, cachedErr
 }
 
 // ParseClaudeUsage parses the output of "claude -p /usage" into a slice of LimitWindow.

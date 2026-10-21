@@ -210,7 +210,15 @@ Flags:
 }
 
 func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, agent, profileName string, sess *session.Session, extraArgs []string) error {
-	repoRoot := getGitRepoRoot()
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	mgr := getSessionManager(ctx)
+	workingDir := resolveSessionWorkingDir(ctx, mgr, sess)
+
+	repoRoot := getGitRepoRoot(workingDir)
 	branch := getGitBranch(repoRoot)
 
 	bridge := catalyst.NewBridge()
@@ -232,13 +240,6 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 	}
 	// Launch agent primed with Catalyst handoff resume
 	launchArgs := append([]string{"handoff resume"}, extraArgs...)
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	mgr := getSessionManager(ctx)
-	workingDir := resolveSessionWorkingDir(ctx, mgr, sess)
 
 	code := executeRunWithOptions(ctx, reg, pm, RunOptions{
 		AgentName:   agent,
@@ -369,10 +370,17 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	return nil
 }
 
-func getGitRepoRoot() string {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+func getGitRepoRoot(dir ...string) string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	if len(dir) > 0 && dir[0] != "" {
+		cmd.Dir = dir[0]
+	}
+	out, err := cmd.Output()
 	if err == nil && len(out) > 0 {
 		return strings.TrimSpace(string(out))
+	}
+	if len(dir) > 0 && dir[0] != "" {
+		return dir[0]
 	}
 	cwd, err := os.Getwd()
 	if err == nil {

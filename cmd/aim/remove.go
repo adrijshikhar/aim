@@ -71,13 +71,6 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 
 	if agentName != "" {
-		if reg != nil {
-			if ad, err := reg.Get(agentName); err == nil {
-				if purger, ok := ad.(agents.CredentialPurger); ok {
-					_ = purger.PurgeCredentials(context.Background(), profileName, pm.ProfileDir(profileName))
-				}
-			}
-		}
 		account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agentName)
 		cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg)
 		if err != nil {
@@ -88,6 +81,13 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 				fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
 			}
 			return 1
+		}
+		if reg != nil {
+			if ad, err := reg.Get(agentName); err == nil {
+				if purger, ok := ad.(agents.CredentialPurger); ok {
+					_ = purger.PurgeCredentials(context.Background(), profileName, pm.ProfileDir(profileName))
+				}
+			}
 		}
 		telemetry.CaptureAccountEvent(agentName, account, "agent_removed", map[string]any{
 			"profile_cleaned_up": cleanedUp,
@@ -100,18 +100,19 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 		return 0
 	}
 
-	if reg != nil {
-		for _, ad := range reg.All() {
-			if purger, ok := ad.(agents.CredentialPurger); ok {
-				_ = purger.PurgeCredentials(context.Background(), profileName, pm.ProfileDir(profileName))
-			}
-		}
-	}
-
+	pDir := pm.ProfileDir(profileName)
 	if err := pm.DeleteProfile(profileName, cfg); err != nil {
 		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
 		fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
 		return 1
+	}
+
+	if reg != nil {
+		for _, ad := range reg.All() {
+			if purger, ok := ad.(agents.CredentialPurger); ok {
+				_ = purger.PurgeCredentials(context.Background(), profileName, pDir)
+			}
+		}
 	}
 	fmt.Printf("%s Profile %s removed successfully.\n", okBadge, cyan.Render(profileName))
 	return 0

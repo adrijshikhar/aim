@@ -132,9 +132,7 @@ VALUES ('775e6ada-1595-4e7e-84fa-ce0ea71e3007', 'Resume Handoff Request', 'Summa
 	cmd.SetArgs([]string{"resume", "agy", "work", "775e6ada", "--catalyst", "--force"})
 
 	// Change working dir to git repo
-	oldWd, _ := os.Getwd()
-	_ = os.Chdir(tempDir)
-	defer os.Chdir(oldWd)
+	t.Chdir(tempDir)
 
 	_ = cmd.Execute()
 
@@ -142,6 +140,89 @@ VALUES ('775e6ada-1595-4e7e-84fa-ce0ea71e3007', 'Resume Handoff Request', 'Summa
 	handoffPath := filepath.Join(tempDir, ".catalyst", "handoffs", "feat-my-feature.json")
 	if fi, err := os.Stat(handoffPath); err != nil || fi.Size() == 0 {
 		t.Errorf("expected handoff brief at %s, err: %v", handoffPath, err)
+	}
+}
+
+func TestResumeCmd_CatalystBriefCreation_UsesSessionWorkingDirRepo(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not found in PATH")
+	}
+
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	// Caller repo (repo A)
+	repoA := filepath.Join(tempDir, "repo-a")
+	_ = os.MkdirAll(repoA, 0755)
+	_ = exec.Command(gitBin, "-C", repoA, "init").Run()
+	_ = exec.Command(gitBin, "-C", repoA, "checkout", "-b", "caller-branch").Run()
+
+	// Session repo (repo B)
+	repoB := filepath.Join(tempDir, "repo-b")
+	_ = os.MkdirAll(repoB, 0755)
+	_ = exec.Command(gitBin, "-C", repoB, "init").Run()
+	_ = exec.Command(gitBin, "-C", repoB, "checkout", "-b", "session-branch").Run()
+
+	reg := agents.NewRegistry()
+	reg.Register(agy.NewAdapter())
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	// Create mock Antigravity session in profile "work" pointing to repoB as CWD
+	agyDbDir := filepath.Join(tempDir, "profiles", "work", ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(agyDbDir, 0755)
+	dbPath := filepath.Join(agyDbDir, "conversation_summaries.db")
+
+	schema := fmt.Sprintf(`
+CREATE TABLE conversation_summaries (
+	conversation_id TEXT PRIMARY KEY,
+	title TEXT NOT NULL DEFAULT '',
+	preview TEXT NOT NULL DEFAULT '',
+	last_modified_time DATETIME NOT NULL,
+	workspace_uris TEXT DEFAULT '',
+	step_count INTEGER DEFAULT 1
+);
+INSERT INTO conversation_summaries (conversation_id, title, preview, last_modified_time, workspace_uris, step_count)
+VALUES ('885e6ada-1595-4e7e-84fa-ce0ea71e3008', 'Remote Repo Handoff', 'Handoff preview', '2026-09-14 10:00:00', '["%s"]', 1);
+`, repoB)
+	if err := exec.Command(sqliteBin, dbPath, schema).Run(); err != nil {
+		t.Fatalf("failed to seed mock sqlite DB: %v", err)
+	}
+
+	fakeBinDir := filepath.Join(tempDir, "bin")
+	_ = os.MkdirAll(fakeBinDir, 0755)
+	fakeAgy := filepath.Join(fakeBinDir, "agy")
+	_ = os.WriteFile(fakeAgy, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	// Caller is currently inside repoA
+	t.Chdir(repoA)
+
+	var buf bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"resume", "agy", "work", "885e6ada", "--catalyst", "--force"})
+
+	_ = cmd.Execute()
+
+	// Verify Catalyst handoff brief was created in repoB (session repo), NOT repoA
+	handoffPathB := filepath.Join(repoB, ".catalyst", "handoffs", "session-branch.json")
+	if fi, err := os.Stat(handoffPathB); err != nil || fi.Size() == 0 {
+		t.Errorf("expected handoff brief at session working dir %s, err: %v", handoffPathB, err)
+	}
+
+	handoffPathA := filepath.Join(repoA, ".catalyst", "handoffs", "caller-branch.json")
+	if _, err := os.Stat(handoffPathA); err == nil {
+		t.Errorf("handoff brief should NOT have been created in caller repo %s", handoffPathA)
 	}
 }
 
