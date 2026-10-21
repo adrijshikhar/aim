@@ -66,3 +66,64 @@ func TestShareStorePeerPersistence(t *testing.T) {
 		t.Errorf("expected updated single peer, got: %+v", peers)
 	}
 }
+
+func TestShareStoreGrantedLeasesPruning(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewStore(tempDir)
+
+	now := time.Now()
+	// Active lease (valid for 1 hour)
+	activeLease := GrantedLease{
+		LeaseID:      "ls_active",
+		ProfileName:  "work",
+		Agent:        "claude",
+		BorrowerID:   "peer-1",
+		GrantedAt:    now,
+		ExpiresAt:    now.Add(1 * time.Hour),
+		Revoked:      false,
+		AutoApproved: true,
+	}
+
+	// Expired lease (expired 10 minutes ago)
+	expiredLease := GrantedLease{
+		LeaseID:      "ls_expired",
+		ProfileName:  "office",
+		Agent:        "codex",
+		BorrowerID:   "peer-2",
+		GrantedAt:    now.Add(-2 * time.Hour),
+		ExpiresAt:    now.Add(-10 * time.Minute),
+		Revoked:      false,
+		AutoApproved: false,
+	}
+
+	if err := store.SaveGrantedLease(activeLease); err != nil {
+		t.Fatalf("failed to save active lease: %v", err)
+	}
+	if err := store.SaveGrantedLease(expiredLease); err != nil {
+		t.Fatalf("failed to save expired lease: %v", err)
+	}
+
+	// GetGrantedLeases must automatically prune expiredLease
+	leases := store.GetGrantedLeases()
+	if len(leases) != 1 {
+		t.Fatalf("expected 1 active lease, got %d", len(leases))
+	}
+	if leases[0].LeaseID != "ls_active" {
+		t.Errorf("expected ls_active, got %s", leases[0].LeaseID)
+	}
+
+	// Revoke the active lease
+	revoked, err := store.RevokeGrantedLease("ls_active")
+	if err != nil {
+		t.Fatalf("failed to revoke lease: %v", err)
+	}
+	if !revoked.Revoked {
+		t.Errorf("expected revoked.Revoked to be true")
+	}
+
+	// Now GetGrantedLeases should return 0 leases
+	leasesAfterRevoke := store.GetGrantedLeases()
+	if len(leasesAfterRevoke) != 0 {
+		t.Fatalf("expected 0 leases after revoke, got %d", len(leasesAfterRevoke))
+	}
+}

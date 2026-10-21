@@ -198,20 +198,23 @@ func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 		_ = json.Unmarshal(data, &leases)
 	}
 
+	now := time.Now()
+	var unexpired []GrantedLease
 	found := false
-	for i := range leases {
-		if leases[i].LeaseID == lease.LeaseID {
-			leases[i] = lease
+	for _, l := range leases {
+		if l.LeaseID == lease.LeaseID {
+			unexpired = append(unexpired, lease)
 			found = true
-			break
+		} else if !l.Revoked && now.Before(l.ExpiresAt) {
+			unexpired = append(unexpired, l)
 		}
 	}
 	if !found {
-		leases = append(leases, lease)
+		unexpired = append(unexpired, lease)
 	}
 
 	_ = os.MkdirAll(s.aimDir, 0700)
-	data, err := json.MarshalIndent(leases, "", "  ")
+	data, err := json.MarshalIndent(unexpired, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -222,19 +225,54 @@ func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 	return os.Rename(tmp, s.grantedFile)
 }
 
-func (s *ShareStore) GetGrantedLeases() []GrantedLease {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+func (s *ShareStore) pruneExpiredGrantedLeasesLocked() ([]GrantedLease, int) {
 	data, err := os.ReadFile(s.grantedFile)
 	if err != nil {
-		return nil
+		return nil, 0
 	}
 	var leases []GrantedLease
 	if err := json.Unmarshal(data, &leases); err != nil {
-		return nil
+		return nil, 0
 	}
-	return leases
+	now := time.Now()
+	var active []GrantedLease
+	pruned := 0
+	for _, l := range leases {
+		if !l.Revoked && now.Before(l.ExpiresAt) {
+			active = append(active, l)
+		} else {
+			pruned++
+		}
+	}
+	if pruned > 0 {
+		if len(active) == 0 {
+			_ = os.Remove(s.grantedFile)
+		} else {
+			if outData, err := json.MarshalIndent(active, "", "  "); err == nil {
+				tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
+				if err := os.WriteFile(tmp, outData, 0600); err == nil {
+					_ = os.Rename(tmp, s.grantedFile)
+				}
+			}
+		}
+	}
+	return active, pruned
+}
+
+func (s *ShareStore) GetGrantedLeases() []GrantedLease {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	active, _ := s.pruneExpiredGrantedLeasesLocked()
+	return active
+}
+
+func (s *ShareStore) PruneExpiredGrantedLeases() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, pruned := s.pruneExpiredGrantedLeasesLocked()
+	return pruned
 }
 
 func (s *ShareStore) RevokeGrantedLease(leaseID string) (*GrantedLease, error) {
@@ -247,27 +285,34 @@ func (s *ShareStore) RevokeGrantedLease(leaseID string) (*GrantedLease, error) {
 	}
 
 	var revoked *GrantedLease
+	var remaining []GrantedLease
+	now := time.Now()
 	for i := range leases {
 		if leases[i].LeaseID == leaseID {
 			leases[i].Revoked = true
 			revoked = &leases[i]
-			break
+		} else if !leases[i].Revoked && now.Before(leases[i].ExpiresAt) {
+			remaining = append(remaining, leases[i])
 		}
 	}
 	if revoked == nil {
 		return nil, fmt.Errorf("lease %s not found", leaseID)
 	}
 
-	data, err := json.MarshalIndent(leases, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(tmp, s.grantedFile); err != nil {
-		return nil, err
+	if len(remaining) == 0 {
+		_ = os.Remove(s.grantedFile)
+	} else {
+		data, err := json.MarshalIndent(remaining, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
+		if err := os.WriteFile(tmp, data, 0600); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(tmp, s.grantedFile); err != nil {
+			return nil, err
+		}
 	}
 	return revoked, nil
 }

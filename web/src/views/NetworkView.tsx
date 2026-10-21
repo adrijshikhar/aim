@@ -93,6 +93,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const [schedStartDate, setSchedStartDate] = React.useState(() => new Date().toISOString().split('T')[0]);
   const [schedEndDate, setSchedEndDate] = React.useState(() => new Date().toISOString().split('T')[0]);
   const [isSavingSchedule, setIsSavingSchedule] = React.useState(false);
+  const [currentTime, setCurrentTime] = React.useState(() => Date.now());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -442,12 +448,21 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   };
 
   const formatExpiresIn = (expiresAtStr: string) => {
-    const diff = new Date(expiresAtStr).getTime() - Date.now();
+    const diff = new Date(expiresAtStr).getTime() - currentTime;
     if (diff <= 0) return 'Expired';
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours === 0 && mins === 0) return '< 1m remaining';
+    if (hours === 0) return `${mins}m remaining`;
     return `${hours}h ${mins}m remaining`;
   };
+
+  const activeGrantedLeases = React.useMemo(() => {
+    if (!data?.granted_leases) return [];
+    return data.granted_leases.filter(
+      (l) => !l.revoked && new Date(l.expires_at).getTime() > currentTime
+    );
+  }, [data?.granted_leases, currentTime]);
 
   const vpn = data?.vpn;
   const isVpnActive = vpn && vpn.connected;
@@ -690,12 +705,32 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   variant="outline"
                   className="text-[10px] font-mono py-0 px-1.5 text-muted-foreground"
                 >
-                  {data.active_leases.length} active
+                  {data.active_leases.filter((l) => !l.is_expired && new Date(l.expires_at).getTime() > currentTime).length} active
                 </Badge>
               </div>
-              <span className="text-[11px] text-muted-foreground font-mono">
-                Sandboxed locally
-              </span>
+              <div className="flex items-center gap-2">
+                {data.active_leases.some((l) => l.is_expired || new Date(l.expires_at).getTime() <= currentTime) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      const expired = data.active_leases.filter((l) => l.is_expired || new Date(l.expires_at).getTime() <= currentTime);
+                      for (const l of expired) {
+                        await releaseShareLease(l.local_profile).catch(() => {});
+                      }
+                      toast({ title: 'Cleaned up expired leases' });
+                      await loadStatus();
+                    }}
+                    className="h-6 px-2 text-[10px] font-mono text-muted-foreground hover:text-status-danger cursor-pointer"
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" />
+                    Clean expired
+                  </Button>
+                )}
+                <span className="text-[11px] text-muted-foreground font-mono">
+                  Sandboxed locally
+                </span>
+              </div>
             </div>
             <CardDescription className="text-xs text-muted-foreground pt-1">
               External teammate profiles currently leased and sandboxed locally on this machine.
@@ -704,6 +739,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           <CardContent className="p-5 pt-0">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {data.active_leases.map((lease) => {
+                const isExpired = lease.is_expired || new Date(lease.expires_at).getTime() <= currentTime;
                 const runCmd = `aim run ${lease.agent} ${lease.local_profile}`;
                 return (
                   <div
@@ -719,11 +755,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                           <AgentBadge agent={lease.agent} size="sm" />
                         </div>
                         <span
-                          className={`text-[10px] font-mono px-2 py-0.5 rounded font-medium ${
-                            lease.is_expired
+                          className={cn(
+                            'text-[10px] font-mono px-2 py-0.5 rounded font-medium',
+                            isExpired
                               ? 'bg-status-danger-bg text-status-danger border border-status-danger-border'
                               : 'bg-status-success-bg text-status-success border border-status-success-border'
-                          }`}
+                          )}
                         >
                           {formatExpiresIn(lease.expires_at)}
                         </span>
@@ -769,7 +806,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
       )}
 
       {/* Active Granted Leases Section (Teammates Borrowing Your Profiles) */}
-      {data && data.granted_leases && data.granted_leases.length > 0 && (
+      {activeGrantedLeases.length > 0 && (
         <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
           <CardHeader className="p-5 pb-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -782,7 +819,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   variant="outline"
                   className="text-[10px] font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
                 >
-                  {data.granted_leases.filter((l) => !l.revoked && new Date(l.expires_at).getTime() > Date.now()).length} active
+                  {activeGrantedLeases.length} active
                 </Badge>
               </div>
               <span className="text-[11px] text-muted-foreground font-mono">
@@ -795,72 +832,58 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           </CardHeader>
           <CardContent className="p-5 pt-0">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {data.granted_leases.map((lease) => {
-                const isExpired = new Date(lease.expires_at).getTime() <= Date.now();
-                return (
-                  <div
-                    key={lease.lease_id}
-                    className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
-                  >
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <AgentBadge agent={lease.agent} size="sm" />
-                          <span className="text-xs font-mono font-bold text-foreground">
-                            {lease.profile_name}
-                          </span>
-                          <span
-                            className={cn(
-                              'text-[10px] font-mono px-1.5 py-0.5 rounded border',
-                              lease.auto_approved
-                                ? 'bg-[#183925]/50 text-[#46a758] border-[#235836]/60'
-                                : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
-                            )}
-                          >
-                            {lease.auto_approved ? 'Auto Approved' : 'Manual Approved'}
-                          </span>
-                        </div>
+              {activeGrantedLeases.map((lease) => (
+                <div
+                  key={lease.lease_id}
+                  className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <AgentBadge agent={lease.agent} size="sm" />
+                        <span className="text-xs font-mono font-bold text-foreground">
+                          {lease.profile_name}
+                        </span>
                         <span
                           className={cn(
-                            'text-[10px] font-mono px-2 py-0.5 rounded font-medium',
-                            lease.revoked
-                              ? 'bg-status-danger-bg text-status-danger border border-status-danger-border'
-                              : isExpired
-                              ? 'bg-[#1e1e1e] text-[#888888] border border-[#333333]'
-                              : 'bg-status-success-bg text-status-success border border-status-success-border'
+                            'text-[10px] font-mono px-1.5 py-0.5 rounded border',
+                            lease.auto_approved
+                              ? 'bg-[#183925]/50 text-[#46a758] border-[#235836]/60'
+                              : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
                           )}
                         >
-                          {lease.revoked ? 'Revoked' : isExpired ? 'Expired' : formatExpiresIn(lease.expires_at)}
+                          {lease.auto_approved ? 'Auto Approved' : 'Manual Approved'}
                         </span>
                       </div>
-                      <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-mono">
-                        <Laptop className="h-3 w-3 text-[#61afef]" />
-                        <span>Borrower:</span>
-                        <span className="text-foreground font-semibold truncate max-w-[220px]" title={lease.borrower_id}>
-                          {lease.borrower_id}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
-                      <span className="text-[10px] font-mono text-[#666666]">
-                        Lease ID: {lease.lease_id}
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded font-medium bg-status-success-bg text-status-success border border-status-success-border">
+                        {formatExpiresIn(lease.expires_at)}
                       </span>
-                      {!lease.revoked && !isExpired && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRevokeLease(lease.lease_id)}
-                          className="h-6 px-2 text-[11px] text-status-danger hover:bg-status-danger-bg cursor-pointer"
-                        >
-                          <ShieldAlert className="h-3 w-3 mr-1" />
-                          Revoke Lease
-                        </Button>
-                      )}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-mono">
+                      <Laptop className="h-3 w-3 text-[#61afef]" />
+                      <span>Borrower:</span>
+                      <span className="text-foreground font-semibold truncate max-w-[220px]" title={lease.borrower_id}>
+                        {lease.borrower_id}
+                      </span>
                     </div>
                   </div>
-                );
-              })}
+
+                  <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
+                    <span className="text-[10px] font-mono text-[#666666]">
+                      Lease ID: {lease.lease_id}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRevokeLease(lease.lease_id)}
+                      className="h-6 px-2 text-[11px] text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                    >
+                      <ShieldAlert className="h-3 w-3 mr-1" />
+                      Revoke Lease
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
