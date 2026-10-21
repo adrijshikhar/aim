@@ -479,7 +479,7 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 	if duration <= 0 {
 		duration = 2 * time.Hour
 	}
-	for _, p := range store.GetSharedProfiles() {
+	for _, p := range store.GetAllSharedProfiles() {
 		if p.Name == rec.ProfileName && p.MaxLeaseTTL > 0 && duration > p.MaxLeaseTTL {
 			duration = p.MaxLeaseTTL
 			break
@@ -693,14 +693,31 @@ func (s *Server) handlePollShareRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if rec.Status == "approved" {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":   "approved",
-			"lease_id": rec.LeaseID,
-			"profile":  rec.ProfileName,
-			"agent":    rec.Agent,
-		})
-		return
+		mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
+		cleanPeer := strings.TrimSuffix(strings.TrimSuffix(rec.PeerID, ".local"), ".LOCAL")
+		sanitizedPeer := strings.ReplaceAll(cleanPeer, ".", "-")
+		sanitizedPeer = strings.ReplaceAll(sanitizedPeer, "/", "-")
+		sanitizedPeer = strings.ReplaceAll(sanitizedPeer, "\\", "-")
+		sanitizedProfile := strings.ReplaceAll(rec.ProfileName, "/", "-")
+		sanitizedProfile = strings.ReplaceAll(sanitizedProfile, "\\", "-")
+		localName := fmt.Sprintf("%s:%s", sanitizedPeer, sanitizedProfile)
+		if sanitizedPeer == "" {
+			localName = sanitizedProfile
+		}
+
+		// If local credentials exist on disk, return approved immediately
+		if mgr.HasLease(localName) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":        "approved",
+				"lease_id":      rec.LeaseID,
+				"profile":       rec.ProfileName,
+				"local_profile": localName,
+				"agent":         rec.Agent,
+			})
+			return
+		}
+		// If status is approved in DB but credentials file is missing, fall through to re-poll host and reinstall
 	}
 	if rec.Status == "denied" || rec.Status == "cancelled" {
 		w.Header().Set("Content-Type", "application/json")
@@ -723,43 +740,26 @@ func (s *Server) handlePollShareRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if resp.Status == "approved" {
-		// Atomically transition from pending to approved before installing files on disk
-		transitioned, err := store.TransitionRequestStatus(req.RequestID, "pending", "approved", resp.LeaseID, "")
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to update request state: "+err.Error())
-			return
-		}
-		if !transitioned {
-			freshRec, _ := store.GetShareRequest(req.RequestID)
-			status := "cancelled"
-			msg := "lease request was cancelled or already decided"
-			if freshRec != nil {
-				status = freshRec.Status
-				msg = freshRec.ErrorMessage
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":  status,
-				"message": msg,
-			})
-			return
-		}
-
+		// Atomically install lease credentials to disk first
 		mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
 		localName, err := mgr.InstallLease(rec.PeerID, rec.ProfileName, resp)
 		if err != nil {
-			_ = store.UpdateRequestStatus(req.RequestID, "failed", "", "failed to install lease credentials: "+err.Error())
+			// Leave request in pending state so retry can succeed once issue is resolved
 			writeJSONError(w, http.StatusInternalServerError, "failed to install lease credentials: "+err.Error())
 			return
 		}
 
-		_ = store.AppendAudit(share.AuditEntry{
-			Action:  "LEASE_BORROWED",
-			Actor:   rec.PeerID,
-			Profile: rec.ProfileName,
-			Agent:   resp.Agent,
-			Details: fmt.Sprintf("Lease %s approved and installed as %s", resp.LeaseID, localName),
-		})
+		// Only publish status transition to approved once files are verified on disk
+		transitioned, _ := store.TransitionRequestStatus(req.RequestID, "pending", "approved", resp.LeaseID, "")
+		if transitioned {
+			_ = store.AppendAudit(share.AuditEntry{
+				Action:  "LEASE_BORROWED",
+				Actor:   rec.PeerID,
+				Profile: rec.ProfileName,
+				Agent:   resp.Agent,
+				Details: fmt.Sprintf("Lease %s approved and installed as %s", resp.LeaseID, localName),
+			})
+		}
 	} else if resp.Status == "denied" {
 		_ = store.UpdateRequestStatus(req.RequestID, "denied", "", resp.Message)
 		_ = store.AppendAudit(share.AuditEntry{

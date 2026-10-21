@@ -198,18 +198,32 @@ func TestSchedulePolicyActive(t *testing.T) {
 		t.Errorf("expected future schedule to be inactive, got true")
 	}
 
-	// Date range with daily window (active date, but inactive time of day)
-	spDateWithWindow := SchedulePolicy{
+	// Continuous calendar interval spanning multiple days (e.g. yesterday 09:00 to tomorrow 18:00)
+	spCalendarSpan := SchedulePolicy{
 		Enabled:   true,
 		Scope:     "global",
 		Mode:      "auto",
 		StartDate: now.Add(-24 * time.Hour).Format("2006-01-02"),
 		EndDate:   now.Add(24 * time.Hour).Format("2006-01-02"),
-		StartTime: fmt.Sprintf("%02d:00", futureStart),
-		EndTime:   fmt.Sprintf("%02d:00", futureEnd),
+		StartTime: "09:00",
+		EndTime:   "18:00",
 	}
-	if spDateWithWindow.IsActive(now) {
-		t.Errorf("expected date range with inactive time window to be inactive, got true")
+	if !spCalendarSpan.IsActive(now) {
+		t.Errorf("expected multi-day calendar span to remain active continuously, got false")
+	}
+
+	// Past calendar interval
+	spCalendarExpired := SchedulePolicy{
+		Enabled:   true,
+		Scope:     "global",
+		Mode:      "auto",
+		StartDate: now.Add(-48 * time.Hour).Format("2006-01-02"),
+		EndDate:   now.Add(-24 * time.Hour).Format("2006-01-02"),
+		StartTime: "09:00",
+		EndTime:   "18:00",
+	}
+	if spCalendarExpired.IsActive(now) {
+		t.Errorf("expected past calendar span to be inactive, got true")
 	}
 }
 

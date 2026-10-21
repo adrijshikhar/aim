@@ -123,15 +123,35 @@ func (p *SchedulePolicy) IsActive(t time.Time) bool {
 		return false
 	}
 
-	// 1. Check Date Range if provided
+	// 1. Case: Continuous Calendar Interval (Start Date & Time through End Date & Time)
 	if p.StartDate != "" && p.EndDate != "" {
-		dateStr := t.Format("2006-01-02")
-		if dateStr < p.StartDate || dateStr > p.EndDate {
-			return false
+		startTime := p.StartTime
+		if startTime == "" {
+			startTime = "00:00"
 		}
+		endTime := p.EndTime
+		if endTime == "" {
+			endTime = "23:59:59"
+		}
+		if len(startTime) == 5 {
+			startTime += ":00"
+		}
+		if len(endTime) == 5 {
+			endTime += ":59"
+		}
+
+		startStr := p.StartDate + "T" + startTime
+		endStr := p.EndDate + "T" + endTime
+
+		start, err1 := time.ParseInLocation("2006-01-02T15:04:05", startStr, t.Location())
+		end, err2 := time.ParseInLocation("2006-01-02T15:04:05", endStr, t.Location())
+		if err1 == nil && err2 == nil {
+			return (t.Equal(start) || t.After(start)) && (t.Equal(end) || t.Before(end))
+		}
+		return false
 	}
 
-	// 2. Check Daily time-of-day window if provided (e.g. 00:00 to 08:00 or 22:00 to 06:00)
+	// 2. Case: Recurring Daily time-of-day window (e.g. 00:00 to 08:00 or overnight 22:00 to 06:00)
 	if p.StartTime != "" && p.EndTime != "" {
 		var sh, sm, eh, em int
 		_, errS := fmt.Sscanf(p.StartTime, "%d:%d", &sh, &sm)
@@ -147,11 +167,6 @@ func (p *SchedulePolicy) IsActive(t time.Time) bool {
 			// Overnight window, e.g. 22:00 to 06:00
 			return nowMinutes >= startMinutes || nowMinutes < endMinutes
 		}
-	}
-
-	// If date range matched and no daily time window was specified, it is active for the whole dates
-	if p.StartDate != "" && p.EndDate != "" {
-		return true
 	}
 
 	return false

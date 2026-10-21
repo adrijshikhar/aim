@@ -14,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/aim-cli/aim/internal/profile"
 )
 
 type Server struct {
@@ -874,7 +872,6 @@ func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePa
 
 	switch agent {
 	case "claude":
-		_ = profile.HarvestKeychainTokenToProfile("claude", profDir)
 		for _, rel := range []string{
 			".claude/.credentials.json",
 			".claude/auth.json",
@@ -898,7 +895,6 @@ func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePa
 			}
 		}
 	case "agy":
-		_ = profile.HarvestKeychainTokenToProfile("agy", profDir)
 		for _, rel := range []string{
 			".gemini/antigravity-cli/antigravity-oauth-token",
 			".gemini/antigravity-cli/config.json",

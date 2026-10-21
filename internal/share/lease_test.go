@@ -74,7 +74,7 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected InstallLease to reject path traversal, but succeeded")
 	}
-	if mgr.HasLease("work") {
+	if mgr.HasLease("attacker:work") {
 		t.Fatalf("expected .aim-lease.json NOT to exist after rejected install")
 	}
 
@@ -96,9 +96,31 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected InstallLease to reject non-credential file .ssh/authorized_keys, but succeeded")
 	}
-	if mgr.HasLease("work") {
+	if mgr.HasLease("attacker:work") {
 		t.Fatalf("expected .aim-lease.json NOT to exist after rejected unauthorized file write")
 	}
+
+	// Verify that a failed install does not leave a directory blocking subsequent valid retries
+	respValidRetry := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_valid_retry",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/auth.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"valid"}`)),
+			},
+		},
+	}
+	localName, err := mgr.InstallLease("attacker", "work", respValidRetry)
+	if err != nil {
+		t.Fatalf("expected subsequent valid install to succeed after failed attempts, but got: %v", err)
+	}
+	if !mgr.HasLease(localName) {
+		t.Fatalf("expected lease to be active for %s after retry", localName)
+	}
+	_ = mgr.ReleaseLease(localName)
 
 	// Attempt sibling file injection (e.g. .claude_backdoor.sh)
 	resp3 := &LeaseResponse{

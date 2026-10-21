@@ -51,12 +51,11 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	if info, err := os.Stat(cleanTargetDir); err == nil && info.IsDir() {
 		leaseFile := filepath.Join(cleanTargetDir, ".aim-lease.json")
 		if _, err := os.Stat(leaseFile); os.IsNotExist(err) {
-			return "", fmt.Errorf("target profile %q already exists and is not a leased profile", localProfileName)
+			entries, _ := os.ReadDir(cleanTargetDir)
+			if len(entries) > 0 {
+				return "", fmt.Errorf("target profile %q already exists and is not a leased profile", localProfileName)
+			}
 		}
-	}
-
-	if err := os.MkdirAll(cleanTargetDir, 0700); err != nil {
-		return "", fmt.Errorf("failed to create ephemeral profile dir: %w", err)
 	}
 
 	allowedCredentialFiles := map[string]bool{
@@ -75,12 +74,12 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	}
 
 	type stagedFile struct {
-		fullPath string
-		content  []byte
+		relPath string
+		content []byte
 	}
 	var staged []stagedFile
 
-	// Validate all payload files before modifying disk or writing metadata
+	// Validate all payload files before modifying disk or creating directories
 	if resp.Payload != nil && resp.Payload.Files != nil {
 		for relPath, b64 := range resp.Payload.Files {
 			cleanRel := filepath.Clean(relPath)
@@ -101,21 +100,34 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 			if err != nil {
 				return "", fmt.Errorf("invalid base64 encoding in file %s: %w", relPath, err)
 			}
-			staged = append(staged, stagedFile{fullPath: fullPath, content: decoded})
+			staged = append(staged, stagedFile{relPath: slashRel, content: decoded})
 		}
 	}
 
-	// Write credential files
+	// Install into a clean staging directory first so failed/interrupted installs leave no partial directory behind
+	stagingDir := fmt.Sprintf("%s.tmp.%d.%d", cleanTargetDir, os.Getpid(), time.Now().UnixNano())
+	if err := os.MkdirAll(stagingDir, 0700); err != nil {
+		return "", fmt.Errorf("failed to create staging dir: %w", err)
+	}
+	success := false
+	defer func() {
+		if !success {
+			_ = os.RemoveAll(stagingDir)
+		}
+	}()
+
+	// Write credential files into staging directory
 	for _, f := range staged {
-		if err := os.MkdirAll(filepath.Dir(f.fullPath), 0700); err != nil {
-			return "", fmt.Errorf("failed to create dir for %s: %w", f.fullPath, err)
+		destPath := filepath.Join(stagingDir, filepath.FromSlash(f.relPath))
+		if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+			return "", fmt.Errorf("failed to create dir for %s: %w", destPath, err)
 		}
-		if err := os.WriteFile(f.fullPath, f.content, 0600); err != nil {
-			return "", fmt.Errorf("failed to write %s: %w", f.fullPath, err)
+		if err := os.WriteFile(destPath, f.content, 0600); err != nil {
+			return "", fmt.Errorf("failed to write %s: %w", destPath, err)
 		}
 	}
 
-	// Publish metadata ONLY after all files are verified and written
+	// Write metadata into staging directory
 	meta := LeaseMeta{
 		LeaseID:       resp.LeaseID,
 		SourcePeer:    sourcePeer,
@@ -128,13 +140,18 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	if err != nil {
 		return "", fmt.Errorf("failed to encode lease metadata: %w", err)
 	}
-	tmpMeta := filepath.Join(cleanTargetDir, fmt.Sprintf(".aim-lease.tmp.%d", time.Now().UnixNano()))
-	if err := os.WriteFile(tmpMeta, metaData, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stagingDir, ".aim-lease.json"), metaData, 0600); err != nil {
 		return "", fmt.Errorf("failed to write lease metadata: %w", err)
 	}
-	if err := os.Rename(tmpMeta, filepath.Join(cleanTargetDir, ".aim-lease.json")); err != nil {
-		return "", fmt.Errorf("failed to publish lease metadata: %w", err)
+
+	// Atomically replace target directory
+	if _, err := os.Stat(cleanTargetDir); err == nil {
+		_ = os.RemoveAll(cleanTargetDir)
 	}
+	if err := os.Rename(stagingDir, cleanTargetDir); err != nil {
+		return "", fmt.Errorf("failed to publish lease: %w", err)
+	}
+	success = true
 
 	return localProfileName, nil
 }
