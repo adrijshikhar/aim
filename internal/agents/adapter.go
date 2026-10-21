@@ -52,6 +52,38 @@ type UsageProvider interface {
 	GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error)
 }
 
+// CachedUsageProvider is optionally implemented by adapters that extract quota
+// and rate-limit telemetry directly from local profile files on disk.
+// Contract: strictly read-only, zero network calls, zero child processes.
+type CachedUsageProvider interface {
+	GetCachedUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error)
+}
+
+// LiveUsageProvider is optionally implemented by adapters that query live quota
+// via provider CLI subcommands or authenticated endpoints.
+type LiveUsageProvider interface {
+	GetLiveUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error)
+}
+
+// CredentialHarvester is optionally implemented by adapters that need to discover,
+// extract, or synchronize credentials from host stores (macOS Keychain, token files,
+// system auth) into an isolated profile directory.
+type CredentialHarvester interface {
+	HarvestCredentials(ctx context.Context, profileName, profileDir string) error
+}
+
+// CredentialPurger is optionally implemented by adapters to clean up external or OS-level
+// credentials (e.g. macOS Keychain items) when a profile is purged or deleted.
+type CredentialPurger interface {
+	PurgeCredentials(ctx context.Context, profileName, profileDir string) error
+}
+
+// SessionResumer is optionally implemented by adapters that define the command-line
+// arguments required to resume an existing conversation thread.
+type SessionResumer interface {
+	ResumeArgs(sessionID string, extraArgs []string) []string
+}
+
 // AccountInfoProvider is optionally implemented by adapters that report authenticated account details.
 type AccountInfoProvider interface {
 	GetAccountInfo(profileDir string) (email, authMethod, projectID string)
