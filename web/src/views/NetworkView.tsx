@@ -27,6 +27,7 @@ import {
   addSharePeer,
   requestShareLease,
   releaseShareLease,
+  cleanExpiredLeases,
   saveSchedule,
   deleteSchedule,
   approveShareRequest,
@@ -126,8 +127,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   }, [toast]);
 
   React.useEffect(() => {
-    loadStatus(false);
-    const interval = setInterval(() => loadStatus(false), 5000);
+    loadStatus(true);
+    let count = 0;
+    const interval = setInterval(() => {
+      count++;
+      loadStatus(count % 3 === 0);
+    }, 5000);
     return () => clearInterval(interval);
   }, [loadStatus]);
 
@@ -143,12 +148,16 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     const auto_approve = mode === 'auto';
     const profObj = profiles.find((p) => p.name === profileName);
     const agent = profObj?.agent || 'claude';
+    const existingConfig = data?.shared_profiles?.find((s) => s.name === profileName);
+    const ttlStr = existingConfig?.max_lease_ttl
+      ? `${Math.max(1, Math.round(existingConfig.max_lease_ttl / 1e9 / 3600))}h`
+      : '4h';
     try {
       await toggleShareProfile({
         name: profileName,
         agent,
         auto_approve,
-        ttl: '4h',
+        ttl: ttlStr,
         enabled,
       });
       toast({
@@ -166,6 +175,25 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
       });
     } finally {
       setIsShareUpdating(false);
+    }
+  };
+
+  const handleCleanExpired = async () => {
+    try {
+      const res = await cleanExpiredLeases();
+      toast({
+        title: 'Expired Leases Cleaned',
+        description: `Removed ${res.cleaned} expired local profile lease(s).`,
+        variant: 'success',
+      });
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to clean expired leases';
+      toast({
+        title: 'Clean Failed',
+        description: msg,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -411,19 +439,23 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
       });
 
       if (res.ok && res.local_profile) {
+        const grantedAgent = res.agent || selectedAgent;
         toast({
           title: 'Lease Granted',
-          description: `Installed as ${res.local_profile}. Run with: aim run ${selectedAgent} ${res.local_profile}`,
+          description: `Installed as ${res.local_profile}. Run with: aim run ${grantedAgent} ${res.local_profile}`,
           variant: 'success',
         });
         setSelectedPeer(null);
         setSelectedProfile('');
-        await loadStatus();
+        await loadStatus(false);
       } else {
         toast({
-          title: 'Request Pending',
-          description: res.message || 'Waiting for approval from host',
+          title: 'Request Submitted',
+          description: res.message || 'Waiting for teammate approval. Lease will activate once approved.',
         });
+        setSelectedPeer(null);
+        setSelectedProfile('');
+        await loadStatus(false);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to obtain lease';
@@ -477,7 +509,31 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     return `${hours}h ${mins}m remaining`;
   };
 
+  const formatLastSeen = (lastSeenStr?: string) => {
+    if (!lastSeenStr) return 'unknown';
+    const diff = currentTime - new Date(lastSeenStr).getTime();
+    if (diff < 60 * 1000) return 'just now';
+    const mins = Math.floor(diff / (60 * 1000));
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
+
   const pendingRequests = data?.pending_requests || [];
+
+  const activeBorrowedLeases = React.useMemo(() => {
+    return (data?.active_leases || []).filter(
+      (l) => !l.is_expired && new Date(l.expires_at).getTime() > currentTime
+    );
+  }, [data?.active_leases, currentTime]);
+
+  const expiredBorrowedLeases = React.useMemo(() => {
+    return (data?.active_leases || []).filter(
+      (l) => l.is_expired || new Date(l.expires_at).getTime() <= currentTime
+    );
+  }, [data?.active_leases, currentTime]);
 
   const revokedOrExpiredLeases = React.useMemo(() => {
     if (!data?.granted_leases) return [];
@@ -674,9 +730,9 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#142334] text-[#52a8ff] border border-[#1f4068] font-bold animate-pulse">
                   {pendingRequests.length}
                 </span>
-              ) : (activeGrantedLeases.length + (data?.active_leases?.length || 0)) > 0 ? (
+              ) : (activeGrantedLeases.length + activeBorrowedLeases.length) > 0 ? (
                 <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
-                  {activeGrantedLeases.length + (data?.active_leases?.length || 0)}
+                  {activeGrantedLeases.length + activeBorrowedLeases.length}
                 </span>
               ) : null}
             </TabsTrigger>
@@ -925,6 +981,9 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filteredPeers.map((peer) => {
                     const profileCount = peer.profiles?.length || 0;
+                    const isPeerOnline = peer.last_seen
+                      ? (currentTime - new Date(peer.last_seen).getTime()) < 5 * 60 * 1000
+                      : true;
                     return (
                       <Card
                         key={peer.id || peer.hostname}
@@ -942,24 +1001,35 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                   {peer.vpn_ip}
                                 </CardDescription>
                               </div>
-                              <Badge
-                                variant="outline"
-                                className="badge-success text-xs font-sans px-2 py-0.5 shrink-0 flex items-center gap-1.5"
-                              >
-                                <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                                <span>Online</span>
-                              </Badge>
+                              {isPeerOnline ? (
+                                <Badge
+                                  variant="outline"
+                                  className="badge-success text-xs font-sans px-2 py-0.5 shrink-0 flex items-center gap-1.5"
+                                >
+                                  <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                                  <span>Online</span>
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="text-xs font-sans px-2 py-0.5 shrink-0 flex items-center gap-1.5 border-border/60 bg-[#161616] text-muted-foreground"
+                                  title={`Last seen: ${peer.last_seen}`}
+                                >
+                                  <span className="h-1.5 w-1.5 rounded-full bg-[#555555]" />
+                                  <span>{formatLastSeen(peer.last_seen)}</span>
+                                </Badge>
+                              )}
                             </div>
                           </CardHeader>
 
-                          <CardContent className="p-4 pt-2 space-y-2">
+                          <CardContent className="p-4 pt-2 space-y-2.5">
                             <div className="flex items-center justify-between text-xs font-mono uppercase text-muted-foreground tracking-wider font-medium">
                               <span>Offered Profiles</span>
                               <span>{profileCount} available</span>
                             </div>
 
                             {peer.profiles && peer.profiles.length > 0 ? (
-                              <div className="space-y-0 divide-y divide-border/40">
+                              <div className="space-y-1.5">
                                 {peer.profiles.map((prof) => {
                                   const sp = peer.shared_profiles?.find((p) => p.name === prof);
                                   const agent = sp?.agent || 'claude';
@@ -967,28 +1037,31 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                   return (
                                     <div
                                       key={prof}
-                                      className="flex items-center justify-between gap-2 py-2 text-xs"
+                                      className="group flex items-center justify-between gap-2 px-2.5 py-2 rounded-geist border border-[#222222] bg-[#121212]/80 hover:bg-[#181818] hover:border-[#383838] transition-all"
                                     >
                                       <div className="flex items-center gap-2 truncate min-w-0">
-                                        <AgentBadge agent={agent} size="sm" />
-                                        <span className="font-mono text-foreground font-medium truncate">
+                                        <span className="font-mono text-xs font-semibold text-foreground group-hover:text-[#61afef] transition-colors truncate">
                                           {prof}
                                         </span>
+                                        <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 shrink-0">
+                                          <AgentBadge agent={agent} size="sm" />
+                                        </div>
                                         {sp && (
                                           <span
                                             className={cn(
-                                              'text-xs font-mono px-1.5 py-0.5 rounded border shrink-0',
+                                              'text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 font-medium flex items-center gap-1',
                                               isAuto
-                                                ? 'bg-[#183925]/50 text-[#98c379] border-[#235836]/60'
-                                                : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
+                                                ? 'bg-[#183925]/60 text-[#98c379] border-[#235836]/70'
+                                                : 'bg-[#142334]/60 text-[#52a8ff] border-[#1f4068]/70'
                                             )}
                                           >
-                                            {isAuto ? 'Auto' : 'Request'}
+                                            <span className={cn('h-1 w-1 rounded-full', isAuto ? 'bg-[#98c379]' : 'bg-[#52a8ff]')} />
+                                            <span>{isAuto ? 'Auto' : 'Request'}</span>
                                           </span>
                                         )}
                                       </div>
                                       <Button
-                                        size="icon"
+                                        size="sm"
                                         variant="outline"
                                         onClick={() => {
                                           setSelectedPeer(peer);
@@ -996,10 +1069,11 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                           setSelectedAgent(agent);
                                           setSelectedIsAuto(isAuto);
                                         }}
-                                        className="h-6 w-6 p-0 rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#262626] text-muted-foreground hover:text-accent-cyan flex items-center justify-center cursor-pointer shrink-0"
-                                        title={`Borrow ${prof} (Lease Credentials)`}
+                                        className="h-6 px-2 text-[11px] font-mono font-medium rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#252525] hover:border-[#404040] text-foreground hover:text-[#61afef] flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs transition-colors"
+                                        title={`Borrow ${prof} from ${peer.hostname}`}
                                       >
-                                        <KeyRound className="h-3 w-3" />
+                                        <KeyRound className="h-3 w-3 text-muted-foreground group-hover:text-[#61afef] transition-colors" />
+                                        <span>Borrow</span>
                                       </Button>
                                     </div>
                                   );
@@ -1036,7 +1110,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     : 'text-muted-foreground hover:text-foreground hover:bg-[#141414] border-transparent'
                 )}
               >
-                All Requests ({pendingRequests.length + activeGrantedLeases.length + (data?.active_leases?.length || 0) + revokedOrExpiredLeases.length})
+                All Requests ({pendingRequests.length + activeGrantedLeases.length + activeBorrowedLeases.length + revokedOrExpiredLeases.length + expiredBorrowedLeases.length})
               </button>
 
               <button
@@ -1064,7 +1138,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 )}
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-[#30a46c]" />
-                <span>Approved ({activeGrantedLeases.length + (data?.active_leases?.length || 0)})</span>
+                <span>Approved ({activeGrantedLeases.length + activeBorrowedLeases.length})</span>
               </button>
 
               <button
@@ -1078,7 +1152,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 )}
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-[#e06c75]" />
-                <span>Revoked / Expired ({revokedOrExpiredLeases.length})</span>
+                <span>Revoked / Expired ({revokedOrExpiredLeases.length + expiredBorrowedLeases.length})</span>
               </button>
             </div>
           </div>
@@ -1164,11 +1238,11 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               <div className="flex items-center gap-2">
                 <FileCheck className="h-4 w-4 text-[#98c379]" />
                 <h3 className="text-xs font-mono uppercase tracking-wider font-semibold text-foreground">
-                  Active Approved Leases ({activeGrantedLeases.length + (data?.active_leases?.length || 0)})
+                  Active Approved Leases ({activeGrantedLeases.length + activeBorrowedLeases.length})
                 </h3>
               </div>
 
-              {activeGrantedLeases.length === 0 && (!data?.active_leases || data.active_leases.length === 0) ? (
+              {activeGrantedLeases.length === 0 && activeBorrowedLeases.length === 0 ? (
                 requestsFilter === 'approved' && (
                   <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
                     No active approved leases.
@@ -1185,10 +1259,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <AgentBadge agent={lease.agent} size="sm" />
                             <span className="text-xs font-mono font-bold text-foreground">
                               {lease.profile_name}
                             </span>
+                            <AgentBadge agent={lease.agent} size="sm" />
                             <span
                               className={cn(
                                 'text-xs font-mono px-1.5 py-0.5 rounded border',
@@ -1231,8 +1305,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   ))}
 
                   {/* Borrowed by you */}
-                  {data?.active_leases?.map((lease) => {
-                    const isExpired = lease.is_expired || new Date(lease.expires_at).getTime() <= currentTime;
+                  {activeBorrowedLeases.map((lease) => {
                     const runCmd = `aim run ${lease.agent} ${lease.local_profile}`;
                     return (
                       <div
@@ -1247,14 +1320,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                               </span>
                               <AgentBadge agent={lease.agent} size="sm" />
                             </div>
-                            <span
-                              className={cn(
-                                'text-xs font-mono px-2 py-0.5 rounded font-medium',
-                                isExpired
-                                  ? 'bg-status-danger-bg text-status-danger border border-status-danger-border'
-                                  : 'bg-status-success-bg text-status-success border border-status-success-border'
-                              )}
-                            >
+                            <span className="text-xs font-mono px-2 py-0.5 rounded font-medium bg-status-success-bg text-status-success border border-status-success-border">
                               {formatExpiresIn(lease.expires_at)}
                             </span>
                           </div>
@@ -1301,14 +1367,27 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           {/* Revoked / Expired Leases Section */}
           {(requestsFilter === 'all' || requestsFilter === 'revoked') && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Ban className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-xs font-mono uppercase tracking-wider font-semibold text-foreground">
-                  Revoked & Expired Leases ({revokedOrExpiredLeases.length})
-                </h3>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Ban className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-xs font-mono uppercase tracking-wider font-semibold text-foreground">
+                    Revoked & Expired Leases ({revokedOrExpiredLeases.length + expiredBorrowedLeases.length})
+                  </h3>
+                </div>
+                {expiredBorrowedLeases.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCleanExpired}
+                    className="h-6 px-2.5 text-xs font-mono border-border bg-[#141414] hover:bg-[#1a1a1a] text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="h-3 w-3 text-status-danger" />
+                    <span>Clean Expired ({expiredBorrowedLeases.length})</span>
+                  </Button>
+                )}
               </div>
 
-              {revokedOrExpiredLeases.length === 0 ? (
+              {revokedOrExpiredLeases.length === 0 && expiredBorrowedLeases.length === 0 ? (
                 requestsFilter === 'revoked' && (
                   <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
                     No revoked or expired leases.
@@ -1316,15 +1395,51 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 )
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Expired Leases Borrowed from Peers */}
+                  {expiredBorrowedLeases.map((lease) => (
+                    <div
+                      key={lease.local_profile}
+                      className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0c0c0c] flex items-center justify-between gap-3 text-xs font-mono opacity-80"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground truncate">{lease.local_profile}</span>
+                            <AgentBadge agent={lease.agent} size="sm" />
+                          </div>
+                          <div className="text-muted-foreground text-xs truncate">from: {lease.source_peer}/{lease.source_profile}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge variant="outline" className="text-xs font-mono border-status-danger-border text-status-danger bg-status-danger-bg">
+                          Expired
+                        </Badge>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRelease(lease.local_profile)}
+                          className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                          title="Purge expired lease credentials"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          Purge
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Leases Granted to Teammates that are Revoked / Expired */}
                   {revokedOrExpiredLeases.map((lease) => (
                     <div
                       key={lease.lease_id}
                       className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0c0c0c] flex items-center justify-between gap-3 text-xs font-mono opacity-80"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <AgentBadge agent={lease.agent} size="sm" />
                         <div className="min-w-0">
-                          <div className="font-semibold text-foreground truncate">{lease.profile_name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground truncate">{lease.profile_name}</span>
+                            <AgentBadge agent={lease.agent} size="sm" />
+                          </div>
                           <div className="text-muted-foreground text-xs truncate">borrower: {lease.borrower_id}</div>
                         </div>
                       </div>
@@ -1493,11 +1608,11 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                       key={p.name}
                       className="p-3.5 rounded-geist border border-border bg-card flex items-center justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <AgentBadge agent={p.agent} size="sm" />
-                        <div className="font-semibold text-xs text-foreground truncate">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="font-semibold text-xs text-foreground truncate font-mono">
                           {p.name}
                         </div>
+                        <AgentBadge agent={p.agent} size="sm" />
                       </div>
 
                       {/* Segmented slider for this profile */}
@@ -2074,10 +2189,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               <div className="flex items-center justify-between text-[#888888]">
                 <span>Offered Profile</span>
                 <div className="flex items-center gap-2">
-                  <AgentBadge agent={selectedAgent} size="sm" />
                   <span className="font-mono text-[#ededed] font-medium">
                     {selectedProfile}
                   </span>
+                  <AgentBadge agent={selectedAgent} size="sm" />
                 </div>
               </div>
               <div className="flex items-center justify-between text-[#888888]">

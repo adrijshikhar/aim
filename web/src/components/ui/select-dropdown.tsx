@@ -22,6 +22,7 @@ export interface SelectDropdownProps<T = string | number> {
   contentClassName?: string;
   size?: 'xs' | 'sm' | 'default';
   id?: string;
+  'aria-label'?: string;
 }
 
 export function SelectDropdown<T extends string | number>({
@@ -35,13 +36,70 @@ export function SelectDropdown<T extends string | number>({
   contentClassName,
   size = 'default',
   id,
+  'aria-label': ariaLabel,
 }: SelectDropdownProps<T>) {
   const [open, setOpen] = React.useState(false);
+  const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
+  const listboxId = React.useId();
 
-  const selectedOption = React.useMemo(
-    () => options.find((opt) => opt.value === value),
+  const selectedIndex = React.useMemo(
+    () => options.findIndex((opt) => opt.value === value),
     [options, value]
   );
+
+  const selectedOption = selectedIndex >= 0 ? options[selectedIndex] : undefined;
+
+  React.useEffect(() => {
+    if (open) {
+      setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    }
+  }, [open, selectedIndex]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
+
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setHighlightedIndex((prev) => (prev + 1 < options.length ? prev + 1 : 0));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setHighlightedIndex((prev) => (prev - 1 >= 0 ? prev - 1 : options.length - 1));
+        break;
+      case 'Home':
+        e.preventDefault();
+        setHighlightedIndex(0);
+        break;
+      case 'End':
+        e.preventDefault();
+        setHighlightedIndex(options.length - 1);
+        break;
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        if (highlightedIndex >= 0 && highlightedIndex < options.length) {
+          onChange(options[highlightedIndex].value);
+          setOpen(false);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setOpen(false);
+        break;
+      case 'Tab':
+        setOpen(false);
+        break;
+    }
+  };
 
   const sizeClasses = {
     xs: 'h-7 px-2 text-[11px]',
@@ -56,7 +114,13 @@ export function SelectDropdown<T extends string | number>({
           <button
             type="button"
             id={id}
+            role="combobox"
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            aria-controls={listboxId}
+            aria-label={ariaLabel || (typeof selectedOption?.label === 'string' ? selectedOption.label : placeholder)}
             disabled={disabled}
+            onKeyDown={handleKeyDown}
             className={cn(
               'flex w-full items-center justify-between gap-2 rounded-geist border border-[#262626] bg-[#0a0a0a] text-[#ededed] transition-colors',
               'hover:border-[#383838] hover:bg-[#121212] focus:outline-none focus:ring-1 focus:ring-[#ededed]/40',
@@ -87,18 +151,28 @@ export function SelectDropdown<T extends string | number>({
         <PopoverContent
           align="start"
           sideOffset={4}
+          onKeyDown={handleKeyDown}
           className={cn(
             'w-[var(--radix-popover-trigger-width)] min-w-[140px] max-h-60 overflow-y-auto p-1 bg-[#111111] border border-[#262626] rounded-geist shadow-2xl',
             contentClassName
           )}
         >
-          <div className="flex flex-col gap-0.5">
-            {options.map((opt) => {
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-label={ariaLabel || placeholder}
+            className="flex flex-col gap-0.5"
+          >
+            {options.map((opt, index) => {
               const isSelected = opt.value === value;
+              const isHighlighted = index === highlightedIndex;
               return (
                 <button
                   key={String(opt.value)}
                   type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseEnter={() => setHighlightedIndex(index)}
                   onClick={() => {
                     onChange(opt.value);
                     setOpen(false);
@@ -107,7 +181,9 @@ export function SelectDropdown<T extends string | number>({
                     'flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs rounded-[4px] transition-colors',
                     isSelected
                       ? 'bg-[#1e1e1e] text-[#ededed] font-medium'
-                      : 'text-[#a1a1a1] hover:bg-[#161616] hover:text-[#ededed]'
+                      : isHighlighted
+                        ? 'bg-[#161616] text-[#ededed]'
+                        : 'text-[#a1a1a1] hover:bg-[#161616] hover:text-[#ededed]'
                   )}
                 >
                   <div className="flex items-center gap-2 min-w-0 truncate">

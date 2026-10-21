@@ -103,13 +103,19 @@ func TestShareStoreGrantedLeasesPruning(t *testing.T) {
 		t.Fatalf("failed to save expired lease: %v", err)
 	}
 
-	// GetGrantedLeases must automatically prune expiredLease
-	leases := store.GetGrantedLeases()
-	if len(leases) != 1 {
-		t.Fatalf("expected 1 active lease, got %d", len(leases))
+	// GetActiveGrantedLeases returns only active unexpired leases
+	activeLeases := store.GetActiveGrantedLeases()
+	if len(activeLeases) != 1 {
+		t.Fatalf("expected 1 active lease, got %d", len(activeLeases))
 	}
-	if leases[0].LeaseID != "ls_active" {
-		t.Errorf("expected ls_active, got %s", leases[0].LeaseID)
+	if activeLeases[0].LeaseID != "ls_active" {
+		t.Errorf("expected ls_active, got %s", activeLeases[0].LeaseID)
+	}
+
+	// GetGrantedLeases retains history for dashboard audit & reporting
+	allLeases := store.GetGrantedLeases()
+	if len(allLeases) != 2 {
+		t.Fatalf("expected 2 leases in history, got %d", len(allLeases))
 	}
 
 	// Revoke the active lease
@@ -121,9 +127,15 @@ func TestShareStoreGrantedLeasesPruning(t *testing.T) {
 		t.Errorf("expected revoked.Revoked to be true")
 	}
 
-	// Now GetGrantedLeases should return 0 leases
-	leasesAfterRevoke := store.GetGrantedLeases()
-	if len(leasesAfterRevoke) != 0 {
-		t.Fatalf("expected 0 leases after revoke, got %d", len(leasesAfterRevoke))
+	// Now GetActiveGrantedLeases should return 0 active leases
+	activeAfterRevoke := store.GetActiveGrantedLeases()
+	if len(activeAfterRevoke) != 0 {
+		t.Fatalf("expected 0 active leases after revoke, got %d", len(activeAfterRevoke))
+	}
+
+	// But history in GetGrantedLeases retains the revoked status
+	historyAfterRevoke := store.GetGrantedLeases()
+	if len(historyAfterRevoke) != 2 {
+		t.Fatalf("expected 2 leases retained in history after revoke, got %d", len(historyAfterRevoke))
 	}
 }

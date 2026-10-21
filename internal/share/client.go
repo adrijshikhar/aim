@@ -63,3 +63,35 @@ func (c *Client) RequestLease(ctx context.Context, peerIP, profile, agent string
 	}
 	return &leaseResp, nil
 }
+
+func (c *Client) PollLease(ctx context.Context, peerIP, requestID string) (*LeaseResponse, error) {
+	baseURL := c.baseURLOverride
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://%s:%d", peerIP, c.port)
+	}
+
+	reqURL := fmt.Sprintf("%s/api/share/poll?request_id=%s", baseURL, requestID)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("request %s not found or expired", requestID)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("peer returned status %s", resp.Status)
+	}
+
+	var leaseResp LeaseResponse
+	if err := json.NewDecoder(resp.Body).Decode(&leaseResp); err != nil {
+		return nil, err
+	}
+	return &leaseResp, nil
+}

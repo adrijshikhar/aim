@@ -558,13 +558,13 @@ export async function requestShareLease(payload: {
   profile: string;
   agent: string;
   hours: number;
-}): Promise<{ ok: boolean; local_profile?: string; expires_at?: string; status?: string; message?: string }> {
+}): Promise<{ ok: boolean; local_profile?: string; agent?: string; expires_at?: string; status?: string; message?: string }> {
   const res = await fetch(`${BASE_URL}/share/request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  return handleResponse<{ ok: boolean; local_profile?: string; expires_at?: string; status?: string; message?: string }>(res);
+  return handleResponse<{ ok: boolean; local_profile?: string; agent?: string; expires_at?: string; status?: string; message?: string }>(res);
 }
 
 export async function releaseShareLease(profile: string): Promise<{ ok: boolean }> {
@@ -574,6 +574,13 @@ export async function releaseShareLease(profile: string): Promise<{ ok: boolean 
     body: JSON.stringify({ profile }),
   });
   return handleResponse<{ ok: boolean }>(res);
+}
+
+export async function cleanExpiredLeases(): Promise<{ ok: boolean; cleaned: number }> {
+  const res = await fetch(`${BASE_URL}/share/clean-expired`, {
+    method: 'POST',
+  });
+  return handleResponse<{ ok: boolean; cleaned: number }>(res);
 }
 
 export async function getSchedules(): Promise<SchedulePolicyDTO[]> {

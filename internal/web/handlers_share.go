@@ -41,7 +41,7 @@ type ActiveLeaseInfo struct {
 
 func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 	vpn, _ := share.DetectVPN()
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 
 	// Live refresh of known peers if requested or on poll
 	if r.URL.Query().Get("refresh") == "true" {
@@ -130,7 +130,7 @@ func (s *Server) handleSetGlobalMode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "mode is required", http.StatusBadRequest)
 		return
 	}
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	if err := store.SetGlobalMode(req.Mode); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -159,7 +159,7 @@ func (s *Server) handleToggleShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	if !req.Enabled {
 		if err := store.DisableProfile(req.Name); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -198,7 +198,7 @@ func (s *Server) handleToggleShare(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSharePeers(w http.ResponseWriter, r *http.Request) {
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	peers := store.GetPeers()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(peers)
@@ -215,7 +215,7 @@ func (s *Server) handleAddSharePeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	disc := share.NewDiscovery(store, 4319)
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
@@ -247,15 +247,15 @@ func (s *Server) handleRequestShareLease(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	targetHost := req.Peer
 	for _, p := range store.GetPeers() {
 		shortHost := strings.TrimSuffix(strings.ToLower(p.HostName), ".local")
 		if strings.EqualFold(p.HostName, req.Peer) || strings.EqualFold(shortHost, strings.ToLower(req.Peer)) || p.VPNIP == req.Peer {
-			if p.HostName != "" {
-				targetHost = p.HostName
-			} else {
+			if p.VPNIP != "" {
 				targetHost = p.VPNIP
+			} else if p.HostName != "" {
+				targetHost = p.HostName
 			}
 			break
 		}
@@ -291,6 +291,7 @@ func (s *Server) handleRequestShareLease(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":            true,
 		"local_profile": localName,
+		"agent":         resp.Agent,
 		"expires_at":    resp.ExpiresAt,
 	})
 }
@@ -316,6 +317,21 @@ func (s *Server) handleReleaseShareLease(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
+func (s *Server) handleCleanExpiredShareLeases(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
+	cleaned, err := mgr.CleanExpiredLeases()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "cleaned": cleaned})
+}
+
 type RevokeLeasePayload struct {
 	LeaseID string `json:"lease_id"`
 }
@@ -331,7 +347,7 @@ func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	revoked, err := store.RevokeGrantedLease(req.LeaseID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -415,14 +431,14 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetShareAudit(w http.ResponseWriter, r *http.Request) {
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	logs := store.GetAuditLogs(100)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(logs)
 }
 
 func (s *Server) handleGetSchedules(w http.ResponseWriter, r *http.Request) {
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	schedules := store.GetSchedules()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(schedules)
@@ -441,7 +457,35 @@ func (s *Server) handleSaveSchedule(w http.ResponseWriter, r *http.Request) {
 		sched.Mode = "auto"
 	}
 
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
+	if sched.Scope != "global" && sched.Scope != "" {
+		// Ensure profile is registered in shared_profiles so teammates can discover & borrow it
+		all := store.GetSharedProfiles()
+		exists := false
+		for _, p := range all {
+			if p.Name == sched.Scope {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			agent := "claude"
+			profRoot := filepath.Join(config.BaseDir(), "profiles", sched.Scope)
+			if entries, err := os.ReadDir(profRoot); err == nil {
+				for _, e := range entries {
+					if strings.HasPrefix(e.Name(), ".claude") {
+						agent = "claude"
+					} else if strings.HasPrefix(e.Name(), ".codex") {
+						agent = "codex"
+					} else if strings.HasPrefix(e.Name(), ".gemini") {
+						agent = "gemini"
+					}
+				}
+			}
+			_ = store.EnableProfile(sched.Scope, agent, sched.Mode == "auto", 4*time.Hour)
+		}
+	}
+
 	if err := store.SaveSchedule(sched); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -467,7 +511,7 @@ func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := share.NewStore(config.BaseDir())
+	store := s.getShareStore()
 	if err := store.DeleteSchedule(req.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

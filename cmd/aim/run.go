@@ -65,12 +65,14 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			if len(extraArgs) > 0 && extraArgs[0] == "--" {
 				extraArgs = extraArgs[1:]
 			}
-			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName), autoCreate)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
+			if !strings.Contains(profileName, ":") {
+				ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName), autoCreate)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
 			}
 
 			if reg != nil {
@@ -158,16 +160,38 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 				resp, reqErr = client.RequestLease(reqCtx, hostPart+".local", profPart, adapter.Name(), 2)
 			}
 			cancel()
-			if reqErr == nil && resp != nil && resp.Status == "approved" {
-				if _, installErr := mgr.InstallLease(hostPart, profPart, resp); installErr == nil {
-					fmt.Printf("%s Auto-acquired lease for %s from %s (expires %s)\n",
-						lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
-						profPart, hostPart, resp.ExpiresAt.Format("15:04:05"))
+			if reqErr != nil || resp == nil || resp.Status != "approved" {
+				errReason := "lease request failed"
+				if reqErr != nil {
+					errReason = reqErr.Error()
+				} else if resp != nil {
+					errReason = resp.Status
+					if resp.Message != "" {
+						errReason += ": " + resp.Message
+					}
 				}
+				fmt.Fprintf(os.Stderr, "Error: Could not acquire lease for %q from %s: %s\n", profPart, hostPart, errReason)
+				return 1
 			}
+			installedName, installErr := mgr.InstallLease(hostPart, profPart, resp)
+			if installErr != nil {
+				fmt.Fprintf(os.Stderr, "Error: Failed to install lease: %v\n", installErr)
+				return 1
+			}
+			profileName = installedName
+			pDir = filepath.Join(pm.ProfilesRoot(), profileName)
+			fmt.Printf("%s Auto-acquired lease for %s from %s (expires %s)\n",
+				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
+				profPart, hostPart, resp.ExpiresAt.Format("15:04:05"))
 		}
 		if mgr.IsLeaseExpired(profileName) {
 			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired. Please renew the lease via 'aim share request %s %s' or the web dashboard.\n", profileName, hostPart, profPart)
+			return 1
+		}
+	} else {
+		mgr := share.NewLeaseManager(pm.ProfilesRoot())
+		if mgr.HasLease(profileName) && mgr.IsLeaseExpired(profileName) {
+			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired. Please renew or release the lease.\n", profileName)
 			return 1
 		}
 	}

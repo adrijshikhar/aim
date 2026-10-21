@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -25,15 +24,17 @@ type PendingRequestInfo struct {
 }
 
 type Server struct {
-	store       *ShareStore
-	profilesDir string
-	nodeID      string
-	port        int
-	mux         *http.ServeMux
-	httpServer  *http.Server
-	listener    net.Listener
-	pendingMu   sync.Mutex
-	pending     map[string]*pendingRequest
+	store           *ShareStore
+	profilesDir     string
+	nodeID          string
+	port            int
+	mux             *http.ServeMux
+	httpServer      *http.Server
+	listener        net.Listener
+	pendingMu       sync.Mutex
+	pending         map[string]*pendingRequest
+	approvedResults map[string]*LeaseResponse
+	deniedResults   map[string]bool
 }
 
 type pendingRequest struct {
@@ -44,12 +45,14 @@ type pendingRequest struct {
 
 func NewServer(store *ShareStore, profilesDir string, nodeID string, port int) *Server {
 	s := &Server{
-		store:       store,
-		profilesDir: profilesDir,
-		nodeID:      nodeID,
-		port:        port,
-		mux:         http.NewServeMux(),
-		pending:     make(map[string]*pendingRequest),
+		store:           store,
+		profilesDir:     profilesDir,
+		nodeID:          nodeID,
+		port:            port,
+		mux:             http.NewServeMux(),
+		pending:         make(map[string]*pendingRequest),
+		approvedResults: make(map[string]*LeaseResponse),
+		deniedResults:   make(map[string]bool),
 	}
 	s.routes()
 	return s
@@ -57,6 +60,18 @@ func NewServer(store *ShareStore, profilesDir string, nodeID string, port int) *
 
 func (s *Server) Handler() http.Handler {
 	return s.mux
+}
+
+func (s *Server) SetListener(ln net.Listener) {
+	s.listener = ln
+}
+
+func (s *Server) Serve(ln net.Listener) error {
+	s.listener = ln
+	s.httpServer = &http.Server{
+		Handler: s.mux,
+	}
+	return s.httpServer.Serve(ln)
 }
 
 func (s *Server) Start(addr string) error {
@@ -81,10 +96,42 @@ func (s *Server) Close() error {
 	return nil
 }
 
+func isLocalhost(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host == "localhost"
+	}
+	return ip.IsLoopback()
+}
+
+func isPrivateOrVPNIP(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host == "localhost"
+	}
+	if ip.IsLoopback() || ip.IsPrivate() {
+		return true
+	}
+	_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
+	if cgnat != nil && cgnat.Contains(ip) {
+		return true
+	}
+	return false
+}
+
 func (s *Server) routes() {
 	s.mux.HandleFunc("/api/share/ping", s.handlePing)
 	s.mux.HandleFunc("/api/share/profiles", s.handleListProfiles)
 	s.mux.HandleFunc("/api/share/request", s.handleRequest)
+	s.mux.HandleFunc("/api/share/poll", s.handlePoll)
 	s.mux.HandleFunc("/api/share/pending", s.handlePending)
 	s.mux.HandleFunc("/api/share/approve", s.handleApprove)
 	s.mux.HandleFunc("/api/share/deny", s.handleDeny)
@@ -95,18 +142,15 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	gMode := s.store.GetEffectiveGlobalMode()
 	var profiles []SharedProfileConfig
 	var names []string
-	if gMode != "off" {
-		for _, p := range s.store.GetSharedProfiles() {
-			enabled, autoApprove := s.store.GetEffectiveProfileMode(p.Name)
-			if enabled {
-				p.AutoApprove = autoApprove
-				p.Enabled = true
-				profiles = append(profiles, p)
-				names = append(names, p.Name)
-			}
+	for _, p := range s.store.GetSharedProfiles() {
+		enabled, autoApprove := s.store.GetEffectiveProfileMode(p.Name)
+		if enabled {
+			p.AutoApprove = autoApprove
+			p.Enabled = true
+			profiles = append(profiles, p)
+			names = append(names, p.Name)
 		}
 	}
 	host, _ := os.Hostname()
@@ -126,13 +170,6 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	gMode := s.store.GetEffectiveGlobalMode()
-	if gMode == "off" {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]SharedProfileConfig{})
-		return
-	}
-
 	allProfiles := s.store.GetSharedProfiles()
 	var exposed []SharedProfileConfig
 	for _, p := range allProfiles {
@@ -151,6 +188,10 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isPrivateOrVPNIP(r.RemoteAddr) {
+		http.Error(w, "Forbidden: lease requests only accepted from private VPN / LAN subnets", http.StatusForbidden)
 		return
 	}
 	var req LeaseRequest
@@ -186,11 +227,15 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		leaseID := generateID("ls")
-		hours := req.RequestedHours
-		if hours <= 0 || time.Duration(hours)*time.Hour > matched.MaxLeaseTTL {
-			hours = int(matched.MaxLeaseTTL.Hours())
+		duration := time.Duration(req.RequestedHours) * time.Hour
+		if duration <= 0 || (matched.MaxLeaseTTL > 0 && duration > matched.MaxLeaseTTL) {
+			if matched.MaxLeaseTTL > 0 {
+				duration = matched.MaxLeaseTTL
+			} else {
+				duration = 2 * time.Hour
+			}
 		}
-		expiresAt := time.Now().Add(time.Duration(hours) * time.Hour)
+		expiresAt := time.Now().Add(duration)
 		resp := LeaseResponse{
 			Status:      "approved",
 			LeaseID:     leaseID,
@@ -204,7 +249,7 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		if borrowerID == "" {
 			borrowerID = r.RemoteAddr
 		}
-		_ = s.store.SaveGrantedLease(GrantedLease{
+		if err := s.store.SaveGrantedLease(GrantedLease{
 			LeaseID:      leaseID,
 			ProfileName:  matched.Name,
 			Agent:        matched.Agent,
@@ -214,14 +259,17 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt:    expiresAt,
 			Revoked:      false,
 			AutoApproved: true,
-		})
+		}); err != nil {
+			http.Error(w, "failed to record granted lease: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		_ = s.store.AppendAudit(AuditEntry{
 			Action:  "LEASE_GRANTED",
 			Actor:   borrowerID,
 			Profile: matched.Name,
 			Agent:   matched.Agent,
-			Details: fmt.Sprintf("Auto-approved lease %s (%s) for %dh to %s", leaseID, matched.Name, hours, borrowerID),
+			Details: fmt.Sprintf("Auto-approved lease %s (%s) for %v to %s", leaseID, matched.Name, duration, borrowerID),
 		})
 
 		w.Header().Set("Content-Type", "application/json")
@@ -266,14 +314,70 @@ func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !isLocalhost(r) {
+		http.Error(w, "Forbidden: pending list requires local host authorization", http.StatusForbidden)
+		return
+	}
 	pending := s.GetPendingRequests()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(pending)
 }
 
+func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	reqID := r.URL.Query().Get("request_id")
+	if reqID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+
+	if resp, ok := s.approvedResults[reqID]; ok {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	if s.deniedResults[reqID] {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":     "denied",
+			"request_id": reqID,
+			"message":    "Lease request was denied by host",
+		})
+		return
+	}
+
+	if pr, ok := s.pending[reqID]; ok {
+		if time.Now().After(pr.info.ExpiresAt) {
+			delete(s.pending, reqID)
+			http.Error(w, "request expired", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":     "pending",
+			"request_id": reqID,
+			"message":    "approval pending on host",
+		})
+		return
+	}
+
+	http.Error(w, "request not found or expired", http.StatusNotFound)
+}
+
 func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isLocalhost(r) {
+		http.Error(w, "Forbidden: approve requires local host authorization", http.StatusForbidden)
 		return
 	}
 	var req struct {
@@ -295,6 +399,10 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeny(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isLocalhost(r) {
+		http.Error(w, "Forbidden: deny requires local host authorization", http.StatusForbidden)
 		return
 	}
 	var req struct {
@@ -344,11 +452,15 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read credentials: %w", err)
 	}
-	hours := pr.info.Request.RequestedHours
-	if hours <= 0 || time.Duration(hours)*time.Hour > pr.matched.MaxLeaseTTL {
-		hours = int(pr.matched.MaxLeaseTTL.Hours())
+	duration := time.Duration(pr.info.Request.RequestedHours) * time.Hour
+	if duration <= 0 || (pr.matched.MaxLeaseTTL > 0 && duration > pr.matched.MaxLeaseTTL) {
+		if pr.matched.MaxLeaseTTL > 0 {
+			duration = pr.matched.MaxLeaseTTL
+		} else {
+			duration = 2 * time.Hour
+		}
 	}
-	expiresAt := time.Now().Add(time.Duration(hours) * time.Hour)
+	expiresAt := time.Now().Add(duration)
 	leaseID := generateID("ls")
 	resp := &LeaseResponse{
 		Status:      "approved",
@@ -359,7 +471,7 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		Payload:     payload,
 	}
 
-	_ = s.store.SaveGrantedLease(GrantedLease{
+	if err := s.store.SaveGrantedLease(GrantedLease{
 		LeaseID:      leaseID,
 		ProfileName:  pr.matched.Name,
 		Agent:        pr.matched.Agent,
@@ -369,14 +481,27 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		ExpiresAt:    expiresAt,
 		Revoked:      false,
 		AutoApproved: false,
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("failed to record granted lease: %w", err)
+	}
+
+	s.pendingMu.Lock()
+	s.approvedResults[reqID] = resp
+	s.pendingMu.Unlock()
+
+	if pr.respCh != nil {
+		select {
+		case pr.respCh <- resp:
+		default:
+		}
+	}
 
 	_ = s.store.AppendAudit(AuditEntry{
 		Action:  "LEASE_GRANTED",
 		Actor:   pr.info.Request.RequesterID,
 		Profile: pr.matched.Name,
 		Agent:   pr.matched.Agent,
-		Details: fmt.Sprintf("Manually approved lease %s (%s) for %dh", leaseID, pr.matched.Name, hours),
+		Details: fmt.Sprintf("Manually approved lease %s (%s) for %v", leaseID, pr.matched.Name, duration),
 	})
 
 	return resp, nil
@@ -387,6 +512,7 @@ func (s *Server) DenyRequest(reqID string) error {
 	pr, exists := s.pending[reqID]
 	if exists {
 		delete(s.pending, reqID)
+		s.deniedResults[reqID] = true
 	}
 	s.pendingMu.Unlock()
 	if !exists {
@@ -417,47 +543,29 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 			".claude/settings.json",
 		} {
 			p := filepath.Join(profDir, filepath.FromSlash(rel))
-			if data, err := os.ReadFile(p); err == nil {
+			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
 				files[rel] = base64.StdEncoding.EncodeToString(data)
 			}
 		}
 	case "codex":
-		codexAuth := filepath.Join(profDir, ".codex", "auth.json")
-		if _, err := os.Stat(codexAuth); os.IsNotExist(err) {
-			realHome := config.RealHomeDir()
-			hostAuth := filepath.Join(realHome, ".codex", "auth.json")
-			if data, err := os.ReadFile(hostAuth); err == nil && len(data) > 0 {
-				_ = os.MkdirAll(filepath.Dir(codexAuth), 0700)
-				_ = os.WriteFile(codexAuth, data, 0600)
-			}
-		}
 		for _, rel := range []string{
 			".codex/auth.json",
 			".codex/config.toml",
 			".config/codex/auth.json",
 		} {
 			p := filepath.Join(profDir, filepath.FromSlash(rel))
-			if data, err := os.ReadFile(p); err == nil {
+			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
 				files[rel] = base64.StdEncoding.EncodeToString(data)
 			}
 		}
 	case "agy":
-		agyAuth := filepath.Join(profDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-		if _, err := os.Stat(agyAuth); os.IsNotExist(err) {
-			realHome := config.RealHomeDir()
-			hostAgy := filepath.Join(realHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-			if data, err := os.ReadFile(hostAgy); err == nil && len(data) > 0 {
-				_ = os.MkdirAll(filepath.Dir(agyAuth), 0700)
-				_ = os.WriteFile(agyAuth, data, 0600)
-			}
-		}
 		for _, rel := range []string{
 			".gemini/antigravity-cli/antigravity-oauth-token",
 			".gemini/antigravity-cli/config.json",
 			".config/gcloud/application_default_credentials.json",
 		} {
 			p := filepath.Join(profDir, filepath.FromSlash(rel))
-			if data, err := os.ReadFile(p); err == nil {
+			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
 				files[rel] = base64.StdEncoding.EncodeToString(data)
 			}
 		}
@@ -467,10 +575,14 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 			".gemini/oauth.json",
 		} {
 			p := filepath.Join(profDir, filepath.FromSlash(rel))
-			if data, err := os.ReadFile(p); err == nil {
+			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
 				files[rel] = base64.StdEncoding.EncodeToString(data)
 			}
 		}
+	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no credentials found for profile %q (agent %s)", profileName, agent)
 	}
 
 	return &SharePayload{Files: files}, nil

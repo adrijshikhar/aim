@@ -31,10 +31,20 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	// Format as host:<profile_name> (e.g., Adrijs-MacBook-Pro:work)
 	cleanPeer := strings.TrimSuffix(strings.TrimSuffix(sourcePeer, ".local"), ".LOCAL")
 	sanitizedPeer := strings.ReplaceAll(cleanPeer, ".", "-")
-	localProfileName := fmt.Sprintf("%s:%s", sanitizedPeer, profileName)
+	sanitizedPeer = strings.ReplaceAll(sanitizedPeer, "/", "-")
+	sanitizedPeer = strings.ReplaceAll(sanitizedPeer, "\\", "-")
+	sanitizedProfile := strings.ReplaceAll(profileName, "/", "-")
+	sanitizedProfile = strings.ReplaceAll(sanitizedProfile, "\\", "-")
+	localProfileName := fmt.Sprintf("%s:%s", sanitizedPeer, sanitizedProfile)
 	targetDir := filepath.Join(m.profilesDir, localProfileName)
 
-	if err := os.MkdirAll(targetDir, 0700); err != nil {
+	cleanTargetDir := filepath.Clean(targetDir)
+	cleanProfilesRoot := filepath.Clean(m.profilesDir)
+	if !strings.HasPrefix(cleanTargetDir, cleanProfilesRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid profile target path traversal: %s", localProfileName)
+	}
+
+	if err := os.MkdirAll(cleanTargetDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create ephemeral profile dir: %w", err)
 	}
 
@@ -49,13 +59,41 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	}
 	metaData, err := json.MarshalIndent(meta, "", "  ")
 	if err == nil {
-		_ = os.WriteFile(filepath.Join(targetDir, ".aim-lease.json"), metaData, 0600)
+		_ = os.WriteFile(filepath.Join(cleanTargetDir, ".aim-lease.json"), metaData, 0600)
 	}
 
-	// Write credential files
+	allowedPrefixes := []string{
+		".claude",
+		".codex",
+		".gemini",
+		".config/codex",
+		".config/gcloud",
+	}
+
+	// Write credential files with strict path validation
 	if resp.Payload != nil && resp.Payload.Files != nil {
 		for relPath, b64 := range resp.Payload.Files {
-			fullPath := filepath.Join(targetDir, relPath)
+			cleanRel := filepath.Clean(relPath)
+			if filepath.IsAbs(cleanRel) || strings.HasPrefix(cleanRel, "..") {
+				return "", fmt.Errorf("illegal relative path in payload: %s", relPath)
+			}
+			slashRel := filepath.ToSlash(cleanRel)
+			isAllowed := false
+			for _, prefix := range allowedPrefixes {
+				if strings.HasPrefix(slashRel, prefix) {
+					isAllowed = true
+					break
+				}
+			}
+			if !isAllowed {
+				return "", fmt.Errorf("disallowed credential path in payload: %s", relPath)
+			}
+
+			fullPath := filepath.Join(cleanTargetDir, cleanRel)
+			if !strings.HasPrefix(filepath.Clean(fullPath), cleanTargetDir+string(filepath.Separator)) {
+				return "", fmt.Errorf("path traversal in credential path: %s", relPath)
+			}
+
 			if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
 				return "", fmt.Errorf("failed to create dir for %s: %w", relPath, err)
 			}
@@ -72,6 +110,12 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	return localProfileName, nil
 }
 
+func (m *LeaseManager) HasLease(localProfileName string) bool {
+	metaFile := filepath.Join(m.profilesDir, localProfileName, ".aim-lease.json")
+	_, err := os.Stat(metaFile)
+	return err == nil
+}
+
 func (m *LeaseManager) IsLeaseExpired(localProfileName string) bool {
 	metaFile := filepath.Join(m.profilesDir, localProfileName, ".aim-lease.json")
 	data, err := os.ReadFile(metaFile)
@@ -86,6 +130,42 @@ func (m *LeaseManager) IsLeaseExpired(localProfileName string) bool {
 }
 
 func (m *LeaseManager) ReleaseLease(localProfileName string) error {
+	if localProfileName == "" || localProfileName == "." || localProfileName == ".." ||
+		strings.Contains(localProfileName, "/") || strings.Contains(localProfileName, "\\") {
+		return fmt.Errorf("invalid profile name: %q", localProfileName)
+	}
+
 	targetDir := filepath.Join(m.profilesDir, localProfileName)
-	return os.RemoveAll(targetDir)
+	cleanTarget := filepath.Clean(targetDir)
+	cleanProfilesRoot := filepath.Clean(m.profilesDir)
+	if !strings.HasPrefix(cleanTarget, cleanProfilesRoot+string(filepath.Separator)) {
+		return fmt.Errorf("profile path escapes profiles root: %q", localProfileName)
+	}
+
+	// Strictly require .aim-lease.json so permanent non-leased profiles cannot be removed
+	leaseFile := filepath.Join(cleanTarget, ".aim-lease.json")
+	if _, err := os.Stat(leaseFile); os.IsNotExist(err) {
+		return fmt.Errorf("profile %q is not an ephemeral leased profile (missing .aim-lease.json)", localProfileName)
+	}
+
+	return os.RemoveAll(cleanTarget)
+}
+
+func (m *LeaseManager) CleanExpiredLeases() (int, error) {
+	entries, err := os.ReadDir(m.profilesDir)
+	if err != nil {
+		return 0, err
+	}
+	cleaned := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if m.IsLeaseExpired(e.Name()) {
+			if err := m.ReleaseLease(e.Name()); err == nil {
+				cleaned++
+			}
+		}
+	}
+	return cleaned, nil
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,18 +43,26 @@ func (s *ShareStore) EnableProfile(profileName, agent string, autoApprove bool, 
 		if configs[i].Name == profileName {
 			configs[i].Agent = agent
 			configs[i].AutoApprove = autoApprove
-			configs[i].MaxLeaseTTL = ttl
+			if ttl > 0 {
+				configs[i].MaxLeaseTTL = ttl
+			} else if configs[i].MaxLeaseTTL <= 0 {
+				configs[i].MaxLeaseTTL = 4 * time.Hour
+			}
 			configs[i].Enabled = true
 			found = true
 			break
 		}
 	}
 	if !found {
+		effTTL := ttl
+		if effTTL <= 0 {
+			effTTL = 4 * time.Hour
+		}
 		configs = append(configs, SharedProfileConfig{
 			Name:        profileName,
 			Agent:       agent,
 			AutoApprove: autoApprove,
-			MaxLeaseTTL: ttl,
+			MaxLeaseTTL: effTTL,
 			Enabled:     true,
 		})
 	}
@@ -116,7 +125,15 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 	peers := s.loadPeersLocked()
 	found := false
 	for i := range peers {
-		if peers[i].VPNIP == peer.VPNIP || (peer.ID != "" && peers[i].ID == peer.ID) {
+		match := false
+		if peer.ID != "" && peers[i].ID == peer.ID {
+			match = true
+		} else if peer.HostName != "" && strings.EqualFold(peers[i].HostName, peer.HostName) {
+			match = true
+		} else if peer.VPNIP != "" && (peers[i].VPNIP == peer.VPNIP || strings.Split(peers[i].VPNIP, ":")[0] == strings.Split(peer.VPNIP, ":")[0]) {
+			match = true
+		}
+		if match {
 			peers[i] = peer
 			found = true
 			break
@@ -198,23 +215,26 @@ func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 		_ = json.Unmarshal(data, &leases)
 	}
 
-	now := time.Now()
-	var unexpired []GrantedLease
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	var retained []GrantedLease
 	found := false
 	for _, l := range leases {
 		if l.LeaseID == lease.LeaseID {
-			unexpired = append(unexpired, lease)
+			retained = append(retained, lease)
 			found = true
-		} else if !l.Revoked && now.Before(l.ExpiresAt) {
-			unexpired = append(unexpired, l)
+		} else if l.GrantedAt.After(cutoff) || l.ExpiresAt.After(cutoff) {
+			retained = append(retained, l)
 		}
 	}
 	if !found {
-		unexpired = append(unexpired, lease)
+		retained = append(retained, lease)
+	}
+	if len(retained) > 100 {
+		retained = retained[len(retained)-100:]
 	}
 
 	_ = os.MkdirAll(s.aimDir, 0700)
-	data, err := json.MarshalIndent(unexpired, "", "  ")
+	data, err := json.MarshalIndent(retained, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -244,22 +264,23 @@ func (s *ShareStore) pruneExpiredGrantedLeasesLocked() ([]GrantedLease, int) {
 			pruned++
 		}
 	}
-	if pruned > 0 {
-		if len(active) == 0 {
-			_ = os.Remove(s.grantedFile)
-		} else {
-			if outData, err := json.MarshalIndent(active, "", "  "); err == nil {
-				tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
-				if err := os.WriteFile(tmp, outData, 0600); err == nil {
-					_ = os.Rename(tmp, s.grantedFile)
-				}
-			}
-		}
-	}
 	return active, pruned
 }
 
+// GetGrantedLeases returns all retained granted leases (active, revoked, and recent expired history within 7 days).
 func (s *ShareStore) GetGrantedLeases() []GrantedLease {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var leases []GrantedLease
+	if data, err := os.ReadFile(s.grantedFile); err == nil {
+		_ = json.Unmarshal(data, &leases)
+	}
+	return leases
+}
+
+// GetActiveGrantedLeases returns only currently active, non-revoked leases.
+func (s *ShareStore) GetActiveGrantedLeases() []GrantedLease {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -285,34 +306,27 @@ func (s *ShareStore) RevokeGrantedLease(leaseID string) (*GrantedLease, error) {
 	}
 
 	var revoked *GrantedLease
-	var remaining []GrantedLease
-	now := time.Now()
 	for i := range leases {
 		if leases[i].LeaseID == leaseID {
 			leases[i].Revoked = true
 			revoked = &leases[i]
-		} else if !leases[i].Revoked && now.Before(leases[i].ExpiresAt) {
-			remaining = append(remaining, leases[i])
+			break
 		}
 	}
 	if revoked == nil {
 		return nil, fmt.Errorf("lease %s not found", leaseID)
 	}
 
-	if len(remaining) == 0 {
-		_ = os.Remove(s.grantedFile)
-	} else {
-		data, err := json.MarshalIndent(remaining, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
-		if err := os.WriteFile(tmp, data, 0600); err != nil {
-			return nil, err
-		}
-		if err := os.Rename(tmp, s.grantedFile); err != nil {
-			return nil, err
-		}
+	data, err := json.MarshalIndent(leases, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(tmp, s.grantedFile); err != nil {
+		return nil, err
 	}
 	return revoked, nil
 }

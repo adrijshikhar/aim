@@ -119,11 +119,11 @@ aim share list
 aim share request teammate-mac.local/work --agent claude --hours 4
 
 # 6. Run coding assistant under the isolated borrowed profile
-aim run claude teammate-mac.local:work
+aim run claude teammate-mac:work
 
 # 7. Check lease status, release early, or inspect active leases
 aim share status
-aim share release teammate-mac.local:work
+aim share release teammate-mac:work
 ```
 
 You can also manage network mesh policies, live peer discovery, active borrower leases, and audit logs graphically via the Web Dashboard at `http://localhost:18480/network`.

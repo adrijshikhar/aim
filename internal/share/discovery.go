@@ -68,7 +68,8 @@ func (d *DiscoveryService) PingPeerWithURL(ctx context.Context, rawURL string) (
 }
 
 func (d *DiscoveryService) PingPeer(ctx context.Context, ip string) (*PeerInfo, error) {
-	url := fmt.Sprintf("http://%s:%d", ip, d.port)
+	host := strings.Split(ip, ":")[0]
+	url := fmt.Sprintf("http://%s:%d", host, d.port)
 	return d.PingPeerWithURL(ctx, url)
 }
 
@@ -90,15 +91,21 @@ func (d *DiscoveryService) RefreshPeers(ctx context.Context) ([]PeerInfo, error)
 			if target == "" {
 				target = peer.VPNIP
 			}
+			hostOnly := strings.Split(target, ":")[0]
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
-			res, err := d.PingPeer(pingCtx, target)
-			if err != nil && !strings.Contains(target, ".") {
-				res, err = d.PingPeer(pingCtx, target+".local")
+			res, err := d.PingPeer(pingCtx, hostOnly)
+			if err != nil && peer.VPNIP != "" && peer.VPNIP != target {
+				vpnHostOnly := strings.Split(peer.VPNIP, ":")[0]
+				res, err = d.PingPeer(pingCtx, vpnHostOnly)
+			}
+			if err != nil && !strings.Contains(hostOnly, ".") {
+				res, err = d.PingPeer(pingCtx, hostOnly+".local")
 			}
 			mu.Lock()
 			if err == nil && res != nil {
 				updated = append(updated, *res)
+				_ = d.store.SavePeer(*res)
 			} else {
 				updated = append(updated, peer)
 			}

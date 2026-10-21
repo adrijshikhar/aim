@@ -458,20 +458,27 @@ export function ProfilesView({
 
   React.useEffect(() => {
     if (!currentProfile) return;
+    let cancelled = false;
+    setShareConfig({ enabled: false, auto_approve: false, ttl: '4h' });
     getShareStatus()
       .then((status) => {
+        if (cancelled) return;
         const found = status.shared_profiles?.find((p) => p.name === currentProfile.name);
         if (found) {
+          const ttlHours = typeof found.max_lease_ttl === 'number' ? Math.round(found.max_lease_ttl / (3600 * 1e9)) : 4;
           setShareConfig({
             enabled: found.enabled,
             auto_approve: found.auto_approve,
-            ttl: '4h',
+            ttl: ttlHours > 0 ? `${ttlHours}h` : '4h',
           });
         } else {
           setShareConfig({ enabled: false, auto_approve: false, ttl: '4h' });
         }
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [currentProfile?.name]);
 
   const handleSetShareMode = async (mode: ShareMode) => {

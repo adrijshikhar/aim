@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -194,5 +196,96 @@ func TestSchedulePolicyActive(t *testing.T) {
 	}
 	if spFuture.IsActive(now) {
 		t.Errorf("expected future schedule to be inactive, got true")
+	}
+}
+
+func TestServerApproveRequiresLocalhost(t *testing.T) {
+	aimDir := t.TempDir()
+	store := NewStore(aimDir)
+	_ = store.SetGlobalMode("request")
+	_ = store.EnableProfile("work", "claude", false, 4*time.Hour)
+
+	profilesDir := filepath.Join(aimDir, "profiles")
+	server := NewServer(store, profilesDir, "alice-node", 4319)
+
+	// Simulate remote request by setting RemoteAddr to a non-localhost IP
+	req := httptest.NewRequest("POST", "/api/share/approve", strings.NewReader(`{"request_id":"req_123"}`))
+	req.RemoteAddr = "192.168.1.100:54321" // Remote peer on network
+	w := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for remote caller to /api/share/approve, got %d", w.Code)
+	}
+
+	// Verify local caller is allowed to attempt approve
+	localReq := httptest.NewRequest("POST", "/api/share/approve", strings.NewReader(`{"request_id":"req_123"}`))
+	localReq.RemoteAddr = "127.0.0.1:54321"
+	localW := httptest.NewRecorder()
+	server.Handler().ServeHTTP(localW, localReq)
+	// Not found (404) because req_123 doesn't exist, but NOT forbidden (403)!
+	if localW.Code != http.StatusNotFound {
+		t.Errorf("expected 404 Not Found for local caller, got %d", localW.Code)
+	}
+}
+
+func TestServerPollLeaseEndpoint(t *testing.T) {
+	aimDir := t.TempDir()
+	store := NewStore(aimDir)
+	_ = store.SetGlobalMode("request")
+	_ = store.EnableProfile("work", "claude", false, 4*time.Hour)
+
+	profilesDir := filepath.Join(aimDir, "profiles")
+	workDir := filepath.Join(profilesDir, "work", ".claude")
+	_ = os.MkdirAll(workDir, 0700)
+	_ = os.WriteFile(filepath.Join(workDir, ".credentials.json"), []byte(`{"token":"secret-token"}`), 0600)
+
+	server := NewServer(store, profilesDir, "alice-node", 4319)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client := NewClient(4319)
+	client.baseURLOverride = ts.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// 1. Borrower requests lease (returns pending)
+	resp, err := client.RequestLease(ctx, "127.0.0.1", "work", "claude", 2)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.Status != "pending" {
+		t.Fatalf("expected pending, got %s", resp.Status)
+	}
+
+	// 2. Poll while still pending
+	pollResp, err := client.PollLease(ctx, "127.0.0.1", resp.RequestID)
+	if err != nil {
+		t.Fatalf("poll failed: %v", err)
+	}
+	if pollResp.Status != "pending" {
+		t.Errorf("expected poll status pending, got %s", pollResp.Status)
+	}
+
+	// 3. Host approves request
+	approved, err := server.ApproveRequest(resp.RequestID)
+	if err != nil {
+		t.Fatalf("failed to approve: %v", err)
+	}
+	if approved.Status != "approved" {
+		t.Fatalf("expected approved, got %s", approved.Status)
+	}
+
+	// 4. Poll after approval -> returns approved lease with credentials!
+	pollApproved, err := client.PollLease(ctx, "127.0.0.1", resp.RequestID)
+	if err != nil {
+		t.Fatalf("poll failed after approval: %v", err)
+	}
+	if pollApproved.Status != "approved" || pollApproved.Payload == nil {
+		t.Fatalf("expected approved with payload, got: %+v", pollApproved)
+	}
+	if _, ok := pollApproved.Payload.Files[".claude/.credentials.json"]; !ok {
+		t.Errorf("expected credential file in poll payload")
 	}
 }

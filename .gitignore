@@ -13,7 +13,7 @@ node_modules/
 .DS_Store
 
 # Agents, tooling, and local harness configs
-.agents/
+.agents
 .catalyst/
 .claude/
 .codex/

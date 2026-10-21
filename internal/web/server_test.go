@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/service"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/web"
 )
 
@@ -1223,7 +1224,9 @@ func TestCrossOriginProtection(t *testing.T) {
 }
 
 func TestShareEndpoints(t *testing.T) {
+	tempDir := t.TempDir()
 	server := web.NewServer(&mockProfileService{}, nil, nil, 0, false)
+	server.SetShareStore(share.NewStore(tempDir))
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 

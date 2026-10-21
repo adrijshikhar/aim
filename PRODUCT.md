@@ -4,7 +4,7 @@
 
 ## Platform
 
-adaptive
+web
 
 ## Users
 Software engineers, AI agent power users, and development team leads managing multiple AI coding assistants (Antigravity/agy, Codex, Claude Code, Gemini). They switch between multiple accounts (work, personal, client, enterprise) throughout the day, navigate strict rate limits and quota resets, and collaborate with teammates over local network or VPN meshes to pool quota.

@@ -51,3 +51,121 @@ func TestLeaseManagerInstallAndExpiry(t *testing.T) {
 		t.Errorf("expected directory deleted after release")
 	}
 }
+
+func TestLeaseManagerPathTraversalRejection(t *testing.T) {
+	profilesDir := t.TempDir()
+	mgr := NewLeaseManager(profilesDir)
+
+	// Attempt path traversal using ../../evil.txt
+	resp := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_evil",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				"../../evil.txt": base64.StdEncoding.EncodeToString([]byte("pwned")),
+			},
+		},
+	}
+
+	_, err := mgr.InstallLease("attacker", "work", resp)
+	if err == nil {
+		t.Fatalf("expected InstallLease to reject path traversal, but succeeded")
+	}
+
+	// Attempt unauthorized file write (e.g. .ssh/id_rsa)
+	resp2 := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_ssh",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".ssh/authorized_keys": base64.StdEncoding.EncodeToString([]byte("pwned")),
+			},
+		},
+	}
+
+	_, err = mgr.InstallLease("attacker", "work", resp2)
+	if err == nil {
+		t.Fatalf("expected InstallLease to reject non-credential file .ssh/authorized_keys, but succeeded")
+	}
+}
+
+func TestLeaseManagerReleaseSafety(t *testing.T) {
+	profilesDir := t.TempDir()
+	mgr := NewLeaseManager(profilesDir)
+
+	// Permanent profile (no .aim-lease.json)
+	permDir := filepath.Join(profilesDir, "work")
+	_ = os.MkdirAll(permDir, 0700)
+	_ = os.WriteFile(filepath.Join(permDir, "config.json"), []byte("{}"), 0600)
+
+	// ReleaseLease MUST fail on permanent profile
+	err := mgr.ReleaseLease("work")
+	if err == nil {
+		t.Fatalf("expected ReleaseLease on permanent profile without .aim-lease.json to fail, but succeeded")
+	}
+	// Verify permanent profile was NOT deleted
+	if _, err := os.Stat(filepath.Join(permDir, "config.json")); err != nil {
+		t.Errorf("permanent profile file was deleted! %v", err)
+	}
+
+	// ReleaseLease on path traversal names
+	if err := mgr.ReleaseLease("../profiles"); err == nil {
+		t.Fatalf("expected ReleaseLease with traversal to fail")
+	}
+	if err := mgr.ReleaseLease("."); err == nil {
+		t.Fatalf("expected ReleaseLease with . to fail")
+	}
+}
+
+func TestLeaseManagerCleanExpired(t *testing.T) {
+	profilesDir := t.TempDir()
+	mgr := NewLeaseManager(profilesDir)
+
+	// Leased profile 1: expired
+	expiredResp := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_exp",
+		ProfileName: "old",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(-10 * time.Minute), // expired
+	}
+	p1, err := mgr.InstallLease("peer1", "old", expiredResp)
+	if err != nil {
+		t.Fatalf("failed to install expired lease: %v", err)
+	}
+
+	// Leased profile 2: active
+	activeResp := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_act",
+		ProfileName: "current",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(2 * time.Hour), // active
+	}
+	p2, err := mgr.InstallLease("peer2", "current", activeResp)
+	if err != nil {
+		t.Fatalf("failed to install active lease: %v", err)
+	}
+
+	cleaned, err := mgr.CleanExpiredLeases()
+	if err != nil {
+		t.Fatalf("CleanExpiredLeases failed: %v", err)
+	}
+	if cleaned != 1 {
+		t.Errorf("expected 1 cleaned lease, got %d", cleaned)
+	}
+
+	// p1 should be deleted, p2 should still exist
+	if _, err := os.Stat(filepath.Join(profilesDir, p1)); !os.IsNotExist(err) {
+		t.Errorf("expected expired profile %s to be deleted", p1)
+	}
+	if _, err := os.Stat(filepath.Join(profilesDir, p2)); err != nil {
+		t.Errorf("expected active profile %s to still exist: %v", p2, err)
+	}
+}

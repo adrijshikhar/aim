@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -29,6 +31,7 @@ func newShareCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 	cmd.AddCommand(
 		newShareEnableCmd(pm),
 		newShareDisableCmd(pm),
+		newShareModeCmd(),
 		newShareStatusCmd(pm),
 		newShareListCmd(pm),
 		newShareRequestCmd(pm),
@@ -37,6 +40,32 @@ func newShareCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 		newShareServeCmd(pm),
 	)
 	return cmd
+}
+
+func newShareModeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "mode [off|request|auto]",
+		Short: "Get or set global sharing mode",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store := share.NewStore(config.BaseDir())
+			if len(args) == 0 {
+				mode := store.GetEffectiveGlobalMode()
+				fmt.Printf("Global sharing mode: %s\n", mode)
+				return nil
+			}
+			target := strings.ToLower(args[0])
+			if target != "off" && target != "request" && target != "auto" {
+				return fmt.Errorf("invalid mode %q (must be 'off', 'request', or 'auto')", target)
+			}
+			if err := store.SetGlobalMode(target); err != nil {
+				return err
+			}
+			fmt.Printf("%s Global sharing mode set to %s\n",
+				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"), target)
+			return nil
+		},
+	}
 }
 
 func newShareEnableCmd(pm *profile.ProfileManager) *cobra.Command {
@@ -55,6 +84,11 @@ func newShareEnableCmd(pm *profile.ProfileManager) *cobra.Command {
 				ttl = 4 * time.Hour
 			}
 			store := share.NewStore(config.BaseDir())
+			if store.GetGlobalMode() == "off" {
+				_ = store.SetGlobalMode("request")
+				fmt.Printf("%s Global sharing mode set to 'request' (required to share profiles)\n",
+					lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"))
+			}
 			if err := store.EnableProfile(profName, agent, autoApprove, ttl); err != nil {
 				return err
 			}
@@ -183,7 +217,34 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("lease request failed: %w", err)
 			}
-			if resp.Status != "approved" {
+			if resp.Status == "pending" {
+				fmt.Printf("%s Request submitted (id: %s). Waiting for teammate approval (press Ctrl+C to cancel)...\n",
+					lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("⏳"),
+					resp.RequestID)
+				pollTicker := time.NewTicker(2 * time.Second)
+				defer pollTicker.Stop()
+				pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer pollCancel()
+
+				approved := false
+				for !approved {
+					select {
+					case <-pollCtx.Done():
+						return fmt.Errorf("approval timed out after 2 minutes")
+					case <-pollTicker.C:
+						pResp, pErr := client.PollLease(pollCtx, targetHost, resp.RequestID)
+						if pErr == nil && pResp != nil {
+							if pResp.Status == "approved" {
+								resp = pResp
+								approved = true
+								break
+							} else if pResp.Status == "denied" {
+								return fmt.Errorf("teammate denied lease request: %s", pResp.Message)
+							}
+						}
+					}
+				}
+			} else if resp.Status != "approved" {
 				fmt.Printf("%s Request status: %s (%s)\n",
 					lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("!"),
 					resp.Status, resp.Message)
@@ -196,11 +257,16 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 				return fmt.Errorf("failed to install credentials: %w", err)
 			}
 
+			runAgent := resp.Agent
+			if runAgent == "" {
+				runAgent = agent
+			}
+
 			fmt.Printf("%s Lease granted until %s\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 				resp.ExpiresAt.Format(time.RFC1123))
 			fmt.Printf("Run natively with: %s\n",
-				lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(fmt.Sprintf("aim run %s %s", agent, localName)))
+				lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(fmt.Sprintf("aim run %s %s", runAgent, localName)))
 			return nil
 		},
 	}
@@ -268,22 +334,33 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 			server := share.NewServer(store, pm.ProfilesRoot(), host, port)
 
 			addr := fmt.Sprintf("0.0.0.0:%d", port)
+			ln, err := net.Listen("tcp", addr)
+			if err != nil {
+				return fmt.Errorf("failed to bind %s: %w", addr, err)
+			}
+
 			fmt.Printf("%s AIM P2P Share Server listening on %s (press Ctrl+C to stop)\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 				addr)
 
+			errCh := make(chan error, 1)
 			go func() {
-				if err := server.Start(addr); err != nil {
-					fmt.Fprintf(os.Stderr, "server stopped: %v\n", err)
+				if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+					errCh <- err
 				}
 			}()
 
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			<-sigCh
-			_ = server.Close()
-			fmt.Println("\nShare server stopped.")
-			return nil
+			select {
+			case sig := <-sigCh:
+				_ = server.Close()
+				fmt.Printf("\nShare server stopped (%s).\n", sig)
+				return nil
+			case err := <-errCh:
+				_ = server.Close()
+				return fmt.Errorf("share server error: %w", err)
+			}
 		},
 	}
 	cmd.Flags().IntVarP(&port, "port", "p", 4319, "Port to listen on")
