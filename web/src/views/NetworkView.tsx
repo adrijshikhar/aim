@@ -15,7 +15,6 @@ import {
   ShieldAlert,
   Activity,
   Calendar,
-  Settings,
 } from 'lucide-react';
 import {
   getShareStatus,
@@ -80,8 +79,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const [leaseHours, setLeaseHours] = React.useState<number>(4);
   const [isRequesting, setIsRequesting] = React.useState(false);
 
-  // Schedule Modal state (Duration & Calendar Date-Time Picker)
-  const [isScheduleModalOpen, setIsScheduleModalOpen] = React.useState(false);
+  // Schedule & Automation state (Duration & Calendar Date-Time Picker)
   const [schedScope, setSchedScope] = React.useState<string>('global');
   const [schedMode, setSchedMode] = React.useState<'auto' | 'request'>('auto');
   const [schedType, setSchedType] = React.useState<'recurring' | 'calendar'>('recurring');
@@ -264,7 +262,6 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         description: `Configured ${schedScope === 'global' ? 'Global' : schedScope} ${schedMode === 'auto' ? 'Auto-Approve' : 'Request'} (${schedStartTime} - ${schedEndTime})`,
         variant: 'success',
       });
-      setIsScheduleModalOpen(false);
       await loadStatus(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save schedule';
@@ -605,15 +602,6 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             </button>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsScheduleModalOpen(true)}
-            className="h-8 w-8 p-0 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-muted-foreground hover:text-foreground flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
-            title={activeSchedulesCount > 0 ? `Sharing Schedules (${activeSchedulesCount} active)` : 'Sharing Schedules & Automation'}
-          >
-            <Settings className="h-3.5 w-3.5" />
-          </Button>
         </div>
       </div>
 
@@ -1191,27 +1179,275 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             )}
           </section>
 
-          {/* Automation & Time Windows Card */}
-          <div className="p-4 rounded-geist border border-[#222222] bg-[#0c0c0c] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-3.5 w-3.5 text-accent-cyan" />
-                <span className="text-xs font-semibold text-foreground">Automation & Time Windows</span>
+          {/* Scheduled Sharing & Automation Card (Housed directly in My Sharing) */}
+          <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+            <CardHeader className="p-5 pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-accent-cyan" />
+                  <CardTitle className="text-sm font-semibold text-foreground">
+                    Automation & Scheduled Windows
+                  </CardTitle>
+                  {activeSchedulesCount > 0 && (
+                    <Badge
+                      variant="outline"
+                      className="text-xs font-mono py-0 px-2 rounded-full border-border bg-[#183925] text-[#98c379]"
+                    >
+                      {activeSchedulesCount} active now
+                    </Badge>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground font-mono">
+                  Time-based sharing policies
+                </span>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Automatically enable sharing after work hours (e.g. 10pm - 8am) or on weekends to let teammates borrow surplus quota without manual prompts.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsScheduleModalOpen(true)}
-              className="h-8 rounded-geist text-xs font-mono border-border bg-[#141414] hover:bg-[#1f1f1f] shrink-0 cursor-pointer"
-            >
-              <Settings className="h-3.5 w-3.5 mr-1.5" />
-              Configure Schedules
-            </Button>
-          </div>
+              <CardDescription className="text-xs text-muted-foreground pt-1">
+                Automatically switch sharing modes or auto-approve teammate requests during off-peak hours (e.g. nights or weekends).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-5 pt-0 space-y-4">
+              <form onSubmit={handleSaveSchedulePolicy} className="space-y-4 p-4 rounded-geist bg-[#0f0f0f] border border-[#1f1f1f]">
+                {/* Scope & Policy Mode */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
+                      Target Scope
+                    </label>
+                    <SelectDropdown
+                      value={schedScope}
+                      onChange={(val) => setSchedScope(String(val))}
+                      size="sm"
+                      options={[
+                        { value: 'global', label: 'Global (All Profiles)' },
+                        ...ownProfiles.map((p) => ({ value: p.name, label: `Profile: ${p.name}` })),
+                      ]}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
+                      Policy Mode in Window
+                    </label>
+                    <SelectDropdown
+                      value={schedMode}
+                      onChange={(val) => setSchedMode(val as 'auto' | 'request')}
+                      size="sm"
+                      options={[
+                        { value: 'auto', label: 'Auto Approve (Instant)' },
+                        { value: 'request', label: 'Request Mode (Manual)' },
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                {/* Schedule Type Selection */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
+                    Schedule Window Type
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSchedType('recurring')}
+                      className={cn(
+                        'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center gap-2 cursor-pointer',
+                        schedType === 'recurring'
+                          ? 'bg-[#181818] border-accent-cyan text-foreground font-semibold'
+                          : 'bg-[#121212] border-[#262626] text-muted-foreground hover:bg-[#161616]'
+                      )}
+                    >
+                      <Clock className="h-3.5 w-3.5 text-accent-cyan" />
+                      <span>Daily Recurring Hours</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSchedType('calendar')}
+                      className={cn(
+                        'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center gap-2 cursor-pointer',
+                        schedType === 'calendar'
+                          ? 'bg-[#181818] border-accent-cyan text-foreground font-semibold'
+                          : 'bg-[#121212] border-[#262626] text-muted-foreground hover:bg-[#161616]'
+                      )}
+                    >
+                      <Calendar className="h-3.5 w-3.5 text-accent-cyan" />
+                      <span>Calendar Date Range</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Recurring Time Pickers with Quick Chips */}
+                {schedType === 'recurring' ? (
+                  <div className="space-y-2.5 p-3 rounded-geist bg-[#141414] border border-[#222222]">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono text-muted-foreground">
+                      <span>Recurring Daily Hours</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => { setSchedStartTime('00:00'); setSchedEndTime('08:00'); }}
+                          className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-accent-cyan transition-colors cursor-pointer"
+                        >
+                          12am - 8am
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setSchedStartTime('22:00'); setSchedEndTime('06:00'); }}
+                          className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        >
+                          10pm - 6am
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setSchedStartTime('09:00'); setSchedEndTime('18:00'); }}
+                          className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        >
+                          9am - 6pm
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <span className="text-xs font-mono text-muted-foreground">From Time</span>
+                        <input
+                          type="time"
+                          value={schedStartTime}
+                          onChange={(e) => setSchedStartTime(e.target.value)}
+                          required
+                          className="w-full h-8 px-2.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs font-mono text-muted-foreground">To Time</span>
+                        <input
+                          type="time"
+                          value={schedEndTime}
+                          onChange={(e) => setSchedEndTime(e.target.value)}
+                          required
+                          className="w-full h-8 px-2.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 p-3 rounded-geist bg-[#141414] border border-[#222222]">
+                    <span className="text-xs font-mono text-muted-foreground block">
+                      Calendar Date & Time Interval
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <span className="text-xs font-mono text-muted-foreground">Start Date & Time</span>
+                        <div className="flex gap-1.5">
+                          <input
+                            type="date"
+                            value={schedStartDate}
+                            onChange={(e) => setSchedStartDate(e.target.value)}
+                            required
+                            className="w-2/3 h-8 px-2 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                          />
+                          <input
+                            type="time"
+                            value={schedStartTime}
+                            onChange={(e) => setSchedStartTime(e.target.value)}
+                            required
+                            className="w-1/3 h-8 px-1.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs font-mono text-muted-foreground">End Date & Time</span>
+                        <div className="flex gap-1.5">
+                          <input
+                            type="date"
+                            value={schedEndDate}
+                            onChange={(e) => setSchedEndDate(e.target.value)}
+                            required
+                            className="w-2/3 h-8 px-2 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                          />
+                          <input
+                            type="time"
+                            value={schedEndTime}
+                            onChange={(e) => setSchedEndTime(e.target.value)}
+                            required
+                            className="w-1/3 h-8 px-1.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-1">
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isSavingSchedule}
+                    className="h-8 rounded-geist bg-[#0070f3] hover:bg-[#0060df] text-xs font-mono text-white flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    <span>{isSavingSchedule ? 'Saving...' : 'Add Scheduled Policy'}</span>
+                  </Button>
+                </div>
+              </form>
+
+              {/* Existing Scheduled Policies */}
+              {data?.schedules && data.schedules.length > 0 ? (
+                <div className="space-y-2 pt-2 border-t border-[#222222]">
+                  <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium block">
+                    Active & Configured Policies ({data.schedules.length})
+                  </span>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {data.schedules.map((sc) => {
+                      const isActive = isScheduleActiveNow(sc);
+                      return (
+                        <div
+                          key={sc.id}
+                          className="p-2.5 rounded-geist bg-[#111111] border border-[#222222] flex items-center justify-between text-xs font-mono"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                'h-2 w-2 rounded-full shrink-0',
+                                isActive ? 'bg-[#10b981]' : 'bg-[#666666]'
+                              )}
+                              title={isActive ? 'Active Now' : 'Scheduled'}
+                            />
+                            <span className="font-bold text-foreground">
+                              {sc.scope === 'global' ? 'Global' : sc.scope}
+                            </span>
+                            <span
+                              className={cn(
+                                'text-xs px-1.5 py-0.5 rounded border',
+                                sc.mode === 'auto'
+                                  ? 'bg-[#183925] text-[#98c379] border-[#235836]'
+                                  : 'bg-[#142334] text-[#52a8ff] border-[#1f4068]'
+                              )}
+                            >
+                              {sc.mode === 'auto' ? 'Auto' : 'Request'}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {sc.start_date ? `${sc.start_date} ` : ''}{sc.start_time} – {sc.end_date ? `${sc.end_date} ` : ''}{sc.end_time}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSchedulePolicy(sc.id)}
+                            className="text-muted-foreground hover:text-status-danger cursor-pointer p-1"
+                            title="Delete schedule"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs text-muted-foreground font-mono">
+                  No scheduled policies configured. Sharing respects the global and per-profile switches above.
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* TAB 3: AUDIT LOG */}
@@ -1546,310 +1782,6 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         </DialogContent>
       </Dialog>
 
-      {/* P2P Sharing Settings Modal */}
-      <Dialog open={isScheduleModalOpen} onOpenChange={setIsScheduleModalOpen}>
-        <DialogContent className="max-w-lg bg-[#111111] border-[#262626] text-[#ededed] p-6 shadow-2xl rounded-geist">
-          <DialogHeader className="space-y-1 pb-3 border-b border-[#222222] pr-6">
-            <div className="flex items-center gap-2">
-              <Settings className="h-5 w-5 text-accent-cyan" />
-              <DialogTitle className="text-base font-semibold text-[#ededed]">
-                Sharing Settings & Policies
-              </DialogTitle>
-            </div>
-            <DialogDescription className="text-xs text-[#888888]">
-              Configure base mesh sharing policy, duration-based auto-approve windows, or calendar intervals.
-            </DialogDescription>
-          </DialogHeader>
-
-          {/* Section 1: Default Mesh Policy when ON */}
-          <div className="p-3 rounded-geist bg-[#141414] border border-[#222222] space-y-2 mt-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-medium text-foreground">
-                Base Policy Mode
-              </span>
-              <span className="text-xs font-mono text-muted-foreground">
-                Applied when Sharing is ON
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleGlobalModeChange('request')}
-                className={cn(
-                  'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center justify-between cursor-pointer',
-                  currentGlobalMode === 'request'
-                    ? 'bg-[#142334] border-[#1f4068] text-[#52a8ff] font-semibold'
-                    : 'bg-[#101010] border-[#222222] text-muted-foreground hover:bg-[#161616]'
-                )}
-              >
-                <span>Request Mode (Manual)</span>
-                <span className={cn('h-1.5 w-1.5 rounded-full', currentGlobalMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]')} />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleGlobalModeChange('auto')}
-                className={cn(
-                  'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center justify-between cursor-pointer',
-                  currentGlobalMode === 'auto'
-                    ? 'bg-[#183925] border-[#235836] text-[#98c379] font-semibold'
-                    : 'bg-[#101010] border-[#222222] text-muted-foreground hover:bg-[#161616]'
-                )}
-              >
-                <span>Auto Approve (Instant)</span>
-                <span className={cn('h-1.5 w-1.5 rounded-full', currentGlobalMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]')} />
-              </button>
-            </div>
-          </div>
-
-          <form onSubmit={handleSaveSchedulePolicy} className="space-y-4 pt-1">
-            {/* Scope & Policy Mode */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
-                  Target Scope
-                </label>
-                <SelectDropdown
-                  value={schedScope}
-                  onChange={(val) => setSchedScope(String(val))}
-                  size="sm"
-                  options={[
-                    { value: 'global', label: 'Global (All Profiles)' },
-                    ...ownProfiles.map((p) => ({ value: p.name, label: `Profile: ${p.name}` })),
-                  ]}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
-                  Policy Mode in Window
-                </label>
-                <SelectDropdown
-                  value={schedMode}
-                  onChange={(val) => setSchedMode(val as 'auto' | 'request')}
-                  size="sm"
-                  options={[
-                    { value: 'auto', label: 'Auto Approve (Instant)' },
-                    { value: 'request', label: 'Request Mode (Manual)' },
-                  ]}
-                />
-              </div>
-            </div>
-
-            {/* Schedule Type Selection */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium">
-                Schedule Window Type
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSchedType('recurring')}
-                  className={cn(
-                    'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center gap-2 cursor-pointer',
-                    schedType === 'recurring'
-                      ? 'bg-[#181818] border-accent-cyan text-foreground font-semibold'
-                      : 'bg-[#121212] border-[#262626] text-muted-foreground hover:bg-[#161616]'
-                  )}
-                >
-                  <Clock className="h-3.5 w-3.5 text-accent-cyan" />
-                  <span>Daily Recurring Hours</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSchedType('calendar')}
-                  className={cn(
-                    'px-3 py-2 text-xs font-mono rounded-geist border transition-all text-left flex items-center gap-2 cursor-pointer',
-                    schedType === 'calendar'
-                      ? 'bg-[#181818] border-accent-cyan text-foreground font-semibold'
-                      : 'bg-[#121212] border-[#262626] text-muted-foreground hover:bg-[#161616]'
-                  )}
-                >
-                  <Calendar className="h-3.5 w-3.5 text-accent-cyan" />
-                  <span>Calendar Date Range</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Recurring Time Pickers with Quick Chips */}
-            {schedType === 'recurring' ? (
-              <div className="space-y-2.5 p-3 rounded-geist bg-[#141414] border border-[#222222]">
-                <div className="flex items-center justify-between text-xs font-mono text-muted-foreground">
-                  <span>Recurring Daily Hours</span>
-                  {/* Preset quick chips */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => { setSchedStartTime('00:00'); setSchedEndTime('08:00'); }}
-                      className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-accent-cyan transition-colors cursor-pointer"
-                    >
-                      12am - 8am
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setSchedStartTime('22:00'); setSchedEndTime('06:00'); }}
-                      className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                    >
-                      10pm - 6am
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setSchedStartTime('09:00'); setSchedEndTime('18:00'); }}
-                      className="px-2 py-0.5 rounded text-xs font-mono bg-[#1f1f1f] hover:bg-[#282828] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                    >
-                      9am - 6pm
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <span className="text-xs font-mono text-muted-foreground">From Time</span>
-                    <input
-                      type="time"
-                      value={schedStartTime}
-                      onChange={(e) => setSchedStartTime(e.target.value)}
-                      required
-                      className="w-full h-8 px-2.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-xs font-mono text-muted-foreground">To Time</span>
-                    <input
-                      type="time"
-                      value={schedEndTime}
-                      onChange={(e) => setSchedEndTime(e.target.value)}
-                      required
-                      className="w-full h-8 px-2.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Calendar Date & Time Picker */
-              <div className="space-y-2.5 p-3 rounded-geist bg-[#141414] border border-[#222222]">
-                <span className="text-xs font-mono text-muted-foreground block">
-                  Calendar Date & Time Interval
-                </span>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <span className="text-xs font-mono text-muted-foreground">Start Date & Time</span>
-                    <div className="flex gap-1.5">
-                      <input
-                        type="date"
-                        value={schedStartDate}
-                        onChange={(e) => setSchedStartDate(e.target.value)}
-                        required
-                        className="w-2/3 h-8 px-2 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
-                      />
-                      <input
-                        type="time"
-                        value={schedStartTime}
-                        onChange={(e) => setSchedStartTime(e.target.value)}
-                        required
-                        className="w-1/3 h-8 px-1.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-xs font-mono text-muted-foreground">End Date & Time</span>
-                    <div className="flex gap-1.5">
-                      <input
-                        type="date"
-                        value={schedEndDate}
-                        onChange={(e) => setSchedEndDate(e.target.value)}
-                        required
-                        className="w-2/3 h-8 px-2 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
-                      />
-                      <input
-                        type="time"
-                        value={schedEndTime}
-                        onChange={(e) => setSchedEndTime(e.target.value)}
-                        required
-                        className="w-1/3 h-8 px-1.5 rounded-geist bg-[#0c0c0c] border border-[#262626] text-xs font-mono text-[#ededed] focus:outline-none focus:border-accent-cyan"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <DialogFooter className="pt-2 border-t border-[#222222]">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsScheduleModalOpen(false)}
-                className="h-8 rounded-geist border-border bg-[#1a1a1a] hover:bg-[#242424] text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={isSavingSchedule}
-                className="h-8 rounded-geist bg-[#0070f3] hover:bg-[#0060df] text-xs font-mono text-white flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <Check className="h-3.5 w-3.5" />
-                <span>Save Schedule</span>
-              </Button>
-            </DialogFooter>
-          </form>
-
-          {/* Active Configured Schedules List */}
-          {data?.schedules && data.schedules.length > 0 && (
-            <div className="mt-4 pt-3 border-t border-[#222222] space-y-2">
-              <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground font-medium block">
-                Existing Scheduled Policies ({data.schedules.length})
-              </span>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                {data.schedules.map((sc) => {
-                  const isActive = isScheduleActiveNow(sc);
-                  return (
-                    <div
-                      key={sc.id}
-                      className="p-2 rounded-geist bg-[#141414] border border-[#222222] flex items-center justify-between text-xs font-mono"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            'h-2 w-2 rounded-full shrink-0',
-                            isActive ? 'bg-[#10b981]' : 'bg-[#666666]'
-                          )}
-                          title={isActive ? 'Active Now' : 'Scheduled'}
-                        />
-                        <span className="font-bold text-foreground">
-                          {sc.scope === 'global' ? 'Global' : sc.scope}
-                        </span>
-                        <span
-                          className={cn(
-                            'text-xs px-1.5 py-0.5 rounded border',
-                            sc.mode === 'auto'
-                              ? 'bg-[#183925] text-[#98c379] border-[#235836]'
-                              : 'bg-[#142334] text-[#52a8ff] border-[#1f4068]'
-                          )}
-                        >
-                          {sc.mode === 'auto' ? 'Auto' : 'Request'}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {sc.start_date ? `${sc.start_date} ` : ''}{sc.start_time} – {sc.end_date ? `${sc.end_date} ` : ''}{sc.end_time}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSchedulePolicy(sc.id)}
-                        className="text-muted-foreground hover:text-status-danger cursor-pointer p-1"
-                        title="Delete schedule"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
