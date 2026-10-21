@@ -561,3 +561,280 @@ func TestResumeCmd_DirectSessionIDWithoutProfile(t *testing.T) {
 		t.Errorf("expected --resume %s in args dump, got %q", sessionID, string(content))
 	}
 }
+
+func canonicalDir(t *testing.T, path string) string {
+	t.Helper()
+	eval, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return eval
+}
+
+func TestResumeCmd_DirectoryAware_And_SessionResumer(t *testing.T) {
+	t.Run("SessionResumer_Implementations", func(t *testing.T) {
+		// Claude
+		if resumer, ok := any(claude.NewAdapter()).(agents.SessionResumer); !ok {
+			t.Errorf("claude.Adapter does not implement agents.SessionResumer")
+		} else {
+			args := resumer.ResumeArgs("sess-claude-123", []string{"--flag", "val"})
+			expected := []string{"--resume", "sess-claude-123", "--flag", "val"}
+			if strings.Join(args, " ") != strings.Join(expected, " ") {
+				t.Errorf("claude ResumeArgs mismatch: expected %v, got %v", expected, args)
+			}
+		}
+
+		// Codex
+		if resumer, ok := any(codex.NewAdapter()).(agents.SessionResumer); !ok {
+			t.Errorf("codex.Adapter does not implement agents.SessionResumer")
+		} else {
+			args := resumer.ResumeArgs("sess-codex-123", []string{"--flag", "val"})
+			expected := []string{"resume", "sess-codex-123", "--flag", "val"}
+			if strings.Join(args, " ") != strings.Join(expected, " ") {
+				t.Errorf("codex ResumeArgs mismatch: expected %v, got %v", expected, args)
+			}
+		}
+
+		// Agy
+		if resumer, ok := any(agy.NewAdapter()).(agents.SessionResumer); !ok {
+			t.Errorf("agy.Adapter does not implement agents.SessionResumer")
+		} else {
+			args := resumer.ResumeArgs("sess-agy-123", []string{"--flag", "val"})
+			expected := []string{"--conversation=sess-agy-123", "--flag", "val"}
+			if strings.Join(args, " ") != strings.Join(expected, " ") {
+				t.Errorf("agy ResumeArgs mismatch: expected %v, got %v", expected, args)
+			}
+		}
+	})
+
+	t.Run("DirectoryPropagation_ValidCwd", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv("AIM_HOME", tempDir)
+		t.Setenv("AIM_REAL_HOME", tempDir)
+		t.Setenv("HOME", tempDir)
+
+		targetWorkDir := filepath.Join(tempDir, "custom-workspace")
+		if err := os.MkdirAll(targetWorkDir, 0755); err != nil {
+			t.Fatalf("failed to create target workspace: %v", err)
+		}
+
+		dumpFile := filepath.Join(tempDir, "cwd_dump.txt")
+		fakeBinDir := filepath.Join(tempDir, "bin")
+		_ = os.MkdirAll(fakeBinDir, 0755)
+		fakeClaude := filepath.Join(fakeBinDir, "claude")
+		fakeScript := fmt.Sprintf("#!/bin/sh\npwd > %q\nexit 0\n", dumpFile)
+		_ = os.WriteFile(fakeClaude, []byte(fakeScript), 0755)
+		t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+		reg := agents.NewRegistry()
+		reg.Register(claude.NewAdapter())
+		pm := profile.NewProfileManager(tempDir)
+		pDir, _ := pm.EnsureProfile("default")
+
+		var buf bytes.Buffer
+		cmd := newRootCmd(reg, pm)
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+
+		sess := &session.Session{
+			ID:           "test-cwd-session-1",
+			ShortID:      "test-cwd-1",
+			Title:        "CWD Test Session",
+			Agent:        "claude",
+			Profile:      "default",
+			Cwd:          targetWorkDir,
+			LastActiveAt: time.Now(),
+			Status:       session.StatusIdle,
+		}
+
+		err := executeExactResume(cmd, reg, pm, nil, "claude", "default", pDir, sess, false, nil)
+		if err != nil {
+			t.Fatalf("executeExactResume failed: %v", err)
+		}
+
+		content, err := os.ReadFile(dumpFile)
+		if err != nil {
+			t.Fatalf("failed to read cwd dump: %v", err)
+		}
+		gotCwd := strings.TrimSpace(string(content))
+		if canonicalDir(t, gotCwd) != canonicalDir(t, targetWorkDir) {
+			t.Errorf("expected working dir %q, got %q", canonicalDir(t, targetWorkDir), canonicalDir(t, gotCwd))
+		}
+	})
+
+	t.Run("DirectoryPropagation_FallbackEmptyCwd", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv("AIM_HOME", tempDir)
+		t.Setenv("AIM_REAL_HOME", tempDir)
+		t.Setenv("HOME", tempDir)
+
+		dumpFile := filepath.Join(tempDir, "cwd_dump_empty.txt")
+		fakeBinDir := filepath.Join(tempDir, "bin")
+		_ = os.MkdirAll(fakeBinDir, 0755)
+		fakeCodex := filepath.Join(fakeBinDir, "codex")
+		fakeScript := fmt.Sprintf("#!/bin/sh\npwd > %q\nexit 0\n", dumpFile)
+		_ = os.WriteFile(fakeCodex, []byte(fakeScript), 0755)
+		t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+		reg := agents.NewRegistry()
+		reg.Register(codex.NewAdapter())
+		pm := profile.NewProfileManager(tempDir)
+		pDir, _ := pm.EnsureProfile("default")
+
+		var buf bytes.Buffer
+		cmd := newRootCmd(reg, pm)
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+
+		sess := &session.Session{
+			ID:           "test-empty-cwd-session",
+			ShortID:      "test-empty-1",
+			Title:        "Empty CWD Test Session",
+			Agent:        "codex",
+			Profile:      "default",
+			Cwd:          "",
+			LastActiveAt: time.Now(),
+			Status:       session.StatusIdle,
+		}
+
+		expectedWd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("failed to get current working directory: %v", err)
+		}
+
+		err = executeExactResume(cmd, reg, pm, nil, "codex", "default", pDir, sess, false, nil)
+		if err != nil {
+			t.Fatalf("executeExactResume failed: %v", err)
+		}
+
+		content, err := os.ReadFile(dumpFile)
+		if err != nil {
+			t.Fatalf("failed to read cwd dump: %v", err)
+		}
+		gotCwd := strings.TrimSpace(string(content))
+		if canonicalDir(t, gotCwd) != canonicalDir(t, expectedWd) {
+			t.Errorf("expected fallback working dir %q, got %q", canonicalDir(t, expectedWd), canonicalDir(t, gotCwd))
+		}
+	})
+
+	t.Run("DirectoryPropagation_FallbackNonExistentCwd", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv("AIM_HOME", tempDir)
+		t.Setenv("AIM_REAL_HOME", tempDir)
+		t.Setenv("HOME", tempDir)
+
+		dumpFile := filepath.Join(tempDir, "cwd_dump_nonexistent.txt")
+		fakeBinDir := filepath.Join(tempDir, "bin")
+		_ = os.MkdirAll(fakeBinDir, 0755)
+		fakeAgy := filepath.Join(fakeBinDir, "agy")
+		fakeScript := fmt.Sprintf("#!/bin/sh\npwd > %q\nexit 0\n", dumpFile)
+		_ = os.WriteFile(fakeAgy, []byte(fakeScript), 0755)
+		t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+		reg := agents.NewRegistry()
+		reg.Register(agy.NewAdapter())
+		pm := profile.NewProfileManager(tempDir)
+		pDir, _ := pm.EnsureProfile("default")
+
+		var buf bytes.Buffer
+		cmd := newRootCmd(reg, pm)
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+
+		sess := &session.Session{
+			ID:           "test-nonexistent-cwd-session",
+			ShortID:      "test-nonexistent-1",
+			Title:        "Nonexistent CWD Test Session",
+			Agent:        "agy",
+			Profile:      "default",
+			Cwd:          filepath.Join(tempDir, "deleted", "workspace", "dir"),
+			LastActiveAt: time.Now(),
+			Status:       session.StatusIdle,
+		}
+
+		expectedWd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("failed to get current working directory: %v", err)
+		}
+
+		err = executeExactResume(cmd, reg, pm, nil, "agy", "default", pDir, sess, false, nil)
+		if err != nil {
+			t.Fatalf("executeExactResume failed: %v", err)
+		}
+
+		content, err := os.ReadFile(dumpFile)
+		if err != nil {
+			t.Fatalf("failed to read cwd dump: %v", err)
+		}
+		gotCwd := strings.TrimSpace(string(content))
+		if canonicalDir(t, gotCwd) != canonicalDir(t, expectedWd) {
+			t.Errorf("expected fallback working dir %q, got %q", canonicalDir(t, expectedWd), canonicalDir(t, gotCwd))
+		}
+	})
+
+	t.Run("CatalystResume_DirectoryPropagation", func(t *testing.T) {
+		gitBin, err := exec.LookPath("git")
+		if err != nil {
+			t.Skip("git not found in PATH")
+		}
+		tempDir := t.TempDir()
+		t.Setenv("AIM_HOME", tempDir)
+		t.Setenv("AIM_REAL_HOME", tempDir)
+		t.Setenv("HOME", tempDir)
+
+		_ = exec.Command(gitBin, "-C", tempDir, "init").Run()
+		_ = exec.Command(gitBin, "-C", tempDir, "checkout", "-b", "feat/catalyst-cwd").Run()
+
+		targetWorkDir := filepath.Join(tempDir, "catalyst-workspace")
+		if err := os.MkdirAll(targetWorkDir, 0755); err != nil {
+			t.Fatalf("failed to create target workspace: %v", err)
+		}
+
+		dumpFile := filepath.Join(tempDir, "catalyst_cwd_dump.txt")
+		fakeBinDir := filepath.Join(tempDir, "bin")
+		_ = os.MkdirAll(fakeBinDir, 0755)
+		fakeClaude := filepath.Join(fakeBinDir, "claude")
+		fakeScript := fmt.Sprintf("#!/bin/sh\npwd > %q\nexit 0\n", dumpFile)
+		_ = os.WriteFile(fakeClaude, []byte(fakeScript), 0755)
+		t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+		reg := agents.NewRegistry()
+		reg.Register(claude.NewAdapter())
+		pm := profile.NewProfileManager(tempDir)
+		_, _ = pm.EnsureProfile("default")
+
+		oldWd, _ := os.Getwd()
+		_ = os.Chdir(tempDir)
+		defer os.Chdir(oldWd)
+
+		var buf bytes.Buffer
+		cmd := newRootCmd(reg, pm)
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+
+		sess := &session.Session{
+			ID:           "test-catalyst-cwd-session",
+			ShortID:      "test-cat-1",
+			Title:        "Catalyst CWD Test Session",
+			Agent:        "claude",
+			Profile:      "default",
+			Cwd:          targetWorkDir,
+			LastActiveAt: time.Now(),
+			Status:       session.StatusIdle,
+		}
+
+		err = executeCatalystResume(cmd, reg, pm, "claude", "default", sess, nil)
+		if err != nil {
+			t.Fatalf("executeCatalystResume failed: %v", err)
+		}
+
+		content, err := os.ReadFile(dumpFile)
+		if err != nil {
+			t.Fatalf("failed to read cwd dump: %v", err)
+		}
+		gotCwd := strings.TrimSpace(string(content))
+		if canonicalDir(t, gotCwd) != canonicalDir(t, targetWorkDir) {
+			t.Errorf("expected working dir %q, got %q", canonicalDir(t, targetWorkDir), canonicalDir(t, gotCwd))
+		}
+	})
+}

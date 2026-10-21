@@ -32,11 +32,17 @@ var (
 	_ agents.UsageProvider         = (*Adapter)(nil)
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
+	_ agents.SessionResumer        = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
 type Adapter struct {
 	agents.BaseAdapter
+}
+
+// ResumeArgs returns the command-line arguments to resume a Codex CLI session.
+func (a *Adapter) ResumeArgs(sessionID string, extraArgs []string) []string {
+	return append([]string{"resume", sessionID}, extraArgs...)
 }
 
 func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {

@@ -65,12 +65,18 @@ var (
 	_ agents.UsageProvider         = (*Adapter)(nil)
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
+	_ agents.SessionResumer        = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 	_ agents.PostLauncher          = (*Adapter)(nil)
 )
 
 type Adapter struct {
 	agents.BaseAdapter
+}
+
+// ResumeArgs returns the command-line arguments to resume an Antigravity CLI conversation.
+func (a *Adapter) ResumeArgs(sessionID string, extraArgs []string) []string {
+	return append([]string{fmt.Sprintf("--conversation=%s", sessionID)}, extraArgs...)
 }
 
 func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/session/catalyst"
@@ -235,7 +236,33 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	code := executeRunWithSession(ctx, reg, pm, agent, profileName, sessID, launchArgs)
+
+	mgr := getSessionManager(ctx)
+	var workingDir string
+	var targetCwd string
+	if mgr != nil && sess != nil {
+		if resolved, err := mgr.ResolveCwd(ctx, sess); err == nil && resolved != "" {
+			targetCwd = resolved
+		}
+	}
+	if targetCwd == "" && sess != nil && sess.Cwd != "" {
+		targetCwd = sess.Cwd
+	}
+	if targetCwd != "" {
+		if fi, err := os.Stat(targetCwd); err == nil && fi.IsDir() {
+			workingDir = targetCwd
+		} else {
+			logger.Debug("[resume] Catalyst target cwd %q does not exist or is not a directory", targetCwd)
+		}
+	}
+
+	code := executeRunWithOptions(ctx, reg, pm, RunOptions{
+		AgentName:   agent,
+		ProfileName: profileName,
+		SessionID:   sessID,
+		WorkingDir:  workingDir,
+		ExtraArgs:   launchArgs,
+	})
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -302,15 +329,15 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		}
 	}
 
+	adapter, err := reg.Get(agent)
+	if err != nil {
+		return fmt.Errorf("failed to get adapter for agent %q: %w", agent, err)
+	}
+
 	var resumeArgs []string
-	switch agent {
-	case "agy":
-		resumeArgs = append([]string{fmt.Sprintf("--conversation=%s", resumeID)}, extraArgs...)
-	case "codex":
-		resumeArgs = append([]string{"resume", resumeID}, extraArgs...)
-	case "claude":
-		resumeArgs = append([]string{"--resume", resumeID}, extraArgs...)
-	default:
+	if resumer, ok := adapter.(agents.SessionResumer); ok {
+		resumeArgs = resumer.ResumeArgs(resumeID, extraArgs)
+	} else {
 		resumeArgs = append([]string{resumeID}, extraArgs...)
 	}
 
@@ -338,8 +365,32 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		profileName,
 	)
 
+	var workingDir string
+	var targetCwd string
+	if mgr != nil && sess != nil {
+		if resolved, err := mgr.ResolveCwd(ctx, sess); err == nil && resolved != "" {
+			targetCwd = resolved
+		}
+	}
+	if targetCwd == "" && sess != nil && sess.Cwd != "" {
+		targetCwd = sess.Cwd
+	}
+	if targetCwd != "" {
+		if fi, err := os.Stat(targetCwd); err == nil && fi.IsDir() {
+			workingDir = targetCwd
+		} else {
+			logger.Debug("[resume] session target cwd %q does not exist or is not a directory", targetCwd)
+		}
+	}
+
 	sessID := displayID
-	code := executeRunWithSession(ctx, reg, pm, agent, profileName, sessID, resumeArgs)
+	code := executeRunWithOptions(ctx, reg, pm, RunOptions{
+		AgentName:   agent,
+		ProfileName: profileName,
+		SessionID:   sessID,
+		WorkingDir:  workingDir,
+		ExtraArgs:   resumeArgs,
+	})
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
