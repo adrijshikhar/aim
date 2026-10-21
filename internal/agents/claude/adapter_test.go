@@ -3,14 +3,16 @@ package claude
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
-	"time"
 )
 
 func TestAdapter_Metadata(t *testing.T) {
@@ -195,6 +197,72 @@ func TestAdapter_HasCredentials(t *testing.T) {
 			t.Errorf("expected HasCredentials=true when .credentials.json contains claudeAiOauth")
 		}
 	})
+}
+
+func TestClaudeAdapter_HasCredentials_CustomProfile(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+	profileName := "work"
+	if profile.ShouldSeedCredentials(profileName) {
+		t.Fatalf("profile %q must not be seedable by default", profileName)
+	}
+
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, profileName)
+	claudeDir := filepath.Join(profileDir, ".claude")
+	_ = os.MkdirAll(claudeDir, 0700)
+
+	scopedService := profile.ClaudeScopedKeychainService(claudeDir)
+	validTokenJSON := `{"claudeAiOauth":{"accessToken":"sk-ant-access-work-123","refreshToken":"sk-ant-refresh-work-123","subscriptionType":"pro"}}`
+
+	restore := profile.SetKeychainPasswordGetterForTest(func(service, account string) (string, error) {
+		if service == scopedService {
+			return validTokenJSON, nil
+		}
+		return "", fmt.Errorf("item not found")
+	})
+	defer restore()
+
+	a := NewAdapter()
+	if !a.HasCredentials(profileDir) {
+		t.Fatalf("expected HasCredentials=true for custom profile %q with scoped keychain entry", profileName)
+	}
+
+	credsPath := filepath.Join(claudeDir, ".credentials.json")
+	data, err := os.ReadFile(credsPath)
+	if err != nil {
+		t.Fatalf("expected .credentials.json to be created, but got err: %v", err)
+	}
+	if string(data) != validTokenJSON {
+		t.Errorf("expected credentials file content %s, got %s", validTokenJSON, string(data))
+	}
+}
+
+func TestClaudeAdapter_PurgeCredentials(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	profileName := "work"
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, profileName)
+	claudeDir := filepath.Join(profileDir, ".claude")
+	_ = os.MkdirAll(claudeDir, 0700)
+
+	scopedService := profile.ClaudeScopedKeychainService(claudeDir)
+	var deletedService string
+	restore := profile.SetKeychainPasswordDeleterForTest(func(service, account string) error {
+		deletedService = service
+		return nil
+	})
+	defer restore()
+
+	a := NewAdapter()
+	if err := a.PurgeCredentials(context.Background(), profileName, profileDir); err != nil {
+		t.Fatalf("PurgeCredentials failed: %v", err)
+	}
+	if deletedService != scopedService {
+		t.Errorf("expected deleted service %q, got %q", scopedService, deletedService)
+	}
 }
 
 func TestAdapter_RewriteHooks(t *testing.T) {

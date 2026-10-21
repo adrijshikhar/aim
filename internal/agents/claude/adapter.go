@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,8 @@ var (
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
 	_ agents.SessionResumer        = (*Adapter)(nil)
+	_ agents.CredentialHarvester   = (*Adapter)(nil)
+	_ agents.CredentialPurger      = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
@@ -75,12 +78,73 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 			return true
 		}
 	}
-	if profile.ShouldSeedCredentials(filepath.Base(profileDir)) {
-		if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
-			return true
+	profileName := filepath.Base(profileDir)
+	return a.HarvestCredentials(context.Background(), profileName, profileDir) == nil
+}
+
+// HarvestCredentials discovers, extracts, and synchronizes Claude Code credentials
+// from the macOS Keychain into the profile's .credentials.json file.
+func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDir string) error {
+	claudeDir := filepath.Join(profileDir, ".claude")
+	destTokenPath := filepath.Join(claudeDir, ".credentials.json")
+
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
+		if data, err := os.ReadFile(destTokenPath); err == nil && len(data) > 0 {
+			if profile.HasClaudeCredentials(data) {
+				return nil
+			}
+		}
+		return errors.New("keychain is only supported on darwin")
+	}
+
+	scopedService := profile.ClaudeScopedKeychainService(claudeDir)
+
+	// 1. Check scoped service in macOS Keychain first (Claude Code's primary store on macOS)
+	if raw, err := profile.GetGenericPasswordWithContext(ctx, scopedService, ""); err == nil && raw != "" {
+		data := profile.DecodeKeychainPassword(raw)
+		if profile.HasClaudeCredentials(data) {
+			if err := merge.AtomicWrite(destTokenPath, data, 0600); err != nil {
+				return fmt.Errorf("failed to save harvested credentials: %w", err)
+			}
+			logger.Debug("[claude] Successfully harvested scoped token from %s into %s", scopedService, destTokenPath)
+			return nil
 		}
 	}
-	return false
+
+	// 2. Check unhashed host service in macOS Keychain if eligible primary profile
+	if profile.ShouldSeedCredentials(profileName) {
+		for _, svc := range []string{"Claude Code-credentials", "Claude Safe Storage"} {
+			if raw, err := profile.GetGenericPasswordWithContext(ctx, svc, ""); err == nil && raw != "" {
+				data := profile.DecodeKeychainPassword(raw)
+				if profile.HasClaudeCredentials(data) {
+					if err := merge.AtomicWrite(destTokenPath, data, 0600); err != nil {
+						return fmt.Errorf("failed to save harvested credentials: %w", err)
+					}
+					logger.Debug("[claude] Successfully harvested host token from %s into %s", svc, destTokenPath)
+					return nil
+				}
+			}
+		}
+	}
+
+	// 3. If file already exists on disk, verify it contains valid credentials
+	if data, err := os.ReadFile(destTokenPath); err == nil && len(data) > 0 {
+		if profile.HasClaudeCredentials(data) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no claude credentials found for profile %q", profileName)
+}
+
+// PurgeCredentials deletes scoped Keychain items associated with this profile.
+func (a *Adapter) PurgeCredentials(ctx context.Context, profileName, profileDir string) error {
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
+		return nil
+	}
+	claudeDir := filepath.Join(profileDir, ".claude")
+	scopedService := profile.ClaudeScopedKeychainService(claudeDir)
+	return profile.DeleteGenericPasswordWithContext(ctx, scopedService, "")
 }
 
 // Login launches the interactive `claude auth login` flow scoped to the profile directory.
@@ -140,7 +204,7 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 
 	seedClaudeJSON(config.RealHomeDir(), profileDir)
 	rewriteSettingsHooks(config.RealHomeDir(), profileDir)
-	_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
+	_ = a.HarvestCredentials(ctx, profileName, profileDir)
 
 	bin := a.ResolveBinary()
 	envMap := a.BaseLaunchEnv(profileName, profileDir, map[string]string{

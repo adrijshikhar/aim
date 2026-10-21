@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -1017,5 +1018,43 @@ func TestAgyGetUsage_AuthErrorCategorizationAndSecretRedaction(t *testing.T) {
 	// Verify token was redacted and not leaked
 	if strings.Contains(rep.Summary, "SECRET_TOKEN_DO_NOT_LEAK") {
 		t.Errorf("FAIL: Secret token leaked in summary!")
+	}
+}
+
+func TestAdapter_HarvestCredentials(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	profileName := "testprof"
+	tempDir := t.TempDir()
+	profileDir := filepath.Join(tempDir, profileName)
+
+	mockTokenJSON := `{"token":{"access_token":"mock_agy_token"}}`
+	restore := profile.SetKeychainPasswordGetterForTest(func(service, account string) (string, error) {
+		if service == "gemini" && account == "antigravity" {
+			return "go-keyring-base64:eyJ0b2tlbiI6eyJhY2Nlc3NfdG9rZW4iOiJtb2NrX2FneV90b2tlbiJ9fQ==", nil
+		}
+		return "", fmt.Errorf("item not found")
+	})
+	defer restore()
+
+	a := NewAdapter()
+	if err := a.HarvestCredentials(context.Background(), profileName, profileDir); err != nil {
+		t.Fatalf("HarvestCredentials failed: %v", err)
+	}
+
+	destFile := a.TokenPath(profileDir)
+	data, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("failed to read harvested token file: %v", err)
+	}
+	if string(data) != mockTokenJSON {
+		t.Errorf("expected token %s, got %s", mockTokenJSON, string(data))
+	}
+
+	fi, err := os.Stat(destFile)
+	if err != nil {
+		t.Fatalf("failed to stat harvested token file: %v", err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("expected file mode 0600, got %#o", fi.Mode().Perm())
 	}
 }

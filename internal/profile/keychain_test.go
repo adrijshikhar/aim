@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -297,5 +298,49 @@ func TestClaudeKeychainServices(t *testing.T) {
 
 	if err := PurgeAgentKeychain("claude"); err != nil {
 		t.Errorf("PurgeAgentKeychain('claude') returned unexpected error: %v", err)
+	}
+}
+
+type mockCredentialPurger struct {
+	calledWithProfile string
+	calledWithDir     string
+}
+
+func (m *mockCredentialPurger) PurgeCredentials(ctx context.Context, profileName, profileDir string) error {
+	m.calledWithProfile = profileName
+	m.calledWithDir = profileDir
+	return nil
+}
+
+func TestPurgeProfileKeychain_Delegation(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	profileDir := filepath.Join(t.TempDir(), "claude-work")
+	claudeDir := filepath.Join(profileDir, ".claude")
+	_ = os.MkdirAll(claudeDir, 0700)
+	scopedService := ClaudeScopedKeychainService(claudeDir)
+
+	var deletedService string
+	restore := SetKeychainPasswordDeleterForTest(func(service, account string) error {
+		deletedService = service
+		return nil
+	})
+	defer restore()
+
+	// 1. Without purger: delegates cleanly to default keychain deletion
+	if err := PurgeProfileKeychain("claude", profileDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deletedService != scopedService {
+		t.Errorf("expected deleted service %q, got %q", scopedService, deletedService)
+	}
+
+	// 2. With CredentialPurger: invokes purger
+	purger := &mockCredentialPurger{}
+	if err := PurgeProfileKeychain("claude", profileDir, purger); err != nil {
+		t.Fatalf("unexpected error with purger: %v", err)
+	}
+	if purger.calledWithProfile != "claude-work" || purger.calledWithDir != profileDir {
+		t.Errorf("expected purger to be called with profile 'claude-work' and dir %s, got %s and %s",
+			profileDir, purger.calledWithProfile, purger.calledWithDir)
 	}
 }

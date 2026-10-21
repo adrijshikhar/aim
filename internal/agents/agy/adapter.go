@@ -66,6 +66,7 @@ var (
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
 	_ agents.SessionResumer        = (*Adapter)(nil)
+	_ agents.CredentialHarvester   = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 	_ agents.PostLauncher          = (*Adapter)(nil)
 )
@@ -239,8 +240,7 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 				if perm == 0 {
 					perm = 0600
 				}
-				_ = os.MkdirAll(filepath.Dir(p), 0700)
-				if err := os.WriteFile(p, rData, perm); err == nil {
+				if err := merge.AtomicWrite(p, rData, perm); err == nil {
 					logger.Debug("[agy] Seeded profile %q from host token file %s", profileName, realToken)
 					copyHostSettings(realHome, filepath.Dir(p))
 					return true
@@ -250,13 +250,34 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	}
 
 	// 2. Try harvesting token from host macOS Keychain
-	if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
+	if err := a.HarvestCredentials(context.Background(), profileName, profileDir); err == nil {
 		logger.Debug("[agy] Seeded profile %q from host macOS Keychain", profileName)
 		copyHostSettings(realHome, filepath.Dir(p))
 		return true
 	}
 
 	return false
+}
+
+// HarvestCredentials extracts existing Antigravity credentials from the macOS Keychain
+// and writes them atomically into the profile's token path.
+func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDir string) error {
+	destTokenPath := a.TokenPath(profileDir)
+	tokData, err := profile.GetAgentKeychainToken(a.Name())
+	if err == nil && len(tokData) > 0 {
+		if err := merge.AtomicWrite(destTokenPath, tokData, 0600); err != nil {
+			return fmt.Errorf("failed to save harvested credentials: %w", err)
+		}
+		logger.Debug("[agy] Successfully harvested keychain token for %s into %s", a.Name(), destTokenPath)
+		return nil
+	}
+	if fi, statErr := os.Stat(destTokenPath); statErr == nil && fi.Size() > 0 {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("no keychain credentials found for %s", a.Name())
 }
 
 func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
