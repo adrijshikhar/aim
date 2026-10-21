@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -506,6 +507,10 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := s.ApproveRequest(req.RequestID)
 	if err != nil {
+		if strings.Contains(err.Error(), "has status") || strings.Contains(err.Error(), "has expired") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -530,6 +535,10 @@ func (s *Server) handleDeny(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.DenyRequest(req.RequestID); err != nil {
+		if strings.Contains(err.Error(), "has status") || strings.Contains(err.Error(), "has expired") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -594,7 +603,7 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		// Look up in SQLite
 		rec, err := s.store.GetShareRequest(reqID)
 		if err != nil || rec == nil {
-			return nil, fmt.Errorf("request %s not found or expired", reqID)
+			return nil, fmt.Errorf("request %s not found", reqID)
 		}
 		if rec.Status == "approved" && rec.LeaseID != "" {
 			leases := s.store.GetGrantedLeases()
@@ -617,7 +626,7 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		}
 		if time.Now().After(rec.ExpiresAt) {
 			_ = s.store.UpdateRequestStatus(reqID, "expired", "", "Request expired")
-			return nil, fmt.Errorf("request %s expired", reqID)
+			return nil, fmt.Errorf("request %s has expired", reqID)
 		}
 
 		profileName = rec.ProfileName
@@ -711,7 +720,14 @@ func (s *Server) DenyRequest(reqID string) error {
 		if pr.respCh != nil {
 			close(pr.respCh)
 		}
-	} else if rec, err := s.store.GetShareRequest(reqID); err == nil && rec != nil {
+	} else {
+		rec, err := s.store.GetShareRequest(reqID)
+		if err != nil || rec == nil {
+			return fmt.Errorf("request %s not found", reqID)
+		}
+		if rec.Status != "pending" {
+			return fmt.Errorf("request %s has status %s", reqID, rec.Status)
+		}
 		actor = rec.PeerID
 		profile = rec.ProfileName
 		agent = rec.Agent

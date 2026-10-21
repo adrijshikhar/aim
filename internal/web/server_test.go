@@ -1225,8 +1225,10 @@ func TestCrossOriginProtection(t *testing.T) {
 
 func TestShareEndpoints(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	store := share.NewStore(tempDir)
 	server := web.NewServer(&mockProfileService{}, nil, nil, 0, false)
-	server.SetShareStore(share.NewStore(tempDir))
+	server.SetShareStore(store)
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 
@@ -1249,5 +1251,55 @@ func TestShareEndpoints(t *testing.T) {
 	defer res2.Body.Close()
 	if res2.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", res2.StatusCode)
+	}
+
+	// Test: Approving a cancelled request must return 400 Bad Request (Greptile Finding 1)
+	cancelledReq := share.ShareRequestRecord{
+		ID:             "req_cancelled_1",
+		Direction:      "incoming",
+		PeerID:         "peer1",
+		PeerIP:         "10.8.0.2",
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "cancelled",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
+	}
+	_ = store.SaveShareRequest(cancelledReq)
+
+	approveBody := strings.NewReader(`{"request_id":"req_cancelled_1"}`)
+	resApproveCancelled, err := http.Post(ts.URL+"/api/share/approve", "application/json", approveBody)
+	if err != nil {
+		t.Fatalf("POST /api/share/approve failed: %v", err)
+	}
+	defer resApproveCancelled.Body.Close()
+	if resApproveCancelled.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request when approving cancelled request, got %d", resApproveCancelled.StatusCode)
+	}
+
+	// Test: Approving an expired request must return 400 Bad Request
+	expiredReq := share.ShareRequestRecord{
+		ID:             "req_expired_1",
+		Direction:      "incoming",
+		PeerID:         "peer1",
+		PeerIP:         "10.8.0.2",
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "pending",
+		CreatedAt:      time.Now().Add(-2 * time.Hour),
+		ExpiresAt:      time.Now().Add(-1 * time.Hour), // Expired
+	}
+	_ = store.SaveShareRequest(expiredReq)
+
+	approveExpiredBody := strings.NewReader(`{"request_id":"req_expired_1"}`)
+	resApproveExpired, err := http.Post(ts.URL+"/api/share/approve", "application/json", approveExpiredBody)
+	if err != nil {
+		t.Fatalf("POST /api/share/approve failed: %v", err)
+	}
+	defer resApproveExpired.Body.Close()
+	if resApproveExpired.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request when approving expired request, got %d", resApproveExpired.StatusCode)
 	}
 }

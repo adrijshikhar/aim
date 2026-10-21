@@ -1,5 +1,8 @@
 import * as React from 'react';
 import {
+  Wifi,
+  AlertTriangle,
+  RefreshCw,
   Radio,
   Clock,
   Laptop,
@@ -692,7 +695,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   return (
     <div className="space-y-6">
       {/* Top Header bar with 3-Level Segmented Slider in the top right */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-[#222222]">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-border">
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <Radio className="h-4 w-4 text-accent-cyan" />
@@ -705,33 +708,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             >
               Mesh
             </Badge>
-
-            {/* Inline VPN & P2P status badge */}
-            {isVpnActive ? (
-              <span
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-border bg-[#141414] text-xs font-mono text-muted-foreground"
-                title={`Corporate VPN Active: Interface ${vpn.interface_name}, Subnet ${vpn.broadcast_ip}`}
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
-                <span className="text-foreground font-medium">{vpn.interface_name}</span>
-                <span className="text-muted-foreground/60">•</span>
-                <span>{vpn.ip}:4319</span>
-              </span>
-            ) : (
-              <span
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-status-warning-border bg-status-warning-bg text-xs font-mono text-status-warning"
-                title="Connect to Pritunl / OpenVPN to discover teammates across your corporate subnet"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                <span>VPN Offline</span>
-              </span>
-            )}
           </div>
         </div>
 
         {/* TOP RIGHT: Global Sharing 3-Level Segmented Control & Settings */}
         <div className="flex items-center gap-2 shrink-0">
-          <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] shadow-xs shrink-0">
+          <div className="inline-flex items-center p-0.5 rounded-geist bg-secondary border border-border shadow-xs shrink-0">
             <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground px-2 flex items-center gap-1.5 shrink-0">
               <Radio className={cn('h-3 w-3', effectiveGlobalMode !== 'off' ? 'text-accent-cyan' : 'text-muted-foreground')} />
               <span>Global:</span>
@@ -744,8 +726,8 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               className={cn(
                 'px-2.5 py-1 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium flex items-center gap-1.5 border',
                 effectiveGlobalMode === 'off'
-                  ? 'bg-[#262626] text-[#ededed] border-[#383838] shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
+                  ? 'bg-muted text-foreground border-border shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 border-transparent'
               )}
               title="Global sharing is OFF — machine is private and unreachable by teammates"
             >
@@ -761,7 +743,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 'px-2.5 py-1 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium flex items-center gap-1.5 border',
                 effectiveGlobalMode === 'request'
                   ? 'bg-[#142334] text-[#52a8ff] border-[#1f4068] shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 border-transparent'
               )}
               title="Global sharing is in Request mode — teammate lease requests require manual approval"
             >
@@ -782,7 +764,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 'px-2.5 py-1 rounded-sm text-xs font-mono transition-colors cursor-pointer font-medium flex items-center gap-1.5 border',
                 effectiveGlobalMode === 'auto'
                   ? 'bg-[#183925] text-[#98c379] border-[#235836] shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a] border-transparent'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50 border-transparent'
               )}
               title="Global sharing is in Auto mode — teammate lease requests are automatically approved"
             >
@@ -798,15 +780,67 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         </div>
       </div>
 
+      {/* VPN Tunnel Status Strip */}
+      <div className="p-4 rounded-geist border border-border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center justify-center h-8 w-8 rounded-full border border-border bg-secondary shrink-0">
+            {isVpnActive ? (
+              <Wifi className="h-4 w-4 text-status-success" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 text-status-warning" />
+            )}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-medium text-foreground">
+                {isVpnActive ? 'Subnet Tunnel Connected' : 'VPN Tunnel Inactive'}
+              </span>
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  isVpnActive ? 'bg-status-success animate-pulse' : 'bg-status-warning'
+                )}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground font-mono mt-0.5">
+              {isVpnActive
+                ? `Assigned IP: ${vpn.ip} on interface ${vpn.interface_name} • Broadcast: ${vpn.broadcast_ip}`
+                : 'Connect to your corporate VPN (Pritunl / OpenVPN / Wireguard) to discover teammates across your subnet.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => loadStatus(true)}
+            disabled={isLoading}
+            className="h-8 rounded-geist border-border bg-secondary hover:bg-muted text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5 mr-1.5', isLoading && 'animate-spin')} />
+            Refresh Mesh
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setIsConnectOpen(true)}
+            className="h-8 rounded-geist bg-[#61afef] hover:bg-[#529fd8] text-black font-semibold text-xs font-mono flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
+            <span>Connect Peer</span>
+          </Button>
+        </div>
+      </div>
+
       {/* Tab Navigation System */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#222222] pb-3">
-          <TabsList className="bg-[#0c0c0c] border border-[#222222] p-1 h-9 rounded-geist gap-1 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
+          <TabsList className="bg-secondary/40 border border-border p-1 h-9 rounded-geist gap-1 w-full sm:w-auto">
             <TabsTrigger value="teammates" className="gap-2 text-xs flex-1 sm:flex-initial">
               <Laptop className="h-3.5 w-3.5 text-[#61afef]" />
               <span>Teammates</span>
               {filteredPeers.length > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-secondary text-foreground border border-border">
                   {filteredPeers.length}
                 </span>
               )}
@@ -820,7 +854,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   {pendingRequests.length + outgoingPending.length}
                 </span>
               ) : (activeGrantedLeases.length + activeBorrowedLeases.length) > 0 ? (
-                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-secondary text-foreground border border-border">
                   {activeGrantedLeases.length + activeBorrowedLeases.length}
                 </span>
               ) : null}
@@ -829,7 +863,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             <TabsTrigger value="my-sharing" className="gap-2 text-xs flex-1 sm:flex-initial">
               <Share2 className="h-3.5 w-3.5 text-accent-cyan" />
               <span>My Sharing</span>
-              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-secondary text-foreground border border-border">
                 {data?.shared_profiles?.filter((sp) => sp.enabled)?.length || 0}/{ownProfiles.length}
               </span>
             </TabsTrigger>
@@ -838,7 +872,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               <Activity className="h-3.5 w-3.5 text-accent-cyan" />
               <span>Audit Log</span>
               {data?.audit_logs && data.audit_logs.length > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-secondary text-foreground border border-border">
                   {data.audit_logs.length}
                 </span>
               )}
@@ -867,7 +901,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         <TabsContent value="teammates" className="space-y-6 focus-visible:outline-none">
           {/* Active Borrowed Leases Section */}
           {data && data.active_leases && data.active_leases.length > 0 && (
-            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+            <Card className="border-border bg-card rounded-geist">
               <CardHeader className="p-5 pb-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1010,7 +1044,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     value={filterQuery}
                     onChange={(e) => setFilterQuery(e.target.value)}
                     placeholder="Filter teammates..."
-                    className="pl-8 pr-8 h-8 text-xs font-sans bg-[#0c0c0c] border-[#222222] text-[#ededed] placeholder:text-muted-foreground rounded-geist focus:border-[#333333]"
+                    className="pl-8 pr-8 h-8 text-xs font-sans bg-secondary border-border text-foreground placeholder:text-muted-foreground rounded-geist focus:border-border/80"
                   />
                   {filterQuery ? (
                     <button
@@ -1022,7 +1056,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                       <X className="h-3.5 w-3.5" />
                     </button>
                   ) : (
-                    <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-xs font-mono text-muted-foreground pointer-events-none">
+                    <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-border bg-muted px-1 py-[1px] rounded text-xs font-mono text-muted-foreground pointer-events-none">
                       /
                     </kbd>
                   )}
@@ -1033,7 +1067,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   variant="default"
                   size="icon"
                   onClick={() => setIsConnectOpen(true)}
-                  className="h-8 w-8 rounded-geist bg-[#ededed] text-[#0a0a0a] hover:bg-white hover:text-black flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+                  className="h-8 w-8 rounded-geist bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
                   title="Connect Peer"
                 >
                   <Plus className="h-4 w-4" />
@@ -1045,7 +1079,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   size="sm"
                   disabled={isLoading}
                   onClick={handleManualRefresh}
-                  className="h-8 w-8 p-0 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-foreground flex items-center justify-center shrink-0 cursor-pointer"
+                  className="h-8 w-8 p-0 rounded-geist border-border bg-secondary hover:bg-muted text-foreground flex items-center justify-center shrink-0 cursor-pointer"
                   title="Refresh Teammates"
                 >
                   <RotateCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin text-accent-cyan')} />
@@ -1119,7 +1153,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                             </div>
 
                             {peer.profiles && peer.profiles.length > 0 ? (
-                              <div className="rounded-geist border border-[#222222] bg-[#0c0c0c] divide-y divide-[#1c1c1c] overflow-hidden">
+                              <div className="rounded-geist border border-border bg-secondary/20 divide-y divide-border overflow-hidden">
                                 {peer.profiles.map((prof) => {
                                   const sp = peer.shared_profiles?.find((p) => p.name === prof);
                                   const agent = sp?.agent || 'claude';
@@ -1127,7 +1161,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                   return (
                                     <div
                                       key={prof}
-                                      className="group flex items-center justify-between gap-3 px-3.5 py-2.5 hover:bg-[#141414] transition-colors"
+                                      className="group flex items-center justify-between gap-3 px-3.5 py-2.5 hover:bg-secondary/50 transition-colors"
                                     >
                                       <div className="flex items-center gap-2 truncate min-w-0">
                                         <TooltipProvider>
@@ -1154,8 +1188,8 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                             </TooltipTrigger>
                                             <TooltipContent side="top" className="flex items-center gap-2">
                                               <AgentBadge agent={agent} size="sm" />
-                                              <span>Engine: <strong className="text-[#ededed] font-semibold">{agent}</strong></span>
-                                              <span className="text-[#666666]">•</span>
+                                              <span>Engine: <strong className="text-foreground font-semibold">{agent}</strong></span>
+                                              <span className="text-muted-foreground">•</span>
                                               <span>{isAuto ? 'Instant auto-approval' : 'Manual approval required'}</span>
                                             </TooltipContent>
                                           </Tooltip>
@@ -1170,7 +1204,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                           setSelectedAgent(agent);
                                           setSelectedIsAuto(isAuto);
                                         }}
-                                        className="h-7 px-2.5 text-xs font-mono font-medium rounded-geist border-[#2a2a2a] bg-[#141414] hover:bg-[#1f1f1f] hover:border-[#383838] text-foreground hover:text-[#61afef] flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs transition-colors"
+                                        className="h-7 px-2.5 text-xs font-mono font-medium rounded-geist border-border bg-secondary hover:bg-muted text-foreground hover:text-[#61afef] flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs transition-colors"
                                         title={`Borrow ${prof} from ${peer.hostname}`}
                                       >
                                         <KeyRound className="h-3.5 w-3.5 text-muted-foreground group-hover:text-[#61afef] transition-colors" />
@@ -1181,7 +1215,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                 })}
                               </div>
                             ) : (
-                              <div className="p-4 rounded-geist bg-[#0c0c0c] border border-dashed border-[#222222] text-xs text-muted-foreground text-center">
+                              <div className="p-4 rounded-geist bg-secondary/30 border border-dashed border-border text-xs text-muted-foreground text-center">
                                 No profiles currently shared
                               </div>
                             )}
@@ -1284,7 +1318,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
               {pendingRequests.length === 0 ? (
                 requestsFilter === 'pending' && (
-                  <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
+                  <div className="p-8 text-center border border-dashed border-border rounded-geist bg-secondary/30 text-xs font-mono text-muted-foreground">
                     No pending incoming requests from teammates.
                   </div>
                 )
@@ -1293,7 +1327,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   {pendingRequests.map((pr) => (
                     <div
                       key={pr.request_id}
-                      className="p-4 rounded-geist border border-[#262626] bg-[#0c0c0c] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs hover:border-[#383838] transition-colors"
+                      className="p-4 rounded-geist border border-border bg-card flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs hover:border-border/80 transition-colors"
                     >
                       <div className="flex items-start sm:items-center gap-3 min-w-0">
                         <div className="h-8 w-8 rounded-geist bg-[#142334] border border-[#1f4068] flex items-center justify-center shrink-0">
@@ -1314,10 +1348,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                               <Laptop className="h-3 w-3 text-[#61afef]" />
                               <span>{pr.request.requester_id}</span>
                             </span>
-                            <span className="text-[#555555]">({pr.request.requester_ip})</span>
-                            <span className="text-[#444444]">•</span>
+                            <span className="text-muted-foreground/60">({pr.request.requester_ip})</span>
+                            <span className="text-muted-foreground/40">•</span>
                             <span>Requested Duration: <strong className="text-foreground">{pr.request.requested_hours}h</strong></span>
-                            <span className="text-[#444444]">•</span>
+                            <span className="text-muted-foreground/40">•</span>
                             <span>Expires in: {formatExpiresIn(pr.expires_at)}</span>
                           </div>
                         </div>
@@ -1361,7 +1395,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
               {outgoingPending.length === 0 ? (
                 requestsFilter === 'outgoing' && (
-                  <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
+                  <div className="p-8 text-center border border-dashed border-border rounded-geist bg-secondary/30 text-xs font-mono text-muted-foreground">
                     No active outgoing requests sent to teammates.
                   </div>
                 )
@@ -1370,7 +1404,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   {outgoingPending.map((req) => (
                     <div
                       key={req.id}
-                      className="p-4 rounded-geist border border-[#262626] bg-[#0c0c0c] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs hover:border-[#383838] transition-colors"
+                      className="p-4 rounded-geist border border-border bg-card flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs hover:border-border/80 transition-colors"
                     >
                       <div className="flex items-start sm:items-center gap-3 min-w-0">
                         <div className="h-8 w-8 rounded-geist bg-[#142334] border border-[#1f4068] flex items-center justify-center shrink-0">
@@ -1392,10 +1426,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                               <Laptop className="h-3 w-3 text-[#61afef]" />
                               <span>Host: {req.peer_id}</span>
                             </span>
-                            <span className="text-[#555555]">({req.peer_ip})</span>
-                            <span className="text-[#444444]">•</span>
+                            <span className="text-muted-foreground/60">({req.peer_ip})</span>
+                            <span className="text-muted-foreground/40">•</span>
                             <span>Duration: <strong className="text-foreground">{req.requested_hours}h</strong></span>
-                            <span className="text-[#444444]">•</span>
+                            <span className="text-muted-foreground/40">•</span>
                             <span>Expires: {formatExpiresIn(req.expires_at)}</span>
                           </div>
                         </div>
@@ -1407,7 +1441,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                           size="sm"
                           disabled={pollingReqId === req.id}
                           onClick={() => handleManualPoll(req.id)}
-                          className="h-7 px-2.5 text-xs font-mono text-muted-foreground hover:text-foreground border-[#2a2a2a] bg-[#141414] hover:bg-[#1f1f1f] cursor-pointer"
+                          className="h-7 px-2.5 text-xs font-mono text-muted-foreground hover:text-foreground border-border bg-secondary hover:bg-muted cursor-pointer"
                           title="Poll host for decision"
                         >
                           <RotateCw className={cn('h-3.5 w-3.5 mr-1.5', pollingReqId === req.id && 'animate-spin text-accent-cyan')} />
@@ -1443,7 +1477,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
               {activeGrantedLeases.length === 0 && activeBorrowedLeases.length === 0 ? (
                 requestsFilter === 'approved' && (
-                  <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
+                  <div className="p-8 text-center border border-dashed border-border rounded-geist bg-secondary/30 text-xs font-mono text-muted-foreground">
                     No active approved leases.
                   </div>
                 )
@@ -1453,7 +1487,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   {activeGrantedLeases.map((lease) => (
                     <div
                       key={lease.lease_id}
-                      className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                      className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-border/80 transition-colors"
                     >
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
@@ -1486,8 +1520,8 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
-                        <span className="text-xs font-mono text-[#666666]">
+                      <div className="flex items-center justify-between pt-2 border-t border-border">
+                        <span className="text-xs font-mono text-muted-foreground">
                           Lease ID: {lease.lease_id}
                         </span>
                         <Button
@@ -1509,7 +1543,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     return (
                       <div
                         key={lease.local_profile}
-                        className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                        className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-border/80 transition-colors"
                       >
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
@@ -1526,12 +1560,12 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                           <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
                             <span>Host:</span>
                             <span className="text-foreground font-semibold">{lease.source_peer}</span>
-                            <span className="text-[#666666]">/</span>
+                            <span className="text-muted-foreground/60">/</span>
                             <span className="text-foreground">{lease.source_profile}</span>
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
+                        <div className="flex items-center justify-between pt-2 border-t border-border">
                           <button
                             onClick={() => copyToClipboard(runCmd, lease.local_profile)}
                             className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
@@ -1578,7 +1612,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     variant="outline"
                     size="sm"
                     onClick={handleCleanExpired}
-                    className="h-6 px-2.5 text-xs font-mono border-border bg-[#141414] hover:bg-[#1a1a1a] text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5"
+                    className="h-6 px-2.5 text-xs font-mono border-border bg-secondary hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5"
                   >
                     <Trash2 className="h-3 w-3 text-status-danger" />
                     <span>Clean Expired ({expiredBorrowedLeases.length})</span>
@@ -1588,7 +1622,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
               {revokedOrExpiredLeases.length === 0 && expiredBorrowedLeases.length === 0 ? (
                 requestsFilter === 'revoked' && (
-                  <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
+                  <div className="p-8 text-center border border-dashed border-border rounded-geist bg-secondary/30 text-xs font-mono text-muted-foreground">
                     No revoked or expired leases.
                   </div>
                 )
@@ -1598,7 +1632,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   {expiredBorrowedLeases.map((lease) => (
                     <div
                       key={lease.local_profile}
-                      className="p-3.5 rounded-geist border border-[#1f1f1f] bg-[#0c0c0c] flex items-center justify-between gap-3 text-xs font-mono opacity-80"
+                      className="p-3.5 rounded-geist border border-border bg-card flex items-center justify-between gap-3 text-xs font-mono opacity-80"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className="min-w-0">
@@ -1688,7 +1722,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
           {/* Active Granted Leases Section (Teammates Borrowing Your Profiles) */}
           {activeGrantedLeases.length > 0 && (
-            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+            <Card className="border-border bg-card rounded-geist">
               <CardHeader className="p-5 pb-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2">

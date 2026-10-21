@@ -435,27 +435,41 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 		pReq.Header.Set("Content-Type", "application/json")
 		pResp, err := http.DefaultClient.Do(pReq)
 		if err == nil {
-			defer pResp.Body.Close()
-			if pResp.StatusCode == http.StatusOK {
-				w.Header().Set("Content-Type", "application/json")
+			respBody, _ := io.ReadAll(pResp.Body)
+			pResp.Body.Close()
+
+			// If daemon handled it successfully (200), or explicitly rejected with domain error (400, 403)
+			if pResp.StatusCode == http.StatusOK || pResp.StatusCode == http.StatusBadRequest || pResp.StatusCode == http.StatusForbidden {
+				w.Header().Set("Content-Type", pResp.Header.Get("Content-Type"))
 				w.WriteHeader(pResp.StatusCode)
-				_, _ = io.Copy(w, pResp.Body)
+				_, _ = w.Write(respBody)
 				return
 			}
 		}
 	}
 
-	// 2. Direct fallback via Store if daemon on :4319 is unreachable or returned non-200
+	// 2. Direct fallback via Store if daemon on :4319 is unreachable or returned 404
 	store := s.getShareStore()
 	rec, err := store.GetShareRequest(req.RequestID)
 	if err != nil || rec == nil {
-		http.Error(w, "request not found or expired", http.StatusNotFound)
+		http.Error(w, "request not found", http.StatusNotFound)
 		return
 	}
 
 	if rec.Status == "approved" && rec.LeaseID != "" {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "lease_id": rec.LeaseID, "status": "approved"})
+		return
+	}
+
+	if rec.Status != "pending" {
+		http.Error(w, fmt.Sprintf("cannot approve request %s: request has status %q", req.RequestID, rec.Status), http.StatusBadRequest)
+		return
+	}
+
+	if time.Now().After(rec.ExpiresAt) {
+		_ = store.UpdateRequestStatus(req.RequestID, "expired", "", "Request expired")
+		http.Error(w, fmt.Sprintf("cannot approve request %s: request has expired", req.RequestID), http.StatusBadRequest)
 		return
 	}
 
@@ -535,21 +549,28 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 		pReq.Header.Set("Content-Type", "application/json")
 		pResp, err := http.DefaultClient.Do(pReq)
 		if err == nil {
-			defer pResp.Body.Close()
-			if pResp.StatusCode == http.StatusOK {
-				w.Header().Set("Content-Type", "application/json")
+			respBody, _ := io.ReadAll(pResp.Body)
+			pResp.Body.Close()
+
+			if pResp.StatusCode == http.StatusOK || pResp.StatusCode == http.StatusBadRequest || pResp.StatusCode == http.StatusForbidden {
+				w.Header().Set("Content-Type", pResp.Header.Get("Content-Type"))
 				w.WriteHeader(pResp.StatusCode)
-				_, _ = io.Copy(w, pResp.Body)
+				_, _ = w.Write(respBody)
 				return
 			}
 		}
 	}
 
-	// 2. Direct fallback via Store if daemon on :4319 is unreachable or returned non-200
+	// 2. Direct fallback via Store if daemon on :4319 is unreachable or returned 404
 	store := s.getShareStore()
 	rec, err := store.GetShareRequest(req.RequestID)
 	if err != nil || rec == nil {
 		http.Error(w, "request not found", http.StatusNotFound)
+		return
+	}
+
+	if rec.Status != "pending" {
+		http.Error(w, fmt.Sprintf("cannot deny request %s: request has status %q", req.RequestID, rec.Status), http.StatusBadRequest)
 		return
 	}
 
