@@ -285,6 +285,9 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 				Profile:    p,
 				ProfileDir: profDir,
 			}
+			if cachedProv, ok := adapter.(agents.CachedUsageProvider); ok {
+				target.GetCachedUsageFn = cachedProv.GetCachedUsage
+			}
 			rep := usage.InspectProfile(context.Background(), target, usageCache)
 
 			authFound := false

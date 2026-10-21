@@ -15,10 +15,11 @@ import (
 )
 
 type TargetProfile struct {
-	Agent      string
-	Profile    string
-	ProfileDir string
-	GetUsageFn func(ctx context.Context, profileName, profileDir string) (*Report, error)
+	Agent            string
+	Profile          string
+	ProfileDir       string
+	GetUsageFn       func(ctx context.Context, profileName, profileDir string) (*Report, error)
+	GetCachedUsageFn func(ctx context.Context, profileName, profileDir string) (*Report, error)
 }
 
 func RefreshAsync(ctx context.Context, targets []TargetProfile, cache *CacheStore, force ...bool) <-chan Report {
@@ -369,6 +370,18 @@ func InspectProfile(ctx context.Context, target TargetProfile, cache *CacheStore
 
 	// 4. Inspect credentials on disk (unrefused)
 	if HasCredentialsOnDisk(target.Agent, target.ProfileDir) {
+		if target.GetCachedUsageFn != nil {
+			if rep, err := target.GetCachedUsageFn(ctx, target.Profile, target.ProfileDir); err == nil && rep != nil && len(rep.Windows) > 0 {
+				rep.FromCache = true
+				if rep.Agent == "" {
+					rep.Agent = target.Agent
+				}
+				if rep.Profile == "" {
+					rep.Profile = target.Profile
+				}
+				return *rep
+			}
+		}
 		return Report{
 			Agent:     target.Agent,
 			Profile:   target.Profile,

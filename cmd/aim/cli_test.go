@@ -1836,3 +1836,37 @@ func TestCLI_List_StaleCachePromotesToIdleWithoutPrewarm(t *testing.T) {
 		t.Errorf("expected '[idle: ready on use]' for stale profile in aim list all, got:\n%s", outAll)
 	}
 }
+
+func TestCLI_List_CachedUsageProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	pDir := pm.ProfileDir("work")
+	_ = os.WriteFile(filepath.Join(pDir, "auth.json"), []byte(`{"tokens":{"access_token":"valid"}}`), 0600)
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("work", "cachedagent")
+	_ = config.SaveConfig(cfg)
+
+	cachedAdapter := &doctorCachedUsageMockAdapter{
+		doctorMockAdapter: doctorMockAdapter{
+			mockAdapter: mockAdapter{name: "cachedagent", hasCreds: true},
+		},
+	}
+	reg := agents.NewRegistry()
+	reg.Register(cachedAdapter)
+
+	out, _ := captureOutput(t, func() {
+		_ = runList(reg, pm, "cachedagent")
+	})
+
+	if !cachedAdapter.cachedUsageCalled {
+		t.Errorf("expected GetCachedUsage to be invoked during runList")
+	}
+	if !strings.Contains(out, "90%") {
+		t.Errorf("expected output to contain quota percentage '90%%', got:\n%s", out)
+	}
+}
