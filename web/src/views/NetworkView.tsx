@@ -1,6 +1,5 @@
 import * as React from 'react';
 import {
-  Wifi,
   Radio,
   Clock,
   Laptop,
@@ -10,7 +9,6 @@ import {
   Check,
   KeyRound,
   Search,
-  AlertTriangle,
   Plus,
   X,
   Share2,
@@ -41,6 +39,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AgentBadge } from '@/components/AgentBadge';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -63,6 +62,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const [isLoading, setIsLoading] = React.useState(true);
   const [filterQuery, setFilterQuery] = React.useState('');
   const [copiedCmd, setCopiedCmd] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState<string>('teammates');
 
   // Global Sharing Slider state
   const [isShareUpdating, setIsShareUpdating] = React.useState(false);
@@ -508,6 +508,27 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             >
               Mesh
             </Badge>
+
+            {/* Inline VPN & P2P status badge */}
+            {isVpnActive ? (
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-border bg-[#141414] text-xs font-mono text-muted-foreground"
+                title={`Corporate VPN Active: Interface ${vpn.interface_name}, Subnet ${vpn.broadcast_ip}`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                <span className="text-foreground font-medium">{vpn.interface_name}</span>
+                <span className="text-muted-foreground/60">•</span>
+                <span>{vpn.ip}:4319</span>
+              </span>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-status-warning-border bg-status-warning-bg text-xs font-mono text-status-warning"
+                title="Connect to Pritunl / OpenVPN to discover teammates across your corporate subnet"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                <span>VPN Offline</span>
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
             Borrow high-tier Claude & AI assistant quotas from teammates on the internal VPN (Pritunl / OpenVPN) or local Wi-Fi. Borrowed profiles are isolated locally as{' '}
@@ -596,669 +617,756 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         </div>
       </div>
 
-      {/* VPN Tunnel Status Strip */}
-      <div className="p-4 rounded-geist border border-[#222222] bg-[#0a0a0a] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="flex items-center justify-center h-8 w-8 rounded-full border border-border bg-secondary shrink-0">
-            {isVpnActive ? (
-              <Wifi className="h-4 w-4 text-status-success" />
-            ) : (
-              <AlertTriangle className="h-4 w-4 text-status-warning" />
+      {/* Tab Navigation System */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#222222] pb-3">
+          <TabsList className="bg-[#0c0c0c] border border-[#222222] p-1 h-9 rounded-geist gap-1 w-full sm:w-auto">
+            <TabsTrigger value="teammates" className="gap-2 text-xs flex-1 sm:flex-initial">
+              <Laptop className="h-3.5 w-3.5 text-[#61afef]" />
+              <span>Teammates</span>
+              {filteredPeers.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
+                  {filteredPeers.length}
+                </span>
+              )}
+            </TabsTrigger>
+
+            <TabsTrigger value="my-sharing" className="gap-2 text-xs flex-1 sm:flex-initial">
+              <Share2 className="h-3.5 w-3.5 text-accent-cyan" />
+              <span>My Sharing</span>
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
+                {data?.shared_profiles?.filter((sp) => sp.enabled)?.length || 0}/{ownProfiles.length}
+              </span>
+            </TabsTrigger>
+
+            <TabsTrigger value="audit" className="gap-2 text-xs flex-1 sm:flex-initial">
+              <Activity className="h-3.5 w-3.5 text-accent-cyan" />
+              <span>Audit Log</span>
+              {data?.audit_logs && data.audit_logs.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
+                  {data.audit_logs.length}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="hidden md:flex items-center gap-3">
+            {data?.active_leases && data.active_leases.length > 0 && (
+              <span className="text-xs font-mono text-muted-foreground flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5 text-[#61afef]" />
+                <span>
+                  {data.active_leases.filter((l) => !l.is_expired && new Date(l.expires_at).getTime() > currentTime).length} borrowed
+                </span>
+              </span>
+            )}
+            {activeGrantedLeases.length > 0 && (
+              <span className="text-xs font-mono text-muted-foreground flex items-center gap-1.5">
+                <Share2 className="h-3.5 w-3.5 text-accent-cyan" />
+                <span>{activeGrantedLeases.length} lending</span>
+              </span>
             )}
           </div>
-          <div className="space-y-0.5 min-w-0">
-            <span className="font-medium text-sm text-foreground tracking-tight">
-              {isVpnActive ? 'Corporate VPN Tunnel Active' : 'VPN Tunnel Offline'}
-            </span>
-            <p className="text-xs font-mono text-muted-foreground text-pretty">
-              {isVpnActive
-                ? `Interface: ${vpn.interface_name} • IP: ${vpn.ip} • Subnet Broadcast: ${vpn.broadcast_ip}`
-                : 'Connect to Pritunl / OpenVPN to discover online teammates across your corporate subnet.'}
-            </p>
-          </div>
         </div>
 
-        {/* P2P Port Badge */}
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground px-2.5 py-1 rounded-geist border border-border bg-[#141414]">
-            <span className={cn('h-1.5 w-1.5 rounded-full', isVpnActive ? 'bg-status-success-solid' : 'bg-[#666666]')} />
-            <span>P2P Port :4319</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Local Offered Profiles Section (Only when global sharing is enabled) */}
-      {effectiveGlobalMode !== 'off' && ownProfiles.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-border/40">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <Share2 className="h-4 w-4 text-accent-cyan" />
-                <h2 className="text-sm font-semibold text-foreground">
-                  Your Offered Profiles
-                </h2>
-                <Badge
-                  variant="outline"
-                  className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
-                >
-                  {data?.shared_profiles?.filter((sp) => sp.enabled)?.length || 0} of {ownProfiles.length} shared
-                </Badge>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Profiles on this machine that teammates on the VPN mesh can discover and lease.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {ownProfiles.map((p) => {
-              const sp = data?.shared_profiles?.find((s) => s.name === p.name);
-              const isShared = sp ? sp.enabled : false;
-              const mode: ShareMode = !isShared ? 'off' : (sp?.auto_approve ? 'auto' : 'request');
-              return (
-                <div
-                  key={p.name}
-                  className="p-3.5 rounded-geist border border-border bg-card flex items-center justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <AgentBadge agent={p.agent} size="sm" />
-                    <div className="min-w-0">
-                      <div className="font-semibold text-xs text-foreground truncate">
-                        {p.name}
-                      </div>
-                      <div className="text-xs font-mono text-muted-foreground truncate">
-                        {isShared ? (mode === 'auto' ? 'Auto-Approve' : 'Manual Approval') : 'Private (Not Shared)'}
-                      </div>
-                    </div>
+        {/* TAB 1: TEAMMATES */}
+        <TabsContent value="teammates" className="space-y-6 focus-visible:outline-none">
+          {/* Active Borrowed Leases Section */}
+          {data && data.active_leases && data.active_leases.length > 0 && (
+            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+              <CardHeader className="p-5 pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-[#61afef]" />
+                    <CardTitle className="text-sm font-semibold text-foreground">
+                      Borrowed Profiles
+                    </CardTitle>
+                    <Badge
+                      variant="outline"
+                      className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                    >
+                      {data.active_leases.filter((l) => !l.is_expired && new Date(l.expires_at).getTime() > currentTime).length} active
+                    </Badge>
                   </div>
-
-                  {/* Segmented slider for this profile */}
-                  <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] shrink-0">
-                    <button
-                      type="button"
-                      disabled={isShareUpdating}
-                      onClick={() => handleSetLocalProfileShareMode(p.name, 'off')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium',
-                        mode === 'off'
-                          ? 'bg-[#262626] text-[#ededed] shadow-xs'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
-                      )}
-                      title="Keep this profile private"
-                    >
-                      Off
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isShareUpdating}
-                      onClick={() => handleSetLocalProfileShareMode(p.name, 'request')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1',
-                        mode === 'request'
-                          ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
-                      )}
-                      title="Require manual lease request confirmation"
-                    >
-                      <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]')} />
-                      Req
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isShareUpdating}
-                      onClick={() => handleSetLocalProfileShareMode(p.name, 'auto')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1',
-                        mode === 'auto'
-                          ? 'bg-[#183925] text-[#98c379] border border-[#235836] shadow-xs'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
-                      )}
-                      title="Auto-approve lease requests for this profile"
-                    >
-                      <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]')} />
-                      Auto
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Active Borrowed Leases Section */}
-      {data && data.active_leases && data.active_leases.length > 0 && (
-        <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-          <CardHeader className="p-5 pb-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-[#61afef]" />
-                <CardTitle className="text-sm font-semibold text-foreground">
-                  Borrowed Profiles
-                </CardTitle>
-                <Badge
-                  variant="outline"
-                  className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
-                >
-                  {data.active_leases.filter((l) => !l.is_expired && new Date(l.expires_at).getTime() > currentTime).length} active
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                {data.active_leases.some((l) => l.is_expired || new Date(l.expires_at).getTime() <= currentTime) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={async () => {
-                      const expired = data.active_leases.filter((l) => l.is_expired || new Date(l.expires_at).getTime() <= currentTime);
-                      for (const l of expired) {
-                        await releaseShareLease(l.local_profile).catch(() => {});
-                      }
-                      toast({ title: 'Cleaned up expired leases' });
-                      await loadStatus();
-                    }}
-                    className="h-6 px-2 text-xs font-mono text-muted-foreground hover:text-status-danger cursor-pointer"
-                  >
-                    <Trash2 className="h-3 w-3 mr-1" />
-                    Clean expired
-                  </Button>
-                )}
-                <span className="text-xs text-muted-foreground font-mono">
-                  Sandboxed locally
-                </span>
-              </div>
-            </div>
-            <CardDescription className="text-xs text-muted-foreground pt-1">
-              External teammate profiles currently leased and sandboxed locally on this machine.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-5 pt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {data.active_leases.map((lease) => {
-                const isExpired = lease.is_expired || new Date(lease.expires_at).getTime() <= currentTime;
-                const runCmd = `aim run ${lease.agent} ${lease.local_profile}`;
-                return (
-                  <div
-                    key={lease.local_profile}
-                    className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
-                  >
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono font-bold text-accent-cyan tracking-tight">
-                            {lease.local_profile}
-                          </span>
-                          <AgentBadge agent={lease.agent} size="sm" />
-                        </div>
-                        <span
-                          className={cn(
-                            'text-xs font-mono px-2 py-0.5 rounded font-medium',
-                            isExpired
-                              ? 'bg-status-danger-bg text-status-danger border border-status-danger-border'
-                              : 'bg-status-success-bg text-status-success border border-status-success-border'
-                          )}
-                        >
-                          {formatExpiresIn(lease.expires_at)}
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
-                        <span>Source:</span>
-                        <span className="text-foreground font-semibold">{lease.source_peer}</span>
-                        <span className="text-[#666666]">/</span>
-                        <span className="text-foreground">{lease.source_profile}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
-                      <button
-                        onClick={() => copyToClipboard(runCmd, lease.local_profile)}
-                        className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-                        title="Click to copy command"
-                      >
-                        {copiedCmd === lease.local_profile ? (
-                          <Check className="h-3 w-3 text-status-success" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                        <code>{runCmd}</code>
-                      </button>
-
+                  <div className="flex items-center gap-2">
+                    {data.active_leases.some((l) => l.is_expired || new Date(l.expires_at).getTime() <= currentTime) && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleRelease(lease.local_profile)}
-                        className="h-6 px-2 text-xs text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                        onClick={async () => {
+                          const expired = data.active_leases.filter((l) => l.is_expired || new Date(l.expires_at).getTime() <= currentTime);
+                          for (const l of expired) {
+                            await releaseShareLease(l.local_profile).catch(() => {});
+                          }
+                          toast({ title: 'Cleaned up expired leases' });
+                          await loadStatus();
+                        }}
+                        className="h-6 px-2 text-xs font-mono text-muted-foreground hover:text-status-danger cursor-pointer"
                       >
                         <Trash2 className="h-3 w-3 mr-1" />
-                        Release
+                        Clean expired
                       </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Active Granted Leases Section (Teammates Borrowing Your Profiles) */}
-      {activeGrantedLeases.length > 0 && (
-        <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-          <CardHeader className="p-5 pb-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Share2 className="h-4 w-4 text-accent-cyan" />
-                <CardTitle className="text-sm font-semibold text-foreground">
-                  Active Borrowers
-                </CardTitle>
-                <Badge
-                  variant="outline"
-                  className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
-                >
-                  {activeGrantedLeases.length} active
-                </Badge>
-              </div>
-              <span className="text-xs text-muted-foreground font-mono">
-                Revoke access instantly anytime
-              </span>
-            </div>
-            <CardDescription className="text-xs text-muted-foreground pt-1">
-              Teammates currently authenticated with your shared profile credentials.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-5 pt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {activeGrantedLeases.map((lease) => (
-                <div
-                  key={lease.lease_id}
-                  className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <AgentBadge agent={lease.agent} size="sm" />
-                        <span className="text-xs font-mono font-bold text-foreground">
-                          {lease.profile_name}
-                        </span>
-                        <span
-                          className={cn(
-                            'text-xs font-mono px-1.5 py-0.5 rounded border',
-                            lease.auto_approved
-                              ? 'bg-[#183925]/50 text-[#98c379] border-[#235836]/60'
-                              : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
-                          )}
-                        >
-                          {lease.auto_approved ? 'Auto Approved' : 'Manual Approved'}
-                        </span>
-                      </div>
-                      <span className="text-xs font-mono px-2 py-0.5 rounded font-medium bg-status-success-bg text-status-success border border-status-success-border">
-                        {formatExpiresIn(lease.expires_at)}
-                      </span>
-                    </div>
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
-                      <Laptop className="h-3 w-3 text-[#61afef]" />
-                      <span>Borrower:</span>
-                      <span className="text-foreground font-semibold truncate max-w-[220px]" title={lease.borrower_id}>
-                        {lease.borrower_id}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
-                    <span className="text-xs font-mono text-[#666666]">
-                      Lease ID: {lease.lease_id}
+                    )}
+                    <span className="text-xs text-muted-foreground font-mono">
+                      Sandboxed locally
                     </span>
+                  </div>
+                </div>
+                <CardDescription className="text-xs text-muted-foreground pt-1">
+                  External teammate profiles currently leased and sandboxed locally on this machine.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 pt-0">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {data.active_leases.map((lease) => {
+                    const isExpired = lease.is_expired || new Date(lease.expires_at).getTime() <= currentTime;
+                    const runCmd = `aim run ${lease.agent} ${lease.local_profile}`;
+                    return (
+                      <div
+                        key={lease.local_profile}
+                        className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono font-bold text-accent-cyan tracking-tight">
+                                {lease.local_profile}
+                              </span>
+                              <AgentBadge agent={lease.agent} size="sm" />
+                            </div>
+                            <span
+                              className={cn(
+                                'text-xs font-mono px-2 py-0.5 rounded font-medium',
+                                isExpired
+                                  ? 'bg-status-danger-bg text-status-danger border border-status-danger-border'
+                                  : 'bg-status-success-bg text-status-success border border-status-success-border'
+                              )}
+                            >
+                              {formatExpiresIn(lease.expires_at)}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
+                            <span>Source:</span>
+                            <span className="text-foreground font-semibold">{lease.source_peer}</span>
+                            <span className="text-[#666666]">/</span>
+                            <span className="text-foreground">{lease.source_profile}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
+                          <button
+                            onClick={() => copyToClipboard(runCmd, lease.local_profile)}
+                            className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                            title="Click to copy command"
+                          >
+                            {copiedCmd === lease.local_profile ? (
+                              <Check className="h-3 w-3 text-status-success" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                            <code>{runCmd}</code>
+                          </button>
+
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRelease(lease.local_profile)}
+                            className="h-6 px-2 text-xs text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                          >
+                            <Trash2 className="h-3 w-3 mr-1" />
+                            Release
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Discovered Teammates & Shared Profiles Section */}
+          <section className="space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-border/40">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Laptop className="h-4 w-4 text-[#61afef]" />
+                  <h2 className="text-sm font-semibold text-foreground">
+                    Discovered Teammates
+                  </h2>
+                  <Badge
+                    variant="outline"
+                    className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                  >
+                    {filteredPeers.length} online
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Teammates actively sharing AI profiles over the VPN subnet or local Wi-Fi.
+                </p>
+              </div>
+
+              {/* Filter Input + Connect Peer + Refresh Button Group */}
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
+                  <Input
+                    ref={searchInputRef}
+                    type="text"
+                    value={filterQuery}
+                    onChange={(e) => setFilterQuery(e.target.value)}
+                    placeholder="Filter teammates..."
+                    className="pl-8 pr-8 h-8 text-xs font-sans bg-[#0c0c0c] border-[#222222] text-[#ededed] placeholder:text-muted-foreground rounded-geist focus:border-[#333333]"
+                  />
+                  {filterQuery ? (
+                    <button
+                      type="button"
+                      onClick={() => setFilterQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      title="Clear filter"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  ) : (
+                    <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-xs font-mono text-muted-foreground pointer-events-none">
+                      /
+                    </kbd>
+                  )}
+                </div>
+
+                {/* Connect Peer Icon Button */}
+                <Button
+                  variant="default"
+                  size="icon"
+                  onClick={() => setIsConnectOpen(true)}
+                  className="h-8 w-8 rounded-geist bg-[#ededed] text-[#0a0a0a] hover:bg-white hover:text-black flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+                  title="Connect Peer"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+
+                {/* Refresh Icon Button */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoading}
+                  onClick={handleManualRefresh}
+                  className="h-8 w-8 p-0 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-foreground flex items-center justify-center shrink-0 cursor-pointer"
+                  title="Refresh Teammates"
+                >
+                  <RotateCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin text-accent-cyan')} />
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              {!data || !data.peers || data.peers.length === 0 ? (
+                <div className="p-10 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] space-y-2.5">
+                  <Radio className="h-7 w-7 text-muted-foreground/30 mx-auto" />
+                  <div className="text-xs font-semibold text-foreground">No teammates discovered yet</div>
+                  <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                    Teammates connected to the internal VPN who share a profile will be automatically discovered via mDNS, or you can click &quot;Connect Peer&quot; above to add their IP/hostname directly.
+                  </p>
+                </div>
+              ) : filteredPeers.length === 0 ? (
+                <div className="p-6 text-center border border-dashed border-border rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground">
+                  No teammates match filter &ldquo;{filterQuery}&rdquo;.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredPeers.map((peer) => {
+                    const profileCount = peer.profiles?.length || 0;
+                    return (
+                      <Card
+                        key={peer.id || peer.hostname}
+                        className="border border-border bg-card hover:border-[#383838] transition-all rounded-geist flex flex-col justify-between"
+                      >
+                        <div>
+                          <CardHeader className="p-4 pb-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="space-y-0.5 min-w-0">
+                                <CardTitle className="font-semibold text-sm text-foreground tracking-tight truncate flex items-center gap-1.5">
+                                  <Laptop className="h-4 w-4 text-[#61afef] shrink-0" />
+                                  <span className="truncate">{peer.hostname}</span>
+                                </CardTitle>
+                                <CardDescription className="text-xs font-mono text-muted-foreground truncate">
+                                  {peer.vpn_ip}
+                                </CardDescription>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className="badge-success text-xs font-sans px-2 py-0.5 shrink-0 flex items-center gap-1.5"
+                              >
+                                <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                                <span>Online</span>
+                              </Badge>
+                            </div>
+                          </CardHeader>
+
+                          <CardContent className="p-4 pt-2 space-y-2">
+                            <div className="flex items-center justify-between text-xs font-mono uppercase text-muted-foreground tracking-wider font-medium">
+                              <span>Offered Profiles</span>
+                              <span>{profileCount} available</span>
+                            </div>
+
+                            {peer.profiles && peer.profiles.length > 0 ? (
+                              <div className="space-y-0 divide-y divide-border/40">
+                                {peer.profiles.map((prof) => {
+                                  const sp = peer.shared_profiles?.find((p) => p.name === prof);
+                                  const agent = sp?.agent || 'claude';
+                                  const isAuto = sp ? sp.auto_approve : true;
+                                  return (
+                                    <div
+                                      key={prof}
+                                      className="flex items-center justify-between gap-2 py-2 text-xs"
+                                    >
+                                      <div className="flex items-center gap-2 truncate min-w-0">
+                                        <AgentBadge agent={agent} size="sm" />
+                                        <span className="font-mono text-foreground font-medium truncate">
+                                          {prof}
+                                        </span>
+                                        {sp && (
+                                          <span
+                                            className={cn(
+                                              'text-xs font-mono px-1.5 py-0.5 rounded border shrink-0',
+                                              isAuto
+                                                ? 'bg-[#183925]/50 text-[#98c379] border-[#235836]/60'
+                                                : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
+                                            )}
+                                          >
+                                            {isAuto ? 'Auto' : 'Request'}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        onClick={() => {
+                                          setSelectedPeer(peer);
+                                          setSelectedProfile(prof);
+                                          setSelectedAgent(agent);
+                                          setSelectedIsAuto(isAuto);
+                                        }}
+                                        className="h-6 w-6 p-0 rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#262626] text-muted-foreground hover:text-accent-cyan flex items-center justify-center cursor-pointer shrink-0"
+                                        title={`Borrow ${prof} (Lease Credentials)`}
+                                      >
+                                        <KeyRound className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="p-3 rounded-geist bg-[#141414] border border-[#1e1e1e] text-xs text-muted-foreground text-center italic">
+                                No profiles currently shared
+                              </div>
+                            )}
+                          </CardContent>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
+        </TabsContent>
+
+        {/* TAB 2: MY SHARING */}
+        <TabsContent value="my-sharing" className="space-y-6 focus-visible:outline-none">
+          {effectiveGlobalMode === 'off' && (
+            <div className="p-4 rounded-geist border border-[#262626] bg-[#0f0f0f] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-[#e5c07b]" />
+                  <span className="text-xs font-semibold text-foreground">Global Sharing is Currently Off</span>
+                </div>
+                <p className="text-xs text-muted-foreground max-w-xl">
+                  Your node is completely private. Teammates on your subnet cannot discover your profiles or request leases until sharing is enabled.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleGlobalModeChange('request')}
+                  className="rounded-geist text-xs font-mono border-border bg-[#141414] hover:bg-[#1a1a1a] cursor-pointer"
+                >
+                  Enable Request Mode
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleGlobalModeChange('auto')}
+                  className="rounded-geist text-xs font-mono bg-[#183925] hover:bg-[#204a31] text-[#98c379] border border-[#235836] cursor-pointer"
+                >
+                  Enable Auto-Approve
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Active Granted Leases Section (Teammates Borrowing Your Profiles) */}
+          {activeGrantedLeases.length > 0 && (
+            <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+              <CardHeader className="p-5 pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Share2 className="h-4 w-4 text-accent-cyan" />
+                    <CardTitle className="text-sm font-semibold text-foreground">
+                      Active Borrowers
+                    </CardTitle>
+                    <Badge
+                      variant="outline"
+                      className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                    >
+                      {activeGrantedLeases.length} active
+                    </Badge>
+                  </div>
+                  <span className="text-xs text-muted-foreground font-mono">
+                    Revoke access instantly anytime
+                  </span>
+                </div>
+                <CardDescription className="text-xs text-muted-foreground pt-1">
+                  Teammates currently authenticated with your shared profile credentials.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 pt-0">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {activeGrantedLeases.map((lease) => (
+                    <div
+                      key={lease.lease_id}
+                      className="p-4 rounded-geist border border-border bg-card flex flex-col justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <AgentBadge agent={lease.agent} size="sm" />
+                            <span className="text-xs font-mono font-bold text-foreground">
+                              {lease.profile_name}
+                            </span>
+                            <span
+                              className={cn(
+                                'text-xs font-mono px-1.5 py-0.5 rounded border',
+                                lease.auto_approved
+                                  ? 'bg-[#183925]/50 text-[#98c379] border-[#235836]/60'
+                                  : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
+                              )}
+                            >
+                              {lease.auto_approved ? 'Auto Approved' : 'Manual Approved'}
+                            </span>
+                          </div>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded font-medium bg-status-success-bg text-status-success border border-status-success-border">
+                            {formatExpiresIn(lease.expires_at)}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-mono">
+                          <Laptop className="h-3 w-3 text-[#61afef]" />
+                          <span>Borrower:</span>
+                          <span className="text-foreground font-semibold truncate max-w-[220px]" title={lease.borrower_id}>
+                            {lease.borrower_id}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-[#1f1f1f]">
+                        <span className="text-xs font-mono text-[#666666]">
+                          Lease ID: {lease.lease_id}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRevokeLease(lease.lease_id)}
+                          className="h-6 px-2 text-xs text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                        >
+                          <ShieldAlert className="h-3 w-3 mr-1" />
+                          Revoke Lease
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Local Offered Profiles Section */}
+          <section className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-border/40">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Share2 className="h-4 w-4 text-accent-cyan" />
+                  <h2 className="text-sm font-semibold text-foreground">
+                    Your Offered Profiles
+                  </h2>
+                  <Badge
+                    variant="outline"
+                    className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                  >
+                    {data?.shared_profiles?.filter((sp) => sp.enabled)?.length || 0} of {ownProfiles.length} shared
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Profiles on this machine that teammates on the VPN mesh can discover and lease.
+                </p>
+              </div>
+            </div>
+
+            {ownProfiles.length === 0 ? (
+              <div className="p-8 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono">
+                No local profiles found on this machine to share.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {ownProfiles.map((p) => {
+                  const sp = data?.shared_profiles?.find((s) => s.name === p.name);
+                  const isShared = sp ? sp.enabled : false;
+                  const mode: ShareMode = !isShared ? 'off' : (sp?.auto_approve ? 'auto' : 'request');
+                  return (
+                    <div
+                      key={p.name}
+                      className="p-3.5 rounded-geist border border-border bg-card flex items-center justify-between gap-3 shadow-xs hover:border-[#383838] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <AgentBadge agent={p.agent} size="sm" />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-xs text-foreground truncate">
+                            {p.name}
+                          </div>
+                          <div className="text-xs font-mono text-muted-foreground truncate">
+                            {isShared ? (mode === 'auto' ? 'Auto-Approve' : 'Manual Approval') : 'Private (Not Shared)'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Segmented slider for this profile */}
+                      <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] shrink-0">
+                        <button
+                          type="button"
+                          disabled={isShareUpdating}
+                          onClick={() => handleSetLocalProfileShareMode(p.name, 'off')}
+                          className={cn(
+                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium',
+                            mode === 'off'
+                              ? 'bg-[#262626] text-[#ededed] shadow-xs'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                          )}
+                          title="Keep this profile private"
+                        >
+                          Off
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isShareUpdating}
+                          onClick={() => handleSetLocalProfileShareMode(p.name, 'request')}
+                          className={cn(
+                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1',
+                            mode === 'request'
+                              ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                          )}
+                          title="Require manual lease request confirmation"
+                        >
+                          <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]')} />
+                          Req
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isShareUpdating}
+                          onClick={() => handleSetLocalProfileShareMode(p.name, 'auto')}
+                          className={cn(
+                            'px-2 py-0.5 rounded-sm text-xs font-mono transition-all cursor-pointer font-medium flex items-center gap-1',
+                            mode === 'auto'
+                              ? 'bg-[#183925] text-[#98c379] border border-[#235836] shadow-xs'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-[#1a1a1a]'
+                          )}
+                          title="Auto-approve lease requests for this profile"
+                        >
+                          <span className={cn('h-1.5 w-1.5 rounded-full', mode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]')} />
+                          Auto
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Automation & Time Windows Card */}
+          <div className="p-4 rounded-geist border border-[#222222] bg-[#0c0c0c] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-3.5 w-3.5 text-accent-cyan" />
+                <span className="text-xs font-semibold text-foreground">Automation & Time Windows</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Automatically enable sharing after work hours (e.g. 10pm - 8am) or on weekends to let teammates borrow surplus quota without manual prompts.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsScheduleModalOpen(true)}
+              className="h-8 rounded-geist text-xs font-mono border-border bg-[#141414] hover:bg-[#1f1f1f] shrink-0 cursor-pointer"
+            >
+              <Settings className="h-3.5 w-3.5 mr-1.5" />
+              Configure Schedules
+            </Button>
+          </div>
+        </TabsContent>
+
+        {/* TAB 3: AUDIT LOG */}
+        <TabsContent value="audit" className="space-y-4 focus-visible:outline-none">
+          {/* P2P Activity & Audit Log Card */}
+          <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+            <CardHeader className="p-5 pb-3 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-accent-cyan" />
+                  <CardTitle className="text-sm font-semibold text-foreground">
+                    Audit Log
+                  </CardTitle>
+                  <Badge
+                    variant="outline"
+                    className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
+                  >
+                    {filteredAuditLogs.length === (data?.audit_logs?.length || 0)
+                      ? `${filteredAuditLogs.length} events`
+                      : `${filteredAuditLogs.length} of ${data?.audit_logs?.length || 0} events`}
+                  </Badge>
+                </div>
+                <span className="text-xs text-muted-foreground font-mono">
+                  Tamper-evident mesh audit trail
+                </span>
+              </div>
+
+              <CardDescription className="text-xs text-muted-foreground pt-0">
+                Real-time audit log of all lease requests, approvals, revocations, and sharing policy switches.
+              </CardDescription>
+
+              {/* Audit Log Filters */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={auditSearchQuery}
+                    onChange={(e) => setAuditSearchQuery(e.target.value)}
+                    placeholder="Filter audit events (actor, details, action)..."
+                    className="h-8 pl-8 pr-7 text-xs font-mono bg-[#141414] border-border rounded-geist placeholder:text-muted-foreground"
+                  />
+                  {auditSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setAuditSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs cursor-pointer"
+                      title="Clear search"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="w-[160px]">
+                    <SelectDropdown
+                      value={auditActionFilter}
+                      onChange={(val) => setAuditActionFilter(String(val))}
+                      size="sm"
+                      triggerClassName="h-8 bg-[#141414] border-border text-xs font-mono"
+                      options={[
+                        { value: 'all', label: 'All Actions' },
+                        { value: 'granted', label: 'Leases Granted' },
+                        { value: 'requested', label: 'Lease Requests' },
+                        { value: 'revoked', label: 'Leases Revoked' },
+                        { value: 'policy', label: 'Policy Changes' },
+                        { value: 'schedule', label: 'Schedules' },
+                      ]}
+                    />
+                  </div>
+
+                  {(auditSearchQuery || auditActionFilter !== 'all') && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleRevokeLease(lease.lease_id)}
-                      className="h-6 px-2 text-xs text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                      onClick={() => {
+                        setAuditSearchQuery('');
+                        setAuditActionFilter('all');
+                      }}
+                      className="h-8 px-2 text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer"
+                      title="Reset Filters"
                     >
-                      <ShieldAlert className="h-3 w-3 mr-1" />
-                      Revoke Lease
+                      <X className="h-3.5 w-3.5 mr-1" />
+                      Reset
                     </Button>
-                  </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Discovered Teammates & Shared Profiles Section */}
-      <section className="space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-border/40">
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <Laptop className="h-4 w-4 text-[#61afef]" />
-              <h2 className="text-sm font-semibold text-foreground">
-                Discovered Teammates
-              </h2>
-              <Badge
-                variant="outline"
-                className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
-              >
-                {filteredPeers.length} online
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Teammates actively sharing AI profiles over the VPN subnet or local Wi-Fi.
-            </p>
-          </div>
-
-            {/* Filter Input + Connect Peer + Refresh Button Group (Screenshot 12.21.08 AM) */}
-            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
-                <Input
-                  ref={searchInputRef}
-                  type="text"
-                  value={filterQuery}
-                  onChange={(e) => setFilterQuery(e.target.value)}
-                  placeholder="Filter teammates..."
-                  className="pl-8 pr-8 h-8 text-xs font-sans bg-[#0c0c0c] border-[#222222] text-[#ededed] placeholder:text-muted-foreground rounded-geist focus:border-[#333333]"
-                />
-                {filterQuery ? (
-                  <button
-                    type="button"
-                    onClick={() => setFilterQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                    title="Clear filter"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                ) : (
-                  <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-xs font-mono text-muted-foreground pointer-events-none">
-                    /
-                  </kbd>
-                )}
               </div>
-
-              {/* Connect Peer Icon Button */}
-              <Button
-                variant="default"
-                size="icon"
-                onClick={() => setIsConnectOpen(true)}
-                className="h-8 w-8 rounded-geist bg-[#ededed] text-[#0a0a0a] hover:bg-white hover:text-black flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
-                title="Connect Peer"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-
-              {/* Refresh Icon Button (Screenshot 12.50.39 AM) */}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isLoading}
-                onClick={handleManualRefresh}
-                className="h-8 w-8 p-0 rounded-geist border-border bg-[#141414] hover:bg-[#1f1f1f] text-foreground flex items-center justify-center shrink-0 cursor-pointer"
-                title="Refresh Teammates"
-              >
-                <RotateCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin text-accent-cyan')} />
-              </Button>
-            </div>
-          </div>
-
-        <div>
-          {!data || !data.peers || data.peers.length === 0 ? (
-            <div className="p-10 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] space-y-2.5">
-              <Radio className="h-7 w-7 text-muted-foreground/30 mx-auto" />
-              <div className="text-xs font-semibold text-foreground">No teammates discovered yet</div>
-              <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
-                Teammates connected to the internal VPN who share a profile will be automatically discovered via mDNS, or you can click "Connect Peer" above to add their IP/hostname directly.
-              </p>
-            </div>
-          ) : filteredPeers.length === 0 ? (
-            <div className="p-6 text-center border border-dashed border-border rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground">
-              No teammates match filter &ldquo;{filterQuery}&rdquo;.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredPeers.map((peer) => {
-                const profileCount = peer.profiles?.length || 0;
-                return (
-                  <Card
-                    key={peer.id || peer.hostname}
-                    className="border border-border bg-card hover:border-[#383838] transition-all rounded-geist flex flex-col justify-between"
+            </CardHeader>
+            <CardContent className="p-5 pt-0">
+              {!data?.audit_logs || data.audit_logs.length === 0 ? (
+                <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono">
+                  No sharing events recorded yet.
+                </div>
+              ) : filteredAuditLogs.length === 0 ? (
+                <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono space-y-2">
+                  <p>No audit events match the selected filters.</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setAuditSearchQuery('');
+                      setAuditActionFilter('all');
+                    }}
+                    className="h-6 px-2.5 text-xs font-mono cursor-pointer"
                   >
-                    <div>
-                      <CardHeader className="p-4 pb-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="space-y-0.5 min-w-0">
-                            <CardTitle className="font-semibold text-sm text-foreground tracking-tight truncate flex items-center gap-1.5">
-                              <Laptop className="h-4 w-4 text-[#61afef] shrink-0" />
-                              <span className="truncate">{peer.hostname}</span>
-                            </CardTitle>
-                            <CardDescription className="text-xs font-mono text-muted-foreground truncate">
-                              {peer.vpn_ip}
-                            </CardDescription>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className="badge-success text-xs font-sans px-2 py-0.5 shrink-0 flex items-center gap-1.5"
-                          >
-                            <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                            <span>Online</span>
-                          </Badge>
+                    Clear filters
+                  </Button>
+                </div>
+              ) : (
+                <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 font-mono text-xs">
+                  {filteredAuditLogs.map((log) => {
+                    const actionColors: Record<string, string> = {
+                      LEASE_GRANTED: 'text-[#98c379] bg-[#183925]/40 border-[#235836]',
+                      LEASE_REQUESTED: 'text-[#52a8ff] bg-[#142334]/40 border-[#1f4068]',
+                      LEASE_REVOKED: 'text-[#e06c75] bg-[#3a1d20]/40 border-[#5c282d]',
+                      LEASE_DENIED: 'text-[#e06c75] bg-[#3a1d20]/40 border-[#5c282d]',
+                      GLOBAL_MODE_CHANGED: 'text-[#e5c07b] bg-[#332b1a]/40 border-[#594926]',
+                      PROFILE_SHARING_ON: 'text-[#98c379] bg-[#183925]/40 border-[#235836]',
+                      PROFILE_SHARING_OFF: 'text-[#888888] bg-[#1e1e1e] border-[#333333]',
+                      SCHEDULE_SAVED: 'text-[#56b6c2] bg-[#1a2d33]/40 border-[#264e59]',
+                      SCHEDULE_DELETED: 'text-[#e5c07b] bg-[#332b1a]/40 border-[#594926]',
+                    };
+                    const color = actionColors[log.action] || 'text-muted-foreground border-border bg-[#141414]';
+                    const timeStr = new Date(log.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    });
+                    return (
+                      <div
+                        key={log.id}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 px-2.5 rounded-geist bg-[#111111] border border-[#1f1f1f] text-xs"
+                      >
+                        <div className="flex items-center gap-2 truncate min-w-0">
+                          <span className="text-muted-foreground shrink-0">{timeStr}</span>
+                          <span className={cn('px-1.5 py-0.5 rounded border text-xs shrink-0 font-medium', color)}>
+                            {log.action.replace(/_/g, ' ')}
+                          </span>
+                          <span className="text-foreground truncate">{log.details}</span>
                         </div>
-                      </CardHeader>
-
-                      <CardContent className="p-4 pt-2 space-y-2">
-                        <div className="flex items-center justify-between text-xs font-mono uppercase text-muted-foreground tracking-wider font-medium">
-                          <span>Offered Profiles</span>
-                          <span>{profileCount} available</span>
-                        </div>
-
-                        {peer.profiles && peer.profiles.length > 0 ? (
-                          <div className="space-y-0 divide-y divide-border/40">
-                            {peer.profiles.map((prof) => {
-                              const sp = peer.shared_profiles?.find((p) => p.name === prof);
-                              const agent = sp?.agent || 'claude';
-                              const isAuto = sp ? sp.auto_approve : true;
-                              return (
-                                <div
-                                  key={prof}
-                                  className="flex items-center justify-between gap-2 py-2 text-xs"
-                                >
-                                  <div className="flex items-center gap-2 truncate min-w-0">
-                                    <AgentBadge agent={agent} size="sm" />
-                                    <span className="font-mono text-foreground font-medium truncate">
-                                      {prof}
-                                    </span>
-                                    {sp && (
-                                      <span
-                                        className={cn(
-                                          'text-xs font-mono px-1.5 py-0.5 rounded border shrink-0',
-                                          isAuto
-                                            ? 'bg-[#183925]/50 text-[#98c379] border-[#235836]/60'
-                                            : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
-                                        )}
-                                      >
-                                        {isAuto ? 'Auto' : 'Request'}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <Button
-                                    size="icon"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setSelectedPeer(peer);
-                                      setSelectedProfile(prof);
-                                      setSelectedAgent(agent);
-                                      setSelectedIsAuto(isAuto);
-                                    }}
-                                    className="h-6 w-6 p-0 rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#262626] text-muted-foreground hover:text-accent-cyan flex items-center justify-center cursor-pointer shrink-0"
-                                    title={`Borrow ${prof} (Lease Credentials)`}
-                                  >
-                                    <KeyRound className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="p-3 rounded-geist bg-[#141414] border border-[#1e1e1e] text-xs text-muted-foreground text-center italic">
-                            No profiles currently shared
-                          </div>
+                        {log.actor && (
+                          <span className="text-muted-foreground text-xs shrink-0 truncate max-w-[150px]">
+                            actor: {log.actor}
+                          </span>
                         )}
-                      </CardContent>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* P2P Activity & Audit Log Card */}
-      <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-        <CardHeader className="p-5 pb-3 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-accent-cyan" />
-              <CardTitle className="text-sm font-semibold text-foreground">
-                Audit Log
-              </CardTitle>
-              <Badge
-                variant="outline"
-                className="text-xs font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
-              >
-                {filteredAuditLogs.length === (data?.audit_logs?.length || 0)
-                  ? `${filteredAuditLogs.length} events`
-                  : `${filteredAuditLogs.length} of ${data?.audit_logs?.length || 0} events`}
-              </Badge>
-            </div>
-            <span className="text-xs text-muted-foreground font-mono">
-              Tamper-evident mesh audit trail
-            </span>
-          </div>
-
-          <CardDescription className="text-xs text-muted-foreground pt-0">
-            Real-time audit log of all lease requests, approvals, revocations, and sharing policy switches.
-          </CardDescription>
-
-          {/* Audit Log Filters */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-            <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={auditSearchQuery}
-                onChange={(e) => setAuditSearchQuery(e.target.value)}
-                placeholder="Filter audit events (actor, details, action)..."
-                className="h-8 pl-8 pr-7 text-xs font-mono bg-[#141414] border-border rounded-geist placeholder:text-muted-foreground"
-              />
-              {auditSearchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setAuditSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs cursor-pointer"
-                  title="Clear search"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="w-[160px]">
-                <SelectDropdown
-                  value={auditActionFilter}
-                  onChange={(val) => setAuditActionFilter(String(val))}
-                  size="sm"
-                  triggerClassName="h-8 bg-[#141414] border-border text-xs font-mono"
-                  options={[
-                    { value: 'all', label: 'All Actions' },
-                    { value: 'granted', label: 'Leases Granted' },
-                    { value: 'requested', label: 'Lease Requests' },
-                    { value: 'revoked', label: 'Leases Revoked' },
-                    { value: 'policy', label: 'Policy Changes' },
-                    { value: 'schedule', label: 'Schedules' },
-                  ]}
-                />
-              </div>
-
-              {(auditSearchQuery || auditActionFilter !== 'all') && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setAuditSearchQuery('');
-                    setAuditActionFilter('all');
-                  }}
-                  className="h-8 px-2 text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer"
-                  title="Reset Filters"
-                >
-                  <X className="h-3.5 w-3.5 mr-1" />
-                  Reset
-                </Button>
-              )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="p-5 pt-0">
-          {!data?.audit_logs || data.audit_logs.length === 0 ? (
-            <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono">
-              No sharing events recorded yet.
-            </div>
-          ) : filteredAuditLogs.length === 0 ? (
-            <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono space-y-2">
-              <p>No audit events match the selected filters.</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setAuditSearchQuery('');
-                  setAuditActionFilter('all');
-                }}
-                className="h-6 px-2.5 text-xs font-mono cursor-pointer"
-              >
-                Clear filters
-              </Button>
-            </div>
-          ) : (
-            <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 font-mono text-xs">
-              {filteredAuditLogs.map((log) => {
-                const actionColors: Record<string, string> = {
-                  LEASE_GRANTED: 'text-[#98c379] bg-[#183925]/40 border-[#235836]',
-                  LEASE_REQUESTED: 'text-[#52a8ff] bg-[#142334]/40 border-[#1f4068]',
-                  LEASE_REVOKED: 'text-[#e06c75] bg-[#3a1d20]/40 border-[#5c282d]',
-                  LEASE_DENIED: 'text-[#e06c75] bg-[#3a1d20]/40 border-[#5c282d]',
-                  GLOBAL_MODE_CHANGED: 'text-[#e5c07b] bg-[#332b1a]/40 border-[#594926]',
-                  PROFILE_SHARING_ON: 'text-[#98c379] bg-[#183925]/40 border-[#235836]',
-                  PROFILE_SHARING_OFF: 'text-[#888888] bg-[#1e1e1e] border-[#333333]',
-                  SCHEDULE_SAVED: 'text-[#56b6c2] bg-[#1a2d33]/40 border-[#264e59]',
-                  SCHEDULE_DELETED: 'text-[#e5c07b] bg-[#332b1a]/40 border-[#594926]',
-                };
-                const color = actionColors[log.action] || 'text-muted-foreground border-border bg-[#141414]';
-                const timeStr = new Date(log.timestamp).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                });
-                return (
-                  <div
-                    key={log.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 px-2.5 rounded-geist bg-[#111111] border border-[#1f1f1f] text-xs"
-                  >
-                    <div className="flex items-center gap-2 truncate min-w-0">
-                      <span className="text-muted-foreground shrink-0">{timeStr}</span>
-                      <span className={cn('px-1.5 py-0.5 rounded border text-xs shrink-0 font-medium', color)}>
-                        {log.action.replace(/_/g, ' ')}
-                      </span>
-                      <span className="text-foreground truncate">{log.details}</span>
-                    </div>
-                    {log.actor && (
-                      <span className="text-muted-foreground text-xs shrink-0 truncate max-w-[150px]">
-                        actor: {log.actor}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Connect Peer Dialog Modal */}
       <Dialog open={isConnectOpen} onOpenChange={setIsConnectOpen}>
