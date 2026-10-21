@@ -8,7 +8,7 @@ import {
   Trash2,
   Copy,
   Check,
-  Download,
+  KeyRound,
   Search,
   AlertTriangle,
   Plus,
@@ -1096,9 +1096,9 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                       setSelectedIsAuto(isAuto);
                                     }}
                                     className="h-6 w-6 p-0 rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#262626] text-muted-foreground hover:text-accent-cyan flex items-center justify-center cursor-pointer shrink-0"
-                                    title={`Borrow ${prof}`}
+                                    title={`Borrow ${prof} (Lease Credentials)`}
                                   >
-                                    <Download className="h-3 w-3" />
+                                    <KeyRound className="h-3 w-3" />
                                   </Button>
                                 </div>
                               );
