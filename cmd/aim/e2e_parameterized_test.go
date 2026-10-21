@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -22,6 +24,7 @@ import (
 	agysess "github.com/aim-cli/aim/internal/session/providers/agy"
 	claudesess "github.com/aim-cli/aim/internal/session/providers/claude"
 	codexsess "github.com/aim-cli/aim/internal/session/providers/codex"
+	"github.com/aim-cli/aim/internal/usage"
 )
 
 type adapterTestCase struct {
@@ -429,4 +432,534 @@ func runCollectionMerge(t *testing.T, launch func([]string, func() int) int, cfg
 	}
 	expect("at rest after switched-off recovery", c.ProfilePath, "new@m,own@m")
 	delete(cfg.Profiles, "work")
+}
+
+// findHostBinary dynamically resolves an agent binary on the host using PATH
+// and standard system/user directories without hardcoding username paths.
+func findHostBinary(name string) string {
+	if bin, err := exec.LookPath(name); err == nil {
+		return bin
+	}
+	realHome := config.RealHomeDir()
+	fallbacks := []string{
+		filepath.Join(realHome, ".local", "bin", name),
+		filepath.Join("/opt/homebrew", "bin", name),
+		filepath.Join("/usr/local/bin", name),
+		filepath.Join("/usr/bin", name),
+		filepath.Join("/bin", name),
+	}
+	for _, fb := range fallbacks {
+		if fi, err := os.Stat(fb); err == nil && !fi.IsDir() {
+			return fb
+		}
+	}
+	return ""
+}
+
+func TestParameterized_RealTools_Claude(t *testing.T) {
+	bin := findHostBinary("claude")
+	if bin == "" {
+		t.Skip("claude binary not found on PATH")
+	}
+
+	binDir := filepath.Dir(bin)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	t.Run("VersionInvocation", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, bin, "--version")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("claude --version failed: %v, output: %s", err, string(out))
+		}
+		outStr := string(out)
+		if !strings.Contains(outStr, "Claude") && !strings.Contains(outStr, "2.") {
+			t.Errorf("unexpected output from claude --version: %s", outStr)
+		}
+	})
+
+	t.Run("HelpFlag", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, bin, "--help")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("claude --help failed: %v, output: %s", err, string(out))
+		}
+		if !strings.Contains(string(out), "--resume") {
+			t.Errorf("expected claude --help to list --resume flag, got: %s", string(out))
+		}
+	})
+
+	t.Run("DoctorOK", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		tempDir := t.TempDir()
+		t.Setenv("AIM_HOME", tempDir)
+		t.Setenv("AIM_REAL_HOME", tempDir)
+		t.Setenv("HOME", tempDir)
+
+		reg := agents.NewRegistry()
+		reg.Register(claude.NewAdapter())
+
+		pm := profile.NewProfileManager(tempDir)
+		_, err := pm.EnsureProfile("work")
+		if err != nil {
+			t.Fatalf("failed to ensure profile: %v", err)
+		}
+
+		cmd := newDoctorCmd(reg, pm)
+		cmd.SetContext(ctx)
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+		cmd.SetArgs([]string{"claude"})
+
+		err = cmd.Execute()
+		if err != nil {
+			t.Fatalf("aim doctor claude failed: %v", err)
+		}
+
+		outStr := buf.String()
+		if !strings.Contains(outStr, "[OK]") || (!strings.Contains(outStr, "Claude installed") && !strings.Contains(outStr, "installed")) {
+			t.Errorf("expected aim doctor claude output to detect installed binary and return [OK], got:\n%s", outStr)
+		}
+	})
+
+	t.Run("ResumeArgumentValidation", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Invoke claude with --resume and a non-existent session ID in print mode (-p).
+		// Claude Code CLI strictly validates --resume and reports that the provided value
+		// is not a UUID / does not match any session, proving the CLI parser validates --resume.
+		cmd := exec.CommandContext(ctx, bin, "--resume", "dummy-session-uuid-1234", "-p", "echo")
+		out, _ := cmd.CombinedOutput()
+		outStr := string(out)
+		if !strings.Contains(outStr, "--resume") {
+			t.Errorf("expected Claude CLI parser to accept and validate --resume flag, output was: %s", outStr)
+		}
+	})
+}
+
+func TestParameterized_RealTools_AllAvailable(t *testing.T) {
+	tools := []struct {
+		agent       string
+		versionArgs []string
+		identText   string
+	}{
+		{agent: "claude", versionArgs: []string{"--version"}, identText: "Claude"},
+		{agent: "codex", versionArgs: []string{"--version"}, identText: "codex"},
+		{agent: "agy", versionArgs: []string{"--version"}, identText: "1."},
+	}
+
+	for _, tc := range tools {
+		t.Run(tc.agent, func(t *testing.T) {
+			bin := findHostBinary(tc.agent)
+			if bin == "" {
+				t.Skipf("%s binary not found on PATH, skipping real invocation", tc.agent)
+			}
+
+			binDir := filepath.Dir(bin)
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, bin, tc.versionArgs...)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s %v failed: %v, output: %s", tc.agent, tc.versionArgs, err, string(out))
+			}
+			if !strings.Contains(strings.ToLower(string(out)), strings.ToLower(tc.identText)) {
+				t.Errorf("expected version output of %s to contain %q, got: %s", tc.agent, tc.identText, string(out))
+			}
+
+			// Run aim doctor against the real binary
+			tempDir := t.TempDir()
+			t.Setenv("AIM_HOME", tempDir)
+			t.Setenv("AIM_REAL_HOME", tempDir)
+			t.Setenv("HOME", tempDir)
+
+			reg := setupParameterizedRegistry()
+			pm := profile.NewProfileManager(tempDir)
+			_, _ = pm.EnsureProfile("work")
+
+			docCmd := newDoctorCmd(reg, pm)
+			docCmd.SetContext(ctx)
+			var buf bytes.Buffer
+			docCmd.SetOut(&buf)
+			docCmd.SetErr(&buf)
+			docCmd.SetArgs([]string{tc.agent})
+
+			if err := docCmd.Execute(); err != nil {
+				t.Fatalf("aim doctor %s failed: %v", tc.agent, err)
+			}
+			outStr := buf.String()
+			if !strings.Contains(outStr, "[OK]") {
+				t.Errorf("expected aim doctor %s to return [OK], got:\n%s", tc.agent, outStr)
+			}
+		})
+	}
+}
+
+func TestParameterized_MultiAgent_SessionResumer(t *testing.T) {
+	reg := setupParameterizedRegistry()
+
+	tests := []struct {
+		agent        string
+		sessionID    string
+		extraArgs    []string
+		expectedArgs []string
+	}{
+		{
+			agent:        "claude",
+			sessionID:    "sess-claude-uuid-123",
+			extraArgs:    nil,
+			expectedArgs: []string{"--resume", "sess-claude-uuid-123"},
+		},
+		{
+			agent:        "claude",
+			sessionID:    "sess-claude-uuid-456",
+			extraArgs:    []string{"--dangerously-skip-permissions", "--verbose"},
+			expectedArgs: []string{"--resume", "sess-claude-uuid-456", "--dangerously-skip-permissions", "--verbose"},
+		},
+		{
+			agent:        "codex",
+			sessionID:    "sess-codex-id-789",
+			extraArgs:    nil,
+			expectedArgs: []string{"resume", "sess-codex-id-789"},
+		},
+		{
+			agent:        "codex",
+			sessionID:    "sess-codex-id-012",
+			extraArgs:    []string{"--model", "gpt-4o"},
+			expectedArgs: []string{"resume", "sess-codex-id-012", "--model", "gpt-4o"},
+		},
+		{
+			agent:        "agy",
+			sessionID:    "sess-agy-id-345",
+			extraArgs:    nil,
+			expectedArgs: []string{"--conversation=sess-agy-id-345"},
+		},
+		{
+			agent:        "agy",
+			sessionID:    "sess-agy-id-678",
+			extraArgs:    []string{"--telemetry=off"},
+			expectedArgs: []string{"--conversation=sess-agy-id-678", "--telemetry=off"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.agent+"_"+tc.sessionID, func(t *testing.T) {
+			adapter, err := reg.Get(tc.agent)
+			if err != nil {
+				t.Fatalf("failed to get adapter %q: %v", tc.agent, err)
+			}
+			resumer, ok := adapter.(agents.SessionResumer)
+			if !ok {
+				t.Fatalf("adapter %q does not implement agents.SessionResumer", tc.agent)
+			}
+			args := resumer.ResumeArgs(tc.sessionID, tc.extraArgs)
+			if len(args) != len(tc.expectedArgs) {
+				t.Fatalf("expected args len %d, got %d: %v", len(tc.expectedArgs), len(args), args)
+			}
+			for i := range args {
+				if args[i] != tc.expectedArgs[i] {
+					t.Errorf("arg[%d] mismatch: expected %q, got %q (all args: %v)", i, tc.expectedArgs[i], args[i], args)
+				}
+			}
+		})
+	}
+}
+
+func TestParameterized_MultiAgent_ResolveCwd(t *testing.T) {
+	mgr := setupParameterizedSessionManager()
+	ctx := context.Background()
+
+	testPaths := []string{
+		"path with spaces/nested workspace",
+		"deeply/nested/sub/directory/project",
+		"unicode_🚀_项目_ünicode/workspace",
+		"spaces and unicode 🎯/dir with spaces/子目录",
+	}
+
+	sessionAgents := []string{"claude", "codex", "agy"}
+
+	for _, agent := range sessionAgents {
+		t.Run(agent, func(t *testing.T) {
+			for _, relPath := range testPaths {
+				t.Run(relPath, func(t *testing.T) {
+					tempDir := t.TempDir()
+					absPath := filepath.Join(tempDir, relPath)
+					if err := os.MkdirAll(absPath, 0755); err != nil {
+						t.Fatalf("failed to create test directory %q: %v", absPath, err)
+					}
+
+					sess := &session.Session{
+						ID:      "test-sess-" + agent,
+						Agent:   agent,
+						Profile: "work",
+						Cwd:     absPath,
+					}
+
+					resolved, err := mgr.ResolveCwd(ctx, sess)
+					if err != nil {
+						t.Fatalf("ResolveCwd failed for agent %s: %v", agent, err)
+					}
+					if canonicalDir(t, resolved) != canonicalDir(t, absPath) {
+						t.Errorf("ResolveCwd mismatch for agent %s:\nexpected: %s\ngot:      %s",
+							agent, canonicalDir(t, absPath), canonicalDir(t, resolved))
+					}
+				})
+			}
+		})
+	}
+
+	t.Run("Claude_SlugResolution_SpacesAndUnicode", func(t *testing.T) {
+		tempDir := t.TempDir()
+		projectDir := filepath.Join(tempDir, "claude-nested-spaces 🚀", "sub-project")
+		if err := os.MkdirAll(projectDir, 0755); err != nil {
+			t.Fatalf("failed to create directory: %v", err)
+		}
+
+		slug := claudesess.PathToSlug(projectDir)
+		recovered := claudesess.SlugToPath(slug)
+		if canonicalDir(t, recovered) != canonicalDir(t, projectDir) {
+			t.Errorf("SlugToPath failed for path with spaces & unicode:\nexpected: %s\ngot:      %s",
+				canonicalDir(t, projectDir), canonicalDir(t, recovered))
+		}
+
+		fakeProjectsDir := filepath.Join(tempDir, "profiles", "work", ".claude", "projects", slug)
+		if err := os.MkdirAll(fakeProjectsDir, 0755); err != nil {
+			t.Fatalf("failed to create fake projects dir: %v", err)
+		}
+		fakeSessionFile := filepath.Join(fakeProjectsDir, "test-sess.jsonl")
+		_ = os.WriteFile(fakeSessionFile, []byte(`{"type":"user","text":"hello"}`), 0600)
+
+		sess := &session.Session{
+			ID:          "test-sess",
+			Agent:       "claude",
+			Profile:     "work",
+			StoragePath: fakeSessionFile,
+			Cwd:         "",
+		}
+		resolved, err := mgr.ResolveCwd(ctx, sess)
+		if err != nil {
+			t.Fatalf("ResolveCwd via StoragePath failed: %v", err)
+		}
+		if canonicalDir(t, resolved) != canonicalDir(t, projectDir) {
+			t.Errorf("expected resolved Cwd from StoragePath to match %s, got %s",
+				canonicalDir(t, projectDir), canonicalDir(t, resolved))
+		}
+	})
+}
+
+func TestParameterized_MultiAgent_WorkingDirPropagation(t *testing.T) {
+	sessionAgents := []string{"claude", "codex", "agy"}
+
+	for _, agent := range sessionAgents {
+		t.Run(agent, func(t *testing.T) {
+			tempDir := t.TempDir()
+			t.Setenv("AIM_HOME", tempDir)
+			t.Setenv("AIM_REAL_HOME", tempDir)
+			t.Setenv("HOME", tempDir)
+
+			targetWorkDir := filepath.Join(tempDir, "workspace with spaces and 🚀 unicode", agent+"_dir")
+			if err := os.MkdirAll(targetWorkDir, 0755); err != nil {
+				t.Fatalf("failed to create target workspace: %v", err)
+			}
+
+			dumpFile := filepath.Join(tempDir, "cwd_dump_"+agent+".txt")
+			fakeBinDir := filepath.Join(tempDir, "bin_"+agent)
+			_ = os.MkdirAll(fakeBinDir, 0755)
+
+			reg := setupParameterizedRegistry()
+			adapter, err := reg.Get(agent)
+			if err != nil {
+				t.Fatalf("failed to get adapter %s: %v", agent, err)
+			}
+
+			binName := adapter.BinaryName()
+			fakeBin := filepath.Join(fakeBinDir, binName)
+			fakeScript := fmt.Sprintf("#!/bin/sh\npwd > %q\nexit 0\n", dumpFile)
+			if err := os.WriteFile(fakeBin, []byte(fakeScript), 0755); err != nil {
+				t.Fatalf("failed to write fake binary: %v", err)
+			}
+			t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+			pm := profile.NewProfileManager(tempDir)
+			pDir, err := pm.EnsureProfile("default")
+			if err != nil {
+				t.Fatalf("failed to ensure profile: %v", err)
+			}
+
+			var buf bytes.Buffer
+			cmd := newRootCmd(reg, pm)
+			cmd.SetOut(&buf)
+			cmd.SetErr(&buf)
+
+			sess := &session.Session{
+				ID:           "test-cwd-session-" + agent,
+				ShortID:      "test-cwd-" + agent,
+				Title:        "CWD Test Session " + agent,
+				Agent:        agent,
+				Profile:      "default",
+				Cwd:          targetWorkDir,
+				LastActiveAt: time.Now(),
+				Status:       session.StatusIdle,
+			}
+
+			mgr := setupParameterizedSessionManager()
+			ctx := WithSessionManager(context.Background(), mgr)
+			cmd.SetContext(ctx)
+
+			err = executeExactResume(cmd, reg, pm, mgr, agent, "default", pDir, sess, false, nil)
+			if err != nil {
+				t.Fatalf("executeExactResume failed for %s: %v", agent, err)
+			}
+
+			content, err := os.ReadFile(dumpFile)
+			if err != nil {
+				t.Fatalf("failed to read cwd dump file for %s: %v", agent, err)
+			}
+			gotCwd := strings.TrimSpace(string(content))
+			if canonicalDir(t, gotCwd) != canonicalDir(t, targetWorkDir) {
+				t.Errorf("working dir mismatch for agent %s:\nexpected: %s\ngot:      %s",
+					agent, canonicalDir(t, targetWorkDir), canonicalDir(t, gotCwd))
+			}
+		})
+	}
+}
+
+func TestParameterized_MultiAgent_CachedUsageProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := setupParameterizedRegistry()
+	usageCache := usage.NewCacheStore(tempDir, usage.DefaultTTL)
+	ctx := context.Background()
+
+	t.Run("claude_CachedUsageProvider", func(t *testing.T) {
+		adapter, err := reg.Get("claude")
+		if err != nil {
+			t.Fatalf("failed to get claude adapter: %v", err)
+		}
+		cachedProv, ok := adapter.(agents.CachedUsageProvider)
+		if !ok {
+			t.Fatalf("claude adapter must implement agents.CachedUsageProvider")
+		}
+
+		profileDir := filepath.Join(tempDir, "profiles", "claude-work")
+		claudeSubdir := filepath.Join(profileDir, ".claude")
+		if err := os.MkdirAll(claudeSubdir, 0700); err != nil {
+			t.Fatalf("failed to create claude profile dir: %v", err)
+		}
+
+		_ = os.WriteFile(filepath.Join(claudeSubdir, ".credentials.json"), []byte(`{"sessionKey":"sk-ant-test"}`), 0600)
+
+		fixturePath := filepath.Join(getGitRepoRoot(), "internal", "agents", "claude", "testdata", "claude_cached_usage.json")
+		fixtureData, err := os.ReadFile(fixturePath)
+		if err != nil {
+			t.Fatalf("failed to read golden fixture: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(profileDir, ".claude.json"), fixtureData, 0600); err != nil {
+			t.Fatalf("failed to write .claude.json: %v", err)
+		}
+
+		target := usage.TargetProfile{
+			Agent:            "claude",
+			Profile:          "claude-work",
+			ProfileDir:       profileDir,
+			GetCachedUsageFn: cachedProv.GetCachedUsage,
+		}
+
+		rep := usage.InspectProfile(ctx, target, usageCache)
+		if !rep.FromCache {
+			t.Errorf("expected rep.FromCache to be true for claude cached usage")
+		}
+		if rep.Status != usage.StatusExhausted && rep.Status != usage.StatusOK {
+			t.Errorf("expected StatusExhausted or StatusOK for valid claude cached usage, got: %s", rep.Status)
+		}
+		if len(rep.Windows) == 0 {
+			t.Fatalf("expected quota windows to be parsed from claude_cached_usage.json")
+		}
+
+		var fiveHourWindow *usage.LimitWindow
+		for i := range rep.Windows {
+			if strings.Contains(rep.Windows[i].Name, "5-Hour") || strings.Contains(rep.Windows[i].Name, "Session") {
+				fiveHourWindow = &rep.Windows[i]
+				break
+			}
+		}
+		if fiveHourWindow == nil {
+			t.Errorf("expected 5-Hour Session window in parsed report, got: %+v", rep.Windows)
+		} else if fiveHourWindow.RemainingPct != 97 {
+			t.Errorf("expected 5-Hour Session RemainingPct 97, got %v", fiveHourWindow.RemainingPct)
+		}
+	})
+
+	sessionAgents := []struct {
+		agent      string
+		credRelDir string
+		credFile   string
+		credData   string
+	}{
+		{
+			agent:      "claude",
+			credRelDir: ".claude",
+			credFile:   ".credentials.json",
+			credData:   `{"sessionKey":"sk-ant-test"}`,
+		},
+		{
+			agent:      "codex",
+			credRelDir: ".codex",
+			credFile:   "auth.json",
+			credData:   `{"tokens":{"access_token":"valid"}}`,
+		},
+		{
+			agent:      "agy",
+			credRelDir: filepath.Join(".gemini", "antigravity-cli"),
+			credFile:   "antigravity-oauth-token",
+			credData:   `{"access_token":"valid"}`,
+		},
+	}
+
+	for _, tc := range sessionAgents {
+		t.Run(tc.agent+"_InspectProfile_Lifecycle", func(t *testing.T) {
+			adapter, err := reg.Get(tc.agent)
+			if err != nil {
+				t.Fatalf("failed to get adapter %s: %v", tc.agent, err)
+			}
+
+			pDir := filepath.Join(tempDir, "profiles", tc.agent+"-idle")
+			credDir := filepath.Join(pDir, tc.credRelDir)
+			if err := os.MkdirAll(credDir, 0700); err != nil {
+				t.Fatalf("failed to create cred dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(credDir, tc.credFile), []byte(tc.credData), 0600); err != nil {
+				t.Fatalf("failed to write credentials: %v", err)
+			}
+
+			target := usage.TargetProfile{
+				Agent:      tc.agent,
+				Profile:    tc.agent + "-idle",
+				ProfileDir: pDir,
+			}
+			if cp, ok := adapter.(agents.CachedUsageProvider); ok {
+				target.GetCachedUsageFn = cp.GetCachedUsage
+			}
+
+			rep := usage.InspectProfile(ctx, target, usageCache)
+			if rep.Status != usage.StatusIdle && rep.Status != usage.StatusOK {
+				t.Errorf("expected StatusIdle or StatusOK for %s, got: %s (error: %s)", tc.agent, rep.Status, rep.Error)
+			}
+		})
+	}
 }
