@@ -96,6 +96,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const [isSavingSchedule, setIsSavingSchedule] = React.useState(false);
   const [currentTime, setCurrentTime] = React.useState(() => Date.now());
 
+  // Audit Log filter state
+  const [auditSearchQuery, setAuditSearchQuery] = React.useState('');
+  const [auditActionFilter, setAuditActionFilter] = React.useState<string>('all');
+
   React.useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -480,6 +484,42 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     );
   }, [data?.peers, filterQuery]);
 
+  const filteredAuditLogs = React.useMemo(() => {
+    if (!data?.audit_logs) return [];
+    return data.audit_logs.filter((log) => {
+      if (auditActionFilter !== 'all') {
+        if (auditActionFilter === 'granted' && log.action !== 'LEASE_GRANTED') return false;
+        if (auditActionFilter === 'requested' && log.action !== 'LEASE_REQUESTED') return false;
+        if (auditActionFilter === 'revoked' && log.action !== 'LEASE_REVOKED') return false;
+        if (
+          auditActionFilter === 'policy' &&
+          !['GLOBAL_MODE_CHANGED', 'PROFILE_SHARING_ON', 'PROFILE_SHARING_OFF'].includes(log.action)
+        ) {
+          return false;
+        }
+        if (
+          auditActionFilter === 'schedule' &&
+          !['SCHEDULE_SAVED', 'SCHEDULE_DELETED'].includes(log.action)
+        ) {
+          return false;
+        }
+      }
+
+      if (auditSearchQuery.trim()) {
+        const q = auditSearchQuery.toLowerCase();
+        const matchesDetails = log.details?.toLowerCase().includes(q) ?? false;
+        const matchesActor = log.actor?.toLowerCase().includes(q) ?? false;
+        const matchesProfile = log.profile?.toLowerCase().includes(q) ?? false;
+        const matchesAction = log.action?.toLowerCase().includes(q) ?? false;
+        if (!matchesDetails && !matchesActor && !matchesProfile && !matchesAction) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [data?.audit_logs, auditActionFilter, auditSearchQuery]);
+
   return (
     <div className="space-y-6">
       {/* Top Header bar with 3-Level Segmented Slider in the top right */}
@@ -513,8 +553,13 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             title={isSharingEnabled ? `Sharing is ON (${effectiveGlobalMode === 'auto' ? 'Auto Approve' : 'Request Mode'})` : 'Sharing is Disabled'}
           >
             <Radio className={cn('h-3.5 w-3.5 transition-colors', isSharingEnabled ? 'text-accent-cyan' : 'text-[#666666]')} />
-            <span className="text-xs font-mono font-medium text-foreground flex items-center gap-1.5">
-              <span>Sharing</span>
+            <span
+              className={cn(
+                'text-xs font-mono font-medium flex items-center gap-1.5 transition-colors',
+                isSharingEnabled ? 'text-foreground' : 'text-muted-foreground'
+              )}
+            >
+              <span>{isSharingEnabled ? 'Sharing' : 'Sharing Off'}</span>
               {activeSchedulesCount > 0 && (
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" title="Active Schedule Override" />
               )}
@@ -1076,7 +1121,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
 
       {/* P2P Activity & Audit Log Card */}
       <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
-        <CardHeader className="p-5 pb-3">
+        <CardHeader className="p-5 pb-3 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Activity className="h-4 w-4 text-accent-cyan" />
@@ -1087,25 +1132,101 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 variant="outline"
                 className="text-[10px] font-mono py-0 px-2 rounded-full border-border bg-secondary text-muted-foreground"
               >
-                {data?.audit_logs?.length || 0} events
+                {filteredAuditLogs.length === (data?.audit_logs?.length || 0)
+                  ? `${filteredAuditLogs.length} events`
+                  : `${filteredAuditLogs.length} of ${data?.audit_logs?.length || 0} events`}
               </Badge>
             </div>
             <span className="text-[11px] text-muted-foreground font-mono">
               Tamper-evident mesh audit trail
             </span>
           </div>
-          <CardDescription className="text-xs text-muted-foreground pt-1">
+
+          <CardDescription className="text-xs text-muted-foreground pt-0">
             Real-time audit log of all lease requests, approvals, revocations, and sharing policy switches.
           </CardDescription>
+
+          {/* Audit Log Filters */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={auditSearchQuery}
+                onChange={(e) => setAuditSearchQuery(e.target.value)}
+                placeholder="Filter audit events (actor, details, action)..."
+                className="h-8 pl-8 pr-7 text-xs font-mono bg-[#141414] border-border rounded-geist placeholder:text-muted-foreground"
+              />
+              {auditSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setAuditSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs cursor-pointer"
+                  title="Clear search"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="w-[160px]">
+                <SelectDropdown
+                  value={auditActionFilter}
+                  onChange={(val) => setAuditActionFilter(String(val))}
+                  size="sm"
+                  triggerClassName="h-8 bg-[#141414] border-border text-xs font-mono"
+                  options={[
+                    { value: 'all', label: 'All Actions' },
+                    { value: 'granted', label: 'Leases Granted' },
+                    { value: 'requested', label: 'Lease Requests' },
+                    { value: 'revoked', label: 'Leases Revoked' },
+                    { value: 'policy', label: 'Policy Changes' },
+                    { value: 'schedule', label: 'Schedules' },
+                  ]}
+                />
+              </div>
+
+              {(auditSearchQuery || auditActionFilter !== 'all') && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setAuditSearchQuery('');
+                    setAuditActionFilter('all');
+                  }}
+                  className="h-8 px-2 text-xs font-mono text-muted-foreground hover:text-foreground cursor-pointer"
+                  title="Reset Filters"
+                >
+                  <X className="h-3.5 w-3.5 mr-1" />
+                  Reset
+                </Button>
+              )}
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="p-5 pt-0">
           {!data?.audit_logs || data.audit_logs.length === 0 ? (
             <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono">
               No sharing events recorded yet.
             </div>
+          ) : filteredAuditLogs.length === 0 ? (
+            <div className="p-6 text-center border border-dashed border-[#262626] rounded-geist bg-[#0e0e0e] text-xs text-muted-foreground font-mono space-y-2">
+              <p>No audit events match the selected filters.</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setAuditSearchQuery('');
+                  setAuditActionFilter('all');
+                }}
+                className="h-6 px-2.5 text-[11px] font-mono cursor-pointer"
+              >
+                Clear filters
+              </Button>
+            </div>
           ) : (
             <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 font-mono text-xs">
-              {data.audit_logs.map((log) => {
+              {filteredAuditLogs.map((log) => {
                 const actionColors: Record<string, string> = {
                   LEASE_GRANTED: 'text-[#46a758] bg-[#183925]/40 border-[#235836]',
                   LEASE_REQUESTED: 'text-[#52a8ff] bg-[#142334]/40 border-[#1f4068]',
@@ -1114,6 +1235,8 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   GLOBAL_MODE_CHANGED: 'text-[#c678dd] bg-[#2a1b33]/40 border-[#4a2b5a]',
                   PROFILE_SHARING_ON: 'text-[#46a758] bg-[#183925]/40 border-[#235836]',
                   PROFILE_SHARING_OFF: 'text-[#888888] bg-[#1e1e1e] border-[#333333]',
+                  SCHEDULE_SAVED: 'text-[#56b6c2] bg-[#1a2d33]/40 border-[#264e59]',
+                  SCHEDULE_DELETED: 'text-[#e5c07b] bg-[#332b1a]/40 border-[#594926]',
                 };
                 const color = actionColors[log.action] || 'text-muted-foreground border-border bg-[#141414]';
                 const timeStr = new Date(log.timestamp).toLocaleTimeString([], {
