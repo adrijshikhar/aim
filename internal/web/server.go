@@ -164,6 +164,8 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("POST /api/share/revoke", s.handleRevokeShareLease)
 	mux.HandleFunc("POST /api/share/approve", s.handleApproveShareRequest)
 	mux.HandleFunc("POST /api/share/deny", s.handleDenyShareRequest)
+	mux.HandleFunc("POST /api/share/cancel", s.handleCancelShareRequest)
+	mux.HandleFunc("POST /api/share/poll", s.handlePollShareRequest)
 	mux.HandleFunc("GET /api/share/audit", s.handleGetShareAudit)
 	mux.HandleFunc("GET /api/share/schedules", s.handleGetSchedules)
 	mux.HandleFunc("POST /api/share/schedules", s.handleSaveSchedule)

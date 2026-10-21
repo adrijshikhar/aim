@@ -18,6 +18,7 @@ import {
   Inbox,
   FileCheck,
   Ban,
+  Send,
 } from 'lucide-react';
 import {
   getShareStatus,
@@ -32,6 +33,8 @@ import {
   deleteSchedule,
   approveShareRequest,
   denyShareRequest,
+  cancelShareRequest,
+  pollShareRequest,
   ShareStatusDTO,
   PeerInfoDTO,
   ProfileDTO,
@@ -45,6 +48,7 @@ import { Input } from '@/components/ui/input';
 import { AgentBadge } from '@/components/AgentBadge';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
@@ -96,8 +100,11 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   const [isSavingSchedule, setIsSavingSchedule] = React.useState(false);
   const [currentTime, setCurrentTime] = React.useState(() => Date.now());
 
+  const [cancellingReqId, setCancellingReqId] = React.useState<string | null>(null);
+  const [pollingReqId, setPollingReqId] = React.useState<string | null>(null);
+
   // Requests Tab Filter state
-  const [requestsFilter, setRequestsFilter] = React.useState<'all' | 'pending' | 'approved' | 'revoked'>('all');
+  const [requestsFilter, setRequestsFilter] = React.useState<'all' | 'pending' | 'outgoing' | 'approved' | 'revoked'>('all');
 
   // Audit Log filter state
   const [auditSearchQuery, setAuditSearchQuery] = React.useState('');
@@ -114,6 +121,25 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     try {
       const res = await getShareStatus(refresh);
       setData(res);
+
+      if (res.outgoing_requests && res.outgoing_requests.some((r) => r.status === 'pending')) {
+        for (const r of res.outgoing_requests) {
+          if (r.status === 'pending') {
+            try {
+              const pollRes = await pollShareRequest(r.id);
+              if (pollRes && pollRes.status === 'approved') {
+                toast({
+                  title: 'Lease Approved!',
+                  description: `Teammate approved lease for ${r.profile_name}. Profile is active.`,
+                  variant: 'success',
+                });
+              }
+            } catch {
+              // Ignore until host approves
+            }
+          }
+        }
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch share status';
       toast({
@@ -246,6 +272,64 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         description: msg,
         variant: 'destructive',
       });
+    }
+  };
+
+  const handleCancelRequest = async (requestId: string) => {
+    setCancellingReqId(requestId);
+    try {
+      await cancelShareRequest(requestId);
+      toast({
+        title: 'Request Cancelled',
+        description: `Cancelled lease request ${requestId}`,
+        variant: 'default',
+      });
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to cancel request';
+      toast({
+        title: 'Cancellation Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setCancellingReqId(null);
+    }
+  };
+
+  const handleManualPoll = async (requestId: string) => {
+    setPollingReqId(requestId);
+    try {
+      const res = await pollShareRequest(requestId);
+      if (res && res.status === 'approved') {
+        toast({
+          title: 'Lease Approved!',
+          description: `Teammate approved request. Profile is now ready to use.`,
+          variant: 'success',
+        });
+      } else if (res && res.status === 'denied') {
+        toast({
+          title: 'Request Denied',
+          description: `Teammate declined request.`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Status Polled',
+          description: `Request is still pending teammate approval.`,
+          variant: 'default',
+        });
+      }
+      await loadStatus(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to poll status';
+      toast({
+        title: 'Poll Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setPollingReqId(null);
     }
   };
 
@@ -522,6 +606,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   };
 
   const pendingRequests = data?.pending_requests || [];
+  const outgoingRequests = data?.outgoing_requests || [];
+  const outgoingPending = React.useMemo(() => {
+    return outgoingRequests.filter((r) => r.status === 'pending');
+  }, [outgoingRequests]);
 
   const activeBorrowedLeases = React.useMemo(() => {
     return (data?.active_leases || []).filter(
@@ -568,9 +656,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
     if (!data?.audit_logs) return [];
     return data.audit_logs.filter((log) => {
       if (auditActionFilter !== 'all') {
-        if (auditActionFilter === 'granted' && log.action !== 'LEASE_GRANTED') return false;
+        if (auditActionFilter === 'granted' && !['LEASE_GRANTED', 'LEASE_APPROVED', 'LEASE_BORROWED'].includes(log.action)) return false;
         if (auditActionFilter === 'requested' && log.action !== 'LEASE_REQUESTED') return false;
-        if (auditActionFilter === 'revoked' && log.action !== 'LEASE_REVOKED') return false;
+        if (auditActionFilter === 'cancelled' && log.action !== 'LEASE_CANCELLED') return false;
+        if (auditActionFilter === 'revoked' && !['LEASE_REVOKED', 'LEASE_DENIED'].includes(log.action)) return false;
         if (
           auditActionFilter === 'policy' &&
           !['GLOBAL_MODE_CHANGED', 'PROFILE_SHARING_ON', 'PROFILE_SHARING_OFF'].includes(log.action)
@@ -726,9 +815,9 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             <TabsTrigger value="requests" className="gap-2 text-xs flex-1 sm:flex-initial">
               <Inbox className="h-3.5 w-3.5 text-[#e5c07b]" />
               <span>Requests</span>
-              {pendingRequests.length > 0 ? (
+              {(pendingRequests.length + outgoingPending.length) > 0 ? (
                 <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#142334] text-[#52a8ff] border border-[#1f4068] font-bold animate-pulse">
-                  {pendingRequests.length}
+                  {pendingRequests.length + outgoingPending.length}
                 </span>
               ) : (activeGrantedLeases.length + activeBorrowedLeases.length) > 0 ? (
                 <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-xs font-mono bg-[#1f1f1f] text-foreground border border-[#333333]">
@@ -1041,25 +1130,36 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                       className="group flex items-center justify-between gap-3 px-3.5 py-2.5 hover:bg-[#141414] transition-colors"
                                     >
                                       <div className="flex items-center gap-2 truncate min-w-0">
-                                        <span className="font-mono text-xs font-semibold text-foreground group-hover:text-[#61afef] transition-colors truncate">
-                                          {prof}
-                                        </span>
-                                        {sp && (
-                                          <span
-                                            className={cn(
-                                              'text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full border shrink-0 font-medium flex items-center gap-1.5',
-                                              isAuto
-                                                ? 'bg-[#183925]/50 text-[#98c379] border-[#235836]/60'
-                                                : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
-                                            )}
-                                          >
-                                            <span className={cn('h-1.5 w-1.5 rounded-full', isAuto ? 'bg-[#30a46c]' : 'bg-[#52a8ff]')} />
-                                            <span>{isAuto ? 'Auto' : 'Request'}</span>
-                                          </span>
-                                        )}
-                                        <div className="hidden group-hover:inline-flex items-center shrink-0 transition-opacity duration-150 animate-in fade-in">
-                                          <AgentBadge agent={agent} size="sm" />
-                                        </div>
+                                        <TooltipProvider>
+                                          <Tooltip delayDuration={100}>
+                                            <TooltipTrigger asChild>
+                                              <div className="flex items-center gap-2 truncate min-w-0 cursor-help">
+                                                <span className="font-mono text-xs font-semibold text-foreground group-hover:text-[#61afef] transition-colors truncate">
+                                                  {prof}
+                                                </span>
+                                                {sp && (
+                                                  <span
+                                                    className={cn(
+                                                      'text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full border shrink-0 font-medium flex items-center gap-1.5',
+                                                      isAuto
+                                                        ? 'bg-[#183925]/60 text-[#98c379] border-[#235836]'
+                                                        : 'bg-[#142334]/60 text-[#52a8ff] border-[#1f4068]'
+                                                    )}
+                                                  >
+                                                    <span className={cn('h-1.5 w-1.5 rounded-full', isAuto ? 'bg-[#30a46c]' : 'bg-[#52a8ff]')} />
+                                                    <span>{isAuto ? 'Auto' : 'Request'}</span>
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="flex items-center gap-2">
+                                              <AgentBadge agent={agent} size="sm" />
+                                              <span>Engine: <strong className="text-[#ededed] font-semibold">{agent}</strong></span>
+                                              <span className="text-[#666666]">•</span>
+                                              <span>{isAuto ? 'Instant auto-approval' : 'Manual approval required'}</span>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </TooltipProvider>
                                       </div>
                                       <Button
                                         size="sm"
@@ -1096,8 +1196,8 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
           </section>
         </TabsContent>
 
-        {/* TAB 2: REQUESTS (Pending, Approved, Revoked / Expired) */}
-        <TabsContent value="requests" className="space-y-5 focus-visible:outline-none">
+        {/* TAB 2: REQUESTS (Incoming, Outgoing, Active Approved, Revoked / Expired) */}
+        <TabsContent value="requests" className="space-y-6 focus-visible:outline-none">
           {/* Sub-filter row */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border/40">
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -1111,7 +1211,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     : 'text-muted-foreground hover:text-foreground hover:bg-[#141414] border-transparent'
                 )}
               >
-                All Requests ({pendingRequests.length + activeGrantedLeases.length + activeBorrowedLeases.length + revokedOrExpiredLeases.length + expiredBorrowedLeases.length})
+                All Requests ({pendingRequests.length + outgoingPending.length + activeGrantedLeases.length + activeBorrowedLeases.length + revokedOrExpiredLeases.length + expiredBorrowedLeases.length})
               </button>
 
               <button
@@ -1125,7 +1225,21 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 )}
               >
                 <span className={cn('h-1.5 w-1.5 rounded-full', pendingRequests.length > 0 ? 'bg-[#52a8ff]' : 'bg-[#555555]')} />
-                <span>Pending ({pendingRequests.length})</span>
+                <span>Incoming Pending ({pendingRequests.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('outgoing')}
+                className={cn(
+                  'px-3 py-1 rounded-geist text-xs font-mono transition-colors cursor-pointer border flex items-center gap-1.5',
+                  requestsFilter === 'outgoing'
+                    ? 'bg-[#142334] text-[#52a8ff] border-[#1f4068] font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-[#141414] border-transparent'
+                )}
+              >
+                <span className={cn('h-1.5 w-1.5 rounded-full', outgoingPending.length > 0 ? 'bg-[#52a8ff]' : 'bg-[#555555]')} />
+                <span>My Outgoing ({outgoingPending.length})</span>
               </button>
 
               <button
@@ -1139,7 +1253,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 )}
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-[#30a46c]" />
-                <span>Approved ({activeGrantedLeases.length + activeBorrowedLeases.length})</span>
+                <span>Active Leases ({activeGrantedLeases.length + activeBorrowedLeases.length})</span>
               </button>
 
               <button
@@ -1158,7 +1272,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             </div>
           </div>
 
-          {/* Pending Requests Section */}
+          {/* Section 1: Incoming Pending Requests */}
           {(requestsFilter === 'all' || requestsFilter === 'pending') && (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
@@ -1171,48 +1285,50 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
               {pendingRequests.length === 0 ? (
                 requestsFilter === 'pending' && (
                   <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
-                    No pending approval requests. Teammate requests will appear here when sharing in Request mode.
+                    No pending incoming requests from teammates.
                   </div>
                 )
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-2.5">
                   {pendingRequests.map((pr) => (
                     <div
                       key={pr.request_id}
-                      className="p-4 rounded-geist border border-[#2a2a2a] bg-[#111111] flex flex-col justify-between gap-3 shadow-sm hover:border-[#3a3a3a] transition-colors"
+                      className="p-4 rounded-geist border border-[#262626] bg-[#0c0c0c] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs hover:border-[#383838] transition-colors"
                     >
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <AgentBadge agent={pr.request.agent} size="sm" />
-                            <span className="font-mono font-bold text-xs text-foreground">
+                      <div className="flex items-start sm:items-center gap-3 min-w-0">
+                        <div className="h-8 w-8 rounded-geist bg-[#142334] border border-[#1f4068] flex items-center justify-center shrink-0">
+                          <Inbox className="h-4 w-4 text-[#52a8ff]" />
+                        </div>
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-sm text-foreground">
                               {pr.request.profile_name}
                             </span>
+                            <AgentBadge agent={pr.request.agent} size="sm" />
+                            <Badge variant="outline" className="text-xs font-mono border-status-warning-border bg-status-warning-bg text-status-warning">
+                              Awaiting Your Approval
+                            </Badge>
                           </div>
-                          <Badge variant="outline" className="text-xs font-mono border-status-warning-border bg-status-warning-bg text-status-warning">
-                            Pending Approval
-                          </Badge>
-                        </div>
-
-                        <div className="space-y-1 text-xs font-mono text-muted-foreground">
-                          <div className="flex items-center gap-1.5">
-                            <Laptop className="h-3 w-3 text-[#61afef]" />
-                            <span className="text-foreground font-semibold">{pr.request.requester_id}</span>
-                            <span className="text-[#666666]">({pr.request.requester_ip})</span>
-                          </div>
-                          <div className="flex items-center justify-between text-[#888888] pt-1">
-                            <span>Requested Duration:</span>
-                            <span className="text-foreground font-semibold">{pr.request.requested_hours} hours</span>
+                          <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground flex-wrap">
+                            <span className="flex items-center gap-1 text-foreground font-medium">
+                              <Laptop className="h-3 w-3 text-[#61afef]" />
+                              <span>{pr.request.requester_id}</span>
+                            </span>
+                            <span className="text-[#555555]">({pr.request.requester_ip})</span>
+                            <span className="text-[#444444]">•</span>
+                            <span>Requested Duration: <strong className="text-foreground">{pr.request.requested_hours}h</strong></span>
+                            <span className="text-[#444444]">•</span>
+                            <span>Expires in: {formatExpiresIn(pr.expires_at)}</span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#1f1f1f]">
+                      <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDenyRequest(pr.request_id)}
-                          className="h-7 px-2.5 text-xs font-mono text-status-danger hover:bg-status-danger-bg cursor-pointer"
+                          className="h-7 px-3 text-xs font-mono text-status-danger hover:bg-status-danger-bg cursor-pointer"
                         >
                           <Ban className="h-3.5 w-3.5 mr-1" />
                           Deny
@@ -1220,10 +1336,92 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                         <Button
                           size="sm"
                           onClick={() => handleApproveRequest(pr.request_id)}
-                          className="h-7 px-3 text-xs font-mono bg-[#183925] hover:bg-[#204a31] text-[#98c379] border border-[#235836] font-medium cursor-pointer shadow-xs"
+                          className="h-7 px-3.5 text-xs font-mono bg-[#183925] hover:bg-[#204a31] text-[#98c379] border border-[#235836] font-medium cursor-pointer shadow-xs"
                         >
-                          <FileCheck className="h-3.5 w-3.5 mr-1" />
-                          Approve
+                          <FileCheck className="h-3.5 w-3.5 mr-1.5" />
+                          Approve Lease
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Section 2: My Outgoing Requests */}
+          {(requestsFilter === 'all' || requestsFilter === 'pending' || requestsFilter === 'outgoing') && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Send className="h-4 w-4 text-[#52a8ff]" />
+                <h3 className="text-xs font-mono uppercase tracking-wider font-semibold text-foreground">
+                  My Outgoing Requests ({outgoingPending.length})
+                </h3>
+              </div>
+
+              {outgoingPending.length === 0 ? (
+                requestsFilter === 'outgoing' && (
+                  <div className="p-8 text-center border border-dashed border-[#222222] rounded-geist bg-[#0d0d0d] text-xs font-mono text-muted-foreground">
+                    No active outgoing requests sent to teammates.
+                  </div>
+                )
+              ) : (
+                <div className="space-y-2.5">
+                  {outgoingPending.map((req) => (
+                    <div
+                      key={req.id}
+                      className="p-4 rounded-geist border border-[#262626] bg-[#0c0c0c] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs hover:border-[#383838] transition-colors"
+                    >
+                      <div className="flex items-start sm:items-center gap-3 min-w-0">
+                        <div className="h-8 w-8 rounded-geist bg-[#142334] border border-[#1f4068] flex items-center justify-center shrink-0">
+                          <Send className="h-4 w-4 text-[#52a8ff]" />
+                        </div>
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-sm text-foreground">
+                              {req.profile_name}
+                            </span>
+                            <AgentBadge agent={req.agent} size="sm" />
+                            <Badge variant="outline" className="text-xs font-mono border-[#1f4068] bg-[#142334] text-[#52a8ff] flex items-center gap-1.5">
+                              <span className="h-1.5 w-1.5 rounded-full bg-[#52a8ff] animate-pulse" />
+                              <span>Awaiting Teammate Approval</span>
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground flex-wrap">
+                            <span className="flex items-center gap-1 text-foreground font-medium">
+                              <Laptop className="h-3 w-3 text-[#61afef]" />
+                              <span>Host: {req.peer_id}</span>
+                            </span>
+                            <span className="text-[#555555]">({req.peer_ip})</span>
+                            <span className="text-[#444444]">•</span>
+                            <span>Duration: <strong className="text-foreground">{req.requested_hours}h</strong></span>
+                            <span className="text-[#444444]">•</span>
+                            <span>Expires: {formatExpiresIn(req.expires_at)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={pollingReqId === req.id}
+                          onClick={() => handleManualPoll(req.id)}
+                          className="h-7 px-2.5 text-xs font-mono text-muted-foreground hover:text-foreground border-[#2a2a2a] bg-[#141414] hover:bg-[#1f1f1f] cursor-pointer"
+                          title="Poll host for decision"
+                        >
+                          <RotateCw className={cn('h-3.5 w-3.5 mr-1.5', pollingReqId === req.id && 'animate-spin text-accent-cyan')} />
+                          Check Status
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={cancellingReqId === req.id}
+                          onClick={() => handleCancelRequest(req.id)}
+                          className="h-7 px-3 text-xs font-mono text-status-danger hover:bg-status-danger-bg border border-transparent hover:border-status-danger-border cursor-pointer"
+                        >
+                          <X className="h-3.5 w-3.5 mr-1" />
+                          {cancellingReqId === req.id ? 'Cancelling...' : 'Cancel Request'}
                         </Button>
                       </div>
                     </div>
@@ -2002,9 +2200,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                       triggerClassName="h-8 bg-[#141414] border-border text-xs font-mono"
                       options={[
                         { value: 'all', label: 'All Actions' },
-                        { value: 'granted', label: 'Leases Granted' },
+                        { value: 'granted', label: 'Leases Granted / Borrowed' },
                         { value: 'requested', label: 'Lease Requests' },
-                        { value: 'revoked', label: 'Leases Revoked' },
+                        { value: 'cancelled', label: 'Leases Cancelled' },
+                        { value: 'revoked', label: 'Leases Revoked / Denied' },
                         { value: 'policy', label: 'Policy Changes' },
                         { value: 'schedule', label: 'Schedules' },
                       ]}
@@ -2054,7 +2253,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                   {filteredAuditLogs.map((log) => {
                     const actionColors: Record<string, string> = {
                       LEASE_GRANTED: 'text-[#98c379] bg-[#183925]/40 border-[#235836]',
+                      LEASE_APPROVED: 'text-[#98c379] bg-[#183925]/40 border-[#235836]',
+                      LEASE_BORROWED: 'text-[#56b6c2] bg-[#1a2d33]/40 border-[#264e59]',
                       LEASE_REQUESTED: 'text-[#52a8ff] bg-[#142334]/40 border-[#1f4068]',
+                      LEASE_CANCELLED: 'text-[#e5c07b] bg-[#332b1a]/40 border-[#594926]',
                       LEASE_REVOKED: 'text-[#e06c75] bg-[#3a1d20]/40 border-[#5c282d]',
                       LEASE_DENIED: 'text-[#e06c75] bg-[#3a1d20]/40 border-[#5c282d]',
                       GLOBAL_MODE_CHANGED: 'text-[#e5c07b] bg-[#332b1a]/40 border-[#594926]',

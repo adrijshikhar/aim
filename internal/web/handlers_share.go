@@ -25,6 +25,7 @@ type ShareStatusResponse struct {
 	ActiveLeases        []ActiveLeaseInfo           `json:"active_leases"`
 	GrantedLeases       []share.GrantedLease        `json:"granted_leases"`
 	PendingRequests     []share.PendingRequestInfo  `json:"pending_requests,omitempty"`
+	OutgoingRequests    []share.ShareRequestRecord  `json:"outgoing_requests,omitempty"`
 	AuditLogs           []share.AuditEntry          `json:"audit_logs,omitempty"`
 	Schedules           []share.SchedulePolicy      `json:"schedules,omitempty"`
 }
@@ -101,6 +102,16 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// If background daemon did not return pending requests, fallback to SQLite store
+	if len(pendingRequests) == 0 {
+		dbIncoming := store.GetPendingIncomingRequests()
+		for _, req := range dbIncoming {
+			pendingRequests = append(pendingRequests, req.ToPendingInfo())
+		}
+	}
+
+	outgoingRequests := store.GetPendingOutgoingRequests()
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(ShareStatusResponse{
 		VPN:                 vpn,
@@ -111,6 +122,7 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 		ActiveLeases:        activeLeases,
 		GrantedLeases:       granted,
 		PendingRequests:     pendingRequests,
+		OutgoingRequests:    outgoingRequests,
 		AuditLogs:           audit,
 		Schedules:           store.GetSchedules(),
 	})
@@ -274,7 +286,30 @@ func (s *Server) handleRequestShareLease(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Always record the lease request action in SQLite audit log
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "LEASE_REQUESTED",
+		Actor:   "local",
+		Profile: req.Profile,
+		Agent:   req.Agent,
+		Details: fmt.Sprintf("Requested %d-hour lease for profile %s from %s", req.Hours, req.Profile, req.Peer),
+	})
+
 	if resp.Status != "approved" {
+		if resp.RequestID != "" {
+			_ = store.SaveShareRequest(share.ShareRequestRecord{
+				ID:             resp.RequestID,
+				Direction:      "outgoing",
+				PeerID:         req.Peer,
+				PeerIP:         targetHost,
+				ProfileName:    req.Profile,
+				Agent:          req.Agent,
+				RequestedHours: req.Hours,
+				Status:         "pending",
+				CreatedAt:      time.Now(),
+				ExpiresAt:      time.Now().Add(30 * time.Minute),
+			})
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 		return
@@ -286,6 +321,18 @@ func (s *Server) handleRequestShareLease(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "failed to install lease: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	if resp.RequestID != "" {
+		_ = store.UpdateRequestStatus(resp.RequestID, "approved", resp.LeaseID, "")
+	}
+
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "LEASE_BORROWED",
+		Actor:   req.Peer,
+		Profile: req.Profile,
+		Agent:   resp.Agent,
+		Details: fmt.Sprintf("Lease %s granted by %s for profile %s (installed as %s, expires in %d hours)", resp.LeaseID, req.Peer, req.Profile, localName, req.Hours),
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -379,7 +426,7 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	body, _ := json.Marshal(req)
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	pReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:4319/api/share/approve", bytes.NewReader(body))
 	if err != nil {
@@ -411,7 +458,7 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	body, _ := json.Marshal(req)
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	pReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:4319/api/share/deny", bytes.NewReader(body))
 	if err != nil {
@@ -428,6 +475,134 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(pResp.StatusCode)
 	_, _ = io.Copy(w, pResp.Body)
+}
+
+func (s *Server) handleCancelShareRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+
+	store := s.getShareStore()
+	rec, _ := store.GetShareRequest(req.RequestID)
+
+	_ = store.CancelShareRequest(req.RequestID)
+
+	actor := "local"
+	profile := ""
+	agent := ""
+	peerHost := ""
+	if rec != nil {
+		profile = rec.ProfileName
+		agent = rec.Agent
+		peerHost = rec.PeerIP
+	}
+
+	_ = store.AppendAudit(share.AuditEntry{
+		Action:  "LEASE_CANCELLED",
+		Actor:   actor,
+		Profile: profile,
+		Agent:   agent,
+		Details: fmt.Sprintf("Cancelled lease request %s for %s", req.RequestID, profile),
+	})
+
+	// Forward cancellation to remote peer if known
+	if peerHost != "" {
+		go func(host, reqID string) {
+			client := share.NewClient(4319)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = client.CancelLeaseRequest(ctx, host, reqID)
+		}(peerHost, req.RequestID)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+func (s *Server) handlePollShareRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+
+	store := s.getShareStore()
+	rec, err := store.GetShareRequest(req.RequestID)
+	if err != nil || rec == nil {
+		http.Error(w, "request not found", http.StatusNotFound)
+		return
+	}
+
+	if rec.Status == "approved" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":   "approved",
+			"lease_id": rec.LeaseID,
+			"profile":  rec.ProfileName,
+			"agent":    rec.Agent,
+		})
+		return
+	}
+	if rec.Status == "denied" || rec.Status == "cancelled" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  rec.Status,
+			"message": rec.ErrorMessage,
+		})
+		return
+	}
+
+	// Poll remote host
+	client := share.NewClient(4319)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.PollLease(ctx, rec.PeerIP, req.RequestID)
+	if err != nil {
+		http.Error(w, "failed to poll peer: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	if resp.Status == "approved" {
+		mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
+		localName, err := mgr.InstallLease(rec.PeerID, rec.ProfileName, resp)
+		if err == nil {
+			_ = store.UpdateRequestStatus(req.RequestID, "approved", resp.LeaseID, "")
+			_ = store.AppendAudit(share.AuditEntry{
+				Action:  "LEASE_BORROWED",
+				Actor:   rec.PeerID,
+				Profile: rec.ProfileName,
+				Agent:   resp.Agent,
+				Details: fmt.Sprintf("Lease %s approved and installed as %s", resp.LeaseID, localName),
+			})
+		}
+	} else if resp.Status == "denied" {
+		_ = store.UpdateRequestStatus(req.RequestID, "denied", "", resp.Message)
+		_ = store.AppendAudit(share.AuditEntry{
+			Action:  "LEASE_DENIED",
+			Actor:   rec.PeerID,
+			Profile: rec.ProfileName,
+			Agent:   rec.Agent,
+			Details: fmt.Sprintf("Peer %s denied lease request %s", rec.PeerID, req.RequestID),
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleGetShareAudit(w http.ResponseWriter, r *http.Request) {

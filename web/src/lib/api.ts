@@ -469,6 +469,21 @@ export interface SchedulePolicyDTO {
   created_at?: string;
 }
 
+export interface OutgoingRequestDTO {
+  id: string;
+  direction: 'outgoing' | 'incoming';
+  peer_id: string;
+  peer_ip: string;
+  profile_name: string;
+  agent: string;
+  requested_hours: number;
+  status: 'pending' | 'approved' | 'denied' | 'cancelled' | 'expired';
+  created_at: string;
+  expires_at: string;
+  lease_id?: string;
+  error_message?: string;
+}
+
 export interface ShareStatusDTO {
   vpn: VPNStatusDTO | null;
   global_mode: 'off' | 'request' | 'auto';
@@ -478,6 +493,7 @@ export interface ShareStatusDTO {
   active_leases: ActiveLeaseDTO[];
   granted_leases?: GrantedLeaseDTO[];
   pending_requests?: PendingRequestDTO[];
+  outgoing_requests?: OutgoingRequestDTO[];
   audit_logs?: AuditEntryDTO[];
   schedules?: SchedulePolicyDTO[];
 }
@@ -499,6 +515,24 @@ export async function approveShareRequest(requestId: string): Promise<any> {
 
 export async function denyShareRequest(requestId: string): Promise<any> {
   const res = await fetch(`${BASE_URL}/share/deny`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId }),
+  });
+  return handleResponse(res);
+}
+
+export async function cancelShareRequest(requestId: string): Promise<any> {
+  const res = await fetch(`${BASE_URL}/share/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId }),
+  });
+  return handleResponse(res);
+}
+
+export async function pollShareRequest(requestId: string): Promise<any> {
+  const res = await fetch(`${BASE_URL}/share/poll`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ request_id: requestId }),

@@ -16,13 +16,6 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 )
 
-type PendingRequestInfo struct {
-	RequestID string       `json:"request_id"`
-	Request   LeaseRequest `json:"request"`
-	CreatedAt time.Time    `json:"created_at"`
-	ExpiresAt time.Time    `json:"expires_at"`
-}
-
 type Server struct {
 	store           *ShareStore
 	profilesDir     string
@@ -135,6 +128,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/share/pending", s.handlePending)
 	s.mux.HandleFunc("/api/share/approve", s.handleApprove)
 	s.mux.HandleFunc("/api/share/deny", s.handleDeny)
+	s.mux.HandleFunc("/api/share/cancel", s.handleCancel)
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -279,19 +273,33 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Manual approval pending
 	reqID := generateID("req")
+	expiresAt := time.Now().Add(30 * time.Minute)
 	s.pendingMu.Lock()
 	pr := &pendingRequest{
 		info: PendingRequestInfo{
 			RequestID: reqID,
 			Request:   req,
 			CreatedAt: time.Now(),
-			ExpiresAt: time.Now().Add(5 * time.Minute),
+			ExpiresAt: expiresAt,
 		},
 		matched: matched,
 		respCh:  make(chan *LeaseResponse, 1),
 	}
 	s.pending[reqID] = pr
 	s.pendingMu.Unlock()
+
+	_ = s.store.SaveShareRequest(ShareRequestRecord{
+		ID:             reqID,
+		Direction:      "incoming",
+		PeerID:         req.RequesterID,
+		PeerIP:         req.RequesterIP,
+		ProfileName:    matched.Name,
+		Agent:          matched.Agent,
+		RequestedHours: req.RequestedHours,
+		Status:         "pending",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      expiresAt,
+	})
 
 	_ = s.store.AppendAudit(AuditEntry{
 		Action:  "LEASE_REQUESTED",
@@ -335,15 +343,18 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.pendingMu.Lock()
-	defer s.pendingMu.Unlock()
+	resp, approved := s.approvedResults[reqID]
+	denied := s.deniedResults[reqID]
+	pr, pending := s.pending[reqID]
+	s.pendingMu.Unlock()
 
-	if resp, ok := s.approvedResults[reqID]; ok {
+	if approved {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 		return
 	}
 
-	if s.deniedResults[reqID] {
+	if denied {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":     "denied",
@@ -353,9 +364,11 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if pr, ok := s.pending[reqID]; ok {
+	if pending {
 		if time.Now().After(pr.info.ExpiresAt) {
+			s.pendingMu.Lock()
 			delete(s.pending, reqID)
+			s.pendingMu.Unlock()
 			http.Error(w, "request expired", http.StatusNotFound)
 			return
 		}
@@ -368,7 +381,111 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check SQLite for durable state
+	rec, err := s.store.GetShareRequest(reqID)
+	if err == nil && rec != nil {
+		if rec.Status == "approved" && rec.LeaseID != "" {
+			leases := s.store.GetGrantedLeases()
+			for _, gl := range leases {
+				if gl.LeaseID == rec.LeaseID {
+					payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(LeaseResponse{
+						Status:      "approved",
+						LeaseID:     gl.LeaseID,
+						ProfileName: gl.ProfileName,
+						Agent:       gl.Agent,
+						ExpiresAt:   gl.ExpiresAt,
+						Payload:     payload,
+					})
+					return
+				}
+			}
+		}
+		if rec.Status == "denied" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":     "denied",
+				"request_id": reqID,
+				"message":    "Lease request was denied by host",
+			})
+			return
+		}
+		if rec.Status == "cancelled" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":     "cancelled",
+				"request_id": reqID,
+				"message":    "Lease request was cancelled",
+			})
+			return
+		}
+		if rec.Status == "pending" {
+			if time.Now().After(rec.ExpiresAt) {
+				_ = s.store.UpdateRequestStatus(reqID, "expired", "", "Request expired")
+				http.Error(w, "request expired", http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":     "pending",
+				"request_id": reqID,
+				"message":    "approval pending on host",
+			})
+			return
+		}
+	}
+
 	http.Error(w, "request not found or expired", http.StatusNotFound)
+}
+
+func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+
+	s.pendingMu.Lock()
+	pr, exists := s.pending[req.RequestID]
+	if exists {
+		delete(s.pending, req.RequestID)
+		if pr.respCh != nil {
+			close(pr.respCh)
+		}
+	}
+	s.pendingMu.Unlock()
+
+	actor := "remote"
+	profile := ""
+	agent := ""
+	if exists {
+		actor = pr.info.Request.RequesterID
+		profile = pr.matched.Name
+		agent = pr.matched.Agent
+	} else if rec, _ := s.store.GetShareRequest(req.RequestID); rec != nil {
+		actor = rec.PeerID
+		profile = rec.ProfileName
+		agent = rec.Agent
+	}
+
+	_ = s.store.CancelShareRequest(req.RequestID)
+	_ = s.store.AppendAudit(AuditEntry{
+		Action:  "LEASE_CANCELLED",
+		Actor:   actor,
+		Profile: profile,
+		Agent:   agent,
+		Details: fmt.Sprintf("Lease request %s was cancelled by %s", req.RequestID, actor),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
@@ -424,15 +541,28 @@ func (s *Server) GetPendingRequests() []PendingRequestInfo {
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
 
+	seen := make(map[string]bool)
 	var result []PendingRequestInfo
 	now := time.Now()
+
 	for id, pr := range s.pending {
 		if now.After(pr.info.ExpiresAt) {
 			delete(s.pending, id)
 			continue
 		}
+		seen[id] = true
 		result = append(result, pr.info)
 	}
+
+	// Also retrieve unexpired pending requests persisted in SQLite
+	dbReqs := s.store.GetPendingIncomingRequests()
+	for _, r := range dbReqs {
+		if !seen[r.ID] && now.Before(r.ExpiresAt) {
+			seen[r.ID] = true
+			result = append(result, r.ToPendingInfo())
+		}
+	}
+
 	return result
 }
 
@@ -444,20 +574,71 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	}
 	s.pendingMu.Unlock()
 
-	if !exists {
-		return nil, fmt.Errorf("request %s not found or expired", reqID)
+	var (
+		profileName    string
+		agent          string
+		requesterID    string
+		requesterIP    string
+		requestedHours int
+		respCh         chan *LeaseResponse
+	)
+
+	if exists {
+		profileName = pr.matched.Name
+		agent = pr.matched.Agent
+		requesterID = pr.info.Request.RequesterID
+		requesterIP = pr.info.Request.RequesterIP
+		requestedHours = pr.info.Request.RequestedHours
+		respCh = pr.respCh
+	} else {
+		// Look up in SQLite
+		rec, err := s.store.GetShareRequest(reqID)
+		if err != nil || rec == nil {
+			return nil, fmt.Errorf("request %s not found or expired", reqID)
+		}
+		if rec.Status == "approved" && rec.LeaseID != "" {
+			leases := s.store.GetGrantedLeases()
+			for _, gl := range leases {
+				if gl.LeaseID == rec.LeaseID {
+					payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
+					return &LeaseResponse{
+						Status:      "approved",
+						LeaseID:     gl.LeaseID,
+						ProfileName: gl.ProfileName,
+						Agent:       gl.Agent,
+						ExpiresAt:   gl.ExpiresAt,
+						Payload:     payload,
+					}, nil
+				}
+			}
+		}
+		if rec.Status != "pending" {
+			return nil, fmt.Errorf("request %s has status %s", reqID, rec.Status)
+		}
+		if time.Now().After(rec.ExpiresAt) {
+			_ = s.store.UpdateRequestStatus(reqID, "expired", "", "Request expired")
+			return nil, fmt.Errorf("request %s expired", reqID)
+		}
+
+		profileName = rec.ProfileName
+		agent = rec.Agent
+		requesterID = rec.PeerID
+		requesterIP = rec.PeerIP
+		requestedHours = rec.RequestedHours
 	}
 
-	payload, err := s.packageCredentials(pr.matched.Name, pr.matched.Agent)
+	payload, err := s.packageCredentials(profileName, agent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read credentials: %w", err)
 	}
-	duration := time.Duration(pr.info.Request.RequestedHours) * time.Hour
-	if duration <= 0 || (pr.matched.MaxLeaseTTL > 0 && duration > pr.matched.MaxLeaseTTL) {
-		if pr.matched.MaxLeaseTTL > 0 {
-			duration = pr.matched.MaxLeaseTTL
-		} else {
-			duration = 2 * time.Hour
+	duration := time.Duration(requestedHours) * time.Hour
+	if duration <= 0 {
+		duration = 2 * time.Hour
+	}
+	for _, p := range s.store.GetSharedProfiles() {
+		if p.Name == profileName && p.MaxLeaseTTL > 0 && duration > p.MaxLeaseTTL {
+			duration = p.MaxLeaseTTL
+			break
 		}
 	}
 	expiresAt := time.Now().Add(duration)
@@ -465,18 +646,18 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	resp := &LeaseResponse{
 		Status:      "approved",
 		LeaseID:     leaseID,
-		ProfileName: pr.matched.Name,
-		Agent:       pr.matched.Agent,
+		ProfileName: profileName,
+		Agent:       agent,
 		ExpiresAt:   expiresAt,
 		Payload:     payload,
 	}
 
 	if err := s.store.SaveGrantedLease(GrantedLease{
 		LeaseID:      leaseID,
-		ProfileName:  pr.matched.Name,
-		Agent:        pr.matched.Agent,
-		BorrowerID:   pr.info.Request.RequesterID,
-		BorrowerIP:   pr.info.Request.RequesterIP,
+		ProfileName:  profileName,
+		Agent:        agent,
+		BorrowerID:   requesterID,
+		BorrowerIP:   requesterIP,
 		GrantedAt:    time.Now(),
 		ExpiresAt:    expiresAt,
 		Revoked:      false,
@@ -485,23 +666,25 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		return nil, fmt.Errorf("failed to record granted lease: %w", err)
 	}
 
+	_ = s.store.UpdateRequestStatus(reqID, "approved", leaseID, "")
+
 	s.pendingMu.Lock()
 	s.approvedResults[reqID] = resp
 	s.pendingMu.Unlock()
 
-	if pr.respCh != nil {
+	if respCh != nil {
 		select {
-		case pr.respCh <- resp:
+		case respCh <- resp:
 		default:
 		}
 	}
 
 	_ = s.store.AppendAudit(AuditEntry{
 		Action:  "LEASE_GRANTED",
-		Actor:   pr.info.Request.RequesterID,
-		Profile: pr.matched.Name,
-		Agent:   pr.matched.Agent,
-		Details: fmt.Sprintf("Manually approved lease %s (%s) for %v", leaseID, pr.matched.Name, duration),
+		Actor:   requesterID,
+		Profile: profileName,
+		Agent:   agent,
+		Details: fmt.Sprintf("Manually approved lease %s (%s) for %v to %s", leaseID, profileName, duration, requesterID),
 	})
 
 	return resp, nil
@@ -512,18 +695,36 @@ func (s *Server) DenyRequest(reqID string) error {
 	pr, exists := s.pending[reqID]
 	if exists {
 		delete(s.pending, reqID)
-		s.deniedResults[reqID] = true
 	}
+	s.deniedResults[reqID] = true
 	s.pendingMu.Unlock()
-	if !exists {
-		return fmt.Errorf("request %s not found or expired", reqID)
+
+	var (
+		actor   = "unknown"
+		profile = ""
+		agent   = ""
+	)
+	if exists {
+		actor = pr.info.Request.RequesterID
+		profile = pr.matched.Name
+		agent = pr.matched.Agent
+		if pr.respCh != nil {
+			close(pr.respCh)
+		}
+	} else if rec, err := s.store.GetShareRequest(reqID); err == nil && rec != nil {
+		actor = rec.PeerID
+		profile = rec.ProfileName
+		agent = rec.Agent
 	}
+
+	_ = s.store.UpdateRequestStatus(reqID, "denied", "", "Host denied request")
+
 	_ = s.store.AppendAudit(AuditEntry{
 		Action:  "LEASE_DENIED",
 		Actor:   "local",
-		Profile: pr.matched.Name,
-		Agent:   pr.matched.Agent,
-		Details: fmt.Sprintf("Host denied request %s from %s", reqID, pr.info.Request.RequesterID),
+		Profile: profile,
+		Agent:   agent,
+		Details: fmt.Sprintf("Host denied request %s from %s", reqID, actor),
 	})
 	return nil
 }

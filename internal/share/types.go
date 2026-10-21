@@ -46,6 +46,43 @@ type LeaseRequest struct {
 	RequestedHours int    `json:"requested_hours"`
 }
 
+type PendingRequestInfo struct {
+	RequestID string       `json:"request_id"`
+	Request   LeaseRequest `json:"request"`
+	CreatedAt time.Time    `json:"created_at"`
+	ExpiresAt time.Time    `json:"expires_at"`
+}
+
+type ShareRequestRecord struct {
+	ID             string    `json:"id"`
+	Direction      string    `json:"direction"` // "incoming" or "outgoing"
+	PeerID         string    `json:"peer_id"`
+	PeerIP         string    `json:"peer_ip"`
+	ProfileName    string    `json:"profile_name"`
+	Agent          string    `json:"agent"`
+	RequestedHours int       `json:"requested_hours"`
+	Status         string    `json:"status"` // "pending", "approved", "denied", "cancelled", "expired"
+	CreatedAt      time.Time `json:"created_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	LeaseID        string    `json:"lease_id,omitempty"`
+	ErrorMessage   string    `json:"error_message,omitempty"`
+}
+
+func (r *ShareRequestRecord) ToPendingInfo() PendingRequestInfo {
+	return PendingRequestInfo{
+		RequestID: r.ID,
+		Request: LeaseRequest{
+			RequesterID:    r.PeerID,
+			RequesterIP:    r.PeerIP,
+			ProfileName:    r.ProfileName,
+			Agent:          r.Agent,
+			RequestedHours: r.RequestedHours,
+		},
+		CreatedAt: r.CreatedAt,
+		ExpiresAt: r.ExpiresAt,
+	}
+}
+
 type LeaseResponse struct {
 	Status      string        `json:"status"` // "approved", "pending", "denied"
 	RequestID   string        `json:"request_id,omitempty"`

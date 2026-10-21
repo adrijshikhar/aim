@@ -95,3 +95,25 @@ func (c *Client) PollLease(ctx context.Context, peerIP, requestID string) (*Leas
 	}
 	return &leaseResp, nil
 }
+
+func (c *Client) CancelLeaseRequest(ctx context.Context, peerIP, requestID string) error {
+	baseURL := c.baseURLOverride
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://%s:%d", peerIP, c.port)
+	}
+
+	reqBody := map[string]string{"request_id": requestID}
+	data, _ := json.Marshal(reqBody)
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/api/share/cancel", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}

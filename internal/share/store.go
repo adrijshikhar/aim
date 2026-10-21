@@ -1,6 +1,7 @@
 package share
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,10 +19,12 @@ type ShareStore struct {
 	grantedFile  string
 	auditFile    string
 	scheduleFile string
+	db           *ShareDB
 	mu           sync.RWMutex
 }
 
 func NewStore(aimDir string) *ShareStore {
+	db, _ := NewShareDB(aimDir)
 	return &ShareStore{
 		aimDir:       aimDir,
 		shareFile:    filepath.Join(aimDir, "share.json"),
@@ -30,6 +33,7 @@ func NewStore(aimDir string) *ShareStore {
 		grantedFile:  filepath.Join(aimDir, "granted_leases.json"),
 		auditFile:    filepath.Join(aimDir, "share_audit.json"),
 		scheduleFile: filepath.Join(aimDir, "share_schedules.json"),
+		db:           db,
 	}
 }
 
@@ -332,6 +336,14 @@ func (s *ShareStore) RevokeGrantedLease(leaseID string) (*GrantedLease, error) {
 }
 
 func (s *ShareStore) AppendAudit(entry AuditEntry) error {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.db.AppendAudit(ctx, entry); err == nil {
+			return nil
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -366,6 +378,14 @@ func (s *ShareStore) AppendAudit(entry AuditEntry) error {
 }
 
 func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if logs, err := s.db.GetAuditLogs(ctx, limit); err == nil && len(logs) > 0 {
+			return logs
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -381,6 +401,78 @@ func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
 		return logs[:limit]
 	}
 	return logs
+}
+
+// SaveShareRequest persists a lease request (incoming or outgoing) in SQLite.
+func (s *ShareStore) SaveShareRequest(req ShareRequestRecord) error {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return s.db.SaveRequest(ctx, req)
+	}
+	return nil
+}
+
+// GetShareRequest retrieves a request by ID.
+func (s *ShareStore) GetShareRequest(id string) (*ShareRequestRecord, error) {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return s.db.GetRequest(ctx, id)
+	}
+	return nil, nil
+}
+
+// GetPendingIncomingRequests returns all active incoming requests awaiting manual host approval.
+func (s *ShareStore) GetPendingIncomingRequests() []ShareRequestRecord {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if reqs, err := s.db.GetPendingIncomingRequests(ctx); err == nil {
+			return reqs
+		}
+	}
+	return nil
+}
+
+// GetPendingOutgoingRequests returns all active outgoing requests sent by this node.
+func (s *ShareStore) GetPendingOutgoingRequests() []ShareRequestRecord {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if reqs, err := s.db.GetPendingOutgoingRequests(ctx); err == nil {
+			return reqs
+		}
+	}
+	return nil
+}
+
+// UpdateRequestStatus updates status, lease ID, and error message for a request.
+func (s *ShareStore) UpdateRequestStatus(id, status, leaseID, errMsg string) error {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return s.db.UpdateRequestStatus(ctx, id, status, leaseID, errMsg)
+	}
+	return nil
+}
+
+// CancelShareRequest marks a request as cancelled.
+func (s *ShareStore) CancelShareRequest(id string) error {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return s.db.CancelRequest(ctx, id)
+	}
+	return nil
+}
+
+// Close releases the SQLite connection pool if open.
+func (s *ShareStore) Close() error {
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
 }
 
 func (s *ShareStore) GetSchedules() []SchedulePolicy {
