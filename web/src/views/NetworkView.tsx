@@ -984,6 +984,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                     const isPeerOnline = peer.last_seen
                       ? (currentTime - new Date(peer.last_seen).getTime()) < 5 * 60 * 1000
                       : true;
+                    const displayIp = peer.vpn_ip ? peer.vpn_ip.replace(/:\d+$/, '') : '';
                     return (
                       <Card
                         key={peer.id || peer.hostname}
@@ -998,7 +999,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                   <span className="truncate">{peer.hostname}</span>
                                 </CardTitle>
                                 <CardDescription className="text-xs font-mono text-muted-foreground truncate">
-                                  {peer.vpn_ip}
+                                  {displayIp || peer.vpn_ip}
                                 </CardDescription>
                               </div>
                               {isPeerOnline ? (
@@ -1022,14 +1023,14 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                             </div>
                           </CardHeader>
 
-                          <CardContent className="p-4 pt-2 space-y-2.5">
+                          <CardContent className="p-4 pt-2 space-y-2.5 pb-4">
                             <div className="flex items-center justify-between text-xs font-mono uppercase text-muted-foreground tracking-wider font-medium">
                               <span>Offered Profiles</span>
                               <span>{profileCount} available</span>
                             </div>
 
                             {peer.profiles && peer.profiles.length > 0 ? (
-                              <div className="space-y-1.5">
+                              <div className="rounded-geist border border-[#222222] bg-[#0c0c0c] divide-y divide-[#1c1c1c] overflow-hidden">
                                 {peer.profiles.map((prof) => {
                                   const sp = peer.shared_profiles?.find((p) => p.name === prof);
                                   const agent = sp?.agent || 'claude';
@@ -1037,28 +1038,28 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                   return (
                                     <div
                                       key={prof}
-                                      className="group flex items-center justify-between gap-2 px-2.5 py-2 rounded-geist border border-[#222222] bg-[#121212]/80 hover:bg-[#181818] hover:border-[#383838] transition-all"
+                                      className="group flex items-center justify-between gap-3 px-3.5 py-2.5 hover:bg-[#141414] transition-colors"
                                     >
                                       <div className="flex items-center gap-2 truncate min-w-0">
                                         <span className="font-mono text-xs font-semibold text-foreground group-hover:text-[#61afef] transition-colors truncate">
                                           {prof}
                                         </span>
-                                        <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 shrink-0">
-                                          <AgentBadge agent={agent} size="sm" />
-                                        </div>
                                         {sp && (
                                           <span
                                             className={cn(
-                                              'text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 font-medium flex items-center gap-1',
+                                              'text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full border shrink-0 font-medium flex items-center gap-1.5',
                                               isAuto
-                                                ? 'bg-[#183925]/60 text-[#98c379] border-[#235836]/70'
-                                                : 'bg-[#142334]/60 text-[#52a8ff] border-[#1f4068]/70'
+                                                ? 'bg-[#183925]/50 text-[#98c379] border-[#235836]/60'
+                                                : 'bg-[#142334]/50 text-[#52a8ff] border-[#1f4068]/60'
                                             )}
                                           >
-                                            <span className={cn('h-1 w-1 rounded-full', isAuto ? 'bg-[#98c379]' : 'bg-[#52a8ff]')} />
+                                            <span className={cn('h-1.5 w-1.5 rounded-full', isAuto ? 'bg-[#30a46c]' : 'bg-[#52a8ff]')} />
                                             <span>{isAuto ? 'Auto' : 'Request'}</span>
                                           </span>
                                         )}
+                                        <div className="hidden group-hover:inline-flex items-center shrink-0 transition-opacity duration-150 animate-in fade-in">
+                                          <AgentBadge agent={agent} size="sm" />
+                                        </div>
                                       </div>
                                       <Button
                                         size="sm"
@@ -1069,10 +1070,10 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                           setSelectedAgent(agent);
                                           setSelectedIsAuto(isAuto);
                                         }}
-                                        className="h-6 px-2 text-[11px] font-mono font-medium rounded-geist border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#252525] hover:border-[#404040] text-foreground hover:text-[#61afef] flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs transition-colors"
+                                        className="h-7 px-2.5 text-xs font-mono font-medium rounded-geist border-[#2a2a2a] bg-[#141414] hover:bg-[#1f1f1f] hover:border-[#383838] text-foreground hover:text-[#61afef] flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs transition-colors"
                                         title={`Borrow ${prof} from ${peer.hostname}`}
                                       >
-                                        <KeyRound className="h-3 w-3 text-muted-foreground group-hover:text-[#61afef] transition-colors" />
+                                        <KeyRound className="h-3.5 w-3.5 text-muted-foreground group-hover:text-[#61afef] transition-colors" />
                                         <span>Borrow</span>
                                       </Button>
                                     </div>
@@ -1080,7 +1081,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                                 })}
                               </div>
                             ) : (
-                              <div className="p-3 rounded-geist bg-[#141414] border border-[#1e1e1e] text-xs text-muted-foreground text-center italic">
+                              <div className="p-4 rounded-geist bg-[#0c0c0c] border border-dashed border-[#222222] text-xs text-muted-foreground text-center">
                                 No profiles currently shared
                               </div>
                             )}
