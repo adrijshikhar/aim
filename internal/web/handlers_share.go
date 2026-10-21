@@ -134,17 +134,17 @@ type SetGlobalModeRequest struct {
 
 func (s *Server) handleSetGlobalMode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req SetGlobalModeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Mode == "" {
-		http.Error(w, "mode is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "mode is required")
 		return
 	}
 	store := s.getShareStore()
 	if err := store.SetGlobalMode(req.Mode); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	_ = store.AppendAudit(share.AuditEntry{
@@ -167,14 +167,14 @@ type ToggleShareRequest struct {
 func (s *Server) handleToggleShare(w http.ResponseWriter, r *http.Request) {
 	var req ToggleShareRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	store := s.getShareStore()
 	if !req.Enabled {
 		if err := store.DisableProfile(req.Name); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		_ = store.AppendAudit(share.AuditEntry{
@@ -194,7 +194,7 @@ func (s *Server) handleToggleShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := store.EnableProfile(req.Name, req.Agent, req.AutoApprove, ttl); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	_ = store.AppendAudit(share.AuditEntry{
@@ -223,21 +223,22 @@ type AddPeerRequest struct {
 func (s *Server) handleAddSharePeer(w http.ResponseWriter, r *http.Request) {
 	var req AddPeerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Host == "" {
-		http.Error(w, "host is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "host is required")
 		return
 	}
 
 	store := s.getShareStore()
 	disc := share.NewDiscovery(store, 4319)
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
-	defer cancel()
-
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	peer, err := disc.PingPeer(ctx, req.Host)
+	cancel()
 	if err != nil && !strings.Contains(req.Host, ".") {
-		peer, err = disc.PingPeer(ctx, req.Host+".local")
+		retryCtx, retryCancel := context.WithTimeout(r.Context(), 3*time.Second)
+		peer, err = disc.PingPeer(retryCtx, req.Host+".local")
+		retryCancel()
 	}
 	if err != nil {
-		http.Error(w, "could not reach peer: "+err.Error(), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "could not reach peer: "+err.Error())
 		return
 	}
 
@@ -255,7 +256,7 @@ type RequestLeasePayload struct {
 func (s *Server) handleRequestShareLease(w http.ResponseWriter, r *http.Request) {
 	var req RequestLeasePayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -274,15 +275,16 @@ func (s *Server) handleRequestShareLease(w http.ResponseWriter, r *http.Request)
 	}
 
 	client := share.NewClient(4319)
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
-	resp, err := client.RequestLease(ctx, targetHost, req.Profile, req.Agent, req.Hours)
+	reqCtx, reqCancel := context.WithTimeout(r.Context(), 5*time.Second)
+	resp, err := client.RequestLease(reqCtx, targetHost, req.Profile, req.Agent, req.Hours)
+	reqCancel()
 	if err != nil && !strings.Contains(targetHost, ".") {
-		resp, err = client.RequestLease(ctx, targetHost+".local", req.Profile, req.Agent, req.Hours)
+		retryCtx, retryCancel := context.WithTimeout(r.Context(), 5*time.Second)
+		resp, err = client.RequestLease(retryCtx, targetHost+".local", req.Profile, req.Agent, req.Hours)
+		retryCancel()
 	}
 	if err != nil {
-		http.Error(w, "lease request failed: "+err.Error(), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "lease request failed: "+err.Error())
 		return
 	}
 
@@ -318,7 +320,7 @@ func (s *Server) handleRequestShareLease(w http.ResponseWriter, r *http.Request)
 	mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
 	localName, err := mgr.InstallLease(req.Peer, req.Profile, resp)
 	if err != nil {
-		http.Error(w, "failed to install lease: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to install lease: "+err.Error())
 		return
 	}
 
@@ -350,13 +352,13 @@ type ReleaseLeasePayload struct {
 func (s *Server) handleReleaseShareLease(w http.ResponseWriter, r *http.Request) {
 	var req ReleaseLeasePayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Profile == "" {
-		http.Error(w, "profile is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "profile is required")
 		return
 	}
 
 	mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
 	if err := mgr.ReleaseLease(req.Profile); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -366,13 +368,13 @@ func (s *Server) handleReleaseShareLease(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleCleanExpiredShareLeases(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
 	cleaned, err := mgr.CleanExpiredLeases()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -385,19 +387,19 @@ type RevokeLeasePayload struct {
 
 func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req RevokeLeasePayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LeaseID == "" {
-		http.Error(w, "lease_id is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "lease_id is required")
 		return
 	}
 
 	store := s.getShareStore()
 	revoked, err := store.RevokeGrantedLease(req.LeaseID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
@@ -415,14 +417,14 @@ func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
-		http.Error(w, "request_id is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "request_id is required")
 		return
 	}
 	body, _ := json.Marshal(req)
@@ -452,7 +454,7 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 	store := s.getShareStore()
 	rec, err := store.GetShareRequest(req.RequestID)
 	if err != nil || rec == nil {
-		http.Error(w, "request not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "request not found")
 		return
 	}
 
@@ -463,13 +465,13 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 	}
 
 	if rec.Status != "pending" {
-		http.Error(w, fmt.Sprintf("cannot approve request %s: request has status %q", req.RequestID, rec.Status), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("cannot approve request %s: request has status %q", req.RequestID, rec.Status))
 		return
 	}
 
 	if time.Now().After(rec.ExpiresAt) {
 		_ = store.UpdateRequestStatus(req.RequestID, "expired", "", "Request expired")
-		http.Error(w, fmt.Sprintf("cannot approve request %s: request has expired", req.RequestID), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("cannot approve request %s: request has expired", req.RequestID))
 		return
 	}
 
@@ -489,7 +491,7 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 	// Atomically reserve transition from pending to approved before recording grant
 	transitioned, err := store.TransitionRequestStatus(req.RequestID, "pending", "approved", leaseID, "")
 	if err != nil {
-		http.Error(w, "failed to transition request: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to transition request: "+err.Error())
 		return
 	}
 	if !transitioned {
@@ -499,14 +501,14 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "lease_id": fresh.LeaseID, "status": "approved"})
 			return
 		}
-		http.Error(w, "request was already decided or cancelled", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "request was already decided or cancelled")
 		return
 	}
 
 	payload, err := share.PackageProfileCredentials(filepath.Join(config.BaseDir(), "profiles"), rec.ProfileName, rec.Agent)
 	if err != nil {
 		_ = store.UpdateRequestStatus(req.RequestID, "pending", "", "failed to read credentials: "+err.Error())
-		http.Error(w, "failed to read credentials: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to read credentials: "+err.Error())
 		return
 	}
 
@@ -522,7 +524,7 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 		AutoApproved: false,
 	}); err != nil {
 		_ = store.UpdateRequestStatus(req.RequestID, "pending", "", "failed to record grant: "+err.Error())
-		http.Error(w, "failed to record granted lease: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to record granted lease: "+err.Error())
 		return
 	}
 
@@ -547,14 +549,14 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
-		http.Error(w, "request_id is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "request_id is required")
 		return
 	}
 	body, _ := json.Marshal(req)
@@ -583,17 +585,17 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 	store := s.getShareStore()
 	rec, err := store.GetShareRequest(req.RequestID)
 	if err != nil || rec == nil {
-		http.Error(w, "request not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "request not found")
 		return
 	}
 
 	transitioned, err := store.TransitionRequestStatus(req.RequestID, "pending", "denied", "", "Host denied request")
 	if err != nil {
-		http.Error(w, "failed to update request status: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to update request status: "+err.Error())
 		return
 	}
 	if !transitioned {
-		http.Error(w, fmt.Sprintf("cannot deny request %s: request is not pending (status %q)", req.RequestID, rec.Status), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("cannot deny request %s: request is not pending (status %q)", req.RequestID, rec.Status))
 		return
 	}
 
@@ -611,21 +613,25 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleCancelShareRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
-		http.Error(w, "request_id is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "request_id is required")
 		return
 	}
 
 	store := s.getShareStore()
 	rec, _ := store.GetShareRequest(req.RequestID)
 
-	_ = store.CancelShareRequest(req.RequestID)
+	cancelled, _ := store.CancelShareRequest(req.RequestID)
+	if !cancelled && rec != nil && rec.Status != "pending" {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("cannot cancel request %s: status is %q", req.RequestID, rec.Status))
+		return
+	}
 
 	actor := "local"
 	profile := ""
@@ -668,21 +674,21 @@ func (s *Server) handleCancelShareRequest(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handlePollShareRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
-		http.Error(w, "request_id is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "request_id is required")
 		return
 	}
 
 	store := s.getShareStore()
 	rec, err := store.GetShareRequest(req.RequestID)
 	if err != nil || rec == nil {
-		http.Error(w, "request not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "request not found")
 		return
 	}
 
@@ -712,44 +718,48 @@ func (s *Server) handlePollShareRequest(w http.ResponseWriter, r *http.Request) 
 
 	resp, err := client.PollLease(ctx, rec.PeerIP, req.RequestID)
 	if err != nil {
-		http.Error(w, "failed to poll peer: "+err.Error(), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "failed to poll peer: "+err.Error())
 		return
 	}
 
 	if resp.Status == "approved" {
-		// Re-check current record status before installation to prevent installing cancelled requests
-		freshRec, _ := store.GetShareRequest(req.RequestID)
-		if freshRec != nil && freshRec.Status == "cancelled" {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":  "cancelled",
-				"message": "lease request was cancelled by borrower",
-			})
+		// Atomically transition from pending to approved before installing files on disk
+		transitioned, err := store.TransitionRequestStatus(req.RequestID, "pending", "approved", resp.LeaseID, "")
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to update request state: "+err.Error())
 			return
 		}
-		if freshRec != nil && freshRec.Status == "approved" && freshRec.LeaseID != "" {
+		if !transitioned {
+			freshRec, _ := store.GetShareRequest(req.RequestID)
+			status := "cancelled"
+			msg := "lease request was cancelled or already decided"
+			if freshRec != nil {
+				status = freshRec.Status
+				msg = freshRec.ErrorMessage
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  status,
+				"message": msg,
+			})
 			return
 		}
 
 		mgr := share.NewLeaseManager(filepath.Join(config.BaseDir(), "profiles"))
 		localName, err := mgr.InstallLease(rec.PeerID, rec.ProfileName, resp)
 		if err != nil {
-			http.Error(w, "failed to install lease credentials: "+err.Error(), http.StatusInternalServerError)
+			_ = store.UpdateRequestStatus(req.RequestID, "failed", "", "failed to install lease credentials: "+err.Error())
+			writeJSONError(w, http.StatusInternalServerError, "failed to install lease credentials: "+err.Error())
 			return
 		}
 
-		transitioned, _ := store.TransitionRequestStatus(req.RequestID, "pending", "approved", resp.LeaseID, "")
-		if transitioned {
-			_ = store.AppendAudit(share.AuditEntry{
-				Action:  "LEASE_BORROWED",
-				Actor:   rec.PeerID,
-				Profile: rec.ProfileName,
-				Agent:   resp.Agent,
-				Details: fmt.Sprintf("Lease %s approved and installed as %s", resp.LeaseID, localName),
-			})
-		}
+		_ = store.AppendAudit(share.AuditEntry{
+			Action:  "LEASE_BORROWED",
+			Actor:   rec.PeerID,
+			Profile: rec.ProfileName,
+			Agent:   resp.Agent,
+			Details: fmt.Sprintf("Lease %s approved and installed as %s", resp.LeaseID, localName),
+		})
 	} else if resp.Status == "denied" {
 		_ = store.UpdateRequestStatus(req.RequestID, "denied", "", resp.Message)
 		_ = store.AppendAudit(share.AuditEntry{
@@ -782,8 +792,14 @@ func (s *Server) handleGetSchedules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSaveSchedule(w http.ResponseWriter, r *http.Request) {
 	var sched share.SchedulePolicy
 	if err := json.NewDecoder(r.Body).Decode(&sched); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if sched.ID == "" {
+		sched.ID = share.GenerateID("sch")
+	}
+	if sched.CreatedAt.IsZero() {
+		sched.CreatedAt = time.Now()
 	}
 	if sched.Scope == "" {
 		sched.Scope = "global"
@@ -830,7 +846,7 @@ func (s *Server) handleSaveSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := store.SaveSchedule(sched); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -850,13 +866,13 @@ func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 
 	store := s.getShareStore()
 	if err := store.DeleteSchedule(req.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

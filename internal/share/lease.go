@@ -36,6 +36,9 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	sanitizedProfile := strings.ReplaceAll(profileName, "/", "-")
 	sanitizedProfile = strings.ReplaceAll(sanitizedProfile, "\\", "-")
 	localProfileName := fmt.Sprintf("%s:%s", sanitizedPeer, sanitizedProfile)
+	if sanitizedPeer == "" {
+		localProfileName = sanitizedProfile
+	}
 	targetDir := filepath.Join(m.profilesDir, localProfileName)
 
 	cleanTargetDir := filepath.Clean(targetDir)
@@ -44,16 +47,31 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		return "", fmt.Errorf("invalid profile target path traversal: %s", localProfileName)
 	}
 
+	// Protect existing permanent user profiles from being overwritten or deleted as leases
+	if info, err := os.Stat(cleanTargetDir); err == nil && info.IsDir() {
+		leaseFile := filepath.Join(cleanTargetDir, ".aim-lease.json")
+		if _, err := os.Stat(leaseFile); os.IsNotExist(err) {
+			return "", fmt.Errorf("target profile %q already exists and is not a leased profile", localProfileName)
+		}
+	}
+
 	if err := os.MkdirAll(cleanTargetDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create ephemeral profile dir: %w", err)
 	}
 
-	allowedPrefixes := []string{
-		".claude",
-		".codex",
-		".gemini",
-		".config/codex",
-		".config/gcloud",
+	allowedCredentialFiles := map[string]bool{
+		".claude/.credentials.json":                           true,
+		".claude/auth.json":                                   true,
+		".claude.json":                                        true,
+		".claude/.claude.json":                                true,
+		".codex/auth.json":                                    true,
+		".codex/config.toml":                                  true,
+		".config/codex/auth.json":                             true,
+		".gemini/antigravity-cli/antigravity-oauth-token":     true,
+		".gemini/antigravity-cli/config.json":                 true,
+		".config/gcloud/application_default_credentials.json": true,
+		".gemini/gemini-oauth-token":                          true,
+		".gemini/oauth.json":                                  true,
 	}
 
 	type stagedFile struct {
@@ -70,14 +88,7 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 				return "", fmt.Errorf("illegal relative path in payload: %s", relPath)
 			}
 			slashRel := filepath.ToSlash(cleanRel)
-			isAllowed := false
-			for _, prefix := range allowedPrefixes {
-				if strings.HasPrefix(slashRel, prefix) {
-					isAllowed = true
-					break
-				}
-			}
-			if !isAllowed {
+			if !allowedCredentialFiles[slashRel] {
 				return "", fmt.Errorf("disallowed credential path in payload: %s", relPath)
 			}
 

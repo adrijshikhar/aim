@@ -105,6 +105,22 @@ func (s *ShareDB) initSchema() error {
 	return err
 }
 
+func parseDBTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t
+	}
+	return time.Time{}
+}
+
 func (s *ShareDB) migrateLegacyAuditLogs(aimDir string) {
 	legacyFile := filepath.Join(aimDir, "share_audit.json")
 	data, err := os.ReadFile(legacyFile)
@@ -145,7 +161,7 @@ func (s *ShareDB) migrateLegacyAuditLogs(aimDir string) {
 
 	for _, entry := range legacyLogs {
 		if entry.ID == "" {
-			entry.ID = fmt.Sprintf("aud_%d", entry.Timestamp.UnixNano())
+			entry.ID = GenerateID("aud")
 		}
 		_, _ = stmt.ExecContext(ctx, entry.ID, entry.Timestamp.Format(time.RFC3339Nano), entry.Action, entry.Actor, entry.Profile, entry.Agent, entry.Details)
 	}
@@ -241,17 +257,8 @@ func (s *ShareDB) GetRequest(ctx context.Context, id string) (*ShareRequestRecor
 		return nil, err
 	}
 
-	if t, err := time.Parse(time.RFC3339Nano, created); err == nil {
-		r.CreatedAt = t
-	} else if t, err := time.Parse("2006-01-02 15:04:05", created); err == nil {
-		r.CreatedAt = t
-	}
-
-	if t, err := time.Parse(time.RFC3339Nano, expires); err == nil {
-		r.ExpiresAt = t
-	} else if t, err := time.Parse("2006-01-02 15:04:05", expires); err == nil {
-		r.ExpiresAt = t
-	}
+	r.CreatedAt = parseDBTime(created)
+	r.ExpiresAt = parseDBTime(expires)
 
 	if leaseID.Valid {
 		r.LeaseID = leaseID.String
@@ -281,7 +288,7 @@ func (s *ShareDB) GetPendingIncomingRequests(ctx context.Context) ([]ShareReques
 	}
 	defer rows.Close()
 
-	var results []ShareRequestRecord
+	results := make([]ShareRequestRecord, 0)
 	now := time.Now()
 
 	for rows.Next() {
@@ -299,12 +306,8 @@ func (s *ShareDB) GetPendingIncomingRequests(ctx context.Context) ([]ShareReques
 			continue
 		}
 
-		if t, err := time.Parse(time.RFC3339Nano, created); err == nil {
-			r.CreatedAt = t
-		}
-		if t, err := time.Parse(time.RFC3339Nano, expires); err == nil {
-			r.ExpiresAt = t
-		}
+		r.CreatedAt = parseDBTime(created)
+		r.ExpiresAt = parseDBTime(expires)
 
 		if leaseID.Valid {
 			r.LeaseID = leaseID.String
@@ -340,7 +343,7 @@ func (s *ShareDB) GetPendingOutgoingRequests(ctx context.Context) ([]ShareReques
 	}
 	defer rows.Close()
 
-	var results []ShareRequestRecord
+	results := make([]ShareRequestRecord, 0)
 	now := time.Now()
 
 	for rows.Next() {
@@ -358,12 +361,8 @@ func (s *ShareDB) GetPendingOutgoingRequests(ctx context.Context) ([]ShareReques
 			continue
 		}
 
-		if t, err := time.Parse(time.RFC3339Nano, created); err == nil {
-			r.CreatedAt = t
-		}
-		if t, err := time.Parse(time.RFC3339Nano, expires); err == nil {
-			r.ExpiresAt = t
-		}
+		r.CreatedAt = parseDBTime(created)
+		r.ExpiresAt = parseDBTime(expires)
 
 		if leaseID.Valid {
 			r.LeaseID = leaseID.String
@@ -418,7 +417,8 @@ func (s *ShareDB) TransitionRequestStatus(ctx context.Context, id, fromStatus, t
 }
 
 // CancelRequest marks a request as cancelled only if it is currently pending.
-func (s *ShareDB) CancelRequest(ctx context.Context, id string) error {
+// Returns (true, nil) if successfully cancelled, or (false, nil) if the request was not pending or not found.
+func (s *ShareDB) CancelRequest(ctx context.Context, id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -427,8 +427,15 @@ func (s *ShareDB) CancelRequest(ctx context.Context, id string) error {
 	SET status = 'cancelled'
 	WHERE id = ? AND status = 'pending'
 	`
-	_, err := s.db.ExecContext(ctx, query, id)
-	return err
+	res, err := s.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // AppendAudit records an audit entry into SQLite.
@@ -437,7 +444,7 @@ func (s *ShareDB) AppendAudit(ctx context.Context, entry AuditEntry) error {
 	defer s.mu.Unlock()
 
 	if entry.ID == "" {
-		entry.ID = fmt.Sprintf("aud_%d", time.Now().UnixNano())
+		entry.ID = GenerateID("aud")
 	}
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now()
@@ -480,7 +487,7 @@ func (s *ShareDB) GetAuditLogs(ctx context.Context, limit int) ([]AuditEntry, er
 	}
 	defer rows.Close()
 
-	var logs []AuditEntry
+	logs := make([]AuditEntry, 0)
 	for rows.Next() {
 		var (
 			e       AuditEntry
@@ -491,11 +498,7 @@ func (s *ShareDB) GetAuditLogs(ctx context.Context, limit int) ([]AuditEntry, er
 		if err := rows.Scan(&e.ID, &ts, &e.Action, &e.Actor, &profile, &agent, &e.Details); err != nil {
 			continue
 		}
-		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-			e.Timestamp = t
-		} else if t, err := time.Parse("2006-01-02 15:04:05", ts); err == nil {
-			e.Timestamp = t
-		}
+		e.Timestamp = parseDBTime(ts)
 		if profile.Valid {
 			e.Profile = profile.String
 		}

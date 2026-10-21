@@ -197,6 +197,20 @@ func TestSchedulePolicyActive(t *testing.T) {
 	if spFuture.IsActive(now) {
 		t.Errorf("expected future schedule to be inactive, got true")
 	}
+
+	// Date range with daily window (active date, but inactive time of day)
+	spDateWithWindow := SchedulePolicy{
+		Enabled:   true,
+		Scope:     "global",
+		Mode:      "auto",
+		StartDate: now.Add(-24 * time.Hour).Format("2006-01-02"),
+		EndDate:   now.Add(24 * time.Hour).Format("2006-01-02"),
+		StartTime: fmt.Sprintf("%02d:00", futureStart),
+		EndTime:   fmt.Sprintf("%02d:00", futureEnd),
+	}
+	if spDateWithWindow.IsActive(now) {
+		t.Errorf("expected date range with inactive time window to be inactive, got true")
+	}
 }
 
 func TestServerApproveRequiresLocalhost(t *testing.T) {

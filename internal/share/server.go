@@ -1,6 +1,7 @@
 package share
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -63,7 +64,11 @@ func (s *Server) SetListener(ln net.Listener) {
 func (s *Server) Serve(ln net.Listener) error {
 	s.listener = ln
 	s.httpServer = &http.Server{
-		Handler: s.mux,
+		Handler:           s.mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	return s.httpServer.Serve(ln)
 }
@@ -75,9 +80,20 @@ func (s *Server) Start(addr string) error {
 	}
 	s.listener = ln
 	s.httpServer = &http.Server{
-		Handler: s.mux,
+		Handler:           s.mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	return s.httpServer.Serve(ln)
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpServer != nil {
+		return s.httpServer.Shutdown(ctx)
+	}
+	return nil
 }
 
 func (s *Server) Close() error {
@@ -137,8 +153,12 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var profiles []SharedProfileConfig
-	var names []string
+	if !isPrivateOrVPNIP(r.RemoteAddr) {
+		http.Error(w, "Forbidden: ping only accepted from private VPN / LAN subnets", http.StatusForbidden)
+		return
+	}
+	profiles := make([]SharedProfileConfig, 0)
+	names := make([]string, 0)
 	for _, p := range s.store.GetAllSharedProfiles() {
 		enabled, autoApprove := s.store.GetEffectiveProfileMode(p.Name)
 		if enabled {
@@ -165,8 +185,12 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !isPrivateOrVPNIP(r.RemoteAddr) {
+		http.Error(w, "Forbidden: profile listing only accepted from private VPN / LAN subnets", http.StatusForbidden)
+		return
+	}
 	allProfiles := s.store.GetAllSharedProfiles()
-	var exposed []SharedProfileConfig
+	exposed := make([]SharedProfileConfig, 0)
 	for _, p := range allProfiles {
 		enabled, autoApprove := s.store.GetEffectiveProfileMode(p.Name)
 		if enabled {
@@ -337,6 +361,10 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !isPrivateOrVPNIP(r.RemoteAddr) {
+		http.Error(w, "Forbidden: poll requests only accepted from private VPN / LAN subnets", http.StatusForbidden)
+		return
+	}
 	reqID := r.URL.Query().Get("request_id")
 	if reqID == "" {
 		http.Error(w, "request_id is required", http.StatusBadRequest)
@@ -350,6 +378,21 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	s.pendingMu.Unlock()
 
 	if approved {
+		if time.Now().After(resp.ExpiresAt) {
+			s.pendingMu.Lock()
+			delete(s.approvedResults, reqID)
+			s.pendingMu.Unlock()
+			http.Error(w, "lease has expired", http.StatusGone)
+			return
+		}
+		// Verify lease is not revoked
+		leases := s.store.GetGrantedLeases()
+		for _, gl := range leases {
+			if gl.LeaseID == resp.LeaseID && gl.Revoked {
+				http.Error(w, "lease was revoked", http.StatusGone)
+				return
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 		return
@@ -449,6 +492,10 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !isPrivateOrVPNIP(r.RemoteAddr) {
+		http.Error(w, "Forbidden: cancellation requests only accepted from private VPN / LAN subnets", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
@@ -480,7 +527,13 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 		agent = rec.Agent
 	}
 
-	_ = s.store.CancelShareRequest(req.RequestID)
+	cancelled, _ := s.store.CancelShareRequest(req.RequestID)
+	if !cancelled && !exists {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "message": "request was already decided or cancelled"})
+		return
+	}
+
 	_ = s.store.AppendAudit(AuditEntry{
 		Action:  "LEASE_CANCELLED",
 		Actor:   actor,
@@ -811,7 +864,12 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 
 // PackageProfileCredentials extracts relevant agent credentials for the specified profile.
 func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePayload, error) {
-	profDir := filepath.Join(profilesDir, profileName)
+	cleanProfilesRoot := filepath.Clean(profilesDir)
+	cleanProfDir := filepath.Clean(filepath.Join(profilesDir, profileName))
+	if !strings.HasPrefix(cleanProfDir, cleanProfilesRoot+string(filepath.Separator)) {
+		return nil, fmt.Errorf("invalid profile name %q: path traversal", profileName)
+	}
+	profDir := cleanProfDir
 	files := make(map[string]string)
 
 	switch agent {
@@ -822,7 +880,6 @@ func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePa
 			".claude/auth.json",
 			".claude.json",
 			".claude/.claude.json",
-			".claude/settings.json",
 		} {
 			p := filepath.Join(profDir, filepath.FromSlash(rel))
 			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
@@ -841,6 +898,7 @@ func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePa
 			}
 		}
 	case "agy":
+		_ = profile.HarvestKeychainTokenToProfile("agy", profDir)
 		for _, rel := range []string{
 			".gemini/antigravity-cli/antigravity-oauth-token",
 			".gemini/antigravity-cli/config.json",

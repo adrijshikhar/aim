@@ -7,6 +7,7 @@ import (
 	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 )
 
 // RenderSharedProfilesTable renders the shared profiles in a bounded Lipgloss table.
@@ -29,6 +30,14 @@ func RenderSharedProfilesTable(w io.Writer, profiles []share.SharedProfileConfig
 			status,
 		)
 	}
+
+	t.StyleFunc(func(row, col int) lipgloss.Style {
+		if row == table.HeaderRow {
+			return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+		}
+		return lipgloss.NewStyle().Foreground(tui.TextPrimary)
+	})
+
 	return t.Render()
 }
 
@@ -47,5 +56,13 @@ func RenderPeersTable(w io.Writer, peers []share.PeerInfo) string {
 			p.LastSeen.Format("15:04:05"),
 		)
 	}
+
+	t.StyleFunc(func(row, col int) lipgloss.Style {
+		if row == table.HeaderRow {
+			return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+		}
+		return lipgloss.NewStyle().Foreground(tui.TextPrimary)
+	})
+
 	return t.Render()
 }

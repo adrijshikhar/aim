@@ -56,6 +56,11 @@ func (c *Client) RequestLease(ctx context.Context, peerIP, profile, agent string
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		trimmed := strings.TrimSpace(string(body))
+		if trimmed != "" {
+			return nil, fmt.Errorf("peer returned %s: %s", resp.Status, trimmed)
+		}
 		return nil, fmt.Errorf("peer returned status %s", resp.Status)
 	}
 
@@ -88,6 +93,11 @@ func (c *Client) PollLease(ctx context.Context, peerIP, requestID string) (*Leas
 		return nil, fmt.Errorf("request %s not found or expired", requestID)
 	}
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		trimmed := strings.TrimSpace(string(body))
+		if trimmed != "" {
+			return nil, fmt.Errorf("peer returned %s: %s", resp.Status, trimmed)
+		}
 		return nil, fmt.Errorf("peer returned status %s", resp.Status)
 	}
 

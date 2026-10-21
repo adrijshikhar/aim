@@ -138,6 +138,16 @@ func TestShareStoreGrantedLeasesPruning(t *testing.T) {
 	if len(historyAfterRevoke) != 2 {
 		t.Fatalf("expected 2 leases retained in history after revoke, got %d", len(historyAfterRevoke))
 	}
+
+	// PruneExpiredGrantedLeases explicitly purges inactive leases from disk
+	pruned := store.PruneExpiredGrantedLeases()
+	if pruned != 2 {
+		t.Fatalf("expected 2 pruned leases, got %d", pruned)
+	}
+	remaining := store.GetGrantedLeases()
+	if len(remaining) != 0 {
+		t.Fatalf("expected 0 remaining leases after PruneExpiredGrantedLeases, got %d", len(remaining))
+	}
 }
 
 func TestShareStoreActiveLeasesNotDroppedByHistoryCap(t *testing.T) {

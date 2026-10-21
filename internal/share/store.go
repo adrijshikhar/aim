@@ -15,7 +15,6 @@ type ShareStore struct {
 	aimDir       string
 	shareFile    string
 	peerFile     string
-	leaseFile    string
 	grantedFile  string
 	auditFile    string
 	scheduleFile string
@@ -29,7 +28,6 @@ func NewStore(aimDir string) *ShareStore {
 		aimDir:       aimDir,
 		shareFile:    filepath.Join(aimDir, "share.json"),
 		peerFile:     filepath.Join(aimDir, "peers.json"),
-		leaseFile:    filepath.Join(aimDir, "leases.json"),
 		grantedFile:  filepath.Join(aimDir, "granted_leases.json"),
 		auditFile:    filepath.Join(aimDir, "share_audit.json"),
 		scheduleFile: filepath.Join(aimDir, "share_schedules.json"),
@@ -162,7 +160,7 @@ func (s *ShareStore) saveSharesLocked(configs []SharedProfileConfig) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d", s.shareFile, time.Now().UnixNano())
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.shareFile, os.Getpid(), time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
@@ -199,7 +197,7 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d", s.peerFile, time.Now().UnixNano())
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.peerFile, os.Getpid(), time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
@@ -240,7 +238,7 @@ func (s *ShareStore) SetGlobalMode(mode string) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d", target, time.Now().UnixNano())
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", target, os.Getpid(), time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
@@ -305,7 +303,7 @@ func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
@@ -359,7 +357,16 @@ func (s *ShareStore) PruneExpiredGrantedLeases() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, pruned := s.pruneExpiredGrantedLeasesLocked()
+	active, pruned := s.pruneExpiredGrantedLeasesLocked()
+	if pruned > 0 {
+		data, err := json.MarshalIndent(active, "", "  ")
+		if err == nil {
+			tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
+			if err := os.WriteFile(tmp, data, 0600); err == nil {
+				_ = os.Rename(tmp, s.grantedFile)
+			}
+		}
+	}
 	return pruned
 }
 
@@ -388,7 +395,7 @@ func (s *ShareStore) RevokeGrantedLease(leaseID string) (*GrantedLease, error) {
 	if err != nil {
 		return nil, err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d", s.grantedFile, time.Now().UnixNano())
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return nil, err
 	}
@@ -411,7 +418,7 @@ func (s *ShareStore) AppendAudit(entry AuditEntry) error {
 	defer s.mu.Unlock()
 
 	if entry.ID == "" {
-		entry.ID = fmt.Sprintf("aud_%d", time.Now().UnixNano())
+		entry.ID = GenerateID("aud")
 	}
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now()
@@ -433,7 +440,7 @@ func (s *ShareStore) AppendAudit(entry AuditEntry) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d", s.auditFile, time.Now().UnixNano())
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.auditFile, os.Getpid(), time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
@@ -532,13 +539,14 @@ func (s *ShareStore) TransitionRequestStatus(id, fromStatus, toStatus, leaseID, 
 }
 
 // CancelShareRequest marks a request as cancelled if it is currently pending.
-func (s *ShareStore) CancelShareRequest(id string) error {
+// Returns (true, nil) if successfully cancelled, or (false, nil) if not pending or not found.
+func (s *ShareStore) CancelShareRequest(id string) (bool, error) {
 	if s.db != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		return s.db.CancelRequest(ctx, id)
 	}
-	return nil
+	return false, nil
 }
 
 // Close releases the SQLite connection pool if open.
@@ -572,7 +580,7 @@ func (s *ShareStore) SaveSchedule(sched SchedulePolicy) error {
 	list := s.loadSchedulesLocked()
 	found := false
 	if sched.ID == "" {
-		sched.ID = fmt.Sprintf("sch_%d", time.Now().UnixNano())
+		sched.ID = GenerateID("sch")
 	}
 	if sched.CreatedAt.IsZero() {
 		sched.CreatedAt = time.Now()
@@ -611,7 +619,7 @@ func (s *ShareStore) saveSchedulesLocked(list []SchedulePolicy) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d", s.scheduleFile, time.Now().UnixNano())
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.scheduleFile, os.Getpid(), time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}

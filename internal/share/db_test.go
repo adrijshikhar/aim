@@ -133,8 +133,12 @@ func TestShareDB_RequestsLifecycle(t *testing.T) {
 	}
 
 	// 6. Cancel outgoing request
-	if err := db.CancelRequest(ctx, "req_out_1"); err != nil {
+	cancelled, err := db.CancelRequest(ctx, "req_out_1")
+	if err != nil {
 		t.Fatalf("CancelRequest failed: %v", err)
+	}
+	if !cancelled {
+		t.Fatalf("expected CancelRequest to succeed and return true")
 	}
 	recOut, err := db.GetRequest(ctx, "req_out_1")
 	if err != nil || recOut == nil {
@@ -189,8 +193,12 @@ func TestShareDB_TransitionRequestStatus(t *testing.T) {
 	}
 
 	// Cancelling an already approved request does not overwrite it
-	if err := db.CancelRequest(ctx, "req_trans_1"); err != nil {
+	cancelled, err := db.CancelRequest(ctx, "req_trans_1")
+	if err != nil {
 		t.Fatalf("CancelRequest error: %v", err)
+	}
+	if cancelled {
+		t.Fatalf("expected cancelling already approved request to return false")
 	}
 	rec, _ := db.GetRequest(ctx, "req_trans_1")
 	if rec.Status != "approved" {

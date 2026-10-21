@@ -99,6 +99,46 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 	if mgr.HasLease("work") {
 		t.Fatalf("expected .aim-lease.json NOT to exist after rejected unauthorized file write")
 	}
+
+	// Attempt sibling file injection (e.g. .claude_backdoor.sh)
+	resp3 := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_sibling",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude_backdoor.sh": base64.StdEncoding.EncodeToString([]byte("#!/bin/sh")),
+			},
+		},
+	}
+	_, err = mgr.InstallLease("attacker", "work", resp3)
+	if err == nil {
+		t.Fatalf("expected InstallLease to reject sibling file injection .claude_backdoor.sh")
+	}
+
+	// Attempt overwriting a permanent profile that has no .aim-lease.json
+	permDir := filepath.Join(profilesDir, "permanent_user")
+	_ = os.MkdirAll(permDir, 0700)
+	_ = os.WriteFile(filepath.Join(permDir, "user_data.txt"), []byte("vital data"), 0600)
+
+	respPerm := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_perm",
+		ProfileName: "permanent_user",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/auth.json": base64.StdEncoding.EncodeToString([]byte("{}")),
+			},
+		},
+	}
+	_, err = mgr.InstallLease("", "permanent_user", respPerm)
+	if err == nil {
+		t.Fatalf("expected InstallLease to reject overwriting permanent user profile")
+	}
 }
 
 func TestLeaseManagerReleaseSafety(t *testing.T) {

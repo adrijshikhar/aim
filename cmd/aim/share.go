@@ -206,13 +206,14 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 			}
 
 			client := share.NewClient(4319)
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			resp, err := client.RequestLease(ctx, targetHost, profileName, agent, hours)
+			reqCtx, reqCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			resp, err := client.RequestLease(reqCtx, targetHost, profileName, agent, hours)
+			reqCancel()
 			if err != nil && !strings.Contains(targetHost, ".") {
 				// Retry with .local for zero-conf mDNS resolution
-				resp, err = client.RequestLease(ctx, targetHost+".local", profileName, agent, hours)
+				retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				resp, err = client.RequestLease(retryCtx, targetHost+".local", profileName, agent, hours)
+				retryCancel()
 			}
 			if err != nil {
 				return fmt.Errorf("lease request failed: %w", err)
