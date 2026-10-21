@@ -58,7 +58,7 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 	audit := store.GetAuditLogs(50)
 
 	// Read active leased profiles on disk
-	var activeLeases []ActiveLeaseInfo
+	activeLeases := make([]ActiveLeaseInfo, 0)
 	profRoot := filepath.Join(config.BaseDir(), "profiles")
 	entries, err := os.ReadDir(profRoot)
 	if err == nil {

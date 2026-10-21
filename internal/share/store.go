@@ -96,11 +96,11 @@ func (s *ShareStore) GetSharedProfiles() []SharedProfileConfig {
 func (s *ShareStore) loadSharesLocked() []SharedProfileConfig {
 	data, err := os.ReadFile(s.shareFile)
 	if err != nil {
-		return nil
+		return []SharedProfileConfig{}
 	}
 	var configs []SharedProfileConfig
 	_ = json.Unmarshal(data, &configs)
-	var active []SharedProfileConfig
+	active := make([]SharedProfileConfig, 0)
 	for _, c := range configs {
 		if c.Enabled {
 			active = append(active, c)
@@ -203,9 +203,9 @@ func (s *ShareStore) SetGlobalMode(mode string) error {
 func (s *ShareStore) loadPeersLocked() []PeerInfo {
 	data, err := os.ReadFile(s.peerFile)
 	if err != nil {
-		return nil
+		return []PeerInfo{}
 	}
-	var peers []PeerInfo
+	peers := make([]PeerInfo, 0)
 	_ = json.Unmarshal(data, &peers)
 	return peers
 }
@@ -276,7 +276,7 @@ func (s *ShareStore) GetGrantedLeases() []GrantedLease {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var leases []GrantedLease
+	leases := make([]GrantedLease, 0)
 	if data, err := os.ReadFile(s.grantedFile); err == nil {
 		_ = json.Unmarshal(data, &leases)
 	}
