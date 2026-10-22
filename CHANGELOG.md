@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/adrijshikhar/aim/compare/v0.16.0...v0.17.0) (2026-10-22)
+
+
+### Features
+
+* multi-agent interface segregation and Claude Code support ([#99](https://github.com/adrijshikhar/aim/issues/99)) ([04b2fb5](https://github.com/adrijshikhar/aim/commit/04b2fb535285ea5fc88de03591f0acaad0ef15ea))
+* peer-to-peer profile sharing and credential leasing ([#98](https://github.com/adrijshikhar/aim/issues/98)) ([19498fe](https://github.com/adrijshikhar/aim/commit/19498feadbce2ba9e4f8809f519f063205457cf5))
+
 ## [0.16.0](https://github.com/adrijshikhar/aim/compare/v0.15.0...v0.16.0) (2026-10-17)
 
 
