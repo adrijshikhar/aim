@@ -808,10 +808,6 @@ func (s *Server) DenyRequest(reqID string) error {
 		return fmt.Errorf("request %s was already approved", reqID)
 	}
 	pr, exists := s.pending[reqID]
-	if exists {
-		delete(s.pending, reqID)
-	}
-	s.deniedResults[reqID] = true
 	s.pendingMu.Unlock()
 
 	var (
@@ -823,9 +819,6 @@ func (s *Server) DenyRequest(reqID string) error {
 		actor = pr.info.Request.RequesterID
 		profile = pr.matched.Name
 		agent = pr.matched.Agent
-		if pr.respCh != nil {
-			close(pr.respCh)
-		}
 	} else {
 		rec, err := s.store.GetShareRequest(reqID)
 		if err != nil || rec == nil {
@@ -846,6 +839,16 @@ func (s *Server) DenyRequest(reqID string) error {
 			return fmt.Errorf("request %s cannot be denied: status is %s", reqID, rec.Status)
 		}
 		return fmt.Errorf("request %s was already decided", reqID)
+	}
+
+	// Update cached memory state ONLY after database transition successfully commits
+	s.pendingMu.Lock()
+	delete(s.pending, reqID)
+	s.deniedResults[reqID] = true
+	s.pendingMu.Unlock()
+
+	if exists && pr.respCh != nil {
+		close(pr.respCh)
 	}
 
 	_ = s.store.AppendAudit(AuditEntry{

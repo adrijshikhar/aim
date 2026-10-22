@@ -211,3 +211,37 @@ func TestShareStoreRegisterProfile(t *testing.T) {
 		t.Fatalf("expected 0 profiles in GetSharedProfiles, got %d", len(store.GetSharedProfiles()))
 	}
 }
+
+func TestShareStoreDBUnavailableReturnsError(t *testing.T) {
+	// A store with nil database must not report success on request operations
+	store := &ShareStore{}
+
+	req := ShareRequestRecord{
+		ID:          "req-test",
+		PeerID:      "peer1",
+		ProfileName: "work",
+		Agent:       "claude",
+		Direction:   "incoming",
+		Status:      "pending",
+	}
+
+	if err := store.SaveShareRequest(req); err == nil {
+		t.Fatalf("expected error when saving request with nil database, got nil")
+	}
+
+	if _, err := store.GetShareRequest("req-test"); err == nil {
+		t.Fatalf("expected error when getting request with nil database, got nil")
+	}
+
+	if err := store.UpdateRequestStatus("req-test", "approved", "ls_1", ""); err == nil {
+		t.Fatalf("expected error when updating request status with nil database, got nil")
+	}
+
+	if _, err := store.TransitionRequestStatus("req-test", "pending", "approved", "ls_1", ""); err == nil {
+		t.Fatalf("expected error when transitioning request status with nil database, got nil")
+	}
+
+	if _, err := store.CancelShareRequest("req-test"); err == nil {
+		t.Fatalf("expected error when cancelling request with nil database, got nil")
+	}
+}

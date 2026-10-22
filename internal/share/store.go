@@ -19,11 +19,12 @@ type ShareStore struct {
 	auditFile    string
 	scheduleFile string
 	db           *ShareDB
+	dbErr        error
 	mu           sync.RWMutex
 }
 
 func NewStore(aimDir string) *ShareStore {
-	db, _ := NewShareDB(aimDir)
+	db, err := NewShareDB(aimDir)
 	return &ShareStore{
 		aimDir:       aimDir,
 		shareFile:    filepath.Join(aimDir, "share.json"),
@@ -32,7 +33,13 @@ func NewStore(aimDir string) *ShareStore {
 		auditFile:    filepath.Join(aimDir, "share_audit.json"),
 		scheduleFile: filepath.Join(aimDir, "share_schedules.json"),
 		db:           db,
+		dbErr:        err,
 	}
+}
+
+// DBError returns any error encountered initializing the share database during NewStore.
+func (s *ShareStore) DBError() error {
+	return s.dbErr
 }
 
 func (s *ShareStore) EnableProfile(profileName, agent string, autoApprove bool, ttl time.Duration) error {
@@ -475,22 +482,28 @@ func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
 
 // SaveShareRequest persists a lease request (incoming or outgoing) in SQLite.
 func (s *ShareStore) SaveShareRequest(req ShareRequestRecord) error {
-	if s.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		return s.db.SaveRequest(ctx, req)
+	if s.db == nil {
+		if s.dbErr != nil {
+			return fmt.Errorf("share database unavailable: %w", s.dbErr)
+		}
+		return fmt.Errorf("share database unavailable")
 	}
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return s.db.SaveRequest(ctx, req)
 }
 
 // GetShareRequest retrieves a request by ID.
 func (s *ShareStore) GetShareRequest(id string) (*ShareRequestRecord, error) {
-	if s.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		return s.db.GetRequest(ctx, id)
+	if s.db == nil {
+		if s.dbErr != nil {
+			return nil, fmt.Errorf("share database unavailable: %w", s.dbErr)
+		}
+		return nil, fmt.Errorf("share database unavailable")
 	}
-	return nil, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return s.db.GetRequest(ctx, id)
 }
 
 // GetPendingIncomingRequests returns all active incoming requests awaiting manual host approval.
@@ -519,34 +532,43 @@ func (s *ShareStore) GetPendingOutgoingRequests() []ShareRequestRecord {
 
 // UpdateRequestStatus updates status, lease ID, and error message for a request.
 func (s *ShareStore) UpdateRequestStatus(id, status, leaseID, errMsg string) error {
-	if s.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		return s.db.UpdateRequestStatus(ctx, id, status, leaseID, errMsg)
+	if s.db == nil {
+		if s.dbErr != nil {
+			return fmt.Errorf("share database unavailable: %w", s.dbErr)
+		}
+		return fmt.Errorf("share database unavailable")
 	}
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return s.db.UpdateRequestStatus(ctx, id, status, leaseID, errMsg)
 }
 
 // TransitionRequestStatus atomically updates status from fromStatus to toStatus.
 // Returns (true, nil) if successfully transitioned, or (false, nil) if the request was not in fromStatus.
 func (s *ShareStore) TransitionRequestStatus(id, fromStatus, toStatus, leaseID, errMsg string) (bool, error) {
-	if s.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		return s.db.TransitionRequestStatus(ctx, id, fromStatus, toStatus, leaseID, errMsg)
+	if s.db == nil {
+		if s.dbErr != nil {
+			return false, fmt.Errorf("share database unavailable: %w", s.dbErr)
+		}
+		return false, fmt.Errorf("share database unavailable")
 	}
-	return true, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return s.db.TransitionRequestStatus(ctx, id, fromStatus, toStatus, leaseID, errMsg)
 }
 
 // CancelShareRequest marks a request as cancelled if it is currently pending.
 // Returns (true, nil) if successfully cancelled, or (false, nil) if not pending or not found.
 func (s *ShareStore) CancelShareRequest(id string) (bool, error) {
-	if s.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		return s.db.CancelRequest(ctx, id)
+	if s.db == nil {
+		if s.dbErr != nil {
+			return false, fmt.Errorf("share database unavailable: %w", s.dbErr)
+		}
+		return false, fmt.Errorf("share database unavailable")
 	}
-	return false, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return s.db.CancelRequest(ctx, id)
 }
 
 // Close releases the SQLite connection pool if open.

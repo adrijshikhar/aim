@@ -317,3 +317,59 @@ func TestServerPollLeaseEndpoint(t *testing.T) {
 		t.Errorf("expected credential file in poll payload")
 	}
 }
+
+func TestServerDenyRequestRejectionDoesNotHideApproval(t *testing.T) {
+	aimDir := t.TempDir()
+	store := NewStore(aimDir)
+	_ = store.SetGlobalMode("request")
+	profilesDir := t.TempDir()
+
+	profileDir := filepath.Join(profilesDir, "work", ".claude")
+	_ = os.MkdirAll(profileDir, 0700)
+	_ = os.WriteFile(filepath.Join(profileDir, ".credentials.json"), []byte(`{"session":"valid"}`), 0600)
+
+	_ = store.EnableProfile("work", "claude", false, 4*time.Hour)
+
+	server := NewServer(store, profilesDir, "host-node", 0)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client := NewClient(0)
+	client.baseURLOverride = ts.URL
+	ctx := context.Background()
+
+	// 1. Borrower requests lease (pending)
+	resp, err := client.RequestLease(ctx, "127.0.0.1", "work", "claude", 2)
+	if err != nil || resp.Status != "pending" {
+		t.Fatalf("request failed: %v, resp: %+v", err, resp)
+	}
+
+	// 2. Host approves request
+	approved, err := server.ApproveRequest(resp.RequestID)
+	if err != nil || approved.Status != "approved" {
+		t.Fatalf("approval failed: %v", err)
+	}
+
+	// 3. Simulate daemon restart with fresh memory state pointing to the same store
+	server2 := NewServer(store, profilesDir, "host-node", 0)
+	ts2 := httptest.NewServer(server2.Handler())
+	defer ts2.Close()
+
+	client2 := NewClient(0)
+	client2.baseURLOverride = ts2.URL
+
+	// 4. Calling DenyRequest on already-approved request must fail
+	err = server2.DenyRequest(resp.RequestID)
+	if err == nil {
+		t.Fatalf("expected DenyRequest to fail on already approved request, but it succeeded")
+	}
+
+	// 5. Poll on server2 must still return approved, not falsely marked denied
+	pollResp, err := client2.PollLease(ctx, "127.0.0.1", resp.RequestID)
+	if err != nil {
+		t.Fatalf("poll failed: %v", err)
+	}
+	if pollResp.Status != "approved" {
+		t.Fatalf("expected poll status approved after rejected denial, got %s", pollResp.Status)
+	}
+}
