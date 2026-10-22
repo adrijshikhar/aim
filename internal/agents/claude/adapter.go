@@ -868,12 +868,17 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 	}
 
 	live, liveErr := a.GetLiveUsage(ctx, profileName, profileDir)
-	if liveErr == nil && live != nil {
+	if liveErr == nil && live != nil && len(live.Windows) > 0 && live.Error == "" {
 		return live, nil
 	}
 
+	// Fallback to cached report if available, even if stale, rather than returning an offline/error report
 	if cached != nil && len(cached.Windows) > 0 {
 		return cached, nil
+	}
+
+	if liveErr == nil && live != nil {
+		return live, nil
 	}
 
 	if liveErr != nil {
