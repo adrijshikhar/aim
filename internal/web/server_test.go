@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/service"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/web"
 )
 
@@ -1219,5 +1220,143 @@ func TestCrossOriginProtection(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 OK for GET status, got %d", resp.StatusCode)
+	}
+}
+
+func TestShareEndpoints(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	store := share.NewStore(tempDir)
+	server := web.NewServer(&mockProfileService{}, nil, nil, 0, false)
+	server.SetShareStore(store)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	// GET /api/share/status
+	res, err := http.Get(ts.URL + "/api/share/status")
+	if err != nil {
+		t.Fatalf("GET /api/share/status failed: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", res.StatusCode)
+	}
+
+	// POST /api/share/toggle
+	body := strings.NewReader(`{"name":"work","agent":"claude","auto_approve":true,"ttl":"4h","enabled":true}`)
+	res2, err := http.Post(ts.URL+"/api/share/toggle", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /api/share/toggle failed: %v", err)
+	}
+	defer res2.Body.Close()
+	if res2.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", res2.StatusCode)
+	}
+
+	// Test: Approving a cancelled request must return 400 Bad Request (Greptile Finding 1)
+	cancelledReq := share.ShareRequestRecord{
+		ID:             "req_cancelled_1",
+		Direction:      "incoming",
+		PeerID:         "peer1",
+		PeerIP:         "10.8.0.2",
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "cancelled",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
+	}
+	_ = store.SaveShareRequest(cancelledReq)
+
+	approveBody := strings.NewReader(`{"request_id":"req_cancelled_1"}`)
+	resApproveCancelled, err := http.Post(ts.URL+"/api/share/approve", "application/json", approveBody)
+	if err != nil {
+		t.Fatalf("POST /api/share/approve failed: %v", err)
+	}
+	defer resApproveCancelled.Body.Close()
+	if resApproveCancelled.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request when approving cancelled request, got %d", resApproveCancelled.StatusCode)
+	}
+
+	// Test: Approving an expired request must return 400 Bad Request
+	expiredReq := share.ShareRequestRecord{
+		ID:             "req_expired_1",
+		Direction:      "incoming",
+		PeerID:         "peer1",
+		PeerIP:         "10.8.0.2",
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "pending",
+		CreatedAt:      time.Now().Add(-2 * time.Hour),
+		ExpiresAt:      time.Now().Add(-1 * time.Hour), // Expired
+	}
+	_ = store.SaveShareRequest(expiredReq)
+
+	approveExpiredBody := strings.NewReader(`{"request_id":"req_expired_1"}`)
+	resApproveExpired, err := http.Post(ts.URL+"/api/share/approve", "application/json", approveExpiredBody)
+	if err != nil {
+		t.Fatalf("POST /api/share/approve failed: %v", err)
+	}
+	defer resApproveExpired.Body.Close()
+	if resApproveExpired.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request when approving expired request, got %d", resApproveExpired.StatusCode)
+	}
+
+	// Test: Cancelling an outgoing request where remote peer is unreachable returns a warning (Greptile P2)
+	outgoingReq := share.ShareRequestRecord{
+		ID:             "req_out_cancel_1",
+		Direction:      "outgoing",
+		PeerID:         "peer-unreachable",
+		PeerIP:         "192.0.2.1", // Non-routable TEST-NET IP
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "pending",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
+	}
+	_ = store.SaveShareRequest(outgoingReq)
+
+	cancelBody := strings.NewReader(`{"request_id":"req_out_cancel_1"}`)
+	resCancel, err := http.Post(ts.URL+"/api/share/cancel", "application/json", cancelBody)
+	if err != nil {
+		t.Fatalf("POST /api/share/cancel failed: %v", err)
+	}
+	defer resCancel.Body.Close()
+	if resCancel.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200 from cancel, got %d", resCancel.StatusCode)
+	}
+	var cancelResp map[string]any
+	_ = json.NewDecoder(resCancel.Body).Decode(&cancelResp)
+	if cancelResp["warning"] == nil || cancelResp["warning"] == "" {
+		t.Errorf("expected warning about unreachable peer, got %v", cancelResp)
+	}
+
+	// Test: Polling a cancelled request returns cancelled status and does not install (Greptile P1)
+	cancelledPollReq := share.ShareRequestRecord{
+		ID:             "req_poll_cancelled_1",
+		Direction:      "outgoing",
+		PeerID:         "peer1",
+		PeerIP:         "127.0.0.1",
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "cancelled",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
+	}
+	_ = store.SaveShareRequest(cancelledPollReq)
+
+	pollBody := strings.NewReader(`{"request_id":"req_poll_cancelled_1"}`)
+	resPoll, err := http.Post(ts.URL+"/api/share/poll", "application/json", pollBody)
+	if err != nil {
+		t.Fatalf("POST /api/share/poll failed: %v", err)
+	}
+	defer resPoll.Body.Close()
+	var pollResp map[string]any
+	_ = json.NewDecoder(resPoll.Body).Decode(&pollResp)
+	if pollResp["status"] != "cancelled" {
+		t.Errorf("expected status 'cancelled', got %v", pollResp["status"])
 	}
 }

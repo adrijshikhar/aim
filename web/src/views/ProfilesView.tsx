@@ -10,6 +10,8 @@ import {
   getSessions,
   getMcpServers,
   resumeSession,
+  getShareStatus,
+  toggleShareProfile,
 } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,6 +20,7 @@ import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
+import { SelectDropdown } from '@/components/ui/select-dropdown';
 import {
   Plus,
   Trash2,
@@ -44,6 +47,7 @@ import {
   LayoutGrid,
   List,
   Clock,
+  Radio,
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
@@ -386,6 +390,8 @@ export function ProfilesView({
     }
   };
 
+
+
   const handleTogglePluginsGlobal = async (profileName: string, currentVal: boolean) => {
     const nextVal = !currentVal;
     setUpdatingConfig(true);
@@ -411,6 +417,8 @@ export function ProfilesView({
     }
   };
 
+
+
   const getAgentBadge = (agent: string, size?: 'sm' | 'default') => {
     return <AgentBadge agent={agent} size={size} />;
   };
@@ -432,6 +440,87 @@ export function ProfilesView({
     if (!selectedProfile || selectedProfile === 'all') return null;
     return profiles.find((p) => p.name === selectedProfile) || null;
   }, [profiles, selectedProfile]);
+
+  type ShareMode = 'off' | 'request' | 'auto';
+
+  const [shareConfig, setShareConfig] = React.useState<{
+    enabled: boolean;
+    auto_approve: boolean;
+    ttl: string;
+  }>({ enabled: false, auto_approve: false, ttl: '4h' });
+  const [isShareLoading, setIsShareLoading] = React.useState(false);
+
+  const currentShareMode: ShareMode = !shareConfig.enabled
+    ? 'off'
+    : shareConfig.auto_approve
+    ? 'auto'
+    : 'request';
+
+  React.useEffect(() => {
+    if (!currentProfile) return;
+    let cancelled = false;
+    setShareConfig({ enabled: false, auto_approve: false, ttl: '4h' });
+    getShareStatus()
+      .then((status) => {
+        if (cancelled) return;
+        const found = status.shared_profiles?.find((p) => p.name === currentProfile.name);
+        if (found) {
+          const ttlHours = typeof found.max_lease_ttl === 'number' ? Math.round(found.max_lease_ttl / (3600 * 1e9)) : 4;
+          setShareConfig({
+            enabled: found.enabled,
+            auto_approve: found.auto_approve,
+            ttl: ttlHours > 0 ? `${ttlHours}h` : '4h',
+          });
+        } else {
+          setShareConfig({ enabled: false, auto_approve: false, ttl: '4h' });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProfile?.name]);
+
+  const handleSetShareMode = async (mode: ShareMode) => {
+    if (!currentProfile) return;
+    setIsShareLoading(true);
+    const enabled = mode !== 'off';
+    const auto_approve = mode === 'auto';
+    try {
+      await toggleShareProfile({
+        name: currentProfile.name,
+        agent: currentProfile.agent || 'claude',
+        auto_approve,
+        ttl: shareConfig.ttl,
+        enabled,
+      });
+      setShareConfig((prev) => ({ ...prev, enabled, auto_approve }));
+      const titles: Record<ShareMode, string> = {
+        off: 'Sharing Disabled',
+        request: 'Sharing Active (Request Approval)',
+        auto: 'Sharing Active (Auto-Approve)',
+      };
+      const descs: Record<ShareMode, string> = {
+        off: `Profile "${currentProfile.name}" is no longer shared on the VPN.`,
+        request: `Profile "${currentProfile.name}" is shared on VPN. Teammate lease requests require your approval.`,
+        auto: `Profile "${currentProfile.name}" is shared on VPN. Teammate lease requests are granted automatically.`,
+      };
+      toast({
+        title: titles[mode],
+        description: descs[mode],
+        variant: mode === 'off' ? 'default' : 'success',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not update sharing state';
+      toast({
+        title: 'Sharing update failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsShareLoading(false);
+    }
+  };
 
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [resumingId, setResumingId] = React.useState<string | null>(null);
@@ -748,7 +837,73 @@ export function ProfilesView({
               </span>
             </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <div className="flex flex-wrap items-center gap-2.5 self-end sm:self-auto shrink-0">
+              {/* If profile is a borrowed lease (contains ':'), do not show P2P share control */}
+              {currentProfile?.name.includes(':') ? (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-geist bg-[#142334]/60 border border-[#1f4068]/80 text-[#52a8ff] text-xs font-mono">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span>Borrowed Profile (Ephemeral Lease)</span>
+                </div>
+              ) : (
+                /* 3-Level Segmented Slider for Profile Sharing (Right Top) */
+                <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
+                  <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground px-2 flex items-center gap-1">
+                    <Radio className="h-3 w-3 text-accent-cyan" />
+                    P2P:
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isShareLoading}
+                    onClick={() => handleSetShareMode('off')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer",
+                      currentShareMode === 'off'
+                        ? "bg-[#262626] text-[#ededed] shadow-xs font-semibold"
+                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                    )}
+                    title="Profile is private and not shared on the VPN"
+                  >
+                    Off
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isShareLoading}
+                    onClick={() => handleSetShareMode('request')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                      currentShareMode === 'request'
+                        ? "bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold"
+                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                    )}
+                    title="Profile is shared; teammate lease requests require manual confirmation"
+                  >
+                    <span className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      currentShareMode === 'request' ? "bg-[#52a8ff]" : "bg-[#666666]"
+                    )} />
+                    Request
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isShareLoading}
+                    onClick={() => handleSetShareMode('auto')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                      currentShareMode === 'auto'
+                        ? "bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold"
+                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                    )}
+                    title="Profile is shared; teammate lease requests are automatically granted"
+                  >
+                    <span className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#666666]"
+                    )} />
+                    Auto Approve
+                  </button>
+                </div>
+              )}
+
               <Button
                 variant="outline"
                 size="sm"
@@ -809,7 +964,7 @@ export function ProfilesView({
                 <Gauge className="h-3.5 w-3.5 text-[#666666]" />
                 <span>Quota</span>
                 {profileAdapters.length > 1 && (
-                  <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                  <span className="text-xs leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-muted-foreground border border-[#2e2e2e]">
                     {profileAdapters.length}
                   </span>
                 )}
@@ -817,14 +972,14 @@ export function ProfilesView({
               <TabsTrigger value="sessions" className="gap-2 text-xs">
                 <Terminal className="h-3.5 w-3.5 text-[#666666]" />
                 <span>Sessions</span>
-                <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                <span className="text-xs leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-muted-foreground border border-[#2e2e2e]">
                   {profileSessions.length}
                 </span>
               </TabsTrigger>
               <TabsTrigger value="mcp" className="gap-2 text-xs">
                 <Server className="h-3.5 w-3.5 text-[#666666]" />
                 <span>MCP Tools</span>
-                <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-[#888888] border border-[#2e2e2e]">
+                <span className="text-xs leading-none px-1.5 py-0.5 rounded-geist bg-[#1c1c1c] text-muted-foreground border border-[#2e2e2e]">
                   {profileMcpServers.length}
                 </span>
               </TabsTrigger>
@@ -841,7 +996,7 @@ export function ProfilesView({
             {profileAdapters.length > 1 && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-geist bg-[#0a0a0a] border border-[#222222]">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-[#666666] font-medium">Engine Switcher:</span>
+                  <span className="text-xs text-muted-foreground font-medium">Engine Switcher:</span>
                   <div className="inline-flex items-center rounded-geist border border-[#262626] bg-[#000000] p-0.5 text-xs">
                     <button
                       type="button"
@@ -854,7 +1009,7 @@ export function ProfilesView({
                       )}
                     >
                       <span>All Engines</span>
-                      <span className="text-[10px] font-mono px-1 rounded bg-[#262626] text-[#888888]">
+                      <span className="text-xs font-mono px-1 rounded bg-[#262626] text-muted-foreground">
                         {profileAdapters.length}
                       </span>
                     </button>
@@ -874,12 +1029,12 @@ export function ProfilesView({
                         {ad.quota && (
                           <span
                             className={cn(
-                              'text-[10px] tabular-nums font-mono',
+                              'text-xs tabular-nums font-mono',
                               ad.quota.bottleneck_pct <= 0
                                 ? 'text-status-danger'
                                 : ad.quota.bottleneck_pct <= 30
                                 ? 'text-status-warning'
-                                : 'text-[#888888]'
+                                : 'text-muted-foreground'
                             )}
                           >
                             {ad.quota.bottleneck_pct}%
@@ -924,12 +1079,12 @@ export function ProfilesView({
             {/* Filter toolbar */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-geist bg-[#0a0a0a] border border-[#222222]">
               <div className="relative flex-1 max-w-md w-full">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#666666]" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   placeholder="Filter sessions by title, directory, or ID..."
                   value={sessionSearch}
                   onChange={(e) => setSessionSearch(e.target.value)}
-                  className="pl-8 h-8 text-xs font-sans bg-[#000000] border-[#262626] text-[#ededed] placeholder:text-[#555555] rounded-geist"
+                  className="pl-8 h-8 text-xs font-sans bg-[#000000] border-[#262626] text-[#ededed] placeholder:text-muted-foreground rounded-geist"
                 />
               </div>
 
@@ -985,7 +1140,7 @@ export function ProfilesView({
                                 description: sess.id,
                               });
                             }}
-                            className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground bg-[#141414] hover:bg-[#1a1a1a] hover:text-[#ededed] px-1.5 py-0.5 rounded border border-[#242424] transition-colors cursor-pointer select-all shrink-0"
+                            className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground bg-[#141414] hover:bg-[#1a1a1a] hover:text-[#ededed] px-1.5 py-0.5 rounded border border-[#242424] transition-colors cursor-pointer select-all shrink-0"
                             title={`Click to copy full ID: ${sess.id}`}
                           >
                             <span className="text-[#666666]">id:</span>
@@ -1013,13 +1168,13 @@ export function ProfilesView({
                         <div className="flex items-center gap-2 flex-wrap text-[11px] font-mono">
                           {getAgentBadge(sess.agent, 'sm')}
 
-                          <span className="font-mono text-[10px] text-[#888888] px-1.5 py-0.5 rounded border border-[#222222] bg-[#050505] shrink-0">
+                          <span className="font-mono text-xs text-[#888888] px-1.5 py-0.5 rounded border border-[#222222] bg-[#050505] shrink-0">
                             {sess.turns} turns
                           </span>
 
                           {sess.is_active && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-status-success font-medium font-sans">
-                              <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid animate-pulse" />
+                            <span className="inline-flex items-center gap-1 text-xs text-status-success font-medium font-sans">
+                              <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
                               active
                             </span>
                           )}
@@ -1070,12 +1225,12 @@ export function ProfilesView({
             {/* Filter toolbar */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-geist bg-[#0a0a0a] border border-[#222222]">
               <div className="relative flex-1 max-w-md w-full">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#666666]" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   placeholder="Filter MCP servers..."
                   value={mcpSearch}
                   onChange={(e) => setMcpSearch(e.target.value)}
-                  className="pl-8 h-8 text-xs font-sans bg-[#000000] border-[#262626] text-[#ededed] placeholder:text-[#555555] rounded-geist"
+                  className="pl-8 h-8 text-xs font-sans bg-[#000000] border-[#262626] text-[#ededed] placeholder:text-muted-foreground rounded-geist"
                 />
               </div>
 
@@ -1116,7 +1271,7 @@ export function ProfilesView({
                         <Badge
                           variant="outline"
                           className={cn(
-                            'text-[10px] font-mono px-2 py-0.5 rounded-full',
+                            'text-xs font-mono px-2 py-0.5 rounded-full',
                             srv.scope === 'global'
                               ? 'border-[#333333] bg-[#1a1a1a] text-[#888888]'
                               : 'border-[#262626] bg-[#0e0e0e] text-[#ededed]'
@@ -1147,7 +1302,6 @@ export function ProfilesView({
           </TabsContent>
 
           {/* TAB 4: SETTINGS */}
-          {/* TAB 4: SETTINGS */}
           <TabsContent value="settings" className="space-y-6 focus-visible:outline-none">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
               {/* LEFT COLUMN: Workspace Info & Inheritance */}
@@ -1166,26 +1320,26 @@ export function ProfilesView({
                   <CardContent className="p-5 pt-0 space-y-4">
                     <div className="grid grid-cols-2 gap-3">
                       <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
-                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Profile Name</div>
+                        <div className="text-xs text-muted-foreground uppercase font-mono tracking-wider">Profile Name</div>
                         <div className="text-sm font-semibold text-[#ededed] font-mono truncate">{currentProfile.name}</div>
                       </div>
                       <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
-                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Configured Engines</div>
+                        <div className="text-xs text-muted-foreground uppercase font-mono tracking-wider">Configured Engines</div>
                         <div className="text-sm font-semibold text-[#ededed] font-mono">{profileAdapters.length}</div>
                       </div>
                       <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
-                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Recorded Sessions</div>
+                        <div className="text-xs text-muted-foreground uppercase font-mono tracking-wider">Recorded Sessions</div>
                         <div className="text-sm font-semibold text-[#ededed] font-mono">{profileSessions.length}</div>
                       </div>
                       <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] space-y-1">
-                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Active MCP Tools</div>
+                        <div className="text-xs text-muted-foreground uppercase font-mono tracking-wider">Active MCP Tools</div>
                         <div className="text-sm font-semibold text-[#ededed] font-mono">{profileMcpServers.length}</div>
                       </div>
                     </div>
 
                     <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-3 text-xs">
                       <div className="space-y-1 min-w-0 flex-1">
-                        <div className="text-[10px] text-[#666666] uppercase font-mono tracking-wider">Sandbox Storage Path</div>
+                        <div className="text-xs text-muted-foreground uppercase font-mono tracking-wider">Sandbox Storage Path</div>
                         <div className="text-xs font-mono text-[#a1a1a1] truncate" title={currentProfile.path}>
                           {currentProfile.path}
                         </div>
@@ -1261,6 +1415,148 @@ export function ProfilesView({
                         onCheckedChange={() => handleTogglePluginsGlobal(currentProfile.name, isPluginsGlobalOn)}
                       />
                     </div>
+                  </CardContent>
+                </Card>
+
+                {/* P2P Profile Sharing Card */}
+                <Card className="border border-[#222222] bg-[#0a0a0a] rounded-geist">
+                  <CardHeader className="p-5 pb-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <CardTitle className="text-sm font-semibold text-[#ededed] flex items-center gap-2">
+                          <Radio className="h-4 w-4 text-accent-cyan" />
+                          P2P Profile Sharing
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#888888] pt-1">
+                          Share this account's AI quota with teammates over the corporate VPN.
+                        </CardDescription>
+                      </div>
+
+                      {/* Right Top 3-Level Segmented Slider / Toggle */}
+                      <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] self-start sm:self-auto shrink-0">
+                        <button
+                          type="button"
+                          disabled={isShareLoading}
+                          onClick={() => handleSetShareMode('off')}
+                          className={cn(
+                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer",
+                            currentShareMode === 'off'
+                              ? "bg-[#262626] text-[#ededed] shadow-xs font-semibold"
+                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                          )}
+                          title="Disable profile sharing"
+                        >
+                          Off
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isShareLoading}
+                          onClick={() => handleSetShareMode('request')}
+                          className={cn(
+                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                            currentShareMode === 'request'
+                              ? "bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold"
+                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                          )}
+                          title="Share profile with manual approval requirement"
+                        >
+                          <span className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            currentShareMode === 'request' ? "bg-[#52a8ff]" : "bg-[#666666]"
+                          )} />
+                          Request
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isShareLoading}
+                          onClick={() => handleSetShareMode('auto')}
+                          className={cn(
+                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
+                            currentShareMode === 'auto'
+                              ? "bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold"
+                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
+                          )}
+                          title="Share profile with automatic lease approvals"
+                        >
+                          <span className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#666666]"
+                          )} />
+                          Auto Approve
+                        </button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-5 pt-0 space-y-3">
+                    {currentShareMode === 'off' ? (
+                      <div className="p-3.5 rounded-geist bg-[#0f0f0f] border border-[#1f1f1f] text-xs text-[#888888] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-[#555555]" />
+                          <span>Profile sharing is currently disabled. Teammates on the VPN cannot discover or lease this account.</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className={cn(
+                          "p-3 rounded-geist border text-xs flex items-center justify-between gap-3",
+                          currentShareMode === 'auto'
+                            ? "bg-[#122619]/40 border-[#1d4d2d]/60 text-[#46a758]"
+                            : "bg-[#142334]/40 border-[#1f4068]/60 text-[#52a8ff]"
+                        )}>
+                          <div className="flex items-center gap-2">
+                            <span className={cn(
+                              "h-2 w-2 rounded-full shrink-0",
+                              currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#52a8ff]"
+                            )} />
+                            <span className="font-medium">
+                              {currentShareMode === 'auto'
+                                ? "Auto-Approve Enabled: Teammates on the VPN can discover and instantly borrow this profile without waiting for approval."
+                                : "Request Approval Required: Teammates can discover and request leases; each lease requires your manual confirmation."}
+                            </span>
+                          </div>
+                          <Badge variant="outline" className={cn(
+                            "text-xs font-mono uppercase tracking-wider py-0 px-1.5 shrink-0",
+                            currentShareMode === 'auto'
+                              ? "border-[#235836] text-[#46a758]"
+                              : "border-[#1f4068] text-[#52a8ff]"
+                          )}>
+                            {currentShareMode === 'auto' ? 'AUTO' : 'APPROVAL REQ'}
+                          </Badge>
+                        </div>
+
+                        <div className="p-3 rounded-geist bg-[#0f0f0f] border border-[#222222] flex items-center justify-between gap-4 text-xs">
+                          <div>
+                            <div className="text-xs font-semibold text-[#ededed]">Max Lease Duration (TTL)</div>
+                            <div className="text-[11px] text-[#666666]">
+                              Borrower credentials automatically expire and are purged after this period.
+                            </div>
+                          </div>
+                          <div className="w-44 shrink-0">
+                            <SelectDropdown
+                              value={shareConfig.ttl}
+                              disabled={isShareLoading}
+                              onChange={(newTtl) => {
+                                setShareConfig((prev) => ({ ...prev, ttl: String(newTtl) }));
+                                toggleShareProfile({
+                                  name: currentProfile.name,
+                                  agent: currentProfile.agent || 'claude',
+                                  auto_approve: currentShareMode === 'auto',
+                                  ttl: String(newTtl),
+                                  enabled: true,
+                                });
+                              }}
+                              size="sm"
+                              options={[
+                                { value: '1h', label: '1 hour' },
+                                { value: '2h', label: '2 hours' },
+                                { value: '4h', label: '4 hours (Recommended)' },
+                                { value: '8h', label: '8 hours (Workday)' },
+                              ]}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -1393,13 +1689,13 @@ export function ProfilesView({
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Search input with '/' hotkey shortcut chip */}
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             ref={profileSearchInputRef}
             placeholder="Search profiles by name, agent, account, or path..."
             value={profileSearchQuery}
             onChange={(e) => setProfileSearchQuery(e.target.value)}
-            className="pl-8 pr-8 h-8 text-xs font-sans bg-[#0c0c0c] border-[#222222] text-[#ededed] placeholder:text-muted-foreground/50 rounded-geist focus:border-[#333333]"
+            className="pl-8 pr-8 h-8 text-xs font-sans bg-[#0c0c0c] border-[#222222] text-[#ededed] placeholder:text-muted-foreground rounded-geist focus:border-[#333333]"
           />
           {profileSearchQuery ? (
             <button
@@ -1411,7 +1707,7 @@ export function ProfilesView({
               <X className="h-3.5 w-3.5" />
             </button>
           ) : (
-            <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-[10px] font-mono text-muted-foreground pointer-events-none">
+            <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 border border-[#2a2a2a] bg-[#161616] px-1 py-[1px] rounded text-xs font-mono text-muted-foreground pointer-events-none">
               /
             </kbd>
           )}
@@ -1526,7 +1822,7 @@ export function ProfilesView({
                         <div className="font-semibold text-[#ededed] group-hover:underline">
                           {p.name}
                         </div>
-                        <div className="text-[11px] font-mono text-[#666666] truncate max-w-[200px]" title={p.path}>
+                        <div className="text-[11px] font-mono text-muted-foreground truncate max-w-[200px]" title={p.path}>
                           {p.path}
                         </div>
                       </td>
@@ -1672,11 +1968,11 @@ export function ProfilesView({
                   </CardHeader>
 
                   <CardContent className="space-y-3 pb-4 p-5 pt-0">
-                    {/* Account Info Box */}
-                    <div className="rounded-geist border border-[#222222] bg-[#0c0c0c] p-3 text-xs space-y-1.5 font-sans">
+                    {/* Account Info List */}
+                    <div className="space-y-1.5 text-xs font-sans pb-0.5">
                       <div className="flex items-center justify-between">
                         <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <User className="h-3 w-3 text-muted-foreground/60" /> Account
+                          <User className="h-3 w-3 text-muted-foreground/80" /> Account
                         </span>
                         <span className="text-[#ededed] font-medium truncate max-w-[140px]" title={p.account?.name || p.name}>
                           {p.account?.name || p.name}
@@ -1685,7 +1981,7 @@ export function ProfilesView({
                       {p.account?.email && (
                         <div className="flex items-center justify-between">
                           <span className="flex items-center gap-1.5 text-muted-foreground">
-                            <Mail className="h-3 w-3 text-muted-foreground/60" /> Email
+                            <Mail className="h-3 w-3 text-muted-foreground/80" /> Email
                           </span>
                           <span className="text-[#ededed] truncate max-w-[160px]" title={p.account.email}>
                             {p.account.email}
@@ -1695,7 +1991,7 @@ export function ProfilesView({
                       {p.account?.auth_method && (
                         <div className="flex items-center justify-between">
                           <span className="flex items-center gap-1.5 text-muted-foreground">
-                            <Key className="h-3 w-3 text-muted-foreground/60" /> Auth
+                            <Key className="h-3 w-3 text-muted-foreground/80" /> Auth
                           </span>
                           <span className="text-muted-foreground truncate max-w-[140px]" title={p.account.auth_method}>
                             {p.account.auth_method}
@@ -1706,12 +2002,12 @@ export function ProfilesView({
 
                     {/* Standardized Quota Telemetry (Strict h-1.5 across multi- and single-engine) */}
                     {p.adapters && p.adapters.length > 1 ? (
-                      <div className="space-y-2 pt-1 border-t border-[#222222]">
-                        <div className="flex items-center justify-between text-[11px] font-sans font-medium uppercase tracking-wider text-[#666666]">
+                      <div className="space-y-2 pt-2 border-t border-border/40">
+                        <div className="flex items-center justify-between text-[11px] font-sans font-medium uppercase tracking-wider text-muted-foreground">
                           <span className="flex items-center gap-1">
-                            <Gauge className="h-3 w-3 text-[#555555]" /> Engine Quotas
+                            <Gauge className="h-3 w-3 text-muted-foreground/80" /> Engine Quotas
                           </span>
-                          <span className="text-[#555555]">{p.adapters.length} Engines</span>
+                          <span className="text-muted-foreground">{p.adapters.length} Engines</span>
                         </div>
                         {p.adapters.map((ad) => {
                           const pct = ad.quota?.bottleneck_pct ?? 100;
@@ -1723,7 +2019,7 @@ export function ProfilesView({
                                   {(() => {
                                     const adDetails = parseQuotaDetails(ad.quota?.summary, ad.quota?.is_exhausted || pct <= 0, pct);
                                     return adDetails.resetTime ? (
-                                      <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
+                                      <span className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground">
                                         <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
                                         <span>{adDetails.resetTime}</span>
                                       </span>
@@ -1759,10 +2055,10 @@ export function ProfilesView({
                         })}
                       </div>
                     ) : (
-                      <div className="space-y-1.5">
+                      <div className="space-y-1.5 pt-2 border-t border-border/40">
                         <div className="flex items-center justify-between text-xs font-sans">
-                          <span className="text-[11px] font-sans font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                            <Gauge className="h-3 w-3 text-muted-foreground/60" /> Quota
+                          <span className="text-xs font-sans font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Gauge className="h-3 w-3 text-muted-foreground/80" /> Quota
                           </span>
                           <div className="flex items-center gap-1.5">
                             {(() => {
@@ -1777,7 +2073,7 @@ export function ProfilesView({
                               return (
                                 <>
                                   {qDetails.resetTime && (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
+                                    <span className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground">
                                       <Clock className="h-2.5 w-2.5 text-muted-foreground/80 shrink-0" />
                                       <span>{qDetails.resetTime}</span>
                                     </span>
@@ -1821,16 +2117,16 @@ export function ProfilesView({
                 </div>
 
                 {/* Card Footer: MCP & Plugin configuration chips */}
-                <CardFooter className="pt-2 pb-4 px-5 border-t border-border flex items-center justify-between text-[11px] font-sans text-muted-foreground">
+                <CardFooter className="pt-2 pb-4 px-5 border-t border-border flex items-center justify-between text-xs font-sans text-muted-foreground">
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted text-[10px] font-sans font-medium text-muted-foreground">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted text-xs font-sans font-medium text-muted-foreground">
                       <Server className="h-3 w-3 text-muted-foreground/60" />
                       <span>MCP</span>
                       <span className={isMcpOn ? 'text-foreground font-medium' : 'text-muted-foreground/60'}>
                         {isMcpOn ? 'on' : 'off'}
                       </span>
                     </span>
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted text-[10px] font-sans font-medium text-muted-foreground">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted text-xs font-sans font-medium text-muted-foreground">
                       <Boxes className="h-3 w-3 text-muted-foreground/60" />
                       <span>Plugins</span>
                       <span className={isPluginsOn ? 'text-foreground font-medium' : 'text-muted-foreground/60'}>

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -14,6 +15,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
 	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
@@ -63,12 +65,14 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			if len(extraArgs) > 0 && extraArgs[0] == "--" {
 				extraArgs = extraArgs[1:]
 			}
-			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName), autoCreate)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
+			if !strings.Contains(profileName, ":") {
+				ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName), autoCreate)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
 			}
 
 			if reg != nil {
@@ -133,13 +137,72 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
-	pDir, err := pm.EnsureProfile(opts.ProfileName)
-	if err != nil {
-		logger.Debug("[run] Failed to ensure profile %q: %v", opts.ProfileName, err)
-		fmt.Fprintf(os.Stderr, "Error preparing profile: %v\n", err)
-		return 1
+	profileName := opts.ProfileName
+	var pDir string
+	if strings.Contains(profileName, ":") {
+		parts := strings.SplitN(profileName, ":", 2)
+		hostPart := parts[0]
+		profPart := parts[1]
+		mgr := share.NewLeaseManager(pm.ProfilesRoot())
+		candidateDir := filepath.Join(pm.ProfilesRoot(), profileName)
+		leaseFile := filepath.Join(candidateDir, ".aim-lease.json")
+		if _, err := os.Stat(leaseFile); os.IsNotExist(err) {
+			logger.Debug("[run] Leased profile %q not found locally, attempting auto-lease from %s...", profileName, hostPart)
+			client := share.NewClient(4319)
+			reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			resp, reqErr := client.RequestLease(reqCtx, hostPart, profPart, adapter.Name(), 2)
+			cancel()
+			if reqErr != nil && !strings.Contains(hostPart, ".") {
+				retryCtx, retryCancel := context.WithTimeout(ctx, 5*time.Second)
+				resp, reqErr = client.RequestLease(retryCtx, hostPart+".local", profPart, adapter.Name(), 2)
+				retryCancel()
+			}
+			if reqErr != nil || resp == nil || resp.Status != "approved" {
+				errReason := "lease request failed"
+				if reqErr != nil {
+					errReason = reqErr.Error()
+				} else if resp != nil {
+					errReason = resp.Status
+					if resp.Message != "" {
+						errReason += ": " + resp.Message
+					}
+				}
+				fmt.Fprintf(os.Stderr, "Error: Could not acquire lease for %q from %s: %s\n", profPart, hostPart, errReason)
+				return 1
+			}
+			installedName, installErr := mgr.InstallLease(hostPart, profPart, resp)
+			if installErr != nil {
+				fmt.Fprintf(os.Stderr, "Error: Failed to install lease: %v\n", installErr)
+				return 1
+			}
+			profileName = installedName
+			opts.ProfileName = profileName
+			pDir = filepath.Join(pm.ProfilesRoot(), profileName)
+			fmt.Printf("%s Auto-acquired lease for %s from %s (expires %s)\n",
+				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
+				profPart, hostPart, resp.ExpiresAt.Format("15:04:05"))
+		} else {
+			pDir = candidateDir
+		}
+		if mgr.IsLeaseExpired(profileName) {
+			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired. Please renew the lease via 'aim share request %s %s' or the web dashboard.\n", profileName, hostPart, profPart)
+			return 1
+		}
+	} else {
+		var err error
+		pDir, err = pm.EnsureProfile(profileName)
+		if err != nil {
+			logger.Debug("[run] Failed to ensure profile %q: %v", profileName, err)
+			fmt.Fprintf(os.Stderr, "Error preparing profile: %v\n", err)
+			return 1
+		}
+		mgr := share.NewLeaseManager(pm.ProfilesRoot())
+		if mgr.HasLease(profileName) && mgr.IsLeaseExpired(profileName) {
+			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired. Please renew or release the lease.\n", profileName)
+			return 1
+		}
 	}
-	logger.Debug("[run] Profile %q directory: %s", opts.ProfileName, pDir)
+	logger.Debug("[run] Profile %q directory: %s", profileName, pDir)
 
 	cfg, _ := config.LoadConfig()
 	if cfg != nil {

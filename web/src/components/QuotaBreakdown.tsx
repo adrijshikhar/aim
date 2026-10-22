@@ -252,7 +252,7 @@ export function QuotaBreakdown({
     });
 
     return (
-      <div key={win.key} className="space-y-2 p-3.5 rounded-[6px] bg-[#0f0f0f] border border-[#222222]">
+      <div key={win.key} className="space-y-2 py-3 border-b border-border/40 last:border-b-0">
         {/* Header row: Window Label & Remaining % + Reset Countdown */}
         <div className="flex items-center justify-between text-xs font-sans">
           <div className="flex items-center gap-2">
@@ -517,7 +517,7 @@ export function QuotaBreakdown({
           <Badge
             variant="outline"
             className={cn(
-              'font-mono text-[10px] font-medium tracking-wider uppercase px-2 py-0.5 rounded-[4px]',
+              'font-mono text-xs font-medium tracking-wider uppercase px-2 py-0.5 rounded-[4px]',
               isEffectiveExhausted
                 ? 'border-[#262626] text-muted-foreground bg-[#141414]'
                 : isWarning

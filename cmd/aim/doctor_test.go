@@ -34,6 +34,15 @@ func (m *doctorMockAdapter) Doctor(ctx context.Context, profileName, profileDir 
 	}
 }
 
+func TestDoctorVPNDetection(t *testing.T) {
+	var buf bytes.Buffer
+	diagnoseVPNTo(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "P2P Sharing & VPN Tunnel") {
+		t.Errorf("expected doctor output to contain P2P Sharing & VPN Tunnel section, got: %s", out)
+	}
+}
+
 func TestDoctorCmd_CheckFlag(t *testing.T) {
 	tempDir := t.TempDir()
 	pm := profile.NewProfileManager(tempDir)

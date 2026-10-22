@@ -17,7 +17,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/service"
+	"github.com/aim-cli/aim/internal/share"
 )
 
 //go:embed dist/*
@@ -25,15 +27,16 @@ var distFS embed.FS
 
 // Server hosts the AIM web dashboard REST API and serves the embedded SPA.
 type Server struct {
-	profiles  service.ProfileService
-	sessions  service.SessionService
-	launcher  service.LauncherService
-	mcp       service.MCPService
-	daemon    service.DaemonService
-	port      int
-	devMode   bool
-	version   string
-	startTime time.Time
+	profiles   service.ProfileService
+	sessions   service.SessionService
+	launcher   service.LauncherService
+	mcp        service.MCPService
+	daemon     service.DaemonService
+	shareStore *share.ShareStore
+	port       int
+	devMode    bool
+	version    string
+	startTime  time.Time
 
 	mux        *http.ServeMux
 	handler    http.Handler
@@ -58,14 +61,15 @@ func NewServer(
 	}
 
 	s := &Server{
-		profiles:  profiles,
-		sessions:  sessions,
-		launcher:  launcher,
-		mcp:       mcpSvc,
-		port:      port,
-		devMode:   devMode,
-		version:   "dev",
-		startTime: time.Now(),
+		profiles:   profiles,
+		sessions:   sessions,
+		launcher:   launcher,
+		mcp:        mcpSvc,
+		shareStore: share.NewStore(config.BaseDir()),
+		port:       port,
+		devMode:    devMode,
+		version:    "dev",
+		startTime:  time.Now(),
 	}
 
 	if devMode {
@@ -147,6 +151,26 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("POST /api/daemon/install", s.handleDaemonInstall)
 	mux.HandleFunc("POST /api/daemon/uninstall", s.handleDaemonUninstall)
 	mux.HandleFunc("POST /api/daemon/run", s.handleDaemonRun)
+
+	// P2P Sharing & VPN Endpoints
+	mux.HandleFunc("GET /api/share/status", s.handleGetShareStatus)
+	mux.HandleFunc("POST /api/share/global", s.handleSetGlobalMode)
+	mux.HandleFunc("POST /api/share/toggle", s.handleToggleShare)
+	mux.HandleFunc("GET /api/share/peers", s.handleGetSharePeers)
+	mux.HandleFunc("POST /api/share/peers", s.handleAddSharePeer)
+	mux.HandleFunc("POST /api/share/request", s.handleRequestShareLease)
+	mux.HandleFunc("POST /api/share/release", s.handleReleaseShareLease)
+	mux.HandleFunc("POST /api/share/clean-expired", s.handleCleanExpiredShareLeases)
+	mux.HandleFunc("POST /api/share/revoke", s.handleRevokeShareLease)
+	mux.HandleFunc("POST /api/share/approve", s.handleApproveShareRequest)
+	mux.HandleFunc("POST /api/share/deny", s.handleDenyShareRequest)
+	mux.HandleFunc("POST /api/share/cancel", s.handleCancelShareRequest)
+	mux.HandleFunc("DELETE /api/share/cancel", s.handleCancelShareRequest)
+	mux.HandleFunc("POST /api/share/poll", s.handlePollShareRequest)
+	mux.HandleFunc("GET /api/share/audit", s.handleGetShareAudit)
+	mux.HandleFunc("GET /api/share/schedules", s.handleGetSchedules)
+	mux.HandleFunc("POST /api/share/schedules", s.handleSaveSchedule)
+	mux.HandleFunc("DELETE /api/share/schedules", s.handleDeleteSchedule)
 
 	// Catch-all for undefined /api/ routes -> JSON 404
 	mux.HandleFunc("/api/", s.handleAPINotFound)
@@ -362,4 +386,20 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// SetShareStore sets the store used by sharing handlers (used to inject test stores).
+func (s *Server) SetShareStore(store *share.ShareStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shareStore = store
+}
+
+func (s *Server) getShareStore() *share.ShareStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shareStore == nil {
+		s.shareStore = share.NewStore(config.BaseDir())
+	}
+	return s.shareStore
 }

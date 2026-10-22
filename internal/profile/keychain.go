@@ -431,6 +431,22 @@ func ClaudeScopedKeychainService(claudeConfigDir string) string {
 	return fmt.Sprintf("Claude Code-credentials-%x", sum[:4])
 }
 
+// ReadScopedClaudeKeychainCredentials reads credentials exclusively from the profile's
+// scoped macOS Keychain service, without falling back to any host or other profile's account.
+func ReadScopedClaudeKeychainCredentials(claudeConfigDir string) []byte {
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
+		return nil
+	}
+	scopedService := ClaudeScopedKeychainService(claudeConfigDir)
+	if raw, err := getGenericPasswordFn(scopedService, ""); err == nil && raw != "" {
+		data := DecodeKeychainPassword(raw)
+		if HasClaudeCredentials(data) {
+			return data
+		}
+	}
+	return nil
+}
+
 // HasClaudeCredentials checks if the raw JSON payload contains usable Claude OAuth credentials.
 // Requires claudeAiOauth with a non-empty accessToken or refreshToken.
 // Metadata-only payloads (such as oauthAccount in .claude.json) or mcpOAuth-only entries return false.

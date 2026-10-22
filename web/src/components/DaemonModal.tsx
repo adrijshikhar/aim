@@ -327,7 +327,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
             </DialogTitle>
             <Badge
               variant="outline"
-              className="text-[10px] font-mono bg-secondary/40 text-muted-foreground border-border px-2 py-0.5 rounded-geist"
+              className="text-xs font-mono bg-secondary/40 text-muted-foreground border-border px-2 py-0.5 rounded-geist"
             >
               15m Quota Pre-Warm
             </Badge>
@@ -372,13 +372,13 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
 
           <div className="grid grid-cols-2 gap-2 font-mono text-[11px] pt-1">
             <div className="p-2 rounded-geist bg-card border border-border">
-              <span className="text-muted-foreground/70 block text-[10px] uppercase">Service Label</span>
+              <span className="text-muted-foreground/70 block text-xs uppercase">Service Label</span>
               <span className="text-foreground font-medium truncate block" title={daemonInfo?.label || 'com.aim-cli.daemon'}>
                 {daemonInfo?.label || 'com.aim-cli.daemon'}
               </span>
             </div>
             <div className="p-2 rounded-geist bg-card border border-border">
-              <span className="text-muted-foreground/70 block text-[10px] uppercase">Schedule Interval</span>
+              <span className="text-muted-foreground/70 block text-xs uppercase">Schedule Interval</span>
               <span className="text-foreground font-medium block">
                 Every {daemonInfo?.interval_sec ? `${daemonInfo.interval_sec / 60}m` : '15m'}
               </span>
@@ -412,7 +412,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleCopy('config', daemonInfo.config_path)}
-                className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
               >
                 {copiedKey === 'config' ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
                 {copiedKey === 'config' ? 'Copied' : 'Copy'}
@@ -429,7 +429,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleCopy('log', daemonInfo.log_path)}
-                className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors shrink-0"
               >
                 {copiedKey === 'log' ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
                 {copiedKey === 'log' ? 'Copied' : 'Copy'}
@@ -447,7 +447,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                 Execution Logs
               </span>
               {totalLogLines > 0 && (
-                <span className="text-[10px] font-mono bg-secondary/70 text-muted-foreground border border-border px-1.5 py-0.5 rounded-geist leading-none inline-flex items-center">
+                <span className="text-xs font-mono bg-secondary/70 text-muted-foreground border border-border px-1.5 py-0.5 rounded-geist leading-none inline-flex items-center">
                   {showLogs && logs.length < totalLogLines
                     ? `${logs.length} of ${totalLogLines} lines`
                     : `${totalLogLines} lines`}
@@ -462,7 +462,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                     onClick={fetchLogs}
                     disabled={loadingLogs}
                     title="Refresh logs"
-                    className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
                   >
                     <RefreshCw className={cn("h-3 w-3", loadingLogs && "animate-spin")} />
                     Refresh
@@ -472,7 +472,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                       type="button"
                       onClick={handleCopyLogs}
                       title="Copy logs"
-                      className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+                      className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
                     >
                       {copiedLogs ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
                       {copiedLogs ? 'Copied' : 'Copy'}
@@ -483,7 +483,7 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               <button
                 type="button"
                 onClick={handleToggleLogs}
-                className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
+                className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-geist bg-card hover:bg-secondary border border-border inline-flex items-center gap-1 cursor-pointer transition-colors"
               >
                 {showLogs ? 'Collapse' : 'View Logs'}
               </button>
@@ -508,13 +508,13 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
               ) : (
                 <>
                   {loadingMoreLogs && (
-                    <div className="py-2 text-center text-muted-foreground/60 flex items-center justify-center gap-1.5 border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
+                    <div className="py-2 text-center text-muted-foreground/60 flex items-center justify-center gap-1.5 border-b border-[#1c1c1c] mb-2 font-mono text-xs">
                       <RefreshCw className="h-3 w-3 animate-spin text-primary" />
                       <span>Loading earlier records...</span>
                     </div>
                   )}
                   {logs.length >= totalLogLines && totalLogLines > 0 && (
-                    <div className="py-2 text-center text-muted-foreground/40 select-none border-b border-[#1c1c1c] mb-2 font-mono text-[10px]">
+                    <div className="py-2 text-center text-muted-foreground/40 select-none border-b border-[#1c1c1c] mb-2 font-mono text-xs">
                       — Beginning of execution logs ({totalLogLines} lines) —
                     </div>
                   )}
@@ -524,13 +524,13 @@ export const DaemonModal: React.FC<DaemonModalProps> = ({
                     return (
                       <div key={i} className="leading-relaxed break-all flex items-baseline gap-2 font-mono text-[11px] py-0.5">
                         {timestamp && (
-                          <span className="text-[#666666] select-none shrink-0 font-mono text-[10px]">
+                          <span className="text-[#666666] select-none shrink-0 font-mono text-xs">
                             [{timestamp}]
                           </span>
                         )}
                         <span
                           className={cn(
-                            "font-semibold select-none shrink-0 text-[9.5px] px-1.5 py-0.5 rounded-sm uppercase tracking-wide",
+                            "font-semibold select-none shrink-0 text-xs px-1.5 py-0.5 rounded-sm uppercase tracking-wide",
                             level === 'ERROR' && "text-red-400 bg-red-950/50 border border-red-800/50",
                             level === 'WARN' && "text-yellow-400 bg-yellow-950/50 border border-yellow-700/50",
                             level === 'INFO' && "text-sky-400 bg-sky-950/40 border border-sky-800/40"
