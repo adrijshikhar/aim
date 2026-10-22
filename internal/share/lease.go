@@ -152,15 +152,15 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 
 		var backups []fileBackup
 		var stagedItems []stagedItem
+		var createdPaths []string
+
+		trackTemp := func(p string) {
+			createdPaths = append(createdPaths, p)
+		}
 
 		cleanTemps := func() {
-			for _, item := range stagedItems {
-				_ = os.Remove(item.tmpPath)
-			}
-			for _, b := range backups {
-				if b.existed {
-					_ = os.Remove(b.bakPath)
-				}
+			for _, p := range createdPaths {
+				_ = os.Remove(p)
 			}
 		}
 
@@ -182,6 +182,7 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 					return "", fmt.Errorf("failed to read existing file for backup %s: %w", destPath, err)
 				}
 				bakPath := fmt.Sprintf("%s.bak.%d.%d", destPath, pid, nowNano)
+				trackTemp(bakPath)
 				if err := os.WriteFile(bakPath, oldData, 0600); err != nil {
 					cleanTemps()
 					return "", fmt.Errorf("failed to backup existing file %s: %w", destPath, err)
@@ -192,6 +193,7 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 			}
 
 			tmpFile := fmt.Sprintf("%s.tmp.%d.%d", destPath, pid, nowNano)
+			trackTemp(tmpFile)
 			if err := os.WriteFile(tmpFile, f.content, 0600); err != nil {
 				cleanTemps()
 				return "", fmt.Errorf("failed to stage write %s: %w", destPath, err)
@@ -206,6 +208,7 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 			return "", fmt.Errorf("failed to read existing lease metadata for backup: %w", err)
 		}
 		bakMeta := fmt.Sprintf("%s.bak.%d.%d", existingLease, pid, nowNano)
+		trackTemp(bakMeta)
 		if err := os.WriteFile(bakMeta, oldMeta, 0600); err != nil {
 			cleanTemps()
 			return "", fmt.Errorf("failed to backup existing lease metadata: %w", err)
@@ -213,6 +216,7 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		backups = append(backups, fileBackup{path: existingLease, bakPath: bakMeta, existed: true})
 
 		tmpMeta := fmt.Sprintf("%s.tmp.%d.%d", existingLease, pid, nowNano)
+		trackTemp(tmpMeta)
 		if err := os.WriteFile(tmpMeta, metaData, 0600); err != nil {
 			cleanTemps()
 			return "", fmt.Errorf("failed to stage write lease metadata: %w", err)

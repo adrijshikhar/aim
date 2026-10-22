@@ -384,6 +384,16 @@ func TestLeaseManagerRenewalAtomicRollbackOnFailure(t *testing.T) {
 	if meta.LeaseID != "ls_initial" {
 		t.Fatalf("expected lease ID ls_initial, got %s", meta.LeaseID)
 	}
+
+	// Verify no temporary or backup files remain on disk after failed renewal
+	_ = filepath.Walk(profilePath, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			if strings.Contains(info.Name(), ".tmp.") || strings.Contains(info.Name(), ".bak.") {
+				t.Errorf("temporary/backup file was left behind after failed renewal: %s", path)
+			}
+		}
+		return nil
+	})
 }
 
 func TestLeaseManagerConcurrentRenewals(t *testing.T) {
