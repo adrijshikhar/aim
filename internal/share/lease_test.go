@@ -2,9 +2,12 @@ package share
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -301,5 +304,153 @@ func TestLeaseManagerRenewalPreservesHistory(t *testing.T) {
 	authData, _ := os.ReadFile(filepath.Join(profilePath, ".claude", "auth.json"))
 	if !strings.Contains(string(authData), "renewed") {
 		t.Fatalf("expected updated token in auth.json, got: %s", string(authData))
+	}
+}
+
+func TestLeaseManagerRenewalAtomicRollbackOnFailure(t *testing.T) {
+	profilesDir := t.TempDir()
+	mgr := NewLeaseManager(profilesDir)
+
+	initialExpiry := time.Now().Add(1 * time.Hour).Truncate(time.Second)
+	resp1 := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_initial",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   initialExpiry,
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/auth.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"initial_safe"}`)),
+			},
+		},
+	}
+	pName, err := mgr.InstallLease("peer1", "work", resp1)
+	if err != nil {
+		t.Fatalf("initial InstallLease failed: %v", err)
+	}
+
+	profilePath := filepath.Join(profilesDir, pName)
+
+	// Create an unwriteable directory to force failure when staging the second file
+	codexDir := filepath.Join(profilePath, ".codex")
+	if err := os.MkdirAll(codexDir, 0500); err != nil {
+		t.Fatalf("failed to create codex dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(codexDir, 0700)
+	})
+
+	// Renewal payload contains two files: the first would succeed, but the second will fail in .codex
+	resp2 := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_failed_renewal",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(10 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/auth.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"uncommitted_change"}`)),
+				".codex/auth.json":  base64.StdEncoding.EncodeToString([]byte(`{"token":"should_fail"}`)),
+			},
+		},
+	}
+
+	_, err = mgr.InstallLease("peer1", "work", resp2)
+	if err == nil {
+		t.Fatalf("expected InstallLease to fail on unwritable dir, but it succeeded")
+	}
+
+	// Verify original .claude/auth.json remains completely intact with original credentials
+	authData, err := os.ReadFile(filepath.Join(profilePath, ".claude", "auth.json"))
+	if err != nil {
+		t.Fatalf("failed to read auth.json: %v", err)
+	}
+	if !strings.Contains(string(authData), "initial_safe") {
+		t.Fatalf("expected auth.json to retain initial credentials, got: %s", string(authData))
+	}
+	if strings.Contains(string(authData), "uncommitted_change") {
+		t.Fatalf("auth.json contains uncommitted renewal change after failure")
+	}
+
+	// Verify .aim-lease.json was NOT updated to the new expiry or ID
+	metaData, err := os.ReadFile(filepath.Join(profilePath, ".aim-lease.json"))
+	if err != nil {
+		t.Fatalf("failed to read lease metadata: %v", err)
+	}
+	var meta LeaseMeta
+	if err := json.Unmarshal(metaData, &meta); err != nil {
+		t.Fatalf("failed to unmarshal metadata: %v", err)
+	}
+	if meta.LeaseID != "ls_initial" {
+		t.Fatalf("expected lease ID ls_initial, got %s", meta.LeaseID)
+	}
+}
+
+func TestLeaseManagerConcurrentRenewals(t *testing.T) {
+	profilesDir := t.TempDir()
+	mgr := NewLeaseManager(profilesDir)
+
+	resp1 := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_initial",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/auth.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"initial"}`)),
+			},
+		},
+	}
+	pName, err := mgr.InstallLease("peer1", "work", resp1)
+	if err != nil {
+		t.Fatalf("initial InstallLease failed: %v", err)
+	}
+
+	const workers = 8
+	var wg sync.WaitGroup
+	errCh := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			r := &LeaseResponse{
+				Status:      "approved",
+				LeaseID:     fmt.Sprintf("ls_renew_%d", workerID),
+				ProfileName: "work",
+				Agent:       "claude",
+				ExpiresAt:   time.Now().Add(time.Duration(workerID+1) * time.Hour),
+				Payload: &SharePayload{
+					Files: map[string]string{
+						".claude/auth.json": base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"token":"token_%d"}`, workerID))),
+					},
+				},
+			}
+			_, err := mgr.InstallLease("peer1", "work", r)
+			if err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent renewal failed: %v", err)
+	}
+
+	// Verify lease metadata and profile are intact and readable
+	metaData, err := os.ReadFile(filepath.Join(profilesDir, pName, ".aim-lease.json"))
+	if err != nil {
+		t.Fatalf("failed to read metadata after concurrent renewals: %v", err)
+	}
+	var meta LeaseMeta
+	if err := json.Unmarshal(metaData, &meta); err != nil {
+		t.Fatalf("metadata corrupted after concurrent renewals: %v", err)
+	}
+	if !strings.HasPrefix(meta.LeaseID, "ls_renew_") {
+		t.Fatalf("unexpected lease ID after renewals: %s", meta.LeaseID)
 	}
 }

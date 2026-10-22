@@ -7,7 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/merge"
+)
+
+var (
+	leaseOpMu sync.Mutex
 )
 
 type LeaseMeta struct {
@@ -46,6 +53,17 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	if !strings.HasPrefix(cleanTargetDir, cleanProfilesRoot+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid profile target path traversal: %s", localProfileName)
 	}
+
+	leaseOpMu.Lock()
+	defer leaseOpMu.Unlock()
+
+	lockName := fmt.Sprintf(".lease-%s.lock", strings.ReplaceAll(localProfileName, ":", "-"))
+	lockPath := filepath.Join(cleanProfilesRoot, lockName)
+	lk, err := merge.LockExclusive(lockPath, 10*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to acquire lease lock for %s: %w", localProfileName, err)
+	}
+	defer lk.Unlock()
 
 	// Protect existing permanent user profiles from being overwritten or deleted as leases
 	if info, err := os.Stat(cleanTargetDir); err == nil && info.IsDir() {
@@ -122,29 +140,114 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	if _, err := os.Stat(existingLease); err == nil {
 		// Renewal: update credential files in-place and refresh lease metadata,
 		// preserving the borrower's local conversation history, databases, and custom settings.
-		for _, f := range staged {
-			destPath := filepath.Join(cleanTargetDir, filepath.FromSlash(f.relPath))
-			if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
-				return "", fmt.Errorf("failed to create dir for %s: %w", destPath, err)
+		type fileBackup struct {
+			path    string
+			bakPath string
+			existed bool
+		}
+		type stagedItem struct {
+			destPath string
+			tmpPath  string
+		}
+
+		var backups []fileBackup
+		var stagedItems []stagedItem
+
+		cleanTemps := func() {
+			for _, item := range stagedItems {
+				_ = os.Remove(item.tmpPath)
 			}
-			tmpFile := fmt.Sprintf("%s.tmp.%d.%d", destPath, os.Getpid(), time.Now().UnixNano())
-			if err := os.WriteFile(tmpFile, f.content, 0600); err != nil {
-				return "", fmt.Errorf("failed to write %s: %w", destPath, err)
-			}
-			if err := os.Rename(tmpFile, destPath); err != nil {
-				_ = os.Remove(tmpFile)
-				return "", fmt.Errorf("failed to update %s: %w", destPath, err)
+			for _, b := range backups {
+				if b.existed {
+					_ = os.Remove(b.bakPath)
+				}
 			}
 		}
 
-		tmpMeta := fmt.Sprintf("%s.tmp.%d.%d", existingLease, os.Getpid(), time.Now().UnixNano())
+		nowNano := time.Now().UnixNano()
+		pid := os.Getpid()
+
+		// 1a. Stage credential files and create backups of existing files
+		for _, f := range staged {
+			destPath := filepath.Join(cleanTargetDir, filepath.FromSlash(f.relPath))
+			if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+				cleanTemps()
+				return "", fmt.Errorf("failed to create dir for %s: %w", destPath, err)
+			}
+
+			if _, err := os.Stat(destPath); err == nil {
+				oldData, err := os.ReadFile(destPath)
+				if err != nil {
+					cleanTemps()
+					return "", fmt.Errorf("failed to read existing file for backup %s: %w", destPath, err)
+				}
+				bakPath := fmt.Sprintf("%s.bak.%d.%d", destPath, pid, nowNano)
+				if err := os.WriteFile(bakPath, oldData, 0600); err != nil {
+					cleanTemps()
+					return "", fmt.Errorf("failed to backup existing file %s: %w", destPath, err)
+				}
+				backups = append(backups, fileBackup{path: destPath, bakPath: bakPath, existed: true})
+			} else {
+				backups = append(backups, fileBackup{path: destPath, existed: false})
+			}
+
+			tmpFile := fmt.Sprintf("%s.tmp.%d.%d", destPath, pid, nowNano)
+			if err := os.WriteFile(tmpFile, f.content, 0600); err != nil {
+				cleanTemps()
+				return "", fmt.Errorf("failed to stage write %s: %w", destPath, err)
+			}
+			stagedItems = append(stagedItems, stagedItem{destPath: destPath, tmpPath: tmpFile})
+		}
+
+		// 1b. Stage lease metadata and create backup of existing metadata
+		oldMeta, err := os.ReadFile(existingLease)
+		if err != nil {
+			cleanTemps()
+			return "", fmt.Errorf("failed to read existing lease metadata for backup: %w", err)
+		}
+		bakMeta := fmt.Sprintf("%s.bak.%d.%d", existingLease, pid, nowNano)
+		if err := os.WriteFile(bakMeta, oldMeta, 0600); err != nil {
+			cleanTemps()
+			return "", fmt.Errorf("failed to backup existing lease metadata: %w", err)
+		}
+		backups = append(backups, fileBackup{path: existingLease, bakPath: bakMeta, existed: true})
+
+		tmpMeta := fmt.Sprintf("%s.tmp.%d.%d", existingLease, pid, nowNano)
 		if err := os.WriteFile(tmpMeta, metaData, 0600); err != nil {
-			return "", fmt.Errorf("failed to write lease metadata: %w", err)
+			cleanTemps()
+			return "", fmt.Errorf("failed to stage write lease metadata: %w", err)
 		}
-		if err := os.Rename(tmpMeta, existingLease); err != nil {
-			_ = os.Remove(tmpMeta)
-			return "", fmt.Errorf("failed to update lease metadata: %w", err)
+		stagedItems = append(stagedItems, stagedItem{destPath: existingLease, tmpPath: tmpMeta})
+
+		// Stage 2: Atomic commit of all staged items.
+		// If any rename fails, rollback restores every file from its backup.
+		rollback := func() {
+			for _, item := range stagedItems {
+				_ = os.Remove(item.tmpPath)
+			}
+			for _, b := range backups {
+				if b.existed {
+					_ = os.Rename(b.bakPath, b.path)
+				} else {
+					_ = os.Remove(b.path)
+				}
+			}
 		}
+
+		for _, item := range stagedItems {
+			if err := os.Rename(item.tmpPath, item.destPath); err != nil {
+				rollback()
+				return "", fmt.Errorf("failed to commit renewal file %s: %w", item.destPath, err)
+			}
+		}
+
+		// Success! Clean up backup files
+		for _, b := range backups {
+			if b.existed {
+				_ = os.Remove(b.bakPath)
+			}
+		}
+
 		return localProfileName, nil
 	}
 
@@ -208,6 +311,10 @@ func (m *LeaseManager) IsLeaseExpired(localProfileName string) bool {
 }
 
 func (m *LeaseManager) ReleaseLease(localProfileName string) error {
+	return m.releaseLeaseInternal(localProfileName, false)
+}
+
+func (m *LeaseManager) releaseLeaseInternal(localProfileName string, onlyIfExpired bool) error {
 	if localProfileName == "" || localProfileName == "." || localProfileName == ".." ||
 		strings.Contains(localProfileName, "/") || strings.Contains(localProfileName, "\\") {
 		return fmt.Errorf("invalid profile name: %q", localProfileName)
@@ -220,10 +327,35 @@ func (m *LeaseManager) ReleaseLease(localProfileName string) error {
 		return fmt.Errorf("profile path escapes profiles root: %q", localProfileName)
 	}
 
+	leaseOpMu.Lock()
+	defer leaseOpMu.Unlock()
+
+	lockName := fmt.Sprintf(".lease-%s.lock", strings.ReplaceAll(localProfileName, ":", "-"))
+	lockPath := filepath.Join(cleanProfilesRoot, lockName)
+	lk, err := merge.LockExclusive(lockPath, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to acquire lease lock for %s: %w", localProfileName, err)
+	}
+	defer lk.Unlock()
+
 	// Strictly require .aim-lease.json so permanent non-leased profiles cannot be removed
 	leaseFile := filepath.Join(cleanTarget, ".aim-lease.json")
 	if _, err := os.Stat(leaseFile); os.IsNotExist(err) {
 		return fmt.Errorf("profile %q is not an ephemeral leased profile (missing .aim-lease.json)", localProfileName)
+	}
+
+	if onlyIfExpired {
+		data, err := os.ReadFile(leaseFile)
+		if err != nil {
+			return err
+		}
+		var meta LeaseMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			return err
+		}
+		if !time.Now().After(meta.ExpiresAt) {
+			return fmt.Errorf("lease %q is not expired", localProfileName)
+		}
 	}
 
 	return os.RemoveAll(cleanTarget)
@@ -240,7 +372,7 @@ func (m *LeaseManager) CleanExpiredLeases() (int, error) {
 			continue
 		}
 		if m.IsLeaseExpired(e.Name()) {
-			if err := m.ReleaseLease(e.Name()); err == nil {
+			if err := m.releaseLeaseInternal(e.Name(), true); err == nil {
 				cleaned++
 			}
 		}
