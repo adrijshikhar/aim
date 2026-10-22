@@ -104,7 +104,51 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		}
 	}
 
-	// Install into a clean staging directory first so failed/interrupted installs leave no partial directory behind
+	meta := LeaseMeta{
+		LeaseID:       resp.LeaseID,
+		SourcePeer:    sourcePeer,
+		SourceProfile: profileName,
+		Agent:         resp.Agent,
+		GrantedAt:     time.Now(),
+		ExpiresAt:     resp.ExpiresAt,
+	}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to encode lease metadata: %w", err)
+	}
+
+	// Check if this is a renewal of an existing lease
+	existingLease := filepath.Join(cleanTargetDir, ".aim-lease.json")
+	if _, err := os.Stat(existingLease); err == nil {
+		// Renewal: update credential files in-place and refresh lease metadata,
+		// preserving the borrower's local conversation history, databases, and custom settings.
+		for _, f := range staged {
+			destPath := filepath.Join(cleanTargetDir, filepath.FromSlash(f.relPath))
+			if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+				return "", fmt.Errorf("failed to create dir for %s: %w", destPath, err)
+			}
+			tmpFile := fmt.Sprintf("%s.tmp.%d.%d", destPath, os.Getpid(), time.Now().UnixNano())
+			if err := os.WriteFile(tmpFile, f.content, 0600); err != nil {
+				return "", fmt.Errorf("failed to write %s: %w", destPath, err)
+			}
+			if err := os.Rename(tmpFile, destPath); err != nil {
+				_ = os.Remove(tmpFile)
+				return "", fmt.Errorf("failed to update %s: %w", destPath, err)
+			}
+		}
+
+		tmpMeta := fmt.Sprintf("%s.tmp.%d.%d", existingLease, os.Getpid(), time.Now().UnixNano())
+		if err := os.WriteFile(tmpMeta, metaData, 0600); err != nil {
+			return "", fmt.Errorf("failed to write lease metadata: %w", err)
+		}
+		if err := os.Rename(tmpMeta, existingLease); err != nil {
+			_ = os.Remove(tmpMeta)
+			return "", fmt.Errorf("failed to update lease metadata: %w", err)
+		}
+		return localProfileName, nil
+	}
+
+	// First install: write into a clean staging directory first so failed/interrupted installs leave no partial directory behind
 	stagingDir := fmt.Sprintf("%s.tmp.%d.%d", cleanTargetDir, os.Getpid(), time.Now().UnixNano())
 	if err := os.MkdirAll(stagingDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create staging dir: %w", err)
@@ -128,18 +172,6 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 	}
 
 	// Write metadata into staging directory
-	meta := LeaseMeta{
-		LeaseID:       resp.LeaseID,
-		SourcePeer:    sourcePeer,
-		SourceProfile: profileName,
-		Agent:         resp.Agent,
-		GrantedAt:     time.Now(),
-		ExpiresAt:     resp.ExpiresAt,
-	}
-	metaData, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to encode lease metadata: %w", err)
-	}
 	if err := os.WriteFile(filepath.Join(stagingDir, ".aim-lease.json"), metaData, 0600); err != nil {
 		return "", fmt.Errorf("failed to write lease metadata: %w", err)
 	}

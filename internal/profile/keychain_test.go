@@ -267,6 +267,41 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	}
 }
 
+func TestReadScopedClaudeKeychainCredentials(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	origFn := getGenericPasswordFn
+	defer func() { getGenericPasswordFn = origFn }()
+
+	claudeDir := filepath.Join(t.TempDir(), ".claude")
+	scopedService := ClaudeScopedKeychainService(claudeDir)
+
+	validTokenJSON := `{"claudeAiOauth":{"accessToken":"sk-ant-test-456","refreshToken":"sk-ant-refresh-456"}}`
+	getGenericPasswordFn = func(service, account string) (string, error) {
+		if service == scopedService {
+			return validTokenJSON, nil
+		}
+		// Return different token for any other service (e.g. host account)
+		return `{"claudeAiOauth":{"accessToken":"sk-ant-host-999"}}`, nil
+	}
+
+	creds := ReadScopedClaudeKeychainCredentials(claudeDir)
+	if string(creds) != validTokenJSON {
+		t.Fatalf("expected scoped token %s, got %s", validTokenJSON, string(creds))
+	}
+
+	// For a different directory whose scoped service is not in keychain:
+	otherDir := filepath.Join(t.TempDir(), ".claude")
+	getGenericPasswordFn = func(service, account string) (string, error) {
+		if service == scopedService {
+			return validTokenJSON, nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+	if otherCreds := ReadScopedClaudeKeychainCredentials(otherDir); otherCreds != nil {
+		t.Fatalf("expected nil for non-matching scoped service, got %s", string(otherCreds))
+	}
+}
+
 func TestClaudeKeychainServices(t *testing.T) {
 	services := KnownKeychainServices("claude")
 	expected := map[string]bool{

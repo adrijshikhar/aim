@@ -131,13 +131,13 @@ func (p *SchedulePolicy) IsActive(t time.Time) bool {
 		}
 		endTime := p.EndTime
 		if endTime == "" {
-			endTime = "23:59:59"
+			endTime = "23:59"
 		}
 		if len(startTime) == 5 {
 			startTime += ":00"
 		}
 		if len(endTime) == 5 {
-			endTime += ":59"
+			endTime += ":00"
 		}
 
 		startStr := p.StartDate + "T" + startTime

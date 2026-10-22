@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -235,5 +236,70 @@ func TestLeaseManagerCleanExpired(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(profilesDir, p2)); err != nil {
 		t.Errorf("expected active profile %s to still exist: %v", p2, err)
+	}
+}
+
+func TestLeaseManagerRenewalPreservesHistory(t *testing.T) {
+	profilesDir := t.TempDir()
+	mgr := NewLeaseManager(profilesDir)
+
+	resp1 := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_initial",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/auth.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"initial"}`)),
+			},
+		},
+	}
+	pName, err := mgr.InstallLease("peer1", "work", resp1)
+	if err != nil {
+		t.Fatalf("initial InstallLease failed: %v", err)
+	}
+
+	// Simulate borrower running sessions and generating local conversation transcripts
+	profilePath := filepath.Join(profilesDir, pName)
+	convoDir := filepath.Join(profilePath, ".claude", "conversations")
+	_ = os.MkdirAll(convoDir, 0700)
+	convoFile := filepath.Join(convoDir, "chat_123.json")
+	_ = os.WriteFile(convoFile, []byte(`{"conversation_id":"123","messages":["hello"]}`), 0600)
+
+	// Renew the lease with new token and updated expiry
+	resp2 := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_renewed",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(4 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/auth.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"renewed"}`)),
+			},
+		},
+	}
+	pName2, err := mgr.InstallLease("peer1", "work", resp2)
+	if err != nil {
+		t.Fatalf("renewal InstallLease failed: %v", err)
+	}
+	if pName2 != pName {
+		t.Fatalf("expected profile name %s, got %s", pName, pName2)
+	}
+
+	// Verify conversation transcript was preserved across renewal
+	convoData, err := os.ReadFile(convoFile)
+	if err != nil {
+		t.Fatalf("expected conversation file %s to be preserved after renewal, but got error: %v", convoFile, err)
+	}
+	if !strings.Contains(string(convoData), "conversation_id") || !strings.Contains(string(convoData), "hello") {
+		t.Fatalf("conversation data corrupted after renewal: %s", string(convoData))
+	}
+
+	// Verify token was updated
+	authData, _ := os.ReadFile(filepath.Join(profilePath, ".claude", "auth.json"))
+	if !strings.Contains(string(authData), "renewed") {
+		t.Fatalf("expected updated token in auth.json, got: %s", string(authData))
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/profile"
 )
 
 type Server struct {
@@ -881,6 +883,13 @@ func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePa
 			p := filepath.Join(profDir, filepath.FromSlash(rel))
 			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
 				files[rel] = base64.StdEncoding.EncodeToString(data)
+			}
+		}
+		// If credentials are not on disk, read exclusively from the selected profile's scoped Keychain service
+		if _, hasCreds := files[".claude/.credentials.json"]; !hasCreds {
+			claudeDir := filepath.Join(profDir, ".claude")
+			if tokData := profile.ReadScopedClaudeKeychainCredentials(claudeDir); len(tokData) > 0 {
+				files[".claude/.credentials.json"] = base64.StdEncoding.EncodeToString(tokData)
 			}
 		}
 	case "codex":
