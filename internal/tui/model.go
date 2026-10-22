@@ -387,11 +387,16 @@ func (m Model) refreshTargets() []usage.TargetProfile {
 				if up, ok := ad.(agents.UsageProvider); ok {
 					usageFn = up.GetUsage
 				}
+				var cachedUsageFn func(context.Context, string, string) (*usage.Report, error)
+				if cp, ok := ad.(agents.CachedUsageProvider); ok {
+					cachedUsageFn = cp.GetCachedUsage
+				}
 				targets = append(targets, usage.TargetProfile{
-					Agent:      ad.Name(),
-					Profile:    p,
-					ProfileDir: pDir,
-					GetUsageFn: usageFn,
+					Agent:            ad.Name(),
+					Profile:          p,
+					ProfileDir:       pDir,
+					GetUsageFn:       usageFn,
+					GetCachedUsageFn: cachedUsageFn,
 				})
 			}
 		}

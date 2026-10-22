@@ -113,6 +113,13 @@ func (s *profileService) buildAdapterInfo(agentName, profileName string, adapter
 			Profile:    profileName,
 			ProfileDir: pDir,
 		}
+		if s.reg != nil {
+			if ad, err := s.reg.Get(agentName); err == nil && ad != nil {
+				if cachedProv, ok := ad.(agents.CachedUsageProvider); ok {
+					target.GetCachedUsageFn = cachedProv.GetCachedUsage
+				}
+			}
+		}
 		rep := usage.InspectProfile(context.Background(), target, s.cache)
 		if rep.Status != usage.StatusUnknown || len(rep.Windows) > 0 {
 			quotaPtr = reportToQuotaDTO(rep)
@@ -531,12 +538,18 @@ func (s *profileService) RefreshUsage(ctx context.Context, agent, profileName st
 			profs, _ = s.pm.ListProfilesForAgent(ad.Name(), cfg, s.reg)
 		}
 
+		var cachedUsageFn func(context.Context, string, string) (*usage.Report, error)
+		if cp, ok := ad.(agents.CachedUsageProvider); ok {
+			cachedUsageFn = cp.GetCachedUsage
+		}
+
 		for _, p := range profs {
 			targets = append(targets, usage.TargetProfile{
-				Agent:      ad.Name(),
-				Profile:    p,
-				ProfileDir: s.pm.ProfileDir(p),
-				GetUsageFn: usageFn,
+				Agent:            ad.Name(),
+				Profile:          p,
+				ProfileDir:       s.pm.ProfileDir(p),
+				GetUsageFn:       usageFn,
+				GetCachedUsageFn: cachedUsageFn,
 			})
 		}
 	}

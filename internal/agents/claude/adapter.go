@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -29,13 +31,23 @@ var (
 	_ agents.Authenticator         = (*Adapter)(nil)
 	_ agents.Diagnostician         = (*Adapter)(nil)
 	_ agents.UsageProvider         = (*Adapter)(nil)
+	_ agents.CachedUsageProvider   = (*Adapter)(nil)
+	_ agents.LiveUsageProvider     = (*Adapter)(nil)
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
+	_ agents.SessionResumer        = (*Adapter)(nil)
+	_ agents.CredentialHarvester   = (*Adapter)(nil)
+	_ agents.CredentialPurger      = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
 type Adapter struct {
 	agents.BaseAdapter
+}
+
+// ResumeArgs returns the command-line arguments to resume a Claude Code session.
+func (a *Adapter) ResumeArgs(sessionID string, extraArgs []string) []string {
+	return append([]string{"--resume", sessionID}, extraArgs...)
 }
 
 func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {
@@ -69,12 +81,73 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 			return true
 		}
 	}
-	if profile.ShouldSeedCredentials(filepath.Base(profileDir)) {
-		if profile.HarvestKeychainTokenToProfile(a.Name(), profileDir) {
-			return true
+	profileName := filepath.Base(profileDir)
+	return a.HarvestCredentials(context.Background(), profileName, profileDir) == nil
+}
+
+// HarvestCredentials discovers, extracts, and synchronizes Claude Code credentials
+// from the macOS Keychain into the profile's .credentials.json file.
+func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDir string) error {
+	claudeDir := filepath.Join(profileDir, ".claude")
+	destTokenPath := filepath.Join(claudeDir, ".credentials.json")
+
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
+		if data, err := os.ReadFile(destTokenPath); err == nil && len(data) > 0 {
+			if profile.HasClaudeCredentials(data) {
+				return nil
+			}
+		}
+		return errors.New("keychain is only supported on darwin")
+	}
+
+	scopedService := profile.ClaudeScopedKeychainService(claudeDir)
+
+	// 1. Check scoped service in macOS Keychain first (Claude Code's primary store on macOS)
+	if raw, err := profile.GetGenericPasswordWithContext(ctx, scopedService, ""); err == nil && raw != "" {
+		data := profile.DecodeKeychainPassword(raw)
+		if profile.HasClaudeCredentials(data) {
+			if err := merge.AtomicWrite(destTokenPath, data, 0600); err != nil {
+				return fmt.Errorf("failed to save harvested credentials: %w", err)
+			}
+			logger.Debug("[claude] Successfully harvested scoped token from %s into %s", scopedService, destTokenPath)
+			return nil
 		}
 	}
-	return false
+
+	// 2. Check unhashed host service in macOS Keychain if eligible primary profile
+	if profile.ShouldSeedCredentials(profileName) {
+		for _, svc := range []string{"Claude Code-credentials", "Claude Safe Storage"} {
+			if raw, err := profile.GetGenericPasswordWithContext(ctx, svc, ""); err == nil && raw != "" {
+				data := profile.DecodeKeychainPassword(raw)
+				if profile.HasClaudeCredentials(data) {
+					if err := merge.AtomicWrite(destTokenPath, data, 0600); err != nil {
+						return fmt.Errorf("failed to save harvested credentials: %w", err)
+					}
+					logger.Debug("[claude] Successfully harvested host token from %s into %s", svc, destTokenPath)
+					return nil
+				}
+			}
+		}
+	}
+
+	// 3. If file already exists on disk, verify it contains valid credentials
+	if data, err := os.ReadFile(destTokenPath); err == nil && len(data) > 0 {
+		if profile.HasClaudeCredentials(data) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no claude credentials found for profile %q", profileName)
+}
+
+// PurgeCredentials deletes scoped Keychain items associated with this profile.
+func (a *Adapter) PurgeCredentials(ctx context.Context, profileName, profileDir string) error {
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
+		return nil
+	}
+	claudeDir := filepath.Join(profileDir, ".claude")
+	scopedService := profile.ClaudeScopedKeychainService(claudeDir)
+	return profile.DeleteGenericPasswordWithContext(ctx, scopedService, "")
 }
 
 // Login launches the interactive `claude auth login` flow scoped to the profile directory.
@@ -134,7 +207,7 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 
 	seedClaudeJSON(config.RealHomeDir(), profileDir)
 	rewriteSettingsHooks(config.RealHomeDir(), profileDir)
-	_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
+	_ = a.HarvestCredentials(ctx, profileName, profileDir)
 
 	bin := a.ResolveBinary()
 	envMap := a.BaseLaunchEnv(profileName, profileDir, map[string]string{
@@ -230,7 +303,7 @@ func seedClaudeJSON(hostHome, profileDir string) {
 		return
 	}
 
-	for _, key := range []string{"oauthAccount", "mcpServers"} {
+	for _, key := range []string{"oauthAccount", "mcpServers", "cachedUsageUtilization"} {
 		if data, err = merge.DeleteJSONKeyBytes(data, key); err != nil {
 			logger.Warn("[claude] Failed to strip %s from seeded .claude.json: %v", key, err)
 			return
@@ -314,8 +387,358 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 	return results
 }
 
-// GetUsage returns the usage report for the Claude Code agent.
-func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+type claudeConfigFile struct {
+	CachedUsageUtilization *claudeCachedUtilization `json:"cachedUsageUtilization"`
+}
+
+type claudeCachedUtilization struct {
+	FetchedAtMs int64                    `json:"fetchedAtMs"`
+	AccountUUID string                   `json:"accountUuid,omitempty"`
+	Utilization claudeUtilizationPayload `json:"utilization"`
+}
+
+type claudeUtilizationPayload struct {
+	FiveHour       *claudeLimitWindowRaw `json:"five_hour,omitempty"`
+	SevenDay       *claudeLimitWindowRaw `json:"seven_day,omitempty"`
+	SevenDayOpus   *claudeLimitWindowRaw `json:"seven_day_opus,omitempty"`
+	SevenDaySonnet *claudeLimitWindowRaw `json:"seven_day_sonnet,omitempty"`
+	Limits         []claudeLimitItemRaw  `json:"limits,omitempty"`
+}
+
+type claudeLimitWindowRaw struct {
+	Utilization any `json:"utilization"`
+	ResetsAt    any `json:"resets_at"`
+}
+
+type claudeLimitItemRaw struct {
+	Kind     string            `json:"kind"`
+	Group    string            `json:"group"`
+	Percent  any               `json:"percent"`
+	Severity string            `json:"severity"`
+	ResetsAt any               `json:"resets_at"`
+	Scope    *claudeLimitScope `json:"scope"`
+	IsActive bool              `json:"is_active"`
+}
+
+type claudeLimitScope struct {
+	Model   *claudeModelScope `json:"model"`
+	Surface *string           `json:"surface"`
+}
+
+type claudeModelScope struct {
+	ID          *string `json:"id"`
+	DisplayName string  `json:"display_name"`
+}
+
+func parsePercentValue(v any) (float64, bool) {
+	if v == nil {
+		return 0, false
+	}
+	switch val := v.(type) {
+	case float64:
+		if val > 0 && val < 1.0 {
+			return val * 100.0, true
+		}
+		return val, true
+	case float32:
+		f := float64(val)
+		if f > 0 && f < 1.0 {
+			return f * 100.0, true
+		}
+		return f, true
+	case int:
+		return float64(val), true
+	case int64:
+		return float64(val), true
+	case string:
+		s := strings.TrimSpace(val)
+		s = strings.TrimSuffix(s, "%")
+		s = strings.TrimSpace(s)
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			if f > 0 && f < 1.0 {
+				return f * 100.0, true
+			}
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+func parseClaudeResetTimestamp(v any, now time.Time) (time.Time, time.Duration) {
+	if v == nil {
+		return time.Time{}, 0
+	}
+	var t time.Time
+	switch val := v.(type) {
+	case string:
+		s := strings.TrimSpace(val)
+		if s == "" {
+			return time.Time{}, 0
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			t = parsed
+		} else if parsed, err := time.Parse(time.RFC3339, s); err == nil {
+			t = parsed
+		} else if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			if n > 1e11 {
+				t = time.UnixMilli(n)
+			} else if n > 0 {
+				t = time.Unix(n, 0)
+			}
+		} else {
+			t, _ = parseClaudeResetTime(s, now)
+		}
+	case float64:
+		n := int64(val)
+		if n > 1e11 {
+			t = time.UnixMilli(n)
+		} else if n > 0 {
+			t = time.Unix(n, 0)
+		}
+	case int64:
+		if val > 1e11 {
+			t = time.UnixMilli(val)
+		} else if val > 0 {
+			t = time.Unix(val, 0)
+		}
+	case int:
+		n := int64(val)
+		if n > 1e11 {
+			t = time.UnixMilli(n)
+		} else if n > 0 {
+			t = time.Unix(n, 0)
+		}
+	}
+
+	if t.IsZero() {
+		return time.Time{}, 0
+	}
+
+	var d time.Duration
+	if now.After(t) {
+		d = 0
+	} else {
+		d = t.Sub(now)
+		if d < 0 {
+			d = 0
+		}
+	}
+	return t, d
+}
+
+// ParseClaudeCachedUsage parses cached utilization JSON payload into a slice of LimitWindow.
+func ParseClaudeCachedUsage(data []byte, now time.Time) ([]usage.LimitWindow, time.Time, error) {
+	var root struct {
+		CachedUsageUtilization *claudeCachedUtilization `json:"cachedUsageUtilization"`
+		claudeCachedUtilization
+	}
+
+	var payload *claudeUtilizationPayload
+	var fetchedAt time.Time
+
+	if err := json.Unmarshal(data, &root); err == nil {
+		if root.CachedUsageUtilization != nil {
+			payload = &root.CachedUsageUtilization.Utilization
+			if root.CachedUsageUtilization.FetchedAtMs > 0 {
+				fetchedAt = time.UnixMilli(root.CachedUsageUtilization.FetchedAtMs)
+			}
+		} else if root.Utilization.FiveHour != nil || root.Utilization.SevenDay != nil || len(root.Utilization.Limits) > 0 {
+			payload = &root.Utilization
+			if root.FetchedAtMs > 0 {
+				fetchedAt = time.UnixMilli(root.FetchedAtMs)
+			}
+		}
+	}
+
+	if payload == nil {
+		var rawPayload claudeUtilizationPayload
+		if err := json.Unmarshal(data, &rawPayload); err == nil && (rawPayload.FiveHour != nil || rawPayload.SevenDay != nil || len(rawPayload.Limits) > 0) {
+			payload = &rawPayload
+		}
+	}
+
+	if payload == nil {
+		return nil, time.Time{}, nil
+	}
+
+	if fetchedAt.IsZero() {
+		fetchedAt = now
+	}
+
+	var windows []usage.LimitWindow
+	seenWindows := make(map[string]bool)
+
+	addWindow := func(category, name, windowType string, rawPercent, rawReset any) {
+		usedPct, ok := parsePercentValue(rawPercent)
+		if !ok {
+			return
+		}
+		dedupKey := windowType + ":" + category
+		if seenWindows[dedupKey] {
+			return
+		}
+		seenWindows[dedupKey] = true
+
+		remainingPct := int(math.Round(100.0 - usedPct))
+		if remainingPct < 0 {
+			remainingPct = 0
+		} else if remainingPct > 100 {
+			remainingPct = 100
+		}
+
+		resetsAt, resetsIn := parseClaudeResetTimestamp(rawReset, now)
+		if !resetsAt.IsZero() && now.After(resetsAt) {
+			remainingPct = 100
+			resetsIn = 0
+		}
+
+		windows = append(windows, usage.LimitWindow{
+			Category:     category,
+			Name:         name,
+			RemainingPct: remainingPct,
+			ResetsAt:     resetsAt,
+			ResetsIn:     resetsIn,
+		})
+	}
+
+	if payload.FiveHour != nil {
+		addWindow("All Models", "5-hour (Session)", "session", payload.FiveHour.Utilization, payload.FiveHour.ResetsAt)
+	}
+	if payload.SevenDay != nil {
+		addWindow("All Models", "7-day (Weekly)", "weekly", payload.SevenDay.Utilization, payload.SevenDay.ResetsAt)
+	}
+	if payload.SevenDayOpus != nil {
+		addWindow("Opus", "7-day (Weekly)", "weekly", payload.SevenDayOpus.Utilization, payload.SevenDayOpus.ResetsAt)
+	}
+	if payload.SevenDaySonnet != nil {
+		addWindow("Sonnet", "7-day (Weekly)", "weekly", payload.SevenDaySonnet.Utilization, payload.SevenDaySonnet.ResetsAt)
+	}
+
+	for _, item := range payload.Limits {
+		category := "All Models"
+		if item.Scope != nil && item.Scope.Model != nil && item.Scope.Model.DisplayName != "" {
+			disp := item.Scope.Model.DisplayName
+			if strings.EqualFold(disp, "all") || strings.EqualFold(disp, "all models") {
+				category = "All Models"
+			} else {
+				category = disp
+			}
+		}
+
+		var windowType string
+		var name string
+		if item.Kind == "session" || item.Group == "session" {
+			windowType = "session"
+			name = "5-hour (Session)"
+		} else if strings.HasPrefix(item.Kind, "weekly") || item.Group == "weekly" {
+			windowType = "weekly"
+			name = "7-day (Weekly)"
+		} else {
+			windowType = item.Kind
+			name = item.Kind
+		}
+
+		addWindow(category, name, windowType, item.Percent, item.ResetsAt)
+	}
+
+	return windows, fetchedAt, nil
+}
+
+func formatClaudeUsageSummary(windows []usage.LimitWindow, authMethod string) string {
+	var parts []string
+	seen := make(map[string]bool)
+	for _, w := range windows {
+		var label string
+		if w.IsHourly() {
+			label = "5h"
+		} else if w.IsWeekly() {
+			label = "wk"
+		}
+		if label != "" {
+			if w.Category != "" && w.Category != "All Models" && w.Category != "Claude" {
+				label = fmt.Sprintf("%s %s", w.Category, label)
+			}
+			if !seen[label] {
+				seen[label] = true
+				parts = append(parts, fmt.Sprintf("%s: %d%%", label, w.RemainingPct))
+			}
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	} else if authMethod != "" {
+		return authMethod
+	}
+	return "Active credentials"
+}
+
+// GetCachedUsage extracts quota telemetry directly from local profile files on disk without child processes.
+func (a *Adapter) GetCachedUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	paths := []string{
+		filepath.Join(profileDir, ".claude", ".claude.json"),
+		filepath.Join(profileDir, ".claude.json"),
+	}
+
+	now := time.Now()
+	var (
+		bestWindows   []usage.LimitWindow
+		bestFetchedAt time.Time
+		lastParseErr  error
+		readErr       error
+	)
+
+	for _, p := range paths {
+		d, err := os.ReadFile(p)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) && readErr == nil {
+				readErr = err
+			}
+			continue
+		}
+		if len(d) == 0 {
+			continue
+		}
+		windows, fetchedAt, parseErr := ParseClaudeCachedUsage(d, now)
+		if parseErr != nil {
+			lastParseErr = parseErr
+			continue
+		}
+		if len(windows) > 0 {
+			bestWindows = windows
+			bestFetchedAt = fetchedAt
+			break
+		}
+	}
+
+	if len(bestWindows) == 0 {
+		if lastParseErr != nil {
+			return nil, lastParseErr
+		}
+		return nil, readErr
+	}
+
+	status := usage.CalculateStatus(bestWindows)
+	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
+
+	report := &usage.Report{
+		Agent:        a.Name(),
+		Profile:      profileName,
+		Status:       status,
+		Windows:      bestWindows,
+		Credits:      "0",
+		AccountEmail: acc.Email,
+		AccountName:  acc.Name,
+		AuthMethod:   acc.AuthMethod,
+		FetchedAt:    bestFetchedAt,
+		FromCache:    true,
+		Summary:      formatClaudeUsageSummary(bestWindows, acc.AuthMethod),
+	}
+
+	return report, nil
+}
+
+// GetLiveUsage queries live quota via "claude -p /usage" child process execution.
+func (a *Adapter) GetLiveUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
 	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
 
 	if !a.HasCredentials(profileDir) {
@@ -347,13 +770,35 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		}
 	}
 
+	claudeDir := filepath.Join(profileDir, ".claude")
 	cmd := exec.CommandContext(ctx, bin, "-p", "/usage")
 	cmd.Dir = profileDir
-	cmd.Env = append(os.Environ(),
+
+	storageEnv := config.StorageEnv()
+	cleanEnv := make([]string, 0, len(os.Environ())+5)
+	for _, env := range os.Environ() {
+		idx := strings.IndexByte(env, '=')
+		if idx == -1 {
+			continue
+		}
+		key := env[:idx]
+		_, storageKey := storageEnv[key]
+		if storageKey || key == "HOME" || key == "CLAUDE_CONFIG_DIR" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_SESSION_ID" ||
+			key == "CLAUDE_CODE_OAUTH_TOKEN" || key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
+			continue
+		}
+		cleanEnv = append(cleanEnv, env)
+	}
+
+	cmd.Env = append(cleanEnv,
 		"HOME="+profileDir,
+		"CLAUDE_CONFIG_DIR="+claudeDir,
 		"AIM_AGENT="+a.Name(),
 		"AIM_PROFILE="+profileName,
 	)
+	for key, value := range storageEnv {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -385,36 +830,61 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		AccountName:  acc.Name,
 		AuthMethod:   acc.AuthMethod,
 		FetchedAt:    now,
-	}
-
-	var parts []string
-	seen := make(map[string]bool)
-	for _, w := range windows {
-		var label string
-		if w.IsHourly() {
-			label = "5h"
-		} else if w.IsWeekly() {
-			label = "wk"
-		}
-		if label != "" {
-			if w.Category != "" && w.Category != "All Models" && w.Category != "Claude" {
-				label = fmt.Sprintf("%s %s", w.Category, label)
-			}
-			if !seen[label] {
-				seen[label] = true
-				parts = append(parts, fmt.Sprintf("%s: %d%%", label, w.RemainingPct))
-			}
-		}
-	}
-	if len(parts) > 0 {
-		report.Summary = strings.Join(parts, ", ")
-	} else if acc.AuthMethod != "" {
-		report.Summary = acc.AuthMethod
-	} else {
-		report.Summary = "Active credentials"
+		FromCache:    false,
+		Summary:      formatClaudeUsageSummary(windows, acc.AuthMethod),
 	}
 
 	return report, nil
+}
+
+func isClaudeReportFresh(rep *usage.Report, now time.Time) bool {
+	if rep == nil || len(rep.Windows) == 0 {
+		return false
+	}
+	if rep.FetchedAt.IsZero() {
+		return false
+	}
+	age := now.Sub(rep.FetchedAt)
+	if age < 0 {
+		age = -age
+	}
+	if age > 15*time.Minute {
+		return false
+	}
+	for _, w := range rep.Windows {
+		if !w.ResetsAt.IsZero() && now.After(w.ResetsAt) {
+			return false
+		}
+	}
+	return true
+}
+
+// GetUsage returns the usage report for the Claude Code agent,
+// preferring fresh cached usage from disk if available, and falling back to live CLI query.
+func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	cached, cachedErr := a.GetCachedUsage(ctx, profileName, profileDir)
+	if cachedErr == nil && isClaudeReportFresh(cached, time.Now()) {
+		return cached, nil
+	}
+
+	live, liveErr := a.GetLiveUsage(ctx, profileName, profileDir)
+	if liveErr == nil && live != nil && len(live.Windows) > 0 && live.Error == "" {
+		return live, nil
+	}
+
+	// Fallback to cached report if available, even if stale, rather than returning an offline/error report
+	if cached != nil && len(cached.Windows) > 0 {
+		return cached, nil
+	}
+
+	if liveErr == nil && live != nil {
+		return live, nil
+	}
+
+	if liveErr != nil {
+		return nil, liveErr
+	}
+	return nil, cachedErr
 }
 
 // ParseClaudeUsage parses the output of "claude -p /usage" into a slice of LimitWindow.

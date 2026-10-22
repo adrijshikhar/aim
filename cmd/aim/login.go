@@ -63,7 +63,11 @@ func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *prof
 	// Harvest any agent credentials into the profile directory after login completes.
 	// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
 	defer func() {
-		_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
+		if harvester, ok := adapter.(agents.CredentialHarvester); ok {
+			_ = harvester.HarvestCredentials(ctx, profileName, pDir)
+		} else {
+			_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
+		}
 		if loginSucceeded {
 			telemetry.IdentifyAccount(adapter.Name(), profile.GetProfileAccountInfoForAgent(pDir, adapter.Name()))
 		}

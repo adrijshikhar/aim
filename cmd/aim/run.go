@@ -101,46 +101,71 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 	return cmd
 }
 
+type RunOptions struct {
+	AgentName   string
+	ProfileName string
+	SessionID   string
+	WorkingDir  string
+	ExtraArgs   []string
+}
+
 func executeRun(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string, extraArgs []string) int {
 	return executeRunWithSession(context.Background(), reg, pm, agentName, profileName, "", extraArgs)
 }
 
 func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName, sessionID string, extraArgs []string) int {
+	return executeRunWithOptions(ctx, reg, pm, RunOptions{
+		AgentName:   agentName,
+		ProfileName: profileName,
+		SessionID:   sessionID,
+		ExtraArgs:   extraArgs,
+	})
+}
+
+func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, opts RunOptions) int {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	logger.Debug("[run] Executing agent %q with profile %q (sessionID=%s, extraArgs=%v)", agentName, profileName, sessionID, extraArgs)
-	adapter, err := reg.Get(agentName)
+	logger.Debug("[run] Executing agent %q with profile %q (sessionID=%s, workingDir=%s, extraArgs=%v)", opts.AgentName, opts.ProfileName, opts.SessionID, opts.WorkingDir, opts.ExtraArgs)
+	adapter, err := reg.Get(opts.AgentName)
 	if err != nil {
-		logger.Debug("[run] Failed to get adapter for agent %q: %v", agentName, err)
+		logger.Debug("[run] Failed to get adapter for agent %q: %v", opts.AgentName, err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
-	pDir, err := pm.EnsureProfile(profileName)
+	pDir, err := pm.EnsureProfile(opts.ProfileName)
 	if err != nil {
-		logger.Debug("[run] Failed to ensure profile %q: %v", profileName, err)
+		logger.Debug("[run] Failed to ensure profile %q: %v", opts.ProfileName, err)
 		fmt.Fprintf(os.Stderr, "Error preparing profile: %v\n", err)
 		return 1
 	}
-	logger.Debug("[run] Profile %q directory: %s", profileName, pDir)
+	logger.Debug("[run] Profile %q directory: %s", opts.ProfileName, pDir)
 
 	cfg, _ := config.LoadConfig()
 	if cfg != nil {
-		cfg.AddProfileAgent(profileName, adapter.Name())
+		cfg.AddProfileAgent(opts.ProfileName, adapter.Name())
 		_ = config.SaveConfig(cfg)
 	}
 
-	launchEnv, err := adapter.PrepareEnv(ctx, profileName, pDir)
+	launchEnv, err := adapter.PrepareEnv(ctx, opts.ProfileName, pDir)
 	if err != nil {
-		logger.Debug("[run] PrepareEnv failed for %q: %v", profileName, err)
+		logger.Debug("[run] PrepareEnv failed for %q: %v", opts.ProfileName, err)
 		fmt.Fprintf(os.Stderr, "Error preparing launch environment: %v\n", err)
 		return 1
 	}
+
+	if opts.WorkingDir != "" {
+		if fi, err := os.Stat(opts.WorkingDir); err == nil && fi.IsDir() {
+			launchEnv.WorkingDir = opts.WorkingDir
+		}
+	}
+
 	logger.Debug("[run] LaunchEnv: binary=%s, workingDir=%s, args=%v, envVars=%d", launchEnv.BinaryPath, launchEnv.WorkingDir, launchEnv.Args, len(launchEnv.Env))
 
 	// Ensure AIM_SESSION_ID is set in launchEnv if resuming or running with a known session ID
+	sessionID := opts.SessionID
 	if sessionID == "" {
-		sessionID = runner.ExtractSessionID(extraArgs)
+		sessionID = runner.ExtractSessionID(opts.ExtraArgs)
 	}
 	if sessionID != "" {
 		if launchEnv.Env == nil {
@@ -150,7 +175,7 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 			launchEnv.Env["AIM_SESSION_ID"] = sessionID
 		}
 		mgr := getSessionManager(ctx)
-		if prov := mgr.Provider(agentName); prov != nil {
+		if prov := mgr.Provider(opts.AgentName); prov != nil {
 			if sanitizable, ok := prov.(interface {
 				SanitizeSession(context.Context, string, string) error
 			}); ok {
@@ -159,21 +184,21 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 		}
 	}
 
-	applyProfileOverrides(&launchEnv, cfg, profileName, true)
+	applyProfileOverrides(&launchEnv, cfg, opts.ProfileName, true)
 
 	r := runner.NewRunner(adapter)
-	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", extraArgs)
-	code := withSessionMerge(adapter, pm.MergeStateStore(), profileName, pDir, cfg, extraArgs, func() int {
-		if isMCPListInvocation(extraArgs) {
+	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", opts.ExtraArgs)
+	code := withSessionMerge(adapter, pm.MergeStateStore(), opts.ProfileName, pDir, cfg, opts.ExtraArgs, func() int {
+		if isMCPListInvocation(opts.ExtraArgs) {
 			if listProv, ok := adapter.(agents.MCPListProvider); ok {
-				servers, listErr := listProv.ListMCPServers(ctx, profileName, pDir)
+				servers, listErr := listProv.ListMCPServers(ctx, opts.ProfileName, pDir)
 				if listErr == nil {
-					presenter.RenderMCPListTable(os.Stdout, adapter.Name(), profileName, servers)
+					presenter.RenderMCPListTable(os.Stdout, adapter.Name(), opts.ProfileName, servers)
 					return 0
 				}
 			}
 		}
-		c, runErr := r.Run(ctx, launchEnv, extraArgs)
+		c, runErr := r.Run(ctx, launchEnv, opts.ExtraArgs)
 		err = runErr
 		return c
 	})

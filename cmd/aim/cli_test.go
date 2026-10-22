@@ -1836,3 +1836,102 @@ func TestCLI_List_StaleCachePromotesToIdleWithoutPrewarm(t *testing.T) {
 		t.Errorf("expected '[idle: ready on use]' for stale profile in aim list all, got:\n%s", outAll)
 	}
 }
+
+func TestCLI_List_CachedUsageProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	pDir := pm.ProfileDir("work")
+	_ = os.WriteFile(filepath.Join(pDir, "auth.json"), []byte(`{"tokens":{"access_token":"valid"}}`), 0600)
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("work", "cachedagent")
+	_ = config.SaveConfig(cfg)
+
+	cachedAdapter := &doctorCachedUsageMockAdapter{
+		doctorMockAdapter: doctorMockAdapter{
+			mockAdapter: mockAdapter{name: "cachedagent", hasCreds: true},
+		},
+	}
+	reg := agents.NewRegistry()
+	reg.Register(cachedAdapter)
+
+	out, _ := captureOutput(t, func() {
+		_ = runList(reg, pm, "cachedagent")
+	})
+
+	if !cachedAdapter.cachedUsageCalled {
+		t.Errorf("expected GetCachedUsage to be invoked during runList")
+	}
+	if !strings.Contains(out, "90%") {
+		t.Errorf("expected output to contain quota percentage '90%%', got:\n%s", out)
+	}
+}
+
+type mockSessionChecker struct {
+	activeProfiles map[string][]string
+}
+
+func (m *mockSessionChecker) ActiveSessions(profileName string) ([]string, error) {
+	if m.activeProfiles != nil {
+		return m.activeProfiles[profileName], nil
+	}
+	return nil, nil
+}
+
+type mockPurgerAdapter struct {
+	mockAdapter
+	purgeCalled bool
+}
+
+func (m *mockPurgerAdapter) PurgeCredentials(ctx context.Context, profileName, profileDir string) error {
+	m.purgeCalled = true
+	return nil
+}
+
+func TestCLI_ExecuteRemove_RefusesWhenSessionActive_DoesNotPurgeCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+
+	checker := &mockSessionChecker{
+		activeProfiles: map[string][]string{
+			"busy": {"busy-agent"},
+		},
+	}
+	pm := profile.NewProfileManager(tmpDir, checker)
+	_, err := pm.EnsureProfile("busy")
+	if err != nil {
+		t.Fatalf("failed to ensure profile: %v", err)
+	}
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("busy", "purger-agent")
+	_ = config.SaveConfig(cfg)
+
+	purger := &mockPurgerAdapter{
+		mockAdapter: mockAdapter{name: "purger-agent"},
+	}
+	reg := agents.NewRegistry()
+	reg.Register(purger)
+
+	// 1. Removing agent from profile with active session must be refused (exit code 1)
+	code := executeRemove(reg, pm, []string{"purger-agent", "busy"})
+	if code != 1 {
+		t.Fatalf("expected exit code 1 when removing agent from busy profile, got %d", code)
+	}
+	if purger.purgeCalled {
+		t.Fatalf("credentials were purged even though RemoveAgent was refused due to active session")
+	}
+
+	// 2. Removing entire profile with active session must be refused (exit code 1)
+	code = executeRemove(reg, pm, []string{"busy"})
+	if code != 1 {
+		t.Fatalf("expected exit code 1 when deleting busy profile, got %d", code)
+	}
+	if purger.purgeCalled {
+		t.Fatalf("credentials were purged even though DeleteProfile was refused due to active session")
+	}
+}

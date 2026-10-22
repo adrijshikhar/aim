@@ -30,13 +30,20 @@ var (
 	_ agents.Authenticator         = (*Adapter)(nil)
 	_ agents.Diagnostician         = (*Adapter)(nil)
 	_ agents.UsageProvider         = (*Adapter)(nil)
+	_ agents.CachedUsageProvider   = (*Adapter)(nil)
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
+	_ agents.SessionResumer        = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
 type Adapter struct {
 	agents.BaseAdapter
+}
+
+// ResumeArgs returns the command-line arguments to resume a Codex CLI session.
+func (a *Adapter) ResumeArgs(sessionID string, extraArgs []string) []string {
+	return append([]string{"resume", sessionID}, extraArgs...)
 }
 
 func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {
@@ -557,6 +564,15 @@ type codexSessionEvent struct {
 	} `json:"payload"`
 	RateLimits      *codexRateLimits `json:"rate_limits"`
 	RateLimitsCamel *codexRateLimits `json:"rateLimits"`
+}
+
+// GetCachedUsage extracts cached quota and rate-limit telemetry from local Codex session files on disk.
+func (a *Adapter) GetCachedUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	rep, err := a.GetUsage(ctx, profileName, profileDir)
+	if err == nil && rep != nil {
+		rep.FromCache = true
+	}
+	return rep, err
 }
 
 func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {

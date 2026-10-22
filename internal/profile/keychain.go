@@ -15,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
 )
 
 // IgnoredKeychainEntry defines an agent credential entry in the macOS Keychain
@@ -163,19 +165,29 @@ func PurgeIgnoredKeychains(agent string, customServices ...string) error {
 }
 
 var (
+	keychainMu               sync.RWMutex
 	deleteGenericPasswordFn  = deleteGenericPasswordReal
 	deleteInternetPasswordFn = deleteInternetPasswordReal
 )
 
 func deleteGenericPassword(service, account string) error {
-	return deleteGenericPasswordFn(service, account)
+	keychainMu.RLock()
+	fn := deleteGenericPasswordFn
+	keychainMu.RUnlock()
+	return fn(service, account)
 }
 
 func deleteInternetPassword(service, account string) error {
-	return deleteInternetPasswordFn(service, account)
+	keychainMu.RLock()
+	fn := deleteInternetPasswordFn
+	keychainMu.RUnlock()
+	return fn(service, account)
 }
 
 func deleteGenericPasswordReal(service, account string) error {
+	if os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -201,6 +213,9 @@ func deleteGenericPasswordReal(service, account string) error {
 }
 
 func deleteInternetPasswordReal(service, account string) error {
+	if os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -225,7 +240,7 @@ func deleteInternetPasswordReal(service, account string) error {
 
 // FindIgnoredKeychains returns any ignored keychain entries that currently exist in the macOS Keychain.
 func FindIgnoredKeychains(agent string, customServices ...string) []IgnoredKeychainEntry {
-	if runtime.GOOS != "darwin" {
+	if runtime.GOOS != "darwin" || os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
 		return nil
 	}
 
@@ -259,6 +274,9 @@ func FindIgnoredKeychains(agent string, customServices ...string) []IgnoredKeych
 var getGenericPasswordFn = getGenericPasswordReal
 
 func getGenericPasswordReal(service, account string) (string, error) {
+	if os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
+		return "", fmt.Errorf("item not found in mock keychain: service=%q, account=%q", service, account)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -274,6 +292,85 @@ func getGenericPasswordReal(service, account string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func getGenericPasswordHook(service, account string) (string, error) {
+	keychainMu.RLock()
+	fn := getGenericPasswordFn
+	keychainMu.RUnlock()
+	return fn(service, account)
+}
+
+// GetGenericPassword retrieves a generic password from the macOS Keychain.
+func GetGenericPassword(service, account string) (string, error) {
+	return getGenericPasswordHook(service, account)
+}
+
+// GetGenericPasswordWithContext retrieves a generic password from the macOS Keychain with context cancellation.
+func GetGenericPasswordWithContext(ctx context.Context, service, account string) (string, error) {
+	type result struct {
+		val string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		val, err := getGenericPasswordHook(service, account)
+		ch <- result{val: val, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case res := <-ch:
+		return res.val, res.err
+	}
+}
+
+// DeleteGenericPassword deletes a generic password from the macOS Keychain.
+func DeleteGenericPassword(service, account string) error {
+	return deleteGenericPassword(service, account)
+}
+
+// DeleteGenericPasswordWithContext deletes a generic password from the macOS Keychain with context cancellation.
+func DeleteGenericPasswordWithContext(ctx context.Context, service, account string) error {
+	type result struct {
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		ch <- result{err: deleteGenericPassword(service, account)}
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case res := <-ch:
+		return res.err
+	}
+}
+
+// SetKeychainPasswordGetterForTest replaces getGenericPasswordFn for testing.
+func SetKeychainPasswordGetterForTest(fn func(service, account string) (string, error)) func() {
+	keychainMu.Lock()
+	orig := getGenericPasswordFn
+	getGenericPasswordFn = fn
+	keychainMu.Unlock()
+	return func() {
+		keychainMu.Lock()
+		getGenericPasswordFn = orig
+		keychainMu.Unlock()
+	}
+}
+
+// SetKeychainPasswordDeleterForTest replaces deleteGenericPasswordFn for testing.
+func SetKeychainPasswordDeleterForTest(fn func(service, account string) error) func() {
+	keychainMu.Lock()
+	orig := deleteGenericPasswordFn
+	deleteGenericPasswordFn = fn
+	keychainMu.Unlock()
+	return func() {
+		keychainMu.Lock()
+		deleteGenericPasswordFn = orig
+		keychainMu.Unlock()
+	}
 }
 
 // DecodeKeychainPassword parses a raw keychain password string, decoding any
@@ -357,12 +454,8 @@ func HasClaudeCredentials(data []byte) bool {
 }
 
 func writeProfileCredentials(destTokenPath string, data []byte) bool {
-	if err := os.MkdirAll(filepath.Dir(destTokenPath), 0700); err != nil {
-		logger.Debug("[keychain] Failed to create directory for token %s: %v", destTokenPath, err)
-		return false
-	}
-	if err := os.WriteFile(destTokenPath, data, 0600); err != nil {
-		logger.Debug("[keychain] Failed to write token to %s: %v", destTokenPath, err)
+	if err := merge.AtomicWrite(destTokenPath, data, 0600); err != nil {
+		logger.Debug("[keychain] Failed to write token atomically to %s: %v", destTokenPath, err)
 		return false
 	}
 	return true
@@ -482,8 +575,15 @@ func PurgeAgentKeychain(agent string) error {
 }
 
 // PurgeProfileKeychain deletes agent credentials scoped specifically to a profile.
-func PurgeProfileKeychain(agent, profileDir string) error {
-	if runtime.GOOS != "darwin" {
+// If purgers are provided, the first non-nil purger is used; otherwise it delegates
+// cleanly based on known agent keychain scoping.
+func PurgeProfileKeychain(agent, profileDir string, purgers ...agents.CredentialPurger) error {
+	for _, cp := range purgers {
+		if cp != nil {
+			return cp.PurgeCredentials(context.Background(), filepath.Base(profileDir), profileDir)
+		}
+	}
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
 		return nil
 	}
 	switch agent {

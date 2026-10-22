@@ -49,12 +49,17 @@ func runPrewarm(reg *agents.Registry, pm *profile.ProfileManager, targetAgent st
 		if up, ok := ad.(agents.UsageProvider); ok {
 			usageFn = up.GetUsage
 		}
+		var cachedUsageFn func(context.Context, string, string) (*usage.Report, error)
+		if cp, ok := ad.(agents.CachedUsageProvider); ok {
+			cachedUsageFn = cp.GetCachedUsage
+		}
 		for _, p := range profs {
 			targets = append(targets, usage.TargetProfile{
-				Agent:      ad.Name(),
-				Profile:    p,
-				ProfileDir: pm.ProfileDir(p),
-				GetUsageFn: usageFn,
+				Agent:            ad.Name(),
+				Profile:          p,
+				ProfileDir:       pm.ProfileDir(p),
+				GetUsageFn:       usageFn,
+				GetCachedUsageFn: cachedUsageFn,
 			})
 		}
 	}

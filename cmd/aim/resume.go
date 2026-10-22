@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/session/catalyst"
@@ -209,7 +210,15 @@ Flags:
 }
 
 func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, agent, profileName string, sess *session.Session, extraArgs []string) error {
-	repoRoot := getGitRepoRoot()
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	mgr := getSessionManager(ctx)
+	workingDir := resolveSessionWorkingDir(ctx, mgr, sess)
+
+	repoRoot := getGitRepoRoot(workingDir)
 	branch := getGitBranch(repoRoot)
 
 	bridge := catalyst.NewBridge()
@@ -231,11 +240,14 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 	}
 	// Launch agent primed with Catalyst handoff resume
 	launchArgs := append([]string{"handoff resume"}, extraArgs...)
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	code := executeRunWithSession(ctx, reg, pm, agent, profileName, sessID, launchArgs)
+
+	code := executeRunWithOptions(ctx, reg, pm, RunOptions{
+		AgentName:   agent,
+		ProfileName: profileName,
+		SessionID:   sessID,
+		WorkingDir:  workingDir,
+		ExtraArgs:   launchArgs,
+	})
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -302,15 +314,15 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		}
 	}
 
+	adapter, err := reg.Get(agent)
+	if err != nil {
+		return fmt.Errorf("failed to get adapter for agent %q: %w", agent, err)
+	}
+
 	var resumeArgs []string
-	switch agent {
-	case "agy":
-		resumeArgs = append([]string{fmt.Sprintf("--conversation=%s", resumeID)}, extraArgs...)
-	case "codex":
-		resumeArgs = append([]string{"resume", resumeID}, extraArgs...)
-	case "claude":
-		resumeArgs = append([]string{"--resume", resumeID}, extraArgs...)
-	default:
+	if resumer, ok := adapter.(agents.SessionResumer); ok {
+		resumeArgs = resumer.ResumeArgs(resumeID, extraArgs)
+	} else {
 		resumeArgs = append([]string{resumeID}, extraArgs...)
 	}
 
@@ -338,8 +350,16 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 		profileName,
 	)
 
+	workingDir := resolveSessionWorkingDir(ctx, mgr, sess)
+
 	sessID := displayID
-	code := executeRunWithSession(ctx, reg, pm, agent, profileName, sessID, resumeArgs)
+	code := executeRunWithOptions(ctx, reg, pm, RunOptions{
+		AgentName:   agent,
+		ProfileName: profileName,
+		SessionID:   sessID,
+		WorkingDir:  workingDir,
+		ExtraArgs:   resumeArgs,
+	})
 	if code != 0 {
 		return &ExitError{Code: code}
 	}
@@ -350,10 +370,17 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 	return nil
 }
 
-func getGitRepoRoot() string {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+func getGitRepoRoot(dir ...string) string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	if len(dir) > 0 && dir[0] != "" {
+		cmd.Dir = dir[0]
+	}
+	out, err := cmd.Output()
 	if err == nil && len(out) > 0 {
 		return strings.TrimSpace(string(out))
+	}
+	if len(dir) > 0 && dir[0] != "" {
+		return dir[0]
 	}
 	cwd, err := os.Getwd()
 	if err == nil {
@@ -386,4 +413,26 @@ func findLatestSessionAcrossProfiles(ctx context.Context, mgr *session.Manager, 
 		return nil, fmt.Errorf("failed to query sessions across profiles: %w", err)
 	}
 	return sess, nil
+}
+
+func resolveSessionWorkingDir(ctx context.Context, mgr *session.Manager, sess *session.Session) string {
+	if sess == nil {
+		return ""
+	}
+	var targetCwd string
+	if mgr != nil {
+		if resolved, err := mgr.ResolveCwd(ctx, sess); err == nil && resolved != "" {
+			targetCwd = resolved
+		}
+	}
+	if targetCwd == "" && sess.Cwd != "" {
+		targetCwd = sess.Cwd
+	}
+	if targetCwd != "" {
+		if fi, err := os.Stat(targetCwd); err == nil && fi.IsDir() {
+			return targetCwd
+		}
+		logger.Debug("[resume] session target cwd %q does not exist or is not a directory", targetCwd)
+	}
+	return ""
 }

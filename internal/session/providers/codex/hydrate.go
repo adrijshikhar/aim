@@ -45,7 +45,6 @@ func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, 
 		if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, dbPath, query); err == nil {
 			cwd := strings.TrimSpace(string(out))
 			if cwd != "" {
-				s.Cwd = cwd
 				return cwd, nil
 			}
 		}

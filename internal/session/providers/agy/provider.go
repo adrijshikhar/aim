@@ -393,7 +393,6 @@ func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, 
 		query := fmt.Sprintf("SELECT workspace_uris FROM conversation_summaries WHERE conversation_id = '%s' LIMIT 1;\n", escapeSQL(s.ID))
 		if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query); err == nil {
 			if cwd := parseWorkspaceURIs(string(out)); cwd != "" {
-				s.Cwd = cwd
 				return cwd, nil
 			}
 		}
@@ -405,7 +404,6 @@ func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, 
 		brainDir = p.brainDir(profileDir, s.IsHost, s.ID)
 	}
 	if cwd := extractTranscriptCwd(brainDir); cwd != "" {
-		s.Cwd = cwd
 		return cwd, nil
 	}
 

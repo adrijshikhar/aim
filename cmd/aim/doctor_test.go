@@ -363,3 +363,60 @@ func TestDoctor_IdleProfileAuthMessage(t *testing.T) {
 		t.Errorf("expected doctor output to contain %q, but got:\n%s", expectedStr, output)
 	}
 }
+
+type doctorCachedUsageMockAdapter struct {
+	doctorMockAdapter
+	cachedUsageCalled bool
+}
+
+func (m *doctorCachedUsageMockAdapter) GetCachedUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
+	m.cachedUsageCalled = true
+	return &usage.Report{
+		Agent:   m.name,
+		Profile: profileName,
+		Status:  usage.StatusOK,
+		Windows: []usage.LimitWindow{
+			{Name: "Session (5-hour)", RemainingPct: 90},
+		},
+	}, nil
+}
+
+func TestDoctorCmd_CachedUsageProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("cached-prof")
+
+	pDir := pm.ProfileDir("cached-prof")
+	_ = os.WriteFile(filepath.Join(pDir, "auth.json"), []byte(`{"tokens":{"access_token":"valid"}}`), 0600)
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("cached-prof", "claude")
+	_ = config.SaveConfig(cfg)
+
+	cachedAdapter := &doctorCachedUsageMockAdapter{
+		doctorMockAdapter: doctorMockAdapter{
+			mockAdapter: mockAdapter{name: "claude", hasCreds: true},
+		},
+	}
+	reg := agents.NewRegistry()
+	reg.Register(cachedAdapter)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor", "claude"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected doctor to succeed, got: %v", err)
+	}
+
+	if !cachedAdapter.cachedUsageCalled {
+		t.Errorf("expected GetCachedUsage to be called during doctor run")
+	}
+
+	outStr := buf.String()
+	if !strings.Contains(outStr, "AIM Doctor Diagnostics") {
+		t.Errorf("expected doctor output to contain 'AIM Doctor Diagnostics', got:\n%s", outStr)
+	}
+}

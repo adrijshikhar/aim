@@ -40,16 +40,24 @@ func newListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command
 	}
 }
 
-func formatProfileUsageBadge(cache *usage.CacheStore, agent, profileName string, profDir ...string) string {
+func formatProfileUsageBadge(cache *usage.CacheStore, reg *agents.Registry, agent, profileName string, profDir ...string) string {
 	dir := ""
 	if len(profDir) > 0 {
 		dir = profDir[0]
 	}
-	rep := usage.InspectProfile(context.Background(), usage.TargetProfile{
+	target := usage.TargetProfile{
 		Agent:      agent,
 		Profile:    profileName,
 		ProfileDir: dir,
-	}, cache)
+	}
+	if reg != nil {
+		if ad, err := reg.Get(agent); err == nil && ad != nil {
+			if cachedProv, ok := ad.(agents.CachedUsageProvider); ok {
+				target.GetCachedUsageFn = cachedProv.GetCachedUsage
+			}
+		}
+	}
+	rep := usage.InspectProfile(context.Background(), target, cache)
 
 	if rep.Status == usage.StatusIdle {
 		return "[idle: ready on use]"
@@ -195,7 +203,7 @@ func runListTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, 
 
 		for i, p := range profiles {
 			badgeStr := ""
-			if summary := formatProfileUsageBadge(cache, canonicalAgent, p, pm.ProfileDir(p)); summary != "" {
+			if summary := formatProfileUsageBadge(cache, reg, canonicalAgent, p, pm.ProfileDir(p)); summary != "" {
 				if strings.HasPrefix(summary, "[") && strings.HasSuffix(summary, "]") {
 					badgeStr = summary
 				} else {
@@ -256,7 +264,7 @@ func runListTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, 
 		var summaries []string
 		if len(agentsList) > 0 {
 			for _, ag := range agentsList {
-				if s := formatProfileUsageBadge(cache, ag, p, pDir); s != "" {
+				if s := formatProfileUsageBadge(cache, reg, ag, p, pDir); s != "" {
 					if len(agentsList) > 1 {
 						summaries = append(summaries, fmt.Sprintf("%s: %s", ag, s))
 					} else {
@@ -266,7 +274,7 @@ func runListTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, 
 			}
 		} else if reg != nil {
 			for _, ad := range reg.All() {
-				if s := formatProfileUsageBadge(cache, ad.Name(), p, pDir); s != "" {
+				if s := formatProfileUsageBadge(cache, reg, ad.Name(), p, pDir); s != "" {
 					summaries = append(summaries, s)
 				}
 			}
