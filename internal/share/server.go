@@ -35,7 +35,6 @@ type Server struct {
 type pendingRequest struct {
 	info    PendingRequestInfo
 	matched *SharedProfileConfig
-	respCh  chan *LeaseResponse
 }
 
 func NewServer(store *ShareStore, profilesDir string, nodeID string, port int) *Server {
@@ -308,7 +307,6 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt: expiresAt,
 		},
 		matched: matched,
-		respCh:  make(chan *LeaseResponse, 1),
 	}
 	s.pending[reqID] = pr
 	s.pendingMu.Unlock()
@@ -508,9 +506,6 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	pr, exists := s.pending[req.RequestID]
 	if exists {
 		delete(s.pending, req.RequestID)
-		if pr.respCh != nil {
-			close(pr.respCh)
-		}
 	}
 	s.pendingMu.Unlock()
 
@@ -654,7 +649,6 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		requesterID    string
 		requesterIP    string
 		requestedHours int
-		respCh         chan *LeaseResponse
 	)
 
 	if exists {
@@ -663,7 +657,6 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		requesterID = pr.info.Request.RequesterID
 		requesterIP = pr.info.Request.RequesterIP
 		requestedHours = pr.info.Request.RequestedHours
-		respCh = pr.respCh
 	} else {
 		// Look up in SQLite
 		rec, err := s.store.GetShareRequest(reqID)
@@ -779,13 +772,6 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	s.approvedResults[reqID] = resp
 	s.pendingMu.Unlock()
 
-	if respCh != nil {
-		select {
-		case respCh <- resp:
-		default:
-		}
-	}
-
 	_ = s.store.AppendAudit(AuditEntry{
 		Action:  "LEASE_GRANTED",
 		Actor:   requesterID,
@@ -846,10 +832,6 @@ func (s *Server) DenyRequest(reqID string) error {
 	delete(s.pending, reqID)
 	s.deniedResults[reqID] = true
 	s.pendingMu.Unlock()
-
-	if exists && pr.respCh != nil {
-		close(pr.respCh)
-	}
 
 	_ = s.store.AppendAudit(AuditEntry{
 		Action:  "LEASE_DENIED",
