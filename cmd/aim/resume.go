@@ -14,6 +14,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 	"github.com/aim-cli/aim/internal/session/catalyst"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
@@ -69,6 +70,14 @@ Flags:
 			}
 			agentName := cleanArgs[0]
 			profileName := cleanArgs[1]
+
+			if pm != nil {
+				leaseMgr := share.NewLeaseManager(pm.ProfilesRoot())
+				if leaseMgr.HasLease(profileName) && leaseMgr.IsLeaseExpired(profileName) {
+					_ = leaseMgr.RevokeLease(profileName)
+					return fmt.Errorf("leased profile %q has expired or was revoked", profileName)
+				}
+			}
 
 			if reg != nil {
 				if ad, err := reg.Get(agentName); err == nil {

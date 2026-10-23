@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -67,9 +69,14 @@ func (d *DiscoveryService) PingPeerWithURL(ctx context.Context, rawURL string) (
 	return peer, nil
 }
 
-func (d *DiscoveryService) PingPeer(ctx context.Context, ip string) (*PeerInfo, error) {
-	host := strings.Split(ip, ":")[0]
-	url := fmt.Sprintf("http://%s:%d", host, d.port)
+func (d *DiscoveryService) PingPeer(ctx context.Context, target string) (*PeerInfo, error) {
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		return d.PingPeerWithURL(ctx, target)
+	}
+	if host, port, err := net.SplitHostPort(target); err == nil {
+		return d.PingPeerWithURL(ctx, fmt.Sprintf("http://%s", net.JoinHostPort(host, port)))
+	}
+	url := fmt.Sprintf("http://%s", net.JoinHostPort(target, strconv.Itoa(d.port)))
 	return d.PingPeerWithURL(ctx, url)
 }
 
@@ -91,12 +98,18 @@ func (d *DiscoveryService) RefreshPeers(ctx context.Context) ([]PeerInfo, error)
 			if target == "" {
 				target = peer.VPNIP
 			}
-			hostOnly := strings.Split(target, ":")[0]
+			hostOnly := target
+			if h, _, err := net.SplitHostPort(target); err == nil {
+				hostOnly = h
+			}
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			res, err := d.PingPeer(pingCtx, hostOnly)
 			if err != nil && peer.VPNIP != "" && peer.VPNIP != target {
-				vpnHostOnly := strings.Split(peer.VPNIP, ":")[0]
+				vpnHostOnly := peer.VPNIP
+				if vh, _, err := net.SplitHostPort(peer.VPNIP); err == nil {
+					vpnHostOnly = vh
+				}
 				res, err = d.PingPeer(pingCtx, vpnHostOnly)
 			}
 			if err != nil && !strings.Contains(hostOnly, ".") {

@@ -1,20 +1,20 @@
 package share
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/merge"
-)
-
-var (
-	leaseOpMu sync.Mutex
 )
 
 type LeaseMeta struct {
@@ -22,12 +22,15 @@ type LeaseMeta struct {
 	SourcePeer    string    `json:"source_peer"`
 	SourceProfile string    `json:"source_profile"`
 	Agent         string    `json:"agent"`
+	Agents        []string  `json:"agents,omitempty"`
 	GrantedAt     time.Time `json:"granted_at"`
 	ExpiresAt     time.Time `json:"expires_at"`
+	Revoked       bool      `json:"revoked,omitempty"`
 }
 
 type LeaseManager struct {
 	profilesDir string
+	NotifyFn    func(sourcePeer, leaseID string)
 }
 
 func NewLeaseManager(profilesDir string) *LeaseManager {
@@ -54,16 +57,15 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		return "", fmt.Errorf("invalid profile target path traversal: %s", localProfileName)
 	}
 
-	leaseOpMu.Lock()
-	defer leaseOpMu.Unlock()
-
 	lockName := fmt.Sprintf(".lease-%s.lock", strings.ReplaceAll(localProfileName, ":", "-"))
 	lockPath := filepath.Join(cleanProfilesRoot, lockName)
 	lk, err := merge.LockExclusive(lockPath, 10*time.Second)
 	if err != nil {
 		return "", fmt.Errorf("failed to acquire lease lock for %s: %w", localProfileName, err)
 	}
-	defer lk.Unlock()
+	defer func() {
+		_ = lk.Unlock()
+	}()
 
 	// Protect existing permanent user profiles from being overwritten or deleted as leases
 	if info, err := os.Stat(cleanTargetDir); err == nil && info.IsDir() {
@@ -122,11 +124,41 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		}
 	}
 
+	detectedAgents := make([]string, 0)
+	seenAgent := make(map[string]bool)
+	if resp.Agent != "" {
+		detectedAgents = append(detectedAgents, resp.Agent)
+		seenAgent[resp.Agent] = true
+	}
+	for _, a := range resp.Agents {
+		if !seenAgent[a] {
+			detectedAgents = append(detectedAgents, a)
+			seenAgent[a] = true
+		}
+	}
+	for _, sf := range staged {
+		slash := sf.relPath
+		if strings.HasPrefix(slash, ".claude") && !seenAgent["claude"] {
+			detectedAgents = append(detectedAgents, "claude")
+			seenAgent["claude"] = true
+		} else if strings.HasPrefix(slash, ".codex") && !seenAgent["codex"] {
+			detectedAgents = append(detectedAgents, "codex")
+			seenAgent["codex"] = true
+		} else if strings.HasPrefix(slash, ".gemini/antigravity") && !seenAgent["agy"] {
+			detectedAgents = append(detectedAgents, "agy")
+			seenAgent["agy"] = true
+		} else if strings.HasPrefix(slash, ".gemini") && !seenAgent["gemini"] {
+			detectedAgents = append(detectedAgents, "gemini")
+			seenAgent["gemini"] = true
+		}
+	}
+
 	meta := LeaseMeta{
 		LeaseID:       resp.LeaseID,
 		SourcePeer:    sourcePeer,
 		SourceProfile: profileName,
 		Agent:         resp.Agent,
+		Agents:        detectedAgents,
 		GrantedAt:     time.Now(),
 		ExpiresAt:     resp.ExpiresAt,
 	}
@@ -251,46 +283,44 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 				_ = os.Remove(b.bakPath)
 			}
 		}
-
-		return localProfileName, nil
-	}
-
-	// First install: write into a clean staging directory first so failed/interrupted installs leave no partial directory behind
-	stagingDir := fmt.Sprintf("%s.tmp.%d.%d", cleanTargetDir, os.Getpid(), time.Now().UnixNano())
-	if err := os.MkdirAll(stagingDir, 0700); err != nil {
-		return "", fmt.Errorf("failed to create staging dir: %w", err)
-	}
-	success := false
-	defer func() {
-		if !success {
-			_ = os.RemoveAll(stagingDir)
+	} else {
+		// First install: write into a clean staging directory first so failed/interrupted installs leave no partial directory behind
+		stagingDir := fmt.Sprintf("%s.tmp.%d.%d", cleanTargetDir, os.Getpid(), time.Now().UnixNano())
+		if err := os.MkdirAll(stagingDir, 0700); err != nil {
+			return "", fmt.Errorf("failed to create staging dir: %w", err)
 		}
-	}()
+		success := false
+		defer func() {
+			if !success {
+				_ = os.RemoveAll(stagingDir)
+			}
+		}()
 
-	// Write credential files into staging directory
-	for _, f := range staged {
-		destPath := filepath.Join(stagingDir, filepath.FromSlash(f.relPath))
-		if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
-			return "", fmt.Errorf("failed to create dir for %s: %w", destPath, err)
+		// Write credential files into staging directory
+		for _, f := range staged {
+			destPath := filepath.Join(stagingDir, filepath.FromSlash(f.relPath))
+			if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+				return "", fmt.Errorf("failed to create dir for %s: %w", destPath, err)
+			}
+			if err := os.WriteFile(destPath, f.content, 0600); err != nil {
+				return "", fmt.Errorf("failed to write %s: %w", destPath, err)
+			}
 		}
-		if err := os.WriteFile(destPath, f.content, 0600); err != nil {
-			return "", fmt.Errorf("failed to write %s: %w", destPath, err)
+
+		// Write metadata into staging directory
+		if err := os.WriteFile(filepath.Join(stagingDir, ".aim-lease.json"), metaData, 0600); err != nil {
+			return "", fmt.Errorf("failed to write lease metadata: %w", err)
 		}
-	}
 
-	// Write metadata into staging directory
-	if err := os.WriteFile(filepath.Join(stagingDir, ".aim-lease.json"), metaData, 0600); err != nil {
-		return "", fmt.Errorf("failed to write lease metadata: %w", err)
+		// Atomically replace target directory
+		if _, err := os.Stat(cleanTargetDir); err == nil {
+			_ = os.RemoveAll(cleanTargetDir)
+		}
+		if err := os.Rename(stagingDir, cleanTargetDir); err != nil {
+			return "", fmt.Errorf("failed to publish lease: %w", err)
+		}
+		success = true
 	}
-
-	// Atomically replace target directory
-	if _, err := os.Stat(cleanTargetDir); err == nil {
-		_ = os.RemoveAll(cleanTargetDir)
-	}
-	if err := os.Rename(stagingDir, cleanTargetDir); err != nil {
-		return "", fmt.Errorf("failed to publish lease: %w", err)
-	}
-	success = true
 
 	return localProfileName, nil
 }
@@ -311,7 +341,125 @@ func (m *LeaseManager) IsLeaseExpired(localProfileName string) bool {
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return false
 	}
-	return time.Now().After(meta.ExpiresAt)
+	return meta.Revoked || time.Now().After(meta.ExpiresAt)
+}
+
+// ScrubCredentials thoroughly scrubs sensitive tokens and keys from a leased profile directory.
+func (m *LeaseManager) ScrubCredentials(targetDir string) {
+	credentialFiles := []string{
+		".claude/.credentials.json",
+		".claude/auth.json",
+		".claude.json",
+		".claude/.claude.json",
+		".codex/auth.json",
+		".codex/config.toml",
+		".config/codex/auth.json",
+		".gemini/antigravity-cli/antigravity-oauth-token",
+		".gemini/antigravity-cli/config.json",
+		".config/gcloud/application_default_credentials.json",
+		".gemini/gemini-oauth-token",
+		".gemini/oauth.json",
+		".local/share/uv/credentials/credentials.toml",
+		".local/share/uv/credentials/credentials.toml.lock",
+	}
+	for _, rel := range credentialFiles {
+		p := filepath.Join(targetDir, filepath.FromSlash(rel))
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			_ = os.WriteFile(p, make([]byte, fi.Size()), 0600)
+			_ = os.Remove(p)
+		}
+	}
+}
+
+// RevokeLease marks a local profile as revoked and immediately scrubs all credentials from disk.
+func (m *LeaseManager) RevokeLease(localProfileName string) error {
+	if localProfileName == "" || localProfileName == "." || localProfileName == ".." ||
+		strings.Contains(localProfileName, "/") || strings.Contains(localProfileName, "\\") {
+		return fmt.Errorf("invalid profile name: %q", localProfileName)
+	}
+	cleanProfilesRoot := filepath.Clean(m.profilesDir)
+	targetDir := filepath.Join(cleanProfilesRoot, localProfileName)
+	cleanTargetDir := filepath.Clean(targetDir)
+	if !strings.HasPrefix(cleanTargetDir, cleanProfilesRoot+string(filepath.Separator)) {
+		return fmt.Errorf("profile path escapes profiles root: %q", localProfileName)
+	}
+
+	lockName := fmt.Sprintf(".lease-%s.lock", strings.ReplaceAll(localProfileName, ":", "-"))
+	lockPath := filepath.Join(cleanProfilesRoot, lockName)
+	lk, err := merge.LockExclusive(lockPath, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to acquire lease lock for %s: %w", localProfileName, err)
+	}
+	defer func() {
+		_ = lk.Unlock()
+	}()
+
+	metaFile := filepath.Join(cleanTargetDir, ".aim-lease.json")
+	data, err := os.ReadFile(metaFile)
+	if err != nil {
+		return err
+	}
+	var meta LeaseMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return err
+	}
+	meta.Revoked = true
+	updated, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", metaFile, os.Getpid(), time.Now().UnixNano())
+	if err := os.WriteFile(tmp, updated, 0600); err == nil {
+		_ = os.Rename(tmp, metaFile)
+	}
+	m.ScrubCredentials(cleanTargetDir)
+	return nil
+}
+
+// GetLeaseMeta retrieves the lease metadata for a leased profile if it exists.
+func (m *LeaseManager) GetLeaseMeta(localProfileName string) (*LeaseMeta, error) {
+	metaFile := filepath.Join(m.profilesDir, localProfileName, ".aim-lease.json")
+	data, err := os.ReadFile(metaFile)
+	if err != nil {
+		return nil, err
+	}
+	var meta LeaseMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+func (m *LeaseManager) RevokeLeaseByID(leaseID string) (string, error) {
+	if leaseID == "" {
+		return "", fmt.Errorf("empty lease_id")
+	}
+	entries, err := os.ReadDir(m.profilesDir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		targetDir := filepath.Join(m.profilesDir, e.Name())
+		metaFile := filepath.Join(targetDir, ".aim-lease.json")
+		data, err := os.ReadFile(metaFile)
+		if err != nil {
+			continue
+		}
+		var meta LeaseMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if meta.LeaseID == leaseID {
+			if err := m.RevokeLease(e.Name()); err != nil {
+				return "", err
+			}
+			return e.Name(), nil
+		}
+	}
+	return "", fmt.Errorf("lease %s not found locally", leaseID)
 }
 
 func (m *LeaseManager) ReleaseLease(localProfileName string) error {
@@ -331,16 +479,15 @@ func (m *LeaseManager) releaseLeaseInternal(localProfileName string, onlyIfExpir
 		return fmt.Errorf("profile path escapes profiles root: %q", localProfileName)
 	}
 
-	leaseOpMu.Lock()
-	defer leaseOpMu.Unlock()
-
 	lockName := fmt.Sprintf(".lease-%s.lock", strings.ReplaceAll(localProfileName, ":", "-"))
 	lockPath := filepath.Join(cleanProfilesRoot, lockName)
 	lk, err := merge.LockExclusive(lockPath, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to acquire lease lock for %s: %w", localProfileName, err)
 	}
-	defer lk.Unlock()
+	defer func() {
+		_ = lk.Unlock()
+	}()
 
 	// Strictly require .aim-lease.json so permanent non-leased profiles cannot be removed
 	leaseFile := filepath.Join(cleanTarget, ".aim-lease.json")
@@ -348,21 +495,83 @@ func (m *LeaseManager) releaseLeaseInternal(localProfileName string, onlyIfExpir
 		return fmt.Errorf("profile %q is not an ephemeral leased profile (missing .aim-lease.json)", localProfileName)
 	}
 
+	var meta LeaseMeta
+	if data, err := os.ReadFile(leaseFile); err == nil {
+		_ = json.Unmarshal(data, &meta)
+	}
+
 	if onlyIfExpired {
-		data, err := os.ReadFile(leaseFile)
-		if err != nil {
-			return err
-		}
-		var meta LeaseMeta
-		if err := json.Unmarshal(data, &meta); err != nil {
-			return err
-		}
-		if !time.Now().After(meta.ExpiresAt) {
+		if !meta.Revoked && !time.Now().After(meta.ExpiresAt) {
 			return fmt.Errorf("lease %q is not expired", localProfileName)
 		}
 	}
 
-	return os.RemoveAll(cleanTarget)
+	err = os.RemoveAll(cleanTarget)
+	if err == nil {
+		if cfg, cfgErr := config.LoadConfig(); cfgErr == nil && cfg != nil && cfg.Profiles != nil {
+			if _, exists := cfg.Profiles[localProfileName]; exists {
+				delete(cfg.Profiles, localProfileName)
+				_ = config.SaveConfig(cfg)
+			}
+		}
+		if meta.LeaseID != "" && meta.SourcePeer != "" {
+			m.NotifyHostLeaseReleased(meta.SourcePeer, meta.LeaseID)
+		}
+	}
+	return err
+}
+
+// NotifyHostLeaseReleased asynchronously notifies the host node that the borrower released the lease.
+func (m *LeaseManager) NotifyHostLeaseReleased(sourcePeer, leaseID string) {
+	if sourcePeer == "" || leaseID == "" {
+		return
+	}
+	if m.NotifyFn != nil {
+		m.NotifyFn(sourcePeer, leaseID)
+		return
+	}
+	go func() {
+		host, _ := os.Hostname()
+		targets := []string{sourcePeer}
+		store := NewStore(config.BaseDir())
+		defer store.Close()
+		for _, p := range store.GetPeers() {
+			if strings.EqualFold(p.HostName, sourcePeer) || p.ID == sourcePeer || p.VPNIP == sourcePeer {
+				if p.VPNIP != "" && p.VPNIP != sourcePeer {
+					targets = append(targets, p.VPNIP)
+				}
+			}
+		}
+		if !strings.Contains(sourcePeer, ".") {
+			targets = append(targets, sourcePeer+".local")
+		}
+
+		body, _ := json.Marshal(map[string]string{
+			"lease_id":    leaseID,
+			"borrower_id": host,
+		})
+		for _, target := range targets {
+			cleanTarget := target
+			if idx := strings.Index(cleanTarget, "%"); idx != -1 {
+				cleanTarget = cleanTarget[:idx]
+			}
+			if idx := strings.LastIndex(cleanTarget, ":"); idx != -1 && !strings.Contains(cleanTarget, "]") {
+				cleanTarget = cleanTarget[:idx]
+			}
+			url := fmt.Sprintf("http://%s/api/share/lease/release", net.JoinHostPort(cleanTarget, "4319"))
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+			if err == nil {
+				req.Header.Set("Content-Type", "application/json")
+				if resp, err := http.DefaultClient.Do(req); err == nil {
+					_ = resp.Body.Close()
+					cancel()
+					return // successfully notified host
+				}
+			}
+			cancel()
+		}
+	}()
 }
 
 func (m *LeaseManager) CleanExpiredLeases() (int, error) {

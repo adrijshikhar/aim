@@ -11,6 +11,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -68,8 +69,8 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 		return result, nil
 	}
 
-	// Listing all profiles across all agents (unique profile per entry)
-	allProfs, err := s.pm.ListProfiles()
+	// Listing all configured profiles across all agents (unique profile per entry)
+	allProfs, err := s.pm.ListConfiguredProfiles()
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +99,16 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 
 func (s *profileService) buildAdapterInfo(agentName, profileName string, adapter agents.AgentAdapter) AdapterInfo {
 	pDir := s.pm.ProfileDir(profileName)
+	if s.pm != nil {
+		leaseMgr := share.NewLeaseManager(s.pm.ProfilesRoot())
+		if leaseMgr.HasLease(profileName) && leaseMgr.IsLeaseExpired(profileName) {
+			return AdapterInfo{
+				Agent:          agentName,
+				HasCredentials: false,
+			}
+		}
+	}
+
 	hasCreds := usage.HasCredentialsOnDisk(agentName, pDir)
 
 	acc := profile.GetProfileAccountInfoForAgent(pDir, agentName)
@@ -175,6 +186,11 @@ func (s *profileService) buildProfileDTO(profileName string, agentNames []string
 		}
 	}
 
+	isLeased := false
+	if s.pm != nil {
+		isLeased = s.pm.IsLeased(profileName)
+	}
+
 	return ProfileDTO{
 		Agent:          primaryAgent,
 		Name:           profileName,
@@ -185,6 +201,7 @@ func (s *profileService) buildProfileDTO(profileName string, agentNames []string
 		MCPGlobal:      mcpGlobal,
 		PluginsGlobal:  pluginsGlobal,
 		Adapters:       adapters,
+		IsLeased:       isLeased,
 	}
 }
 

@@ -39,6 +39,7 @@ export interface ProfileDTO {
   mcp_global?: boolean;
   plugins_global?: boolean;
   adapters?: AdapterInfo[];
+  is_leased?: boolean;
 }
 
 export interface CreateProfileRequest {
@@ -397,6 +398,7 @@ export interface VPNStatusDTO {
 export interface SharedProfileConfigDTO {
   name: string;
   agent: string;
+  agents?: string[];
   auto_approve: boolean;
   max_lease_ttl: number;
   enabled: boolean;
@@ -417,15 +419,18 @@ export interface ActiveLeaseDTO {
   source_peer: string;
   source_profile: string;
   agent: string;
+  agents?: string[];
   granted_at: string;
   expires_at: string;
   is_expired: boolean;
+  is_revoked?: boolean;
 }
 
 export interface GrantedLeaseDTO {
   lease_id: string;
   profile_name: string;
   agent: string;
+  agents?: string[];
   borrower_id: string;
   borrower_ip: string;
   granted_at: string;
@@ -495,6 +500,7 @@ export interface ShareStatusDTO {
   pending_requests?: PendingRequestDTO[];
   outgoing_requests?: OutgoingRequestDTO[];
   audit_logs?: AuditEntryDTO[];
+  total_audit_count?: number;
   schedules?: SchedulePolicyDTO[];
 }
 

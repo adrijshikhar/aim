@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
@@ -238,8 +240,8 @@ func runListTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, 
 		return nil
 	}
 
-	// List all profiles with attached agent tags
-	profiles, err := pm.ListProfiles()
+	// List all configured profiles with attached agent tags
+	profiles, err := pm.ListConfiguredProfiles()
 	if err != nil {
 		return err
 	}
@@ -247,72 +249,146 @@ func runListTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, 
 	if len(profiles) == 0 {
 		emptyStyle := lipgloss.NewStyle().Foreground(tui.TextMuted)
 		fmt.Fprintln(out, emptyStyle.Render("  No profiles found. Run: aim login agy <profile>"))
-		return nil
-	}
-	t := presenter.NewTable(out).
-		Border(lipgloss.HiddenBorder()).
-		Headers("#", "PROFILE", "AGENTS", "QUOTA STATUS", "STORAGE PATH")
+	} else {
+		t := presenter.NewTable(out).
+			Border(lipgloss.HiddenBorder()).
+			Headers("#", "PROFILE", "AGENTS", "QUOTA STATUS", "STORAGE PATH")
 
-	for i, p := range profiles {
-		agentsList := cfg.GetProfileAgents(p)
-		agentStr := ""
-		if len(agentsList) > 0 {
-			agentStr = fmt.Sprintf("[%s]", strings.Join(agentsList, ", "))
-		}
+		for i, p := range profiles {
+			agentsList := cfg.GetProfileAgents(p)
+			agentStr := ""
+			if len(agentsList) > 0 {
+				agentStr = fmt.Sprintf("[%s]", strings.Join(agentsList, ", "))
+			}
 
-		pDir := pm.ProfileDir(p)
-		var summaries []string
-		if len(agentsList) > 0 {
-			for _, ag := range agentsList {
-				if s := formatProfileUsageBadge(cache, reg, ag, p, pDir); s != "" {
-					if len(agentsList) > 1 {
-						summaries = append(summaries, fmt.Sprintf("%s: %s", ag, s))
-					} else {
+			pDir := pm.ProfileDir(p)
+			var summaries []string
+			if len(agentsList) > 0 {
+				for _, ag := range agentsList {
+					if s := formatProfileUsageBadge(cache, reg, ag, p, pDir); s != "" {
+						if len(agentsList) > 1 {
+							summaries = append(summaries, fmt.Sprintf("%s: %s", ag, s))
+						} else {
+							summaries = append(summaries, s)
+						}
+					}
+				}
+			} else if reg != nil {
+				for _, ad := range reg.All() {
+					if s := formatProfileUsageBadge(cache, reg, ad.Name(), p, pDir); s != "" {
 						summaries = append(summaries, s)
 					}
 				}
 			}
-		} else if reg != nil {
-			for _, ad := range reg.All() {
-				if s := formatProfileUsageBadge(cache, reg, ad.Name(), p, pDir); s != "" {
-					summaries = append(summaries, s)
-				}
+			badgeStr := ""
+			if len(summaries) == 1 && strings.HasPrefix(summaries[0], "[") && strings.HasSuffix(summaries[0], "]") {
+				badgeStr = summaries[0]
+			} else if len(summaries) > 0 {
+				badgeStr = fmt.Sprintf("(%s)", strings.Join(summaries, ", "))
 			}
-		}
-		badgeStr := ""
-		if len(summaries) == 1 && strings.HasPrefix(summaries[0], "[") && strings.HasSuffix(summaries[0], "]") {
-			badgeStr = summaries[0]
-		} else if len(summaries) > 0 {
-			badgeStr = fmt.Sprintf("(%s)", strings.Join(summaries, ", "))
+
+			t.Row(
+				fmt.Sprintf("%d.", i+1),
+				p,
+				agentStr,
+				badgeStr,
+				pDir,
+			)
 		}
 
-		t.Row(
-			fmt.Sprintf("%d.", i+1),
-			p,
-			agentStr,
-			badgeStr,
-			pDir,
-		)
+		t.StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+			}
+			switch col {
+			case 0:
+				return lipgloss.NewStyle().Foreground(tui.TextMuted)
+			case 1:
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+			case 2:
+				return lipgloss.NewStyle().Foreground(tui.AccentPurple)
+			case 3:
+				return lipgloss.NewStyle().Foreground(tui.AccentCyan)
+			default:
+				return lipgloss.NewStyle().Foreground(tui.TextDim)
+			}
+		})
+
+		fmt.Fprintln(out, t.Render())
 	}
 
-	t.StyleFunc(func(row, col int) lipgloss.Style {
-		if row == table.HeaderRow {
-			return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+	// Render ephemeral borrowed leases in a separate dedicated section
+	var leasedProfiles []string
+	if all, err := pm.ListProfiles(); err == nil {
+		for _, p := range all {
+			if pm.IsLeased(p) {
+				leasedProfiles = append(leasedProfiles, p)
+			}
 		}
-		switch col {
-		case 0:
-			return lipgloss.NewStyle().Foreground(tui.TextMuted)
-		case 1:
-			return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
-		case 2:
-			return lipgloss.NewStyle().Foreground(tui.AccentPurple)
-		case 3:
-			return lipgloss.NewStyle().Foreground(tui.AccentCyan)
-		default:
-			return lipgloss.NewStyle().Foreground(tui.TextDim)
-		}
-	})
+	}
 
-	fmt.Fprintln(out, t.Render())
+	if len(leasedProfiles) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, headerStyle.Render("=== Borrowed Leases (P2P) ==="))
+		lt := presenter.NewTable(out).
+			Border(lipgloss.HiddenBorder()).
+			Headers("#", "LEASE PROFILE", "SOURCE PEER", "AGENTS", "STATUS", "STORAGE PATH")
+
+		leaseMgr := share.NewLeaseManager(pm.ProfilesRoot())
+		for i, p := range leasedProfiles {
+			meta, _ := leaseMgr.GetLeaseMeta(p)
+			source := ""
+			status := "Active"
+			agentStr := ""
+			if meta != nil {
+				source = meta.SourcePeer
+				if len(meta.Agents) > 0 {
+					agentStr = fmt.Sprintf("[%s]", strings.Join(meta.Agents, ", "))
+				}
+				if meta.Revoked {
+					status = lipgloss.NewStyle().Foreground(tui.StatusRed).Render("Revoked")
+				} else if time.Now().After(meta.ExpiresAt) {
+					status = lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("Expired")
+				} else {
+					rem := time.Until(meta.ExpiresAt).Round(time.Minute)
+					status = lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(fmt.Sprintf("Active (%s left)", rem))
+				}
+			} else {
+				status = lipgloss.NewStyle().Foreground(tui.TextMuted).Render("Unknown")
+			}
+
+			lt.Row(
+				fmt.Sprintf("%d.", i+1),
+				p,
+				source,
+				agentStr,
+				status,
+				pm.ProfileDir(p),
+			)
+		}
+
+		lt.StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
+			}
+			switch col {
+			case 0:
+				return lipgloss.NewStyle().Foreground(tui.TextMuted)
+			case 1:
+				return lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+			case 2:
+				return lipgloss.NewStyle().Foreground(tui.AccentCyan)
+			case 3:
+				return lipgloss.NewStyle().Foreground(tui.AccentPurple)
+			case 4:
+				return lipgloss.NewStyle()
+			default:
+				return lipgloss.NewStyle().Foreground(tui.TextDim)
+			}
+		})
+
+		fmt.Fprintln(out, lt.Render())
+	}
+
 	return nil
 }

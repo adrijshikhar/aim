@@ -147,6 +147,7 @@ export interface QuotaBreakdownProps {
   bottleneckPct?: number;
   isExhausted?: boolean;
   sessionCount?: number;
+  layout?: 'compact' | 'expanded';
 }
 
 export function QuotaBreakdown({
@@ -157,6 +158,7 @@ export function QuotaBreakdown({
   bottleneckPct = 100,
   isExhausted = false,
   sessionCount,
+  layout = 'expanded',
 }: QuotaBreakdownProps) {
   const activeSummary = quota?.summary || summary;
   const effectiveBottleneckPct = isExhausted ? 0 : (quota?.bottleneck_pct ?? bottleneckPct);
@@ -222,12 +224,6 @@ export function QuotaBreakdown({
     return 'bg-status-success-solid';
   };
 
-  const getTextColor = (pct: number) => {
-    if (pct <= 0) return 'text-status-danger';
-    if (pct <= 30) return 'text-status-warning';
-    return 'text-[#ededed]';
-  };
-
   // Find reset time from parsed summary or windows for card-level alerts
   const cardResetTime = React.useMemo(() => {
     if (parsed?.type === 'single' && parsed.single?.reset) return parsed.single.reset;
@@ -252,14 +248,21 @@ export function QuotaBreakdown({
     });
 
     return (
-      <div key={win.key} className="space-y-2 py-3 border-b border-border/40 last:border-b-0">
+      <div
+        key={win.key}
+        className="p-3.5 rounded-geist border border-border/60 bg-[#0e0e0e] hover:border-border/80 transition-colors space-y-2.5 shadow-2xs"
+      >
         {/* Header row: Window Label & Remaining % + Reset Countdown */}
         <div className="flex items-center justify-between text-xs font-sans">
           <div className="flex items-center gap-2">
             <span className="text-[#ededed] font-medium font-sans text-xs">
               {win.label}
             </span>
-            <span className={cn('font-mono font-semibold tabular-nums text-xs', getTextColor(win.pct))}>
+            <span className={cn('font-mono font-semibold tabular-nums text-xs px-2 py-0.5 rounded-full border', 
+              win.pct <= 0 ? 'bg-status-danger-bg border-status-danger-border text-status-danger' :
+              win.pct <= 30 ? 'bg-status-warning-bg border-status-warning-border text-status-warning' :
+              'bg-status-success-bg border-status-success-border text-status-success'
+            )}>
               {win.pct}% remaining
             </span>
           </div>
@@ -278,7 +281,7 @@ export function QuotaBreakdown({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label={`${win.label} quota`}
-          className="relative w-full h-2 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
+          className="relative w-full h-1.5 rounded-full overflow-hidden border bg-[#181818] border-[#262626]/50"
         >
           {/* Actual Remaining Capacity Fill - cleanly empty when remaining is 0% */}
           {win.pct > 0 && (
@@ -312,8 +315,8 @@ export function QuotaBreakdown({
         </div>
 
         {/* Intelligence Line: CodexBar Deficit/Reserve Pacing & Runout Projection */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] pt-0.5 font-sans">
-          <div className="flex items-center gap-1.5 font-sans">
+        <div className="flex items-center justify-between gap-2 text-[11px] pt-1 border-t border-border/30 font-sans">
+          <div className="flex items-center gap-1.5 font-sans min-w-0">
             {pacing.stage === 'exhausted' ? (
               <Clock className="h-3 w-3 text-muted-foreground/60 shrink-0" />
             ) : pacing.stage === 'deficit' ? (
@@ -326,7 +329,7 @@ export function QuotaBreakdown({
 
             <span
               className={cn(
-                'font-medium whitespace-nowrap',
+                'font-medium truncate',
                 pacing.stage === 'exhausted'
                   ? 'text-muted-foreground'
                   : pacing.stage === 'deficit'
@@ -338,8 +341,8 @@ export function QuotaBreakdown({
             >
               {pacing.stage === 'exhausted' ? 'Window exhausted' : pacing.paceLabel}
             </span>
-            <span className="text-muted-foreground/40">·</span>
-            <span className="text-muted-foreground font-normal whitespace-nowrap">
+            <span className="text-muted-foreground/40 shrink-0">·</span>
+            <span className="text-muted-foreground font-normal truncate">
               {pacing.stage === 'exhausted'
                 ? (win.reset ? `Resets in ${win.reset}` : 'Awaiting reset')
                 : pacing.projectionLabel}
@@ -348,7 +351,7 @@ export function QuotaBreakdown({
 
           {pacing.windowDateRange && (
             <span
-              className="text-[11px] font-sans text-muted-foreground/75 truncate whitespace-nowrap tracking-normal"
+              className="text-[10px] font-mono text-muted-foreground/60 truncate shrink-0"
               title={pacing.windowDateRange}
             >
               {pacing.windowDateRange}
@@ -360,7 +363,7 @@ export function QuotaBreakdown({
   };
 
   return (
-    <div className="rounded-geist border border-[#2a2a2a] bg-[#0c0c0c] overflow-hidden shadow-sm">
+    <div className="rounded-geist border border-[#262626] bg-[#0c0c0c] overflow-hidden shadow-xs flex flex-col justify-between hover:border-[#333333] transition-all">
       {/* 1. UNIFIED CARD HEADER: Engine badge, Status Pill, Account info, Refresh time */}
       <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0a0a0a]">
         <div className="flex items-center gap-2.5 flex-wrap">
@@ -465,8 +468,10 @@ export function QuotaBreakdown({
                 </div>
                 <div
                   className={cn(
-                    'grid gap-2.5',
-                    m.windows.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'
+                    'grid gap-3',
+                    layout === 'compact' || m.windows.length === 1
+                      ? 'grid-cols-1'
+                      : 'grid-cols-1 md:grid-cols-2 gap-3.5'
                   )}
                 >
                   {m.windows

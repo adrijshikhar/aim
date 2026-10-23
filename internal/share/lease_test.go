@@ -12,9 +12,21 @@ import (
 	"time"
 )
 
-func TestLeaseManagerInstallAndExpiry(t *testing.T) {
-	profilesDir := t.TempDir()
+func setupTestLeaseManager(t *testing.T) (*LeaseManager, string) {
+	t.Helper()
+	tempHome := t.TempDir()
+	t.Setenv("AIM_HOME", tempHome)
+	profilesDir := filepath.Join(tempHome, "profiles")
+	if err := os.MkdirAll(profilesDir, 0700); err != nil {
+		t.Fatalf("failed to create temp profiles dir: %v", err)
+	}
 	mgr := NewLeaseManager(profilesDir)
+	mgr.NotifyFn = func(sourcePeer, leaseID string) {} // stub network notifications in tests
+	return mgr, profilesDir
+}
+
+func TestLeaseManagerInstallAndExpiry(t *testing.T) {
+	mgr, profilesDir := setupTestLeaseManager(t)
 
 	resp := &LeaseResponse{
 		Status:      "approved",
@@ -57,8 +69,7 @@ func TestLeaseManagerInstallAndExpiry(t *testing.T) {
 }
 
 func TestLeaseManagerPathTraversalRejection(t *testing.T) {
-	profilesDir := t.TempDir()
-	mgr := NewLeaseManager(profilesDir)
+	mgr, profilesDir := setupTestLeaseManager(t)
 
 	// Attempt path traversal using ../../evil.txt
 	resp := &LeaseResponse{
@@ -168,8 +179,7 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 }
 
 func TestLeaseManagerReleaseSafety(t *testing.T) {
-	profilesDir := t.TempDir()
-	mgr := NewLeaseManager(profilesDir)
+	mgr, profilesDir := setupTestLeaseManager(t)
 
 	// Permanent profile (no .aim-lease.json)
 	permDir := filepath.Join(profilesDir, "work")
@@ -196,8 +206,7 @@ func TestLeaseManagerReleaseSafety(t *testing.T) {
 }
 
 func TestLeaseManagerCleanExpired(t *testing.T) {
-	profilesDir := t.TempDir()
-	mgr := NewLeaseManager(profilesDir)
+	mgr, profilesDir := setupTestLeaseManager(t)
 
 	// Leased profile 1: expired
 	expiredResp := &LeaseResponse{
@@ -243,8 +252,7 @@ func TestLeaseManagerCleanExpired(t *testing.T) {
 }
 
 func TestLeaseManagerRenewalPreservesHistory(t *testing.T) {
-	profilesDir := t.TempDir()
-	mgr := NewLeaseManager(profilesDir)
+	mgr, profilesDir := setupTestLeaseManager(t)
 
 	resp1 := &LeaseResponse{
 		Status:      "approved",
@@ -308,8 +316,7 @@ func TestLeaseManagerRenewalPreservesHistory(t *testing.T) {
 }
 
 func TestLeaseManagerRenewalAtomicRollbackOnFailure(t *testing.T) {
-	profilesDir := t.TempDir()
-	mgr := NewLeaseManager(profilesDir)
+	mgr, profilesDir := setupTestLeaseManager(t)
 
 	initialExpiry := time.Now().Add(1 * time.Hour).Truncate(time.Second)
 	resp1 := &LeaseResponse{
@@ -397,8 +404,7 @@ func TestLeaseManagerRenewalAtomicRollbackOnFailure(t *testing.T) {
 }
 
 func TestLeaseManagerConcurrentRenewals(t *testing.T) {
-	profilesDir := t.TempDir()
-	mgr := NewLeaseManager(profilesDir)
+	mgr, profilesDir := setupTestLeaseManager(t)
 
 	resp1 := &LeaseResponse{
 		Status:      "approved",
@@ -462,5 +468,89 @@ func TestLeaseManagerConcurrentRenewals(t *testing.T) {
 	}
 	if !strings.HasPrefix(meta.LeaseID, "ls_renew_") {
 		t.Fatalf("unexpected lease ID after renewals: %s", meta.LeaseID)
+	}
+}
+
+func TestLeaseManagerScrubCredentials(t *testing.T) {
+	mgr, profilesDir := setupTestLeaseManager(t)
+
+	targetDir := filepath.Join(profilesDir, "test-scrub")
+	_ = os.MkdirAll(filepath.Join(targetDir, ".claude"), 0700)
+	_ = os.MkdirAll(filepath.Join(targetDir, ".codex"), 0700)
+	_ = os.MkdirAll(filepath.Join(targetDir, ".gemini", "antigravity-cli"), 0700)
+
+	claudeCreds := filepath.Join(targetDir, ".claude", ".credentials.json")
+	codexCreds := filepath.Join(targetDir, ".codex", "auth.json")
+	agyCreds := filepath.Join(targetDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	userFile := filepath.Join(targetDir, "user_notes.txt")
+
+	_ = os.WriteFile(claudeCreds, []byte("super-secret-claude-token"), 0600)
+	_ = os.WriteFile(codexCreds, []byte("super-secret-codex-token"), 0600)
+	_ = os.WriteFile(agyCreds, []byte("super-secret-agy-token"), 0600)
+	_ = os.WriteFile(userFile, []byte("keep-my-notes"), 0600)
+
+	mgr.ScrubCredentials(targetDir)
+
+	if _, err := os.Stat(claudeCreds); !os.IsNotExist(err) {
+		t.Errorf("expected claude credentials to be scrubbed and removed")
+	}
+	if _, err := os.Stat(codexCreds); !os.IsNotExist(err) {
+		t.Errorf("expected codex credentials to be scrubbed and removed")
+	}
+	if _, err := os.Stat(agyCreds); !os.IsNotExist(err) {
+		t.Errorf("expected agy credentials to be scrubbed and removed")
+	}
+	// User files must NOT be deleted
+	if data, err := os.ReadFile(userFile); err != nil || string(data) != "keep-my-notes" {
+		t.Errorf("user notes were affected by ScrubCredentials: %v", err)
+	}
+}
+
+func TestLeaseManagerRevokeLeaseAndScrub(t *testing.T) {
+	mgr, profilesDir := setupTestLeaseManager(t)
+
+	resp := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_revoke_test",
+		ProfileName: "work",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(2 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/.credentials.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"secret"}`)),
+			},
+		},
+	}
+
+	localName, err := mgr.InstallLease("peer1", "work", resp)
+	if err != nil {
+		t.Fatalf("InstallLease failed: %v", err)
+	}
+
+	credsPath := filepath.Join(profilesDir, localName, ".claude", ".credentials.json")
+	if _, err := os.Stat(credsPath); err != nil {
+		t.Fatalf("credentials not installed: %v", err)
+	}
+
+	// Revoke lease
+	if err := mgr.RevokeLease(localName); err != nil {
+		t.Fatalf("RevokeLease failed: %v", err)
+	}
+
+	// Check credentials are scrubbed
+	if _, err := os.Stat(credsPath); !os.IsNotExist(err) {
+		t.Errorf("expected credentials to be scrubbed on RevokeLease")
+	}
+
+	// Check metadata marked revoked
+	meta, err := mgr.GetLeaseMeta(localName)
+	if err != nil {
+		t.Fatalf("GetLeaseMeta failed: %v", err)
+	}
+	if !meta.Revoked {
+		t.Errorf("expected meta.Revoked to be true")
+	}
+	if !mgr.IsLeaseExpired(localName) {
+		t.Errorf("expected IsLeaseExpired to be true for revoked lease")
 	}
 }

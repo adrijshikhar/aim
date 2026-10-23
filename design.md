@@ -1,8 +1,8 @@
 # AIM Design System
 
 > **Theme**: Atom One Dark  
-> **Engine**: [Charm Lipgloss](https://github.com/charmbracelet/lipgloss)  
-> **Reference Implementation**: [`internal/tui/styles.go`](file:///Users/nemesis/Projects/my-projects/aim/internal/tui/styles.go)
+> **Engines**: [Charm Lipgloss](https://github.com/charmbracelet/lipgloss) (CLI / TUI) & [Tailwind CSS + Lucide](https://tailwindcss.com) (Web Dashboard)  
+> **Reference Implementations**: [`internal/tui/styles.go`](file:///Users/nemesis/Projects/my-projects/aim/internal/tui/styles.go) & [`web/src/`](file:///Users/nemesis/Projects/my-projects/aim/web/src/)
 
 ---
 
@@ -220,3 +220,61 @@ When adding new commands, views, or TUI components to AIM, enforce the following
 > [!TIP]
 > **Preserve raw text patterns for testability.**  
 > Smoke tests (`test/smoke_test.sh`) and CLI assertions grep stdout for tokens like `[OK]`, `[WARN]`, or profile names. Ensure the underlying text content remains uncorrupted when wrapped in Lipgloss styles.
+
+---
+
+## 7. Web Dashboard Design Standards (`web/`)
+
+The AIM Web Dashboard operates alongside the interactive TUI and headless CLI, adhering to Geist-inspired dark-tech ergonomics and strict Atom One Dark semantic styling.
+
+### 7.1 Icon System & Monoline Outline Invariant
+The web UI exclusively uses **minimalist monoline vector outline icons** via [`lucide-react`](https://lucide.dev):
+
+- **Pure Outlines Only:** Monoline stroke geometry (`stroke-width: 2`, `fill="none"`). Never use solid, filled, or 3D icon sets.
+- **Strict Prohibition of OS Emojis:** Never use raw Unicode or OS emojis (`🔒`, `✋`, `⚡`, `🚀`, `💡`, `🎉`, etc.) in labels, dropdowns, buttons, or badges. Emojis clash with dark-tech minimalism, introduce inconsistent OS rendering across platforms (macOS vs. Linux vs. Windows), and corrupt line-height metrics.
+- **Import Collision Guard:** Always alias Lucide icons that share names with UI components:
+  ```tsx
+  // ✅ Prevent collision with month-picker Calendar component
+  import { Calendar as CalendarIcon } from 'lucide-react';
+  import { Calendar } from '@/components/ui/calendar';
+  ```
+- **Semantic Icon Strokes:** Icons inherit Atom One Dark tokens directly:
+  - Inactive / Secondary: `text-muted-foreground` (`#5c6370`)
+  - Highlighted Entity: `text-accent-cyan` (`#56b6c2`)
+  - Active Connection / Link: `text-[#52a8ff]`
+  - Healthy / Active: `text-status-success` (`#98c379`)
+  - Warning / Impending: `text-status-warning` (`#e5c07b`)
+  - Danger / Expired: `text-status-danger` (`#e06c75`)
+
+### 7.2 Metric Cards & Zero-Count Color Rule
+When a metric card or stat counter displays a value of `0` (e.g. `0 Active Leases`), avoid misleading positive/green indicators:
+- **Zero Value:** Both the icon container (`bg-secondary text-muted-foreground border-border`) and status label (`text-muted-foreground`) must remain in neutral styling.
+- **Positive Count (> 0):** The icon container (`bg-[#183925] text-[#98c379] border-[#235836]`) and label (`text-status-success`) switch to active green strictly when the count is greater than zero.
+
+### 7.3 Column Balancing & Layout Ergonomics
+Forms and dashboard sections must maintain balanced visual weight to prevent awkward horizontal dead space on desktop displays:
+
+- **Prohibition of Full-Bleed Inputs:** Never stretch simple forms or small inputs across an unconstrained 1000px+ card. Inputs like selects, dates, and times must maintain natural, ergonomic widths (~180px–300px).
+- **Symmetric 50/50 Column Split (`grid-cols-1 lg:grid-cols-2`):** When pairing form builders with overviews (e.g., Schedule Rule Builder + Configured Policies list), use an equal 50/50 two-column grid on desktop screens (`lg:grid-cols-2 gap-6`). This eliminates sprawling dead space, ensures balanced column heights, and places live policy state directly beside the configuration builder.
+- **Responsive Stacking:** All two-column splits must stack vertically (`grid-cols-1`) on mobile and small tablet screens to maintain full touch usability.
+
+### 7.4 Segmented Controls, Border Parity & Zero Layout Shift
+For tabbed selectors and multi-state switchers:
+- **Strict Border Parity:** Inactive buttons must have `border border-transparent`, while active buttons have `border border-border/80`. Never toggle a border conditionally without maintaining transparent border padding on inactive states (+2px box-model jitter).
+- **Prohibition of `transition-all`:** Never use `transition-all` on tabs or segmented controls. Interpolating border width and padding creates visible wobbling. Always use `transition-colors duration-150` exclusively.
+- **Prohibition of Stretched Tabs:** Never use full-width grid tabs (`grid w-full grid-cols-2`) that stretch buttons across wide viewports.
+- **Canonical Primitive:** Always use [`SegmentedControl`](file:///Users/nemesis/Projects/my-projects/aim/web/src/components/ui/segmented-control.tsx). It bounds width intrinsically to content, enforces rigid height contracts (`size="sm"`: `h-7`, `size="default"`: `h-8`), and guarantees border parity.
+
+### 7.5 Typography Consistency & Anti-Pill Fatigue
+- **Standardized Badge Font Sizing:** Badge and tag font sizes must strictly follow the system standard: `text-[10px]` or `text-xs` with `font-mono font-medium`. Never introduce ad-hoc variable font sizes.
+- **Anti-Pill Discipline:** Do not wrap every data point in colored pill badges. Overuse of pills creates visual clutter. Use typographic hierarchy, subtle secondary labels (`text-muted-foreground`), and status indicator dots (`h-1.5 w-1.5 rounded-full`) instead of nested badge containers.
+
+### 7.6 Toast Notifications & Viewport Collision Safety
+- **Visual Presentation:** Toasts use OLED glassmorphism (`bg-card/90 backdrop-blur-md`), subtle semantic borders (`border-status-success/30`, `border-status-danger/30`), and ambient shadows (`shadow-[0_12px_36px_rgba(0,0,0,0.65)]`).
+- **Semantic Icons:** Toasts must feature dedicated semantic icons (`CheckCircle2` for success `#98c379`, `AlertCircle` for error `#e06c75`, `Info` for default `#52a8ff`).
+- **Safe Viewport Insets:** Toast viewports must maintain safe insets (`right-16 sm:right-16`) to guarantee notifications never overlap floating bottom-right trigger widgets or modal buttons.
+
+### 7.7 Collections & Scalability Pattern (> 10 Items)
+- **Bounded Containers:** Never assume collections will only contain 1–3 items. Any list capable of containing 10+ entries must be bounded (`max-h-60 overflow-y-auto` or `max-h-96`) to prevent cards from extending indefinitely down the page.
+- **Search & Filter Controls:** Provide instant text filtering for tables and lists that scale with user data.
+- **Responsive Viewport Testing:** All views must remain fully visible and wrap cleanly when browser sidebars (e.g. Safari sidebar, desktop toolbars) reduce viewport width to 800px–1100px.

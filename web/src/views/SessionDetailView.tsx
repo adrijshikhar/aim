@@ -14,6 +14,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { AgentBadge } from '@/components/AgentBadge';
 import { ResumeModal } from '@/components/ResumeModal';
 import { TurnMessageRenderer } from '@/components/TurnMessageRenderer';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import {
   ArrowLeft,
   Terminal,
@@ -768,48 +769,17 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
             </Badge>
 
             {/* Role Filter Tabs */}
-            <div className="flex items-center bg-[#0a0a0a] border border-border rounded-[4px] p-0.5 text-[11px] font-sans">
-              <button
-                type="button"
-                onClick={() => setRoleFilter('all')}
-                className={cn(
-                  'px-2 py-0.5 rounded transition-colors cursor-pointer',
-                  roleFilter === 'all' ? 'bg-[#222222] text-[#ededed] font-medium' : 'text-[#888888] hover:text-[#ededed]'
-                )}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                onClick={() => setRoleFilter('user')}
-                className={cn(
-                  'px-2 py-0.5 rounded transition-colors cursor-pointer',
-                  roleFilter === 'user' ? 'bg-[#222222] text-[#ededed] font-medium' : 'text-[#888888] hover:text-[#ededed]'
-                )}
-              >
-                User Prompts
-              </button>
-              <button
-                type="button"
-                onClick={() => setRoleFilter('assistant')}
-                className={cn(
-                  'px-2 py-0.5 rounded transition-colors cursor-pointer',
-                  roleFilter === 'assistant' ? 'bg-[#222222] text-[#ededed] font-medium' : 'text-[#888888] hover:text-[#ededed]'
-                )}
-              >
-                Responses
-              </button>
-              <button
-                type="button"
-                onClick={() => setRoleFilter('tools')}
-                className={cn(
-                  'px-2 py-0.5 rounded transition-colors cursor-pointer',
-                  roleFilter === 'tools' ? 'bg-[#222222] text-[#ededed] font-medium' : 'text-[#888888] hover:text-[#ededed]'
-                )}
-              >
-                Tools Only
-              </button>
-            </div>
+            <SegmentedControl
+              size="sm"
+              value={roleFilter}
+              onChange={(val) => setRoleFilter(val as 'all' | 'user' | 'assistant' | 'tools')}
+              options={[
+                { value: 'all', label: 'All' },
+                { value: 'user', label: 'User Prompts' },
+                { value: 'assistant', label: 'Responses' },
+                { value: 'tools', label: 'Tools Only' },
+              ]}
+            />
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">

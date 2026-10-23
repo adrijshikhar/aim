@@ -116,6 +116,194 @@ export function ViewLoadingSkeleton() {
   );
 }
 
+export function TeammateCardsSkeleton({
+  count = 3,
+}: {
+  count?: number;
+  isRefreshing?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-geist border border-border bg-card p-4 space-y-4 shadow-xs"
+        >
+            {/* Header: Hostname + IP + Status */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-4 rounded bg-muted animate-pulse shrink-0" />
+                  <div className="h-4 w-28 rounded bg-muted animate-pulse" />
+                </div>
+                <div className="h-3 w-20 rounded bg-muted/60 animate-pulse" />
+              </div>
+              <div className="h-5 w-16 rounded-full bg-muted/60 animate-pulse shrink-0" />
+            </div>
+
+            {/* Shared profiles list skeleton */}
+            <div className="space-y-2 pt-1 border-t border-border/50">
+              <div className="h-3 w-24 rounded bg-muted/60 animate-pulse" />
+              <div className="p-2.5 rounded-geist border border-border/60 bg-secondary/40 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-4 w-12 rounded-full bg-muted animate-pulse" />
+                    <div className="h-3.5 w-16 rounded bg-muted animate-pulse" />
+                  </div>
+                  <div className="h-5 w-16 rounded-geist bg-muted/80 animate-pulse" />
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-muted/40 animate-pulse" />
+              </div>
+            </div>
+
+            {/* Footer metrics strip */}
+            <div className="flex items-center gap-2 pt-2 border-t border-border/40">
+              <div className="h-3.5 w-14 rounded bg-muted/40 animate-pulse" />
+              <div className="h-3.5 w-12 rounded bg-muted/40 animate-pulse" />
+              <div className="h-3.5 w-16 rounded bg-muted/40 animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+  );
+}
+
+export function NetworkViewSkeleton() {
+  return (
+    <div className="space-y-6">
+      {/* Top Header Bar Skeleton */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-border">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-4 rounded-full bg-muted animate-pulse" />
+            <div className="h-6 w-48 rounded bg-muted animate-pulse" />
+            <div className="h-5 w-14 rounded-full bg-muted/60 animate-pulse" />
+          </div>
+        </div>
+
+        {/* Global Policy Control Skeleton placeholder in Header */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="h-8 w-72 rounded-geist bg-secondary border border-border animate-pulse shrink-0" />
+        </div>
+      </div>
+
+      {/* VPN Tunnel Status Strip Skeleton */}
+      <div className="p-4 rounded-geist border border-border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="h-8 w-8 rounded-full border border-border bg-secondary shrink-0 animate-pulse" />
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="h-3.5 w-36 rounded bg-muted animate-pulse" />
+              <div className="h-2 w-2 rounded-full bg-muted/60 animate-pulse" />
+            </div>
+            <div className="h-3 w-64 max-w-full rounded bg-muted/50 animate-pulse" />
+          </div>
+        </div>
+        <div className="h-8 w-20 rounded-geist bg-secondary border border-border animate-pulse shrink-0" />
+      </div>
+
+      {/* Tab Bar Skeleton */}
+      <div className="flex items-center justify-between gap-3 pb-1">
+        <div className="h-9 w-96 rounded-geist bg-secondary/40 border border-border animate-pulse" />
+        <div className="hidden md:flex items-center gap-3">
+          <div className="h-4 w-24 rounded bg-muted/40 animate-pulse" />
+        </div>
+      </div>
+
+      {/* Teammates Section Header Skeleton */}
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="h-4 w-4 rounded bg-muted animate-pulse" />
+              <div className="h-4 w-36 rounded bg-muted animate-pulse" />
+              <div className="h-4 w-12 rounded-full bg-muted/60 animate-pulse" />
+            </div>
+            <div className="h-3 w-60 rounded bg-muted/40 animate-pulse" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-48 rounded-geist bg-secondary border border-border animate-pulse shrink-0" />
+            <div className="h-8 w-8 rounded-geist bg-secondary border border-border animate-pulse shrink-0" />
+            <div className="h-8 w-8 rounded-geist bg-secondary border border-border animate-pulse shrink-0" />
+          </div>
+        </div>
+
+        {/* Teammate Cards Skeleton */}
+        <TeammateCardsSkeleton count={3} />
+      </div>
+    </div>
+  );
+}
+
+export function ProfilesOverviewSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-200">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-geist border border-border bg-card p-5 space-y-4 shadow-xs"
+        >
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="h-8 w-8 rounded-full bg-muted animate-pulse shrink-0" />
+              <div className="space-y-1">
+                <div className="h-4 w-28 rounded bg-muted animate-pulse" />
+                <div className="h-3 w-20 rounded bg-muted/60 animate-pulse" />
+              </div>
+            </div>
+            <div className="h-5 w-16 rounded-full bg-muted/60 animate-pulse shrink-0" />
+          </div>
+
+          {/* Quota Scorecard Pill */}
+          <div className="p-3 rounded-geist bg-secondary/50 border border-border/60 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="h-3 w-20 rounded bg-muted/80 animate-pulse" />
+              <div className="h-3 w-10 rounded bg-muted/80 animate-pulse" />
+            </div>
+            <div className="h-2 w-full rounded-full bg-muted/40 animate-pulse" />
+          </div>
+
+          {/* Footer details */}
+          <div className="flex items-center justify-between pt-2 border-t border-border/40">
+            <div className="h-3 w-24 rounded bg-muted/40 animate-pulse" />
+            <div className="h-6 w-16 rounded-geist bg-muted/60 animate-pulse" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function McpCatalogSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-200">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-geist border border-border bg-card p-5 space-y-3.5 shadow-xs"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="h-7 w-7 rounded-geist bg-muted animate-pulse shrink-0" />
+              <div className="space-y-1">
+                <div className="h-4 w-28 rounded bg-muted animate-pulse" />
+                <div className="h-3 w-20 rounded bg-muted/60 animate-pulse" />
+              </div>
+            </div>
+            <div className="h-5 w-14 rounded-full bg-muted/60 animate-pulse shrink-0" />
+          </div>
+          <div className="h-3 w-3/4 rounded bg-muted/40 animate-pulse" />
+          <div className="flex items-center gap-2 pt-2 border-t border-border/40">
+            <div className="h-5 w-16 rounded-[4px] bg-secondary border border-border animate-pulse" />
+            <div className="h-5 w-20 rounded-[4px] bg-secondary border border-border animate-pulse" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ProfileDetailSkeleton({ profileName }: { profileName?: string }) {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">

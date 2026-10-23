@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/service"
+	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/web"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
@@ -333,6 +335,24 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 		logger.Debug("[web] Failed to write PID file: %v", err)
 	}
 	defer removeOwnWebPID()
+
+	// Start P2P Share Server listener on port 4319 in background if available
+	shareStore := share.NewStore(config.BaseDir())
+	host, _ := os.Hostname()
+	shareServer := share.NewServer(shareStore, pm.ProfilesRoot(), host, 4319)
+	shareLn, shareErr := net.Listen("tcp", "0.0.0.0:4319")
+	if shareErr == nil {
+		go func() {
+			_ = shareServer.Serve(shareLn)
+		}()
+		defer func() {
+			_ = shareServer.Close()
+			_ = shareLn.Close()
+		}()
+		logger.Debug("[web] P2P Share Server listening on 0.0.0.0:4319")
+	} else {
+		logger.Debug("[web] P2P Share Server port 4319 unavailable (already running?): %v", shareErr)
+	}
 
 	serverURL := fmt.Sprintf("http://localhost:%d", actualPort)
 	fmt.Printf("🚀 AIM Web Dashboard running at %s (PID %d)\n", serverURL, os.Getpid())
