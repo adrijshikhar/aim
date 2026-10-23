@@ -232,6 +232,34 @@ func (m *ProfileManager) EnsureAllProfilesDotfiles() error {
 	return errors.Join(errs...)
 }
 
+// IsLeased reports whether a profile directory represents an ephemeral peer lease.
+func (m *ProfileManager) IsLeased(name string) bool {
+	if m == nil || name == "" {
+		return false
+	}
+	if strings.Contains(name, ":") {
+		return true
+	}
+	pDir := m.ProfileDir(name)
+	_, err := os.Stat(filepath.Join(pDir, ".aim-lease.json"))
+	return err == nil
+}
+
+// ListConfiguredProfiles returns all local user-configured profiles, excluding ephemeral peer leases.
+func (m *ProfileManager) ListConfiguredProfiles() ([]string, error) {
+	all, err := m.ListProfiles()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, 0, len(all))
+	for _, p := range all {
+		if !m.IsLeased(p) {
+			res = append(res, p)
+		}
+	}
+	return res, nil
+}
+
 func (m *ProfileManager) ListProfiles() ([]string, error) {
 	root := m.ProfilesRoot()
 	entries, err := os.ReadDir(root)
@@ -365,7 +393,7 @@ func (m *ProfileManager) ListProfilesForAgent(agentName string, cfg *config.Conf
 	if m == nil {
 		return nil, nil
 	}
-	all, err := m.ListProfiles()
+	all, err := m.ListConfiguredProfiles()
 	if err != nil {
 		return nil, err
 	}

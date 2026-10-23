@@ -185,8 +185,22 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 			pDir = candidateDir
 		}
 		if mgr.IsLeaseExpired(profileName) {
-			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired. Please renew the lease via 'aim share request %s %s' or the web dashboard.\n", profileName, hostPart, profPart)
+			_ = mgr.RevokeLease(profileName)
+			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired or was revoked. Please renew the lease via 'aim share request %s %s' or the web dashboard.\n", profileName, hostPart, profPart)
 			return 1
+		}
+		// Active verification with peer host if connected
+		meta, metaErr := mgr.GetLeaseMeta(profileName)
+		if metaErr == nil && meta != nil && meta.LeaseID != "" {
+			client := share.NewClient(4319)
+			checkCtx, checkCancel := context.WithTimeout(ctx, 600*time.Millisecond)
+			st, checkErr := client.CheckLeaseStatus(checkCtx, hostPart, meta.LeaseID)
+			checkCancel()
+			if checkErr == nil && st != nil && (st.Revoked || !st.Active) {
+				_ = mgr.RevokeLease(profileName)
+				fmt.Fprintf(os.Stderr, "Error: Leased profile %q has been revoked by host %s.\n", profileName, hostPart)
+				return 1
+			}
 		}
 	} else {
 		var err error
@@ -198,7 +212,8 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		}
 		mgr := share.NewLeaseManager(pm.ProfilesRoot())
 		if mgr.HasLease(profileName) && mgr.IsLeaseExpired(profileName) {
-			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired. Please renew or release the lease.\n", profileName)
+			_ = mgr.RevokeLease(profileName)
+			fmt.Fprintf(os.Stderr, "Error: Leased profile %q has expired or was revoked. Please renew or release the lease.\n", profileName)
 			return 1
 		}
 	}

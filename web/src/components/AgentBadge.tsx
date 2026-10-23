@@ -1,43 +1,59 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-interface AgentBadgeProps {
+export interface AgentBadgeProps {
   agent: string;
   className?: string;
   size?: 'sm' | 'default';
+  variant?: 'badge' | 'dot';
 }
 
-const getAgentDotColor = (agent: string) => {
+export const getAgentDotColor = (agent: string) => {
   const a = agent?.toLowerCase() || '';
   switch (a) {
     case 'claude':
-      return 'bg-[#be9137]'; // Cool muted bronze
+      return 'bg-[#be9137]'; // Atom One Dark warm bronze
     case 'codex':
-      return 'bg-[#47ae8f]'; // Cool slate-pine / sage
+      return 'bg-[#47ae8f]'; // Slate-sage / pine
     case 'gemini':
-      return 'bg-[#6b94d1]'; // Cool slate-blue
+      return 'bg-[#6b94d1]'; // Slate-blue
     case 'agy':
     case 'antigravity':
-      return 'bg-[#8e7dbf]'; // Cool slate-iris
+      return 'bg-[#8e7dbf]'; // Slate-iris
     default:
       return 'bg-muted-foreground';
   }
 };
 
-export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent, className = '', size = 'default' }) => {
+export const AgentBadge: React.FC<AgentBadgeProps> = ({
+  agent,
+  className = '',
+  size = 'default',
+  variant = 'badge',
+}) => {
   const name = agent?.toLowerCase() || 'agent';
-  const sizeClasses = size === 'sm' ? 'text-[11px] px-2 py-0.5' : 'text-xs px-2.5 py-1';
-  const dotSize = 'h-1.5 w-1.5';
+  const dotColor = getAgentDotColor(name);
+
+  if (variant === 'dot') {
+    return (
+      <span className={cn('inline-flex items-center gap-1.5 font-mono text-xs text-foreground/80 select-none', className)}>
+        <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', dotColor)} />
+        <span>{name}</span>
+      </span>
+    );
+  }
+
+  const sizeClasses = size === 'sm' ? 'text-[11px] h-5 px-1.5' : 'text-xs h-5.5 px-2';
 
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 font-mono font-medium tracking-tight rounded-full border border-border bg-secondary text-foreground select-none transition-colors hover:border-border/80',
+        'inline-flex items-center gap-1.5 font-mono font-medium rounded-[4px] border border-border/70 bg-secondary/50 text-foreground/90 select-none transition-colors hover:border-border',
         sizeClasses,
         className
       )}
     >
-      <span className={cn('rounded-full shrink-0', dotSize, getAgentDotColor(name))} />
+      <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', dotColor)} />
       <span>{name}</span>
     </span>
   );

@@ -94,16 +94,20 @@ export function Sidebar({
     };
   };
 
+  const configuredProfiles = React.useMemo(() => {
+    return profiles.filter((p) => !p.is_leased && !p.name.includes(':'));
+  }, [profiles]);
+
   const filteredProfiles = React.useMemo(() => {
-    if (!findQuery.trim()) return profiles;
+    if (!findQuery.trim()) return configuredProfiles;
     const q = findQuery.toLowerCase().trim();
-    return profiles.filter(
+    return configuredProfiles.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.agent.toLowerCase().includes(q) ||
         (p.adapters && p.adapters.some((ad) => ad.agent.toLowerCase().includes(q)))
     );
-  }, [profiles, findQuery]);
+  }, [configuredProfiles, findQuery]);
 
   const isOverviewActive = currentView === 'overview';
   const isSessionsActive = currentView === 'sessions' || currentView === 'session-detail';

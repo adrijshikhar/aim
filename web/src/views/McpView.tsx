@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
+import { McpCatalogSkeleton } from '@/components/Skeletons';
 
 const KNOWN_SERVER_TOOLS: Record<string, Array<{ name: string; description: string; params?: string[] }>> = {
   'claude-mem': [
@@ -310,11 +311,7 @@ export function McpView({
 
       {/* Grid of Servers */}
       {loading && servers.length === 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-44 rounded-geist border border-border bg-card/40 animate-pulse p-6" />
-          ))}
-        </div>
+        <McpCatalogSkeleton count={3} />
       ) : filteredServers.length === 0 ? (
         <div className="rounded-geist border border-dashed border-border p-12 text-center bg-card/50">
           <Server className="h-10 w-10 text-muted-foreground mx-auto mb-3 opacity-60" />

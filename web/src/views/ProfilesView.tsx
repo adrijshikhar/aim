@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import { useToast } from '@/components/ui/use-toast';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
 import {
@@ -54,7 +55,7 @@ import { AddProfileModal } from '@/components/AddProfileModal';
 import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
 import { QuotaBreakdown, cleanAuthMethod } from '@/components/QuotaBreakdown';
-import { ProfileDetailSkeleton } from '@/components/Skeletons';
+import { ProfileDetailSkeleton, ProfilesOverviewSkeleton } from '@/components/Skeletons';
 import { cn } from '@/lib/utils';
 
 interface ParsedQuotaDetails {
@@ -156,11 +157,12 @@ export function ProfilesView({
   onTabChange,
   profiles: externalProfiles,
 }: ProfilesViewProps) {
-  const [profiles, setProfiles] = React.useState<ProfileDTO[]>(() =>
-    externalProfiles && externalProfiles.length > 0
+  const [profiles, setProfiles] = React.useState<ProfileDTO[]>(() => {
+    const raw = externalProfiles && externalProfiles.length > 0
       ? externalProfiles
-      : profilesMemoryCache || []
-  );
+      : profilesMemoryCache || [];
+    return raw.filter((p) => !p.is_leased && !p.name.includes(':'));
+  });
   const [loading, setLoading] = React.useState(
     () => !profilesMemoryCache && (!externalProfiles || externalProfiles.length === 0)
   );
@@ -169,8 +171,9 @@ export function ProfilesView({
 
   React.useEffect(() => {
     if (externalProfiles && externalProfiles.length > 0) {
-      setProfiles(externalProfiles);
-      profilesMemoryCache = externalProfiles;
+      const filtered = externalProfiles.filter((p) => !p.is_leased && !p.name.includes(':'));
+      setProfiles(filtered);
+      profilesMemoryCache = filtered;
       setLoading(false);
     }
   }, [externalProfiles]);
@@ -199,13 +202,14 @@ export function ProfilesView({
       const data = await getProfiles({
         refresh: forceRefresh,
       });
-      setProfiles(data);
-      profilesMemoryCache = data;
-      onProfilesLoaded?.(data);
+      const filtered = data.filter((p) => !p.is_leased && !p.name.includes(':'));
+      setProfiles(filtered);
+      profilesMemoryCache = filtered;
+      onProfilesLoaded?.(filtered);
       if (forceRefresh) {
         toast({
           title: 'Quota Telemetry Refreshed',
-          description: `Updated live quota telemetry for ${data.length} profile(s).`,
+          description: `Updated live quota telemetry for ${filtered.length} profile(s).`,
           variant: 'success',
         });
       }
@@ -707,7 +711,7 @@ export function ProfilesView({
     const q = currentProfile.quota;
     if (!q) {
       return (
-        <Badge variant="outline" className="text-[11px] font-sans border-border bg-secondary text-muted-foreground px-2.5 py-0.5">
+        <Badge variant="outline" className="text-xs font-sans border-border bg-secondary text-muted-foreground h-6 px-2.5 inline-flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
           <span>Quota: Uncached</span>
         </Badge>
@@ -715,7 +719,7 @@ export function ProfilesView({
     }
     if (q.is_exhausted || q.bottleneck_pct <= 0) {
       return (
-        <Badge variant="outline" className="flex items-center gap-1.5 border-[#332022] bg-[#160b0c] text-[#f87171] text-[11px] font-sans px-2.5 py-0.5 rounded-full">
+        <Badge variant="outline" className="flex items-center gap-1.5 border-[#332022] bg-[#160b0c] text-[#f87171] text-xs font-sans h-6 px-2.5 rounded-full">
           <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
           <span>Quota Exhausted <span className="font-mono tabular-nums text-muted-foreground">(0%)</span></span>
         </Badge>
@@ -723,14 +727,14 @@ export function ProfilesView({
     }
     if (q.bottleneck_pct <= 30) {
       return (
-        <Badge variant="outline" className="badge-warning text-[11px] font-sans px-2.5 py-0.5">
+        <Badge variant="outline" className="badge-warning text-xs font-sans h-6 px-2.5 inline-flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
           <span>Low Quota <span className="font-mono tabular-nums">({q.bottleneck_pct}%)</span></span>
         </Badge>
       );
     }
     return (
-      <Badge variant="outline" className="badge-success text-[11px] font-sans px-2.5 py-0.5">
+      <Badge variant="outline" className="badge-success text-xs font-sans h-6 px-2.5 inline-flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
         <span>Quota Healthy <span className="font-mono tabular-nums">({q.bottleneck_pct}%)</span></span>
       </Badge>
@@ -769,6 +773,40 @@ export function ProfilesView({
   // VIEW A: SPECIFIC PROFILE WORKSPACE VIEW
   // ==========================================
   if (selectedProfile !== 'all') {
+    if (selectedProfile.includes(':')) {
+      return (
+        <div className="py-16 text-center space-y-4 max-w-md mx-auto">
+          <div className="h-10 w-10 rounded-full bg-[#142334] border border-[#1f4068] flex items-center justify-center mx-auto text-[#52a8ff]">
+            <Radio className="h-5 w-5" />
+          </div>
+          <div className="text-base font-semibold text-[#ededed]">Borrowed Profile Lease</div>
+          <p className="text-xs text-[#888888] leading-relaxed">
+            "{selectedProfile}" is an ephemeral guest lease borrowed from a teammate over P2P.
+            Borrowed profile leases and renewals are managed in the P2P Network view.
+          </p>
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onSelectProfile('all')}
+              className="rounded-geist text-xs text-[#ededed] border-border"
+            >
+              Back to Profiles
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                window.location.href = '/network';
+              }}
+              className="rounded-geist text-xs font-medium bg-foreground text-background hover:bg-foreground/90"
+            >
+              Open P2P Network
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
     if (loading && !currentProfile) {
       return <ProfileDetailSkeleton profileName={selectedProfile} />;
     }
@@ -794,50 +832,92 @@ export function ProfilesView({
     const isPluginsGlobalOn = currentProfile.plugins_global !== false;
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-6xl mx-auto">
         {/* Profile Page Header (Clean, uncarded page header with high/low contrast hierarchy) */}
         <div className="space-y-4 pb-6 border-b border-[#222222]">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-2xl font-semibold tracking-tight text-[#ededed] font-sans">
-                {currentProfile.name}
-              </h1>
-              {profileAdapters.length > 0 ? (
-                profileAdapters.map((ad) => (
-                  <React.Fragment key={ad.agent}>
-                    {getAgentBadge(ad.agent)}
-                  </React.Fragment>
-                ))
-              ) : (
-                getAgentBadge(currentProfile.agent)
-              )}
-              {currentProfile.has_credentials ? (
-                <Badge
-                  variant="outline"
-                  className="badge-success text-[11px] font-sans px-2.5 py-0.5"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
-                  <span>Authenticated</span>
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  className="badge-warning text-[11px] font-sans px-2.5 py-0.5"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
-                  <span>Needs Auth</span>
-                </Badge>
-              )}
-              {quotaHealthBadge}
-              <span className="inline-flex items-center gap-1 text-[11px] font-sans text-muted-foreground px-2.5 py-0.5 rounded-full border border-border bg-secondary">
-                <span className="font-mono tabular-nums text-foreground font-medium">
-                  {resourcesLoading ? '...' : profileSessions.length}
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h1 className="text-2xl font-bold tracking-tight text-[#ededed] font-sans">
+                  {currentProfile.name}
+                </h1>
+                <div className="flex items-center gap-1.5 p-0.5 rounded-geist bg-secondary/50 border border-border/60">
+                  {profileAdapters.length > 0 ? (
+                    profileAdapters.map((ad) => (
+                      <React.Fragment key={ad.agent}>
+                        {getAgentBadge(ad.agent)}
+                      </React.Fragment>
+                    ))
+                  ) : (
+                    getAgentBadge(currentProfile.agent)
+                  )}
+                </div>
+                {currentProfile.has_credentials ? (
+                  <Badge
+                    variant="outline"
+                    className="badge-success text-xs font-sans h-6 px-2.5 inline-flex items-center gap-1.5"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-success-solid" />
+                    <span>Authenticated</span>
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="badge-warning text-xs font-sans h-6 px-2.5 inline-flex items-center gap-1.5"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-warning-solid" />
+                    <span>Needs Auth</span>
+                  </Badge>
+                )}
+                {quotaHealthBadge}
+                <span className="inline-flex items-center gap-1.5 text-xs font-sans text-muted-foreground h-6 px-2.5 rounded-full border border-border bg-secondary">
+                  <span className="font-mono tabular-nums text-foreground font-medium">
+                    {resourcesLoading ? '...' : profileSessions.length}
+                  </span>
+                  <span>sessions</span>
                 </span>
-                <span>sessions</span>
-              </span>
+              </div>
+
+              {/* Sandbox & Environment Sub-bar with clean badges and click-to-copy */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs font-sans text-muted-foreground">
+                <div className="flex items-center gap-1.5 max-w-md">
+                  <Folder className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+                  <span className="text-muted-foreground/80 shrink-0">Sandbox:</span>
+                  <span className="text-foreground font-mono text-[11px] truncate select-all" title={currentProfile.path}>
+                    {currentProfile.path}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPath(currentProfile.path)}
+                    title={copiedPath ? 'Copied to clipboard' : 'Copy sandbox path'}
+                    aria-label={copiedPath ? 'Copied to clipboard' : 'Copy sandbox path'}
+                    className="h-5 w-5 rounded flex items-center justify-center hover:bg-secondary text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
+                  >
+                    {copiedPath ? (
+                      <Check className="h-3 w-3 text-status-success" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </button>
+                </div>
+                {currentProfile.account?.email && (
+                  <div className="flex items-center gap-1.5">
+                    <Mail className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
+                    <span className="text-muted-foreground/80">Email:</span>
+                    <span className="text-foreground">{currentProfile.account.email}</span>
+                  </div>
+                )}
+                {currentProfile.account?.auth_method && (
+                  <div className="flex items-center gap-1.5">
+                    <Key className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
+                    <span className="text-muted-foreground/80">Auth:</span>
+                    <span className="text-foreground/90">{cleanAuthMethod(currentProfile.account.auth_method)}</span>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5 self-end sm:self-auto shrink-0">
+            <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-center shrink-0">
               {/* If profile is a borrowed lease (contains ':'), do not show P2P share control */}
               {currentProfile?.name.includes(':') ? (
                 <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-geist bg-[#142334]/60 border border-[#1f4068]/80 text-[#52a8ff] text-xs font-mono">
@@ -845,63 +925,38 @@ export function ProfilesView({
                   <span>Borrowed Profile (Ephemeral Lease)</span>
                 </div>
               ) : (
-                /* 3-Level Segmented Slider for Profile Sharing (Right Top) */
-                <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626]">
-                  <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground px-2 flex items-center gap-1">
-                    <Radio className="h-3 w-3 text-accent-cyan" />
-                    P2P:
-                  </span>
-                  <button
-                    type="button"
-                    disabled={isShareLoading}
-                    onClick={() => handleSetShareMode('off')}
-                    className={cn(
-                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer",
-                      currentShareMode === 'off'
-                        ? "bg-[#262626] text-[#ededed] shadow-xs font-semibold"
-                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                    )}
-                    title="Profile is private and not shared on the VPN"
-                  >
-                    Off
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isShareLoading}
-                    onClick={() => handleSetShareMode('request')}
-                    className={cn(
-                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
-                      currentShareMode === 'request'
-                        ? "bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold"
-                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                    )}
-                    title="Profile is shared; teammate lease requests require manual confirmation"
-                  >
-                    <span className={cn(
-                      "h-1.5 w-1.5 rounded-full",
-                      currentShareMode === 'request' ? "bg-[#52a8ff]" : "bg-[#666666]"
-                    )} />
-                    Request
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isShareLoading}
-                    onClick={() => handleSetShareMode('auto')}
-                    className={cn(
-                      "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
-                      currentShareMode === 'auto'
-                        ? "bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold"
-                        : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                    )}
-                    title="Profile is shared; teammate lease requests are automatically granted"
-                  >
-                    <span className={cn(
-                      "h-1.5 w-1.5 rounded-full",
-                      currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#666666]"
-                    )} />
-                    Auto Approve
-                  </button>
-                </div>
+                <SegmentedControl
+                  value={currentShareMode}
+                  onChange={(val) => handleSetShareMode(val as 'off' | 'request' | 'auto')}
+                  disabled={isShareLoading}
+                  prefix={
+                    <>
+                      <Radio className="h-3 w-3 text-accent-cyan" />
+                      <span>P2P:</span>
+                    </>
+                  }
+                  options={[
+                    {
+                      value: 'off',
+                      label: 'Off',
+                      title: 'Profile is private and not shared on the VPN',
+                    },
+                    {
+                      value: 'request',
+                      label: 'Request',
+                      dotColor: currentShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]',
+                      activeClassName: 'bg-[#142334] text-[#52a8ff] border-[#1f4068]',
+                      title: 'Profile is shared; teammate lease requests require manual confirmation',
+                    },
+                    {
+                      value: 'auto',
+                      label: 'Auto Approve',
+                      dotColor: currentShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]',
+                      activeClassName: 'bg-[#183925] text-[#98c379] border-[#235836]',
+                      title: 'Profile is shared; teammate lease requests are automatically granted',
+                    },
+                  ]}
+                />
               )}
 
               <Button
@@ -916,50 +971,12 @@ export function ProfilesView({
               </Button>
             </div>
           </div>
-
-          {/* Sandbox & Environment Sub-bar with low-contrast labels & high-contrast values */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs font-sans">
-            <div className="flex items-center gap-1.5 max-w-md">
-              <Folder className="h-3.5 w-3.5 text-[#666666] shrink-0" />
-              <span className="text-[#666666] shrink-0">Sandbox:</span>
-              <span className="text-[#ededed] font-mono truncate select-all" title={currentProfile.path}>
-                {currentProfile.path}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleCopyPath(currentProfile.path)}
-                title={copiedPath ? 'Copied to clipboard' : 'Copy sandbox path'}
-                aria-label={copiedPath ? 'Copied to clipboard' : 'Copy sandbox path'}
-                className="h-6 w-6 rounded flex items-center justify-center hover:bg-secondary text-[#666666] hover:text-[#ededed] cursor-pointer transition-colors shrink-0"
-              >
-                {copiedPath ? (
-                  <Check className="h-3 w-3 text-status-success" />
-                ) : (
-                  <Copy className="h-3 w-3" />
-                )}
-              </button>
-            </div>
-            {currentProfile.account?.email && (
-              <div className="flex items-center gap-1.5">
-                <Mail className="h-3.5 w-3.5 text-[#555555]" />
-                <span className="text-[#666666]">Email:</span>
-                <span className="text-[#ededed]">{currentProfile.account.email}</span>
-              </div>
-            )}
-            {currentProfile.account?.auth_method && (
-              <div className="flex items-center gap-1.5">
-                <Key className="h-3.5 w-3.5 text-[#555555]" />
-                <span className="text-[#666666]">Auth:</span>
-                <span className="text-[#888888]">{cleanAuthMethod(currentProfile.account.auth_method)}</span>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Multi-Tab Workspace Organization */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-6">
           <div className="flex items-center justify-between">
-            <TabsList className="bg-[#0c0c0c] border border-[#222222] p-1 h-9 rounded-geist gap-1">
+            <TabsList className="bg-secondary/40 border border-border p-1 h-9 rounded-geist gap-1">
               <TabsTrigger value="quota" className="gap-2 text-xs">
                 <Gauge className="h-3.5 w-3.5 text-[#666666]" />
                 <span>Quota</span>
@@ -1053,7 +1070,14 @@ export function ProfilesView({
             )}
 
             {/* Unified Engine Quota Cards with CodexBar Intelligence */}
-            <div className="space-y-6">
+            <div
+              className={cn(
+                'grid gap-6 items-start',
+                displayedAdapters.length > 1
+                  ? 'grid-cols-1 lg:grid-cols-2'
+                  : 'grid-cols-1 max-w-4xl mx-auto w-full'
+              )}
+            >
               {displayedAdapters.map((ad) => {
                 const pct = ad.quota?.bottleneck_pct ?? 100;
                 const isExhausted = ad.quota?.is_exhausted || pct <= 0;
@@ -1068,6 +1092,7 @@ export function ProfilesView({
                     bottleneckPct={pct}
                     isExhausted={isExhausted}
                     sessionCount={filteredSessions.length}
+                    layout={displayedAdapters.length > 1 ? 'compact' : 'expanded'}
                   />
                 );
               })}
@@ -1433,58 +1458,33 @@ export function ProfilesView({
                       </div>
 
                       {/* Right Top 3-Level Segmented Slider / Toggle */}
-                      <div className="inline-flex items-center p-0.5 rounded-geist bg-[#141414] border border-[#262626] self-start sm:self-auto shrink-0">
-                        <button
-                          type="button"
-                          disabled={isShareLoading}
-                          onClick={() => handleSetShareMode('off')}
-                          className={cn(
-                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer",
-                            currentShareMode === 'off'
-                              ? "bg-[#262626] text-[#ededed] shadow-xs font-semibold"
-                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                          )}
-                          title="Disable profile sharing"
-                        >
-                          Off
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isShareLoading}
-                          onClick={() => handleSetShareMode('request')}
-                          className={cn(
-                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
-                            currentShareMode === 'request'
-                              ? "bg-[#142334] text-[#52a8ff] border border-[#1f4068] shadow-xs font-semibold"
-                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                          )}
-                          title="Share profile with manual approval requirement"
-                        >
-                          <span className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            currentShareMode === 'request' ? "bg-[#52a8ff]" : "bg-[#666666]"
-                          )} />
-                          Request
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isShareLoading}
-                          onClick={() => handleSetShareMode('auto')}
-                          className={cn(
-                            "px-2.5 py-1 rounded-sm text-xs font-mono transition-all cursor-pointer flex items-center gap-1.5",
-                            currentShareMode === 'auto'
-                              ? "bg-[#183925] text-[#46a758] border border-[#235836] shadow-xs font-semibold"
-                              : "text-[#888888] hover:text-[#ededed] hover:bg-[#1a1a1a]"
-                          )}
-                          title="Share profile with automatic lease approvals"
-                        >
-                          <span className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            currentShareMode === 'auto' ? "bg-[#30a46c]" : "bg-[#666666]"
-                          )} />
-                          Auto Approve
-                        </button>
-                      </div>
+                      <SegmentedControl
+                        value={currentShareMode}
+                        onChange={(val) => handleSetShareMode(val as 'off' | 'request' | 'auto')}
+                        disabled={isShareLoading}
+                        className="self-start sm:self-auto shrink-0"
+                        options={[
+                          {
+                            value: 'off',
+                            label: 'Off',
+                            title: 'Disable profile sharing',
+                          },
+                          {
+                            value: 'request',
+                            label: 'Request',
+                            dotColor: currentShareMode === 'request' ? 'bg-[#52a8ff]' : 'bg-[#666666]',
+                            activeClassName: 'bg-[#142334] text-[#52a8ff] border-[#1f4068]',
+                            title: 'Share profile with manual approval requirement',
+                          },
+                          {
+                            value: 'auto',
+                            label: 'Auto Approve',
+                            dotColor: currentShareMode === 'auto' ? 'bg-[#30a46c]' : 'bg-[#666666]',
+                            activeClassName: 'bg-[#183925] text-[#98c379] border-[#235836]',
+                            title: 'Share profile with automatic lease approvals',
+                          },
+                        ]}
+                      />
                     </div>
                   </CardHeader>
                   <CardContent className="p-5 pt-0 space-y-3">
@@ -1775,11 +1775,7 @@ export function ProfilesView({
 
       {/* Profiles Directory Content */}
       {loading && profiles.length === 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-64 rounded-geist border border-[#262626] bg-[#111111]/40 animate-pulse p-6" />
-          ))}
-        </div>
+        <ProfilesOverviewSkeleton count={3} />
       ) : filteredProfilesList.length === 0 ? (
         <div className="rounded-geist border border-dashed border-[#262626] p-12 text-center bg-[#0a0a0a]/50">
           <Bot className="h-10 w-10 text-[#666666] mx-auto mb-3 opacity-60" />

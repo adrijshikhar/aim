@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,7 @@ type Server struct {
 	nodeID          string
 	port            int
 	mux             *http.ServeMux
+	srvMu           sync.Mutex
 	httpServer      *http.Server
 	listener        net.Listener
 	pendingMu       sync.Mutex
@@ -57,19 +59,24 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) SetListener(ln net.Listener) {
+	s.srvMu.Lock()
+	defer s.srvMu.Unlock()
 	s.listener = ln
 }
 
 func (s *Server) Serve(ln net.Listener) error {
-	s.listener = ln
-	s.httpServer = &http.Server{
+	hs := &http.Server{
 		Handler:           s.mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	return s.httpServer.Serve(ln)
+	s.srvMu.Lock()
+	s.listener = ln
+	s.httpServer = hs
+	s.srvMu.Unlock()
+	return hs.Serve(ln)
 }
 
 func (s *Server) Start(addr string) error {
@@ -77,30 +84,29 @@ func (s *Server) Start(addr string) error {
 	if err != nil {
 		return err
 	}
-	s.listener = ln
-	s.httpServer = &http.Server{
-		Handler:           s.mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-	return s.httpServer.Serve(ln)
+	return s.Serve(ln)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.httpServer != nil {
-		return s.httpServer.Shutdown(ctx)
+	s.srvMu.Lock()
+	hs := s.httpServer
+	s.srvMu.Unlock()
+	if hs != nil {
+		return hs.Shutdown(ctx)
 	}
 	return nil
 }
 
 func (s *Server) Close() error {
-	if s.httpServer != nil {
-		return s.httpServer.Close()
+	s.srvMu.Lock()
+	hs := s.httpServer
+	ln := s.listener
+	s.srvMu.Unlock()
+	if hs != nil {
+		return hs.Close()
 	}
-	if s.listener != nil {
-		return s.listener.Close()
+	if ln != nil {
+		return ln.Close()
 	}
 	return nil
 }
@@ -117,16 +123,102 @@ func isLocalhost(r *http.Request) bool {
 	return ip.IsLoopback()
 }
 
+func requireLocalAdmin(r *http.Request) error {
+	if !isLocalhost(r) {
+		return fmt.Errorf("forbidden: requires local host authorization")
+	}
+
+	// Enforce application/json to prevent browser simple CORS requests (text/plain, form-urlencoded)
+	ct := r.Header.Get("Content-Type")
+	if !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+		return fmt.Errorf("forbidden: invalid Content-Type, expected application/json")
+	}
+
+	// Validate Origin header if present (reject cross-origin requests)
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil {
+			return fmt.Errorf("forbidden: invalid Origin header")
+		}
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("forbidden: cross-origin requests rejected")
+		}
+	}
+
+	// Validate Referer header if present
+	if referer := r.Header.Get("Referer"); referer != "" {
+		u, err := url.Parse(referer)
+		if err != nil {
+			return fmt.Errorf("forbidden: invalid Referer header")
+		}
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("forbidden: cross-origin referer rejected")
+		}
+	}
+
+	// Validate Sec-Fetch-Site if present (modern browser CSRF defense)
+	if sfs := r.Header.Get("Sec-Fetch-Site"); sfs == "cross-site" {
+		return fmt.Errorf("forbidden: cross-site requests rejected")
+	}
+
+	return nil
+}
+
+func requireLocalAdminRead(r *http.Request) error {
+	if !isLocalhost(r) {
+		return fmt.Errorf("forbidden: requires local host authorization")
+	}
+
+	// Validate Origin header if present
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil {
+			return fmt.Errorf("forbidden: invalid Origin header")
+		}
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("forbidden: cross-origin requests rejected")
+		}
+	}
+
+	// Validate Referer header if present
+	if referer := r.Header.Get("Referer"); referer != "" {
+		u, err := url.Parse(referer)
+		if err != nil {
+			return fmt.Errorf("forbidden: invalid Referer header")
+		}
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("forbidden: cross-origin referer rejected")
+		}
+	}
+
+	if sfs := r.Header.Get("Sec-Fetch-Site"); sfs == "cross-site" {
+		return fmt.Errorf("forbidden: cross-site requests rejected")
+	}
+
+	return nil
+}
+
 func isPrivateOrVPNIP(remoteAddr string) bool {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		host = remoteAddr
 	}
+	if idx := strings.Index(host, "%"); idx != -1 {
+		host = host[:idx]
+	}
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return host == "localhost"
 	}
-	if ip.IsLoopback() || ip.IsPrivate() {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
 	}
 	_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
@@ -145,6 +237,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/share/approve", s.handleApprove)
 	s.mux.HandleFunc("/api/share/deny", s.handleDeny)
 	s.mux.HandleFunc("/api/share/cancel", s.handleCancel)
+	s.mux.HandleFunc("/api/share/lease/status", s.handleLeaseStatus)
+	s.mux.HandleFunc("/api/share/lease/revoke", s.handleNotifyRevoke)
+	s.mux.HandleFunc("/api/share/lease/release", s.handleNotifyRelease)
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -163,11 +258,15 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		if enabled {
 			p.AutoApprove = autoApprove
 			p.Enabled = true
+			s.populateProfileAgents(&p)
 			profiles = append(profiles, p)
 			names = append(names, p.Name)
 		}
 	}
-	host, _ := os.Hostname()
+	host := s.nodeID
+	if host == "" {
+		host, _ = os.Hostname()
+	}
 	resp := PingResponse{
 		NodeID:         s.nodeID,
 		HostName:       host,
@@ -195,6 +294,7 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 		if enabled {
 			p.AutoApprove = autoApprove
 			p.Enabled = true
+			s.populateProfileAgents(&p)
 			exposed = append(exposed, p)
 		}
 	}
@@ -217,6 +317,16 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	hostIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		hostIP = r.RemoteAddr
+	}
+	if idx := strings.Index(hostIP, "%"); idx != -1 {
+		hostIP = hostIP[:idx]
+	}
+	// Enforce peer IP derived strictly from TCP socket remote address to prevent SSRF
+	req.RequesterIP = hostIP
 
 	enabled, autoApprove := s.store.GetEffectiveProfileMode(req.ProfileName)
 	if !enabled {
@@ -254,25 +364,28 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		expiresAt := time.Now().Add(duration)
+		detectedAgents := DetectAgentsInFiles(payload.Files)
 		resp := LeaseResponse{
 			Status:      "approved",
 			LeaseID:     leaseID,
 			ProfileName: matched.Name,
 			Agent:       matched.Agent,
+			Agents:      detectedAgents,
 			ExpiresAt:   expiresAt,
 			Payload:     payload,
 		}
 
 		borrowerID := req.RequesterID
 		if borrowerID == "" {
-			borrowerID = r.RemoteAddr
+			borrowerID = hostIP
 		}
 		if err := s.store.SaveGrantedLease(GrantedLease{
 			LeaseID:      leaseID,
 			ProfileName:  matched.Name,
 			Agent:        matched.Agent,
+			Agents:       detectedAgents,
 			BorrowerID:   borrowerID,
-			BorrowerIP:   r.RemoteAddr,
+			BorrowerIP:   hostIP,
 			GrantedAt:    time.Now(),
 			ExpiresAt:    expiresAt,
 			Revoked:      false,
@@ -345,8 +458,8 @@ func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !isLocalhost(r) {
-		http.Error(w, "Forbidden: pending list requires local host authorization", http.StatusForbidden)
+	if err := requireLocalAdminRead(r); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 	pending := s.GetPendingRequests()
@@ -426,27 +539,38 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	// Check SQLite for durable state
 	rec, err := s.store.GetShareRequest(reqID)
 	if err == nil && rec != nil {
-		if rec.Status == "approved" && rec.LeaseID != "" {
-			leases := s.store.GetGrantedLeases()
-			for _, gl := range leases {
-				if gl.LeaseID == rec.LeaseID {
-					if gl.Revoked || time.Now().After(gl.ExpiresAt) {
-						http.Error(w, "lease has expired or was revoked", http.StatusGone)
+		if rec.Status == "approved" {
+			if rec.LeaseID != "" {
+				leases := s.store.GetGrantedLeases()
+				for _, gl := range leases {
+					if gl.LeaseID == rec.LeaseID {
+						if gl.Revoked || time.Now().After(gl.ExpiresAt) {
+							http.Error(w, "lease has expired or was revoked", http.StatusGone)
+							return
+						}
+						payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
+						w.Header().Set("Content-Type", "application/json")
+						_ = json.NewEncoder(w).Encode(LeaseResponse{
+							Status:      "approved",
+							LeaseID:     gl.LeaseID,
+							ProfileName: gl.ProfileName,
+							Agent:       gl.Agent,
+							ExpiresAt:   gl.ExpiresAt,
+							Payload:     payload,
+						})
 						return
 					}
-					payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
-					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(LeaseResponse{
-						Status:      "approved",
-						LeaseID:     gl.LeaseID,
-						ProfileName: gl.ProfileName,
-						Agent:       gl.Agent,
-						ExpiresAt:   gl.ExpiresAt,
-						Payload:     payload,
-					})
-					return
 				}
 			}
+			// Status is approved in SQLite, but lease payload is still being finalized or written.
+			// Return status "pending" so the client continues polling instead of 404.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":     "pending",
+				"request_id": reqID,
+				"message":    "approval completed, preparing credentials",
+			})
+			return
 		}
 		if rec.Status == "denied" {
 			w.Header().Set("Content-Type", "application/json")
@@ -541,13 +665,147 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
+func (s *Server) handleLeaseStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isPrivateOrVPNIP(r.RemoteAddr) {
+		http.Error(w, "Forbidden: status requests only accepted from private VPN / LAN subnets", http.StatusForbidden)
+		return
+	}
+	leaseID := r.URL.Query().Get("lease_id")
+	if leaseID == "" {
+		http.Error(w, "lease_id is required", http.StatusBadRequest)
+		return
+	}
+
+	leases := s.store.GetGrantedLeases()
+	for _, gl := range leases {
+		if gl.LeaseID == leaseID {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"lease_id": gl.LeaseID,
+				"revoked":  gl.Revoked,
+				"expired":  time.Now().After(gl.ExpiresAt),
+				"active":   !gl.Revoked && time.Now().Before(gl.ExpiresAt),
+			})
+			return
+		}
+	}
+
+	// Also check local borrowed profiles on disk (if this node is the borrower)
+	if s.profilesDir != "" {
+		entries, err := os.ReadDir(s.profilesDir)
+		if err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				metaPath := filepath.Join(s.profilesDir, e.Name(), ".aim-lease.json")
+				if data, err := os.ReadFile(metaPath); err == nil {
+					var meta LeaseMeta
+					if err := json.Unmarshal(data, &meta); err == nil && meta.LeaseID == leaseID {
+						w.Header().Set("Content-Type", "application/json")
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"lease_id": meta.LeaseID,
+							"revoked":  meta.Revoked,
+							"expired":  time.Now().After(meta.ExpiresAt),
+							"active":   !meta.Revoked && time.Now().Before(meta.ExpiresAt),
+						})
+						return
+					}
+				}
+			}
+		}
+	}
+
+	// Lease not found on host or borrower implies it was released, revoked or pruned
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"lease_id": leaseID,
+		"revoked":  true,
+		"expired":  true,
+		"active":   false,
+	})
+}
+
+func (s *Server) handleNotifyRelease(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isPrivateOrVPNIP(r.RemoteAddr) {
+		http.Error(w, "Forbidden: release notifications only accepted from private VPN / LAN subnets", http.StatusForbidden)
+		return
+	}
+	var req struct {
+		LeaseID    string `json:"lease_id"`
+		BorrowerID string `json:"borrower_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LeaseID == "" {
+		http.Error(w, "lease_id is required", http.StatusBadRequest)
+		return
+	}
+
+	revoked, err := s.store.RevokeGrantedLease(req.LeaseID)
+	if err == nil && revoked != nil {
+		actor := req.BorrowerID
+		if actor == "" {
+			actor = r.RemoteAddr
+		}
+		_ = s.store.AppendAudit(AuditEntry{
+			Action:  "LEASE_RELEASED",
+			Actor:   actor,
+			Profile: revoked.ProfileName,
+			Agent:   revoked.Agent,
+			Details: fmt.Sprintf("Borrower %s released lease %s for profile %s", actor, req.LeaseID, revoked.ProfileName),
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+func (s *Server) handleNotifyRevoke(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isPrivateOrVPNIP(r.RemoteAddr) {
+		http.Error(w, "Forbidden: revoke notifications only accepted from private VPN / LAN subnets", http.StatusForbidden)
+		return
+	}
+	var req struct {
+		LeaseID string `json:"lease_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LeaseID == "" {
+		http.Error(w, "lease_id is required", http.StatusBadRequest)
+		return
+	}
+
+	mgr := NewLeaseManager(s.profilesDir)
+	localProf, err := mgr.RevokeLeaseByID(req.LeaseID)
+	if err == nil && localProf != "" {
+		_ = s.store.AppendAudit(AuditEntry{
+			Action:  "LEASE_REVOKED",
+			Actor:   "host",
+			Profile: localProf,
+			Details: fmt.Sprintf("Host revoked lease %s; local sandbox access disabled", req.LeaseID),
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
 func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !isLocalhost(r) {
-		http.Error(w, "Forbidden: approve requires local host authorization", http.StatusForbidden)
+	if err := requireLocalAdmin(r); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 	var req struct {
@@ -575,8 +833,8 @@ func (s *Server) handleDeny(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !isLocalhost(r) {
-		http.Error(w, "Forbidden: deny requires local host authorization", http.StatusForbidden)
+	if err := requireLocalAdmin(r); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 	var req struct {
@@ -638,9 +896,6 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		return nil, fmt.Errorf("request %s was denied", reqID)
 	}
 	pr, exists := s.pending[reqID]
-	if exists {
-		delete(s.pending, reqID)
-	}
 	s.pendingMu.Unlock()
 
 	var (
@@ -744,11 +999,13 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		return nil, fmt.Errorf("failed to read credentials: %w", err)
 	}
 
+	detectedAgents := DetectAgentsInFiles(payload.Files)
 	resp := &LeaseResponse{
 		Status:      "approved",
 		LeaseID:     leaseID,
 		ProfileName: profileName,
 		Agent:       agent,
+		Agents:      detectedAgents,
 		ExpiresAt:   expiresAt,
 		Payload:     payload,
 	}
@@ -757,6 +1014,7 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		LeaseID:      leaseID,
 		ProfileName:  profileName,
 		Agent:        agent,
+		Agents:       detectedAgents,
 		BorrowerID:   requesterID,
 		BorrowerIP:   requesterIP,
 		GrantedAt:    time.Now(),
@@ -769,6 +1027,7 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	}
 
 	s.pendingMu.Lock()
+	delete(s.pending, reqID)
 	s.approvedResults[reqID] = resp
 	s.pendingMu.Unlock()
 
@@ -848,6 +1107,8 @@ func (s *Server) packageCredentials(profileName, agent string) (*SharePayload, e
 }
 
 // PackageProfileCredentials extracts relevant agent credentials for the specified profile.
+// If the profile contains multiple agent credentials, all available agent credentials are packaged
+// so the borrower can run any of the configured agent engines.
 func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePayload, error) {
 	cleanProfilesRoot := filepath.Clean(profilesDir)
 	cleanProfDir := filepath.Clean(filepath.Join(profilesDir, profileName))
@@ -857,57 +1118,68 @@ func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePa
 	profDir := cleanProfDir
 	files := make(map[string]string)
 
-	switch agent {
-	case "claude":
-		for _, rel := range []string{
-			".claude/.credentials.json",
-			".claude/auth.json",
-			".claude.json",
-			".claude/.claude.json",
-		} {
-			p := filepath.Join(profDir, filepath.FromSlash(rel))
-			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
-				files[rel] = base64.StdEncoding.EncodeToString(data)
+	packageAgent := func(ag string) {
+		switch ag {
+		case "claude":
+			for _, rel := range []string{
+				".claude/.credentials.json",
+				".claude/auth.json",
+				".claude.json",
+				".claude/.claude.json",
+			} {
+				p := filepath.Join(profDir, filepath.FromSlash(rel))
+				if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+					files[rel] = base64.StdEncoding.EncodeToString(data)
+				}
+			}
+			// If credentials are not on disk, read exclusively from the selected profile's scoped Keychain service
+			if _, hasCreds := files[".claude/.credentials.json"]; !hasCreds {
+				claudeDir := filepath.Join(profDir, ".claude")
+				if tokData := profile.ReadScopedClaudeKeychainCredentials(claudeDir); len(tokData) > 0 {
+					files[".claude/.credentials.json"] = base64.StdEncoding.EncodeToString(tokData)
+				}
+			}
+		case "codex":
+			for _, rel := range []string{
+				".codex/auth.json",
+				".codex/config.toml",
+				".config/codex/auth.json",
+			} {
+				p := filepath.Join(profDir, filepath.FromSlash(rel))
+				if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+					files[rel] = base64.StdEncoding.EncodeToString(data)
+				}
+			}
+		case "agy":
+			for _, rel := range []string{
+				".gemini/antigravity-cli/antigravity-oauth-token",
+				".gemini/antigravity-cli/config.json",
+				".config/gcloud/application_default_credentials.json",
+			} {
+				p := filepath.Join(profDir, filepath.FromSlash(rel))
+				if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+					files[rel] = base64.StdEncoding.EncodeToString(data)
+				}
+			}
+		case "gemini":
+			for _, rel := range []string{
+				".gemini/gemini-oauth-token",
+				".gemini/oauth.json",
+			} {
+				p := filepath.Join(profDir, filepath.FromSlash(rel))
+				if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+					files[rel] = base64.StdEncoding.EncodeToString(data)
+				}
 			}
 		}
-		// If credentials are not on disk, read exclusively from the selected profile's scoped Keychain service
-		if _, hasCreds := files[".claude/.credentials.json"]; !hasCreds {
-			claudeDir := filepath.Join(profDir, ".claude")
-			if tokData := profile.ReadScopedClaudeKeychainCredentials(claudeDir); len(tokData) > 0 {
-				files[".claude/.credentials.json"] = base64.StdEncoding.EncodeToString(tokData)
-			}
-		}
-	case "codex":
-		for _, rel := range []string{
-			".codex/auth.json",
-			".codex/config.toml",
-			".config/codex/auth.json",
-		} {
-			p := filepath.Join(profDir, filepath.FromSlash(rel))
-			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
-				files[rel] = base64.StdEncoding.EncodeToString(data)
-			}
-		}
-	case "agy":
-		for _, rel := range []string{
-			".gemini/antigravity-cli/antigravity-oauth-token",
-			".gemini/antigravity-cli/config.json",
-			".config/gcloud/application_default_credentials.json",
-		} {
-			p := filepath.Join(profDir, filepath.FromSlash(rel))
-			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
-				files[rel] = base64.StdEncoding.EncodeToString(data)
-			}
-		}
-	case "gemini":
-		for _, rel := range []string{
-			".gemini/gemini-oauth-token",
-			".gemini/oauth.json",
-		} {
-			p := filepath.Join(profDir, filepath.FromSlash(rel))
-			if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
-				files[rel] = base64.StdEncoding.EncodeToString(data)
-			}
+	}
+
+	if agent != "" && agent != "all" {
+		packageAgent(agent)
+	} else {
+		// Package all available agent credentials if agent is "all" or unspecified
+		for _, candidate := range []string{"claude", "codex", "agy", "gemini"} {
+			packageAgent(candidate)
 		}
 	}
 
@@ -916,6 +1188,66 @@ func PackageProfileCredentials(profilesDir, profileName, agent string) (*SharePa
 	}
 
 	return &SharePayload{Files: files}, nil
+}
+
+// DetectAgentsInFiles determines which agent adapters have valid credential files in the payload map.
+func DetectAgentsInFiles(files map[string]string) []string {
+	detected := make([]string, 0)
+	seen := make(map[string]bool)
+	for rel := range files {
+		slash := filepath.ToSlash(rel)
+		if strings.HasPrefix(slash, ".claude") && !seen["claude"] {
+			detected = append(detected, "claude")
+			seen["claude"] = true
+		} else if strings.HasPrefix(slash, ".codex") && !seen["codex"] {
+			detected = append(detected, "codex")
+			seen["codex"] = true
+		} else if strings.HasPrefix(slash, ".gemini/antigravity") && !seen["agy"] {
+			detected = append(detected, "agy")
+			seen["agy"] = true
+		} else if strings.HasPrefix(slash, ".gemini") && !seen["gemini"] {
+			detected = append(detected, "gemini")
+			seen["gemini"] = true
+		}
+	}
+	return detected
+}
+
+func (s *Server) populateProfileAgents(p *SharedProfileConfig) {
+	if len(p.Agents) > 0 {
+		return
+	}
+	seen := make(map[string]bool)
+	var agents []string
+	if p.Agent != "" {
+		agents = append(agents, p.Agent)
+		seen[p.Agent] = true
+	}
+	if s.profilesDir != "" {
+		profDir := filepath.Join(s.profilesDir, p.Name)
+		checkAgent := func(ag string, paths ...string) {
+			if seen[ag] {
+				return
+			}
+			for _, rel := range paths {
+				if _, err := os.Stat(filepath.Join(profDir, rel)); err == nil {
+					agents = append(agents, ag)
+					seen[ag] = true
+					break
+				}
+			}
+		}
+		checkAgent("claude", ".claude/.credentials.json", ".claude/auth.json", ".claude.json")
+		checkAgent("codex", ".codex/auth.json", ".codex/config.toml", ".config/codex/auth.json")
+		checkAgent("agy", ".gemini/antigravity-cli/antigravity-oauth-token", ".gemini/antigravity-cli/config.json")
+		checkAgent("gemini", ".gemini/gemini-oauth-token", ".gemini/oauth.json")
+	}
+	if len(agents) > 0 {
+		p.Agents = agents
+		if p.Agent == "" {
+			p.Agent = agents[0]
+		}
+	}
 }
 
 // GenerateID produces a unique prefixed identifier with 128-bit cryptographic random bytes.

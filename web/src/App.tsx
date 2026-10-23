@@ -13,8 +13,17 @@ import { Sidebar } from '@/components/Sidebar';
 import { DaemonModal } from '@/components/DaemonModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
 import { Toaster } from '@/components/ui/toaster';
-import { SessionDetailSkeleton, ViewLoadingSkeleton } from '@/components/Skeletons';
+import {
+  SessionDetailSkeleton,
+  ViewLoadingSkeleton,
+  NetworkViewSkeleton,
+  ProfilesOverviewSkeleton,
+  ProfileDetailSkeleton,
+  McpCatalogSkeleton,
+} from '@/components/Skeletons';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ChevronRight } from 'lucide-react';
+import { Agentation } from 'agentation';
 
 const ProfilesView = React.lazy(() =>
   import('@/views/ProfilesView').then((m) => ({ default: m.ProfilesView }))
@@ -110,6 +119,16 @@ function parseCurrentRoute(): {
     if (rawPath.startsWith('/profiles/') && rawPath.length > '/profiles/'.length) {
       const segments = rawPath.slice('/profiles/'.length).split('/');
       const profileName = decodeURIComponent(segments[0]);
+      if (profileName.includes(':')) {
+        // Leased/borrowed peer profiles are managed exclusively in P2P Network -> Borrowed Profiles
+        return {
+          view: 'network',
+          profile: 'all',
+          tab: 'borrowed',
+          mcpScope: scopeParam,
+          sessionId: null,
+        };
+      }
       let routeTab = normalizedTab;
       if (segments[1]) {
         const segTab = decodeURIComponent(segments[1]);
@@ -180,6 +199,7 @@ function parseCurrentRoute(): {
 export function App() {
   const initialRoute = React.useMemo(() => parseCurrentRoute(), []);
   const [currentView, setCurrentView] = React.useState<ViewType>(initialRoute.view);
+  const [visitedNetwork, setVisitedNetwork] = React.useState<boolean>(initialRoute.view === 'network');
   const [selectedProfile, setSelectedProfile] = React.useState<string>(initialRoute.profile);
   const [selectedMcpScope, setSelectedMcpScope] = React.useState<string>(initialRoute.mcpScope);
   const [activeProfileTab, setActiveProfileTab] = React.useState<string>(initialRoute.tab);
@@ -264,6 +284,9 @@ export function App() {
   React.useEffect(() => {
     const handlePopState = () => {
       const route = parseCurrentRoute();
+      if (route.view === 'network') {
+        setVisitedNetwork(true);
+      }
       setCurrentView(route.view);
       setSelectedProfile(route.profile);
       setActiveProfileTab(route.tab);
@@ -385,6 +408,7 @@ export function App() {
       setCurrentView('mcp');
       syncUrl('mcp', 'all', 'quota', 'all', null);
     } else if (view === 'network') {
+      setVisitedNetwork(true);
       setCurrentView('network');
       syncUrl('network', 'all', 'quota', 'all', null);
     }
@@ -393,6 +417,10 @@ export function App() {
   const handleSelectProfile = (profileName: string) => {
     setViewedSession(null);
     setTargetSessionId(null);
+    if (profileName.includes(':')) {
+      handleSelectView('network');
+      return;
+    }
     if (profileName === 'all') {
       setSelectedProfile('all');
       setCurrentView('overview');
@@ -554,64 +582,86 @@ export function App() {
         {/* Stage Content */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 min-h-0 bg-background">
           <div className="max-w-7xl mx-auto">
-            <React.Suspense fallback={<ViewLoadingSkeleton />}>
-              {currentView === 'overview' && (
-                <ProfilesView
-                  selectedProfile="all"
-                  profiles={profiles}
-                  onSelectProfile={handleSelectProfile}
-                  onNavigateToSessions={handleNavigateToSessions}
-                  onNavigateToMcp={handleNavigateToMcp}
-                  onProfilesLoaded={setProfiles}
-                />
-              )}
-              {currentView === 'profile-detail' && (
-                <ProfilesView
-                  selectedProfile={selectedProfile}
-                  profiles={profiles}
-                  activeTab={activeProfileTab}
-                  onTabChange={handleProfileTabChange}
-                  onSelectProfile={handleSelectProfile}
-                  onNavigateToSessions={handleNavigateToSessions}
-                  onNavigateToMcp={handleNavigateToMcp}
-                  onProfilesLoaded={setProfiles}
-                  onViewSession={handleViewSession}
-                />
-              )}
-              <div className={currentView === 'sessions' ? 'block' : 'hidden'}>
-                <SessionsView
-                  selectedProfile={selectedProfile}
-                  onSelectProfile={setSelectedProfile}
-                  profiles={profiles}
-                  onViewSession={handleViewSession}
-                />
-              </div>
-              {currentView === 'session-detail' && (
-                viewedSession ? (
-                  <SessionDetailView
-                    key={viewedSession.id}
-                    session={viewedSession}
-                    onBack={handleBackFromSession}
+            <ErrorBoundary>
+              <React.Suspense
+                fallback={
+                  currentView === 'network' ? (
+                    <NetworkViewSkeleton />
+                  ) : currentView === 'profile-detail' ? (
+                    <ProfileDetailSkeleton profileName={selectedProfile} />
+                  ) : currentView === 'mcp' ? (
+                    <McpCatalogSkeleton />
+                  ) : currentView === 'session-detail' ? (
+                    <SessionDetailSkeleton targetSessionId={targetSessionId} onBack={handleBackFromSession} />
+                  ) : currentView === 'overview' ? (
+                    <ProfilesOverviewSkeleton />
+                  ) : (
+                    <ViewLoadingSkeleton />
+                  )
+                }
+              >
+                {currentView === 'overview' && (
+                  <ProfilesView
+                    selectedProfile="all"
+                    profiles={profiles}
+                    onSelectProfile={handleSelectProfile}
+                    onNavigateToSessions={handleNavigateToSessions}
+                    onNavigateToMcp={handleNavigateToMcp}
+                    onProfilesLoaded={setProfiles}
                   />
-                ) : (
-                  <SessionDetailSkeleton
-                    targetSessionId={targetSessionId}
-                    onBack={handleBackFromSession}
+                )}
+                {currentView === 'profile-detail' && (
+                  <ProfilesView
+                    selectedProfile={selectedProfile}
+                    profiles={profiles}
+                    activeTab={activeProfileTab}
+                    onTabChange={handleProfileTabChange}
+                    onSelectProfile={handleSelectProfile}
+                    onNavigateToSessions={handleNavigateToSessions}
+                    onNavigateToMcp={handleNavigateToMcp}
+                    onProfilesLoaded={setProfiles}
+                    onViewSession={handleViewSession}
                   />
-                )
-              )}
-              {currentView === 'mcp' && (
-                <McpView
-                  selectedScope={selectedMcpScope}
-                  onSelectScope={(scope) => {
-                    setSelectedMcpScope(scope);
-                    syncUrl('mcp', 'all', 'quota', scope, null, true);
-                  }}
-                  profiles={profiles}
-                />
-              )}
-              {currentView === 'network' && <NetworkView profiles={profiles} />}
-            </React.Suspense>
+                )}
+                <div className={currentView === 'sessions' ? 'block' : 'hidden'}>
+                  <SessionsView
+                    selectedProfile={selectedProfile}
+                    onSelectProfile={setSelectedProfile}
+                    profiles={profiles}
+                    onViewSession={handleViewSession}
+                  />
+                </div>
+                {currentView === 'session-detail' && (
+                  viewedSession ? (
+                    <SessionDetailView
+                      key={viewedSession.id}
+                      session={viewedSession}
+                      onBack={handleBackFromSession}
+                    />
+                  ) : (
+                    <SessionDetailSkeleton
+                      targetSessionId={targetSessionId}
+                      onBack={handleBackFromSession}
+                    />
+                  )
+                )}
+                {currentView === 'mcp' && (
+                  <McpView
+                    selectedScope={selectedMcpScope}
+                    onSelectScope={(scope) => {
+                      setSelectedMcpScope(scope);
+                      syncUrl('mcp', 'all', 'quota', scope, null, true);
+                    }}
+                    profiles={profiles}
+                  />
+                )}
+                <div className={currentView === 'network' ? 'block' : 'hidden'}>
+                  {(visitedNetwork || currentView === 'network') && (
+                    <NetworkView profiles={profiles} />
+                  )}
+                </div>
+              </React.Suspense>
+            </ErrorBoundary>
           </div>
         </main>
       </div>
@@ -633,6 +683,7 @@ export function App() {
       />
 
       <Toaster />
+      <Agentation endpoint="http://localhost:4747" appName="AIM" />
     </div>
   );
 }

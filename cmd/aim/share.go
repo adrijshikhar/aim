@@ -51,7 +51,7 @@ func newShareModeCmd() *cobra.Command {
 			store := share.NewStore(config.BaseDir())
 			if len(args) == 0 {
 				mode := store.GetEffectiveGlobalMode()
-				fmt.Printf("Global sharing mode: %s\n", mode)
+				fmt.Fprintf(cmd.OutOrStdout(), "Global sharing mode: %s\n", mode)
 				return nil
 			}
 			target := strings.ToLower(args[0])
@@ -61,7 +61,7 @@ func newShareModeCmd() *cobra.Command {
 			if err := store.SetGlobalMode(target); err != nil {
 				return err
 			}
-			fmt.Printf("%s Global sharing mode set to %s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Global sharing mode set to %s\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"), target)
 			return nil
 		},
@@ -80,19 +80,19 @@ func newShareEnableCmd(pm *profile.ProfileManager) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			profName := args[0]
 			ttl, err := time.ParseDuration(ttlStr)
-			if err != nil {
+			if err != nil || ttl <= 0 {
 				ttl = 4 * time.Hour
 			}
 			store := share.NewStore(config.BaseDir())
 			if store.GetGlobalMode() == "off" {
 				_ = store.SetGlobalMode("request")
-				fmt.Printf("%s Global sharing mode set to 'request' (required to share profiles)\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "%s Global sharing mode set to 'request' (required to share profiles)\n",
 					lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"))
 			}
 			if err := store.EnableProfile(profName, agent, autoApprove, ttl); err != nil {
 				return err
 			}
-			fmt.Printf("%s Profile %s is now shared (agent=%s, auto_approve=%v, ttl=%s)\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Profile %s is now shared (agent=%s, auto_approve=%v, ttl=%s)\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 				lipgloss.NewStyle().Foreground(tui.TextBright).Render(profName),
 				agent, autoApprove, ttl)
@@ -101,6 +101,7 @@ func newShareEnableCmd(pm *profile.ProfileManager) *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&agent, "agent", "a", "claude", "Agent type (claude, codex, gemini, agy)")
 	cmd.Flags().BoolVar(&autoApprove, "auto-approve", false, "Automatically approve lease requests")
+	cmd.Flags().BoolVar(&autoApprove, "auto", false, "Alias for --auto-approve")
 	cmd.Flags().StringVar(&ttlStr, "ttl", "4h", "Maximum lease duration")
 	return cmd
 }
@@ -116,7 +117,7 @@ func newShareDisableCmd(pm *profile.ProfileManager) *cobra.Command {
 			if err := store.DisableProfile(profName); err != nil {
 				return err
 			}
-			fmt.Printf("%s Profile %s is no longer shared\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Profile %s is no longer shared\n",
 				lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("✔"),
 				profName)
 			return nil
@@ -131,21 +132,21 @@ func newShareStatusCmd(pm *profile.ProfileManager) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vpn, _ := share.DetectVPN()
 			if vpn != nil && vpn.Connected {
-				fmt.Printf("%s VPN: %s (%s, broadcast: %s)\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "%s VPN: %s (%s, broadcast: %s)\n",
 					lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 					vpn.InterfaceName, vpn.IP, vpn.BroadcastIP)
 			} else {
-				fmt.Printf("%s VPN: Disconnected (Pritunl not active)\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "%s VPN: Disconnected (Pritunl not active)\n",
 					lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("!"))
 			}
 
 			store := share.NewStore(config.BaseDir())
 			profs := store.GetSharedProfiles()
 			if len(profs) == 0 {
-				fmt.Println("No profiles currently shared.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No profiles currently shared.")
 				return nil
 			}
-			fmt.Println(presenter.RenderSharedProfilesTable(os.Stdout, profs))
+			fmt.Fprintln(cmd.OutOrStdout(), presenter.RenderSharedProfilesTable(cmd.OutOrStdout(), profs))
 			return nil
 		},
 	}
@@ -159,10 +160,10 @@ func newShareListCmd(pm *profile.ProfileManager) *cobra.Command {
 			store := share.NewStore(config.BaseDir())
 			peers := store.GetPeers()
 			if len(peers) == 0 {
-				fmt.Println("No peers discovered yet. Use 'aim share peer add <vpn-ip>' or ensure teammates are on the VPN.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No peers discovered yet. Use 'aim share peer add <vpn-ip>' or ensure teammates are on the VPN.")
 				return nil
 			}
-			fmt.Println(presenter.RenderPeersTable(os.Stdout, peers))
+			fmt.Fprintln(cmd.OutOrStdout(), presenter.RenderPeersTable(cmd.OutOrStdout(), peers))
 			return nil
 		},
 	}
@@ -191,6 +192,10 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 				return fmt.Errorf("format must be <peer> <profile>, <peer>/<profile>, or <peer>:<profile>")
 			}
 
+			if hours <= 0 || hours > 72 {
+				return fmt.Errorf("requested hours must be between 1 and 72 (got %d)", hours)
+			}
+
 			store := share.NewStore(config.BaseDir())
 			targetHost := peer
 			for _, p := range store.GetPeers() {
@@ -206,12 +211,12 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 			}
 
 			client := share.NewClient(4319)
-			reqCtx, reqCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			reqCtx, reqCancel := context.WithTimeout(cmd.Context(), 5*time.Second)
 			resp, err := client.RequestLease(reqCtx, targetHost, profileName, agent, hours)
 			reqCancel()
 			if err != nil && !strings.Contains(targetHost, ".") {
 				// Retry with .local for zero-conf mDNS resolution
-				retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				retryCtx, retryCancel := context.WithTimeout(cmd.Context(), 5*time.Second)
 				resp, err = client.RequestLease(retryCtx, targetHost+".local", profileName, agent, hours)
 				retryCancel()
 			}
@@ -219,12 +224,12 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 				return fmt.Errorf("lease request failed: %w", err)
 			}
 			if resp.Status == "pending" {
-				fmt.Printf("%s Request submitted (id: %s). Waiting for teammate approval (press Ctrl+C to cancel)...\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "%s Request submitted (id: %s). Waiting for teammate approval (press Ctrl+C to cancel)...\n",
 					lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("⏳"),
 					resp.RequestID)
 				pollTicker := time.NewTicker(2 * time.Second)
 				defer pollTicker.Stop()
-				pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				pollCtx, pollCancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 				defer pollCancel()
 
 				approved := false
@@ -246,7 +251,7 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 					}
 				}
 			} else if resp.Status != "approved" {
-				fmt.Printf("%s Request status: %s (%s)\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "%s Request status: %s (%s)\n",
 					lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("!"),
 					resp.Status, resp.Message)
 				return nil
@@ -263,15 +268,15 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 				runAgent = agent
 			}
 
-			fmt.Printf("%s Lease granted until %s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Lease granted until %s\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 				resp.ExpiresAt.Format(time.RFC1123))
-			fmt.Printf("Run natively with: %s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "Run natively with: %s\n",
 				lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(fmt.Sprintf("aim run %s %s", runAgent, localName)))
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&hours, "hours", 2, "Requested lease duration in hours")
+	cmd.Flags().IntVar(&hours, "hours", 4, "Requested lease duration in hours")
 	cmd.Flags().StringVarP(&agent, "agent", "a", "claude", "Agent type")
 	return cmd
 }
@@ -286,7 +291,7 @@ func newShareReleaseCmd(pm *profile.ProfileManager) *cobra.Command {
 			if err := mgr.ReleaseLease(args[0]); err != nil {
 				return err
 			}
-			fmt.Printf("%s Leased profile %s released\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Leased profile %s released\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 				args[0])
 			return nil
@@ -299,6 +304,7 @@ func newSharePeerCmd(pm *profile.ProfileManager) *cobra.Command {
 		Use:   "peer",
 		Short: "Manage network peers",
 	}
+
 	cmd.AddCommand(&cobra.Command{
 		Use:   "add <ip-or-host>",
 		Short: "Add a teammate's VPN IP or hostname",
@@ -308,19 +314,52 @@ func newSharePeerCmd(pm *profile.ProfileManager) *cobra.Command {
 			store := share.NewStore(config.BaseDir())
 			disc := share.NewDiscovery(store, 4319)
 
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
 			defer cancel()
 
 			peer, err := disc.PingPeer(ctx, ip)
 			if err != nil {
 				return fmt.Errorf("could not reach peer at %s: %w", ip, err)
 			}
-			fmt.Printf("%s Peer verified: %s (%s, profiles: %v)\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Added peer %s (%s, profiles: %v)\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 				peer.HostName, peer.VPNIP, peer.Profiles)
 			return nil
 		},
 	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List discovered and manually added peers",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store := share.NewStore(config.BaseDir())
+			peers := store.GetPeers()
+			if len(peers) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No peers discovered yet.")
+				return nil
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), presenter.RenderPeersTable(cmd.OutOrStdout(), peers))
+			return nil
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:     "rm <ip-or-host>",
+		Aliases: []string{"remove"},
+		Short:   "Remove a teammate's peer from known peers",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store := share.NewStore(config.BaseDir())
+			if err := store.DeletePeer(args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Removed peer %s\n",
+				lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("✔"),
+				args[0])
+			return nil
+		},
+	})
+
 	return cmd
 }
 

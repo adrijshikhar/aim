@@ -1,6 +1,10 @@
 package share
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -243,5 +247,66 @@ func TestShareStoreDBUnavailableReturnsError(t *testing.T) {
 
 	if _, err := store.CancelShareRequest("req-test"); err == nil {
 		t.Fatalf("expected error when cancelling request with nil database, got nil")
+	}
+}
+
+func TestShareDB_CorruptRecovery(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "share.db")
+
+	// Write garbage bytes simulating corrupted SQLite file
+	if err := os.WriteFile(dbPath, []byte("NOT A SQLITE FILE GARBAGE DATA 1234567890"), 0600); err != nil {
+		t.Fatalf("failed to write corrupted db file: %v", err)
+	}
+
+	// NewShareDB must detect corrupted database, quarantine it, and recreate a clean schema
+	sdb, err := NewShareDB(tempDir)
+	if err != nil {
+		t.Fatalf("expected NewShareDB to auto-recover from corruption, got error: %v", err)
+	}
+	defer sdb.Close()
+
+	// Verify we can perform operations on the recovered database
+	req := ShareRequestRecord{
+		ID:             "req_recovered",
+		Direction:      "incoming",
+		PeerID:         "peer_bob",
+		PeerIP:         "10.8.0.2",
+		ProfileName:    "work",
+		Agent:          "claude",
+		RequestedHours: 2,
+		Status:         "pending",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(30 * time.Minute),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := sdb.SaveRequest(ctx, req); err != nil {
+		t.Fatalf("failed to save request in recovered db: %v", err)
+	}
+
+	got, err := sdb.GetRequest(ctx, "req_recovered")
+	if err != nil || got == nil {
+		t.Fatalf("failed to get request in recovered db: %v", err)
+	}
+	if got.ProfileName != "work" {
+		t.Errorf("expected profile work, got %s", got.ProfileName)
+	}
+
+	// Verify quarantined backup file was created
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("failed to read tempDir: %v", err)
+	}
+	quarantineFound := false
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "share.db.corrupt.") {
+			quarantineFound = true
+			break
+		}
+	}
+	if !quarantineFound {
+		t.Errorf("expected to find quarantined share.db.corrupt.* file in %s", tempDir)
 	}
 }

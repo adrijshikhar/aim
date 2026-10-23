@@ -238,6 +238,7 @@ func TestServerApproveRequiresLocalhost(t *testing.T) {
 
 	// Simulate remote request by setting RemoteAddr to a non-localhost IP
 	req := httptest.NewRequest("POST", "/api/share/approve", strings.NewReader(`{"request_id":"req_123"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "192.168.1.100:54321" // Remote peer on network
 	w := httptest.NewRecorder()
 
@@ -246,8 +247,41 @@ func TestServerApproveRequiresLocalhost(t *testing.T) {
 		t.Errorf("expected 403 Forbidden for remote caller to /api/share/approve, got %d", w.Code)
 	}
 
-	// Verify local caller is allowed to attempt approve
+	// CSRF rejection: local caller with text/plain (simple CORS) must be rejected
+	csrfReq := httptest.NewRequest("POST", "/api/share/approve", strings.NewReader(`{"request_id":"req_123"}`))
+	csrfReq.Header.Set("Content-Type", "text/plain")
+	csrfReq.RemoteAddr = "127.0.0.1:54321"
+	csrfW := httptest.NewRecorder()
+	server.Handler().ServeHTTP(csrfW, csrfReq)
+	if csrfW.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for text/plain CSRF bypass, got %d", csrfW.Code)
+	}
+
+	// CSRF rejection: cross-origin Origin header must be rejected
+	originReq := httptest.NewRequest("POST", "/api/share/approve", strings.NewReader(`{"request_id":"req_123"}`))
+	originReq.Header.Set("Content-Type", "application/json")
+	originReq.Header.Set("Origin", "https://malicious-website.com")
+	originReq.RemoteAddr = "127.0.0.1:54321"
+	originW := httptest.NewRecorder()
+	server.Handler().ServeHTTP(originW, originReq)
+	if originW.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for malicious Origin, got %d", originW.Code)
+	}
+
+	// CSRF rejection: cross-site Sec-Fetch-Site must be rejected
+	sfsReq := httptest.NewRequest("POST", "/api/share/approve", strings.NewReader(`{"request_id":"req_123"}`))
+	sfsReq.Header.Set("Content-Type", "application/json")
+	sfsReq.Header.Set("Sec-Fetch-Site", "cross-site")
+	sfsReq.RemoteAddr = "127.0.0.1:54321"
+	sfsW := httptest.NewRecorder()
+	server.Handler().ServeHTTP(sfsW, sfsReq)
+	if sfsW.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for cross-site Sec-Fetch-Site, got %d", sfsW.Code)
+	}
+
+	// Verify legitimate local caller is allowed to attempt approve
 	localReq := httptest.NewRequest("POST", "/api/share/approve", strings.NewReader(`{"request_id":"req_123"}`))
+	localReq.Header.Set("Content-Type", "application/json")
 	localReq.RemoteAddr = "127.0.0.1:54321"
 	localW := httptest.NewRecorder()
 	server.Handler().ServeHTTP(localW, localReq)
@@ -371,5 +405,92 @@ func TestServerDenyRequestRejectionDoesNotHideApproval(t *testing.T) {
 	}
 	if pollResp.Status != "approved" {
 		t.Fatalf("expected poll status approved after rejected denial, got %s", pollResp.Status)
+	}
+}
+
+func TestIsPrivateOrVPNIP(t *testing.T) {
+	tests := []struct {
+		addr string
+		want bool
+	}{
+		{"127.0.0.1:4319", true},
+		{"[::1]:4319", true},
+		{"localhost:4319", true},
+		{"10.8.19.251:4319", true},
+		{"10.8.16.9:54321", true},
+		{"192.168.1.50:4319", true},
+		{"172.16.0.10:4319", true},
+		{"100.64.1.2:4319", true},
+		{"[fe80::1]:4319", true},
+		{"[fe80::1%en0]:4319", true},
+		{"[fe80::20c:29ff:fe4a:3b21%utun4]:51234", true},
+		{"[fc00::1]:4319", true},
+		{"8.8.8.8:4319", false},
+		{"1.1.1.1:80", false},
+		{"[2001:4860:4860::8888]:4319", false},
+	}
+
+	for _, tt := range tests {
+		got := isPrivateOrVPNIP(tt.addr)
+		if got != tt.want {
+			t.Errorf("isPrivateOrVPNIP(%q) = %v, want %v", tt.addr, got, tt.want)
+		}
+	}
+}
+
+func TestPackageProfileCredentials_AgentScoping(t *testing.T) {
+	profilesDir := t.TempDir()
+	profDir := filepath.Join(profilesDir, "multi-agent")
+
+	// Set up credentials for Claude, Codex, and Agy
+	_ = os.MkdirAll(filepath.Join(profDir, ".claude"), 0700)
+	_ = os.WriteFile(filepath.Join(profDir, ".claude", ".credentials.json"), []byte("claude-secret"), 0600)
+
+	_ = os.MkdirAll(filepath.Join(profDir, ".codex"), 0700)
+	_ = os.WriteFile(filepath.Join(profDir, ".codex", "auth.json"), []byte("codex-secret"), 0600)
+
+	_ = os.MkdirAll(filepath.Join(profDir, ".gemini", "antigravity-cli"), 0700)
+	_ = os.WriteFile(filepath.Join(profDir, ".gemini", "antigravity-cli", "antigravity-oauth-token"), []byte("agy-secret"), 0600)
+
+	// 1. When agent == "claude" is requested, ONLY Claude credentials should be packaged
+	payloadClaude, err := PackageProfileCredentials(profilesDir, "multi-agent", "claude")
+	if err != nil {
+		t.Fatalf("PackageProfileCredentials claude failed: %v", err)
+	}
+	if _, ok := payloadClaude.Files[".claude/.credentials.json"]; !ok {
+		t.Errorf("expected claude credentials in payload")
+	}
+	if _, ok := payloadClaude.Files[".codex/auth.json"]; ok {
+		t.Errorf("CRIT-1 failure: codex credentials leaked when only claude was requested!")
+	}
+	if _, ok := payloadClaude.Files[".gemini/antigravity-cli/antigravity-oauth-token"]; ok {
+		t.Errorf("CRIT-1 failure: agy credentials leaked when only claude was requested!")
+	}
+
+	// 2. When agent == "codex" is requested, ONLY Codex credentials should be packaged
+	payloadCodex, err := PackageProfileCredentials(profilesDir, "multi-agent", "codex")
+	if err != nil {
+		t.Fatalf("PackageProfileCredentials codex failed: %v", err)
+	}
+	if _, ok := payloadCodex.Files[".codex/auth.json"]; !ok {
+		t.Errorf("expected codex credentials in payload")
+	}
+	if _, ok := payloadCodex.Files[".claude/.credentials.json"]; ok {
+		t.Errorf("CRIT-1 failure: claude credentials leaked when only codex was requested!")
+	}
+
+	// 3. When agent == "all" is requested, ALL credentials should be packaged
+	payloadAll, err := PackageProfileCredentials(profilesDir, "multi-agent", "all")
+	if err != nil {
+		t.Fatalf("PackageProfileCredentials all failed: %v", err)
+	}
+	if _, ok := payloadAll.Files[".claude/.credentials.json"]; !ok {
+		t.Errorf("expected claude credentials in 'all' payload")
+	}
+	if _, ok := payloadAll.Files[".codex/auth.json"]; !ok {
+		t.Errorf("expected codex credentials in 'all' payload")
+	}
+	if _, ok := payloadAll.Files[".gemini/antigravity-cli/antigravity-oauth-token"]; !ok {
+		t.Errorf("expected agy credentials in 'all' payload")
 	}
 }

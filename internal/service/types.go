@@ -55,6 +55,7 @@ type ProfileDTO struct {
 	MCPGlobal      *bool                `json:"mcp_global,omitempty"`
 	PluginsGlobal  *bool                `json:"plugins_global,omitempty"`
 	Adapters       []AdapterInfo        `json:"adapters,omitempty"`
+	IsLeased       bool                 `json:"is_leased,omitempty"`
 }
 
 // CreateProfileRequest represents a request to create or scaffold a new profile.

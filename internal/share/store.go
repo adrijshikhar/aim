@@ -211,6 +211,31 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 	return os.Rename(tmp, s.peerFile)
 }
 
+func (s *ShareStore) DeletePeer(target string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	peers := s.loadPeersLocked()
+	var next []PeerInfo
+	for _, p := range peers {
+		if p.VPNIP == target || p.HostName == target || p.ID == target || strings.Split(p.VPNIP, ":")[0] == target {
+			continue
+		}
+		next = append(next, p)
+	}
+
+	_ = os.MkdirAll(s.aimDir, 0700)
+	data, err := json.MarshalIndent(next, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.peerFile, os.Getpid(), time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.peerFile)
+}
+
 func (s *ShareStore) GetPeers() []PeerInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -478,6 +503,30 @@ func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
 		return logs[:limit]
 	}
 	return logs
+}
+
+// GetAuditCount returns the total number of audit logs in the system.
+func (s *ShareStore) GetAuditCount() int {
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if count, err := s.db.GetAuditCount(ctx); err == nil {
+			return count
+		}
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	data, err := os.ReadFile(s.auditFile)
+	if err != nil {
+		return 0
+	}
+	var logs []AuditEntry
+	if err := json.Unmarshal(data, &logs); err != nil {
+		return 0
+	}
+	return len(logs)
 }
 
 // SaveShareRequest persists a lease request (incoming or outgoing) in SQLite.

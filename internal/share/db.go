@@ -42,6 +42,23 @@ func NewShareDB(aimDir string) (*ShareDB, error) {
 
 	if err := sdb.initSchema(); err != nil {
 		_ = db.Close()
+		// Auto-recovery: if database file is corrupt, quarantine it and initialize a clean database
+		backupPath := fmt.Sprintf("%s.corrupt.%d", dbPath, time.Now().UnixNano())
+		_ = os.Rename(dbPath, backupPath)
+		_ = os.Remove(dbPath + "-wal")
+		_ = os.Remove(dbPath + "-shm")
+
+		freshDB, freshErr := sql.Open("sqlite", dbPath)
+		if freshErr == nil {
+			freshDB.SetMaxOpenConns(1)
+			sdb.db = freshDB
+			if freshSchemaErr := sdb.initSchema(); freshSchemaErr == nil {
+				_ = os.Chmod(dbPath, 0600)
+				sdb.migrateLegacyAuditLogs(aimDir)
+				return sdb, nil
+			}
+			_ = freshDB.Close()
+		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
@@ -321,6 +338,9 @@ func (s *ShareDB) GetPendingIncomingRequests(ctx context.Context) ([]ShareReques
 		}
 		results = append(results, r)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return results, nil
 }
@@ -375,6 +395,9 @@ func (s *ShareDB) GetPendingOutgoingRequests(ctx context.Context) ([]ShareReques
 			continue
 		}
 		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return results, nil
@@ -507,6 +530,21 @@ func (s *ShareDB) GetAuditLogs(ctx context.Context, limit int) ([]AuditEntry, er
 		}
 		logs = append(logs, e)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return logs, nil
+}
+
+// GetAuditCount returns the total number of recorded audit log entries.
+func (s *ShareDB) GetAuditCount(ctx context.Context) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var count int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM share_audit_logs").Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }

@@ -8,6 +8,7 @@ import (
 type SharedProfileConfig struct {
 	Name        string        `json:"name"`
 	Agent       string        `json:"agent"`
+	Agents      []string      `json:"agents,omitempty"`
 	AutoApprove bool          `json:"auto_approve"`
 	MaxLeaseTTL time.Duration `json:"max_lease_ttl"`
 	Enabled     bool          `json:"enabled"`
@@ -89,6 +90,7 @@ type LeaseResponse struct {
 	LeaseID     string        `json:"lease_id,omitempty"`
 	ProfileName string        `json:"profile_name,omitempty"`
 	Agent       string        `json:"agent,omitempty"`
+	Agents      []string      `json:"agents,omitempty"`
 	ExpiresAt   time.Time     `json:"expires_at,omitempty"`
 	Payload     *SharePayload `json:"payload,omitempty"`
 	Message     string        `json:"message,omitempty"`
@@ -98,6 +100,7 @@ type GrantedLease struct {
 	LeaseID      string    `json:"lease_id"`
 	ProfileName  string    `json:"profile_name"`
 	Agent        string    `json:"agent"`
+	Agents       []string  `json:"agents,omitempty"`
 	BorrowerID   string    `json:"borrower_id"`
 	BorrowerIP   string    `json:"borrower_ip"`
 	GrantedAt    time.Time `json:"granted_at"`

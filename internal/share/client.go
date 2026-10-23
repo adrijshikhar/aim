@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,13 +29,36 @@ func NewClient(port int) *Client {
 	}
 }
 
+// SetBaseURLOverride sets an explicit base URL for testing with httptest.Server.
+func (c *Client) SetBaseURLOverride(url string) {
+	c.baseURLOverride = url
+}
+
+func (c *Client) resolveBaseURL(target string) string {
+	if c.baseURLOverride != "" {
+		return strings.TrimRight(c.baseURLOverride, "/")
+	}
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		return strings.TrimRight(target, "/")
+	}
+	if host, port, err := net.SplitHostPort(target); err == nil {
+		return fmt.Sprintf("http://%s", net.JoinHostPort(host, port))
+	}
+	port := c.port
+	if port <= 0 {
+		port = 4319
+	}
+	return fmt.Sprintf("http://%s", net.JoinHostPort(target, strconv.Itoa(port)))
+}
+
 func (c *Client) RequestLease(ctx context.Context, peerIP, profile, agent string, hours int) (*LeaseResponse, error) {
-	baseURL := c.baseURLOverride
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://%s:%d", peerIP, c.port)
+	baseURL := c.resolveBaseURL(peerIP)
+	requesterID, _ := os.Hostname()
+	if requesterID == "" {
+		requesterID = "local-node"
 	}
 	reqBody := LeaseRequest{
-		RequesterID:    "local-node",
+		RequesterID:    requesterID,
 		RequesterIP:    peerIP,
 		ProfileName:    profile,
 		Agent:          agent,
@@ -72,10 +98,7 @@ func (c *Client) RequestLease(ctx context.Context, peerIP, profile, agent string
 }
 
 func (c *Client) PollLease(ctx context.Context, peerIP, requestID string) (*LeaseResponse, error) {
-	baseURL := c.baseURLOverride
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://%s:%d", peerIP, c.port)
-	}
+	baseURL := c.resolveBaseURL(peerIP)
 
 	reqURL := fmt.Sprintf("%s/api/share/poll?request_id=%s", baseURL, requestID)
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
@@ -109,10 +132,7 @@ func (c *Client) PollLease(ctx context.Context, peerIP, requestID string) (*Leas
 }
 
 func (c *Client) CancelLeaseRequest(ctx context.Context, peerIP, requestID string) error {
-	baseURL := c.baseURLOverride
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://%s:%d", peerIP, c.port)
-	}
+	baseURL := c.resolveBaseURL(peerIP)
 
 	reqBody := map[string]string{"request_id": requestID}
 	data, _ := json.Marshal(reqBody)
@@ -132,4 +152,40 @@ func (c *Client) CancelLeaseRequest(ctx context.Context, peerIP, requestID strin
 		return fmt.Errorf("remote host returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+type LeaseStatusResponse struct {
+	LeaseID string `json:"lease_id"`
+	Active  bool   `json:"active"`
+	Revoked bool   `json:"revoked"`
+	Expired bool   `json:"expired"`
+}
+
+func (c *Client) CheckLeaseStatus(ctx context.Context, peerIP, leaseID string) (*LeaseStatusResponse, error) {
+	baseURL := c.resolveBaseURL(peerIP)
+
+	reqURL := fmt.Sprintf("%s/api/share/lease/status?lease_id=%s", baseURL, leaseID)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		return &LeaseStatusResponse{LeaseID: leaseID, Active: false, Revoked: true, Expired: true}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("host returned status %s", resp.Status)
+	}
+
+	var statusResp LeaseStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
+		return nil, err
+	}
+	return &statusResp, nil
 }
