@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/adrijshikhar/aim/compare/v0.17.0...v0.18.0) (2026-10-23)
+
+
+### Features
+
+* **web:** complete design audit, token standardization, and UI invariants ([#101](https://github.com/adrijshikhar/aim/issues/101)) ([caf95fa](https://github.com/adrijshikhar/aim/commit/caf95faa3e050bf5012788e87eb7399c5b9357ae))
+
 ## [0.17.0](https://github.com/adrijshikhar/aim/compare/v0.16.0...v0.17.0) (2026-10-22)
 
 
