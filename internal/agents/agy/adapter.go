@@ -243,7 +243,8 @@ func mergeHostStatusLineSettings(realHome, tokenDir string) error {
 		data = append(data, '\n')
 		return merge.AtomicWrite(destSettings, data, 0644)
 	} else if err != nil {
-		return nil
+		logger.Debug("[agy] Failed to read dest settings.json: %v", err)
+		return err
 	}
 
 	var destJSON map[string]any
@@ -268,15 +269,33 @@ func mergeHostStatusLineSettings(realHome, tokenDir string) error {
 }
 
 func copyHostSettings(realHome, tokenDir string) {
-	realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
-	destSettings := filepath.Join(tokenDir, "settings.json")
-	if _, err := os.Stat(destSettings); os.IsNotExist(err) {
-		if sData, err := os.ReadFile(realSettings); err == nil {
-			_ = merge.AtomicWrite(destSettings, sData, 0644)
-			return
-		}
+	if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
+		logger.Debug("[agy] Failed to merge host statusLine: %v", err)
 	}
-	_ = mergeHostStatusLineSettings(realHome, tokenDir)
+}
+
+// SyncHostSettings synchronizes host status line settings into the profile's settings.json
+// unless statusline_global is disabled for the profile in config.
+func (a *Adapter) SyncHostSettings(ctx context.Context, profileName, profileDir string, cfg *config.Config) error {
+	tokenDir := filepath.Join(profileDir, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(tokenDir, 0700); err != nil {
+		return err
+	}
+
+	if cfg != nil && !cfg.StatuslineGlobalEnabled(profileName) {
+		// When disabled, remove .config/agstatusline symlink if present
+		agConfig := filepath.Join(profileDir, ".config", "agstatusline")
+		if fi, err := os.Lstat(agConfig); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(agConfig); err != nil {
+				logger.Debug("[agy] Failed to remove agstatusline symlink: %v", err)
+			}
+		}
+		return nil
+	}
+
+	realHome := config.RealHomeDir()
+	copyHostSettings(realHome, tokenDir)
+	return nil
 }
 
 // SeedDefaultCredentials copies the host's existing Antigravity CLI token to an
@@ -303,7 +322,6 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 				}
 				if err := merge.AtomicWrite(p, rData, perm); err == nil {
 					logger.Debug("[agy] Seeded profile %q from host token file %s", profileName, realToken)
-					copyHostSettings(realHome, filepath.Dir(p))
 					return true
 				}
 			}
@@ -313,7 +331,6 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	// 2. Try harvesting token from host macOS Keychain
 	if err := a.HarvestCredentials(context.Background(), profileName, profileDir); err == nil {
 		logger.Debug("[agy] Seeded profile %q from host macOS Keychain", profileName)
-		copyHostSettings(realHome, filepath.Dir(p))
 		return true
 	}
 
@@ -384,8 +401,11 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			return fmt.Errorf("OAuth client credentials not configured and '%s' binary not found in PATH", a.BinaryName())
 		}
 		realHome := config.RealHomeDir()
-		tokenDir := filepath.Join(profileDir, ".gemini", "antigravity-cli")
-		copyHostSettings(realHome, tokenDir)
+		loginCfg, cfgErr := config.LoadConfig()
+		if cfgErr != nil {
+			logger.Debug("[agy] Failed to load config in Login: %v", cfgErr)
+		}
+		_ = a.SyncHostSettings(ctx, profileName, profileDir, loginCfg)
 		_ = bridgeSharedState(realHome, profileDir)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
@@ -418,7 +438,11 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			return err
 		}
 		_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
-		copyHostSettings(realHome, tokenDir)
+		loginCfg, cfgErr = config.LoadConfig()
+		if cfgErr != nil {
+			logger.Debug("[agy] Failed to load config in Login: %v", cfgErr)
+		}
+		_ = a.SyncHostSettings(ctx, profileName, profileDir, loginCfg)
 		return nil
 	}
 	cfg := oauth.ProviderConfig{
@@ -472,7 +496,11 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		return err
 	}
 
-	copyHostSettings(config.RealHomeDir(), tokenDir)
+	loginCfg, cfgErr := config.LoadConfig()
+	if cfgErr != nil {
+		logger.Debug("[agy] Failed to load config in Login: %v", cfgErr)
+	}
+	_ = a.SyncHostSettings(ctx, profileName, profileDir, loginCfg)
 
 	okBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#98c379")).Bold(true).Render("✔")
 	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("#56b6c2"))
@@ -492,8 +520,12 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	// Auto-seed credentials for personal/default profile if missing in profileDir but available on host
 	_ = a.SeedDefaultCredentials(profileName, profileDir)
 
-	// Also copy settings.json from host if not present in profile
-	copyHostSettings(realHome, tokenDir)
+	// Synchronize host status line settings if enabled
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		logger.Debug("[agy] Failed to load config in PrepareEnv: %v", err)
+	}
+	_ = a.SyncHostSettings(ctx, profileName, profileDir, cfg)
 
 	bin := a.ResolveBinary()
 	logger.Debug("[agy] Resolved binary: %s", bin)

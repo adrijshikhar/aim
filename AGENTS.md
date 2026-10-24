@@ -176,3 +176,11 @@ Before declaring any work complete or opening a PR:
 3. **Smoke & Responsive Verification:**
    - Verify CLI commands produce clean, bounded output in standard terminal dimensions (80 and 120 columns).
    - Verify web views remain glitch-free and properly aligned with sidebars open or on narrow laptop viewports.
+
+---
+
+## 6. Git, Branching & Pull Request Invariants
+
+- **PROHIBITED:** Never push directly to `main` (`git push origin main` is strictly forbidden). Even if local credentials or repository admin permissions allow bypassing branch protection rules, AI agents must NEVER push directly to `main`.
+- **MANDATORY:** Always work in an isolated feature branch (`feat/<name>` or `fix/<name>`), preferably within a dedicated git worktree (`.worktrees/`).
+- **MANDATORY:** Every change must be merged into `main` strictly through a GitHub Pull Request (`gh pr create`) after all quality gates, status checks, and reviews pass.

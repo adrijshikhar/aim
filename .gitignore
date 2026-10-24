@@ -20,6 +20,7 @@ node_modules/
 .hermes/
 .playwright-mcp/
 .superpowers/
+.openqodex/
 
 # Planning artifacts (specs, plans, roadmaps live in private `projects` repo)
 docs/

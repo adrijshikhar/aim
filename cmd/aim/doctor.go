@@ -346,10 +346,7 @@ func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.P
 		}
 		if !bridged[p] {
 			bridged[p] = true
-			var extraPaths []string
-			if cfg != nil {
-				extraPaths = cfg.CustomBridgedPaths
-			}
+			extraPaths := profile.ProfileExtraPaths(cfg, p)
 			results = append(results, profile.BridgeDiagnostics(p, config.RealHomeDir(), pm.ProfileDir(p), extraPaths...)...)
 		}
 		if cfg != nil {

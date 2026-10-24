@@ -179,8 +179,12 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	// Bridge host plugins and hooks (e.g. Catalyst) into profile
 	bridgePluginsAndHooks(realHome, codexDir)
 
-	// Bridge host cxstatusline config into profile
-	bridgeCxStatusline(realHome, profileDir)
+	// Bridge host cxstatusline config into profile if statusline_global enabled
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		logger.Debug("[codex] Failed to load config in PrepareEnv: %v", err)
+	}
+	_ = a.SyncHostSettings(ctx, profileName, profileDir, cfg)
 
 	bin := a.ResolveBinary()
 	logger.Debug("[codex] Resolved binary: %s", bin)
@@ -395,6 +399,24 @@ func bridgePluginsAndHooks(realHome, profileCodexDir string) {
 			_ = os.Symlink(hostHooksJSON, destHooksJSON)
 		}
 	}
+}
+
+// SyncHostSettings synchronizes host cxstatusline configuration into the profile sandbox
+// unless statusline_global is disabled for the profile in config.
+func (a *Adapter) SyncHostSettings(ctx context.Context, profileName, profileDir string, cfg *config.Config) error {
+	destConfig := filepath.Join(profileDir, ".config", "cxstatusline")
+	if cfg != nil && !cfg.StatuslineGlobalEnabled(profileName) {
+		if fi, err := os.Lstat(destConfig); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(destConfig); err != nil {
+				logger.Debug("[codex] Failed to remove cxstatusline symlink: %v", err)
+			}
+		}
+		return nil
+	}
+
+	realHome := config.RealHomeDir()
+	bridgeCxStatusline(realHome, profileDir)
+	return nil
 }
 
 func bridgeCxStatusline(realHome, profileDir string) {
