@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/adrijshikhar/aim/compare/v0.18.0...v0.18.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **agy:** bridge agstatusline and merge host statusLine into profile settings ([5435ec4](https://github.com/adrijshikhar/aim/commit/5435ec485d61efffcd92d9b8e4b096e9dbc41a1e))
+
 ## [0.18.0](https://github.com/adrijshikhar/aim/compare/v0.17.0...v0.18.0) (2026-10-23)
 
 
