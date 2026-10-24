@@ -1335,3 +1335,60 @@ func TestAgyAdapter_MergeHostStatusLineSettings(t *testing.T) {
 		}
 	})
 }
+
+func TestAgyAdapter_SyncHostSettings_StatuslineGlobal(t *testing.T) {
+	tempDir := t.TempDir()
+	realHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+	t.Setenv("AIM_REAL_HOME", realHome)
+	t.Setenv("HOME", realHome)
+
+	hostDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(hostDir, 0755); err != nil {
+		t.Fatalf("failed to create hostDir: %v", err)
+	}
+	hostSettings := filepath.Join(hostDir, "settings.json")
+	hostData, _ := json.Marshal(map[string]any{
+		"statusLine": map[string]any{
+			"command": "agstatusline",
+			"enabled": true,
+		},
+	})
+	if err := os.WriteFile(hostSettings, hostData, 0644); err != nil {
+		t.Fatalf("failed to write host settings: %v", err)
+	}
+
+	adapter := NewAdapter()
+
+	// 1. When statusline_global is disabled, SyncHostSettings is a no-op
+	fl := false
+	cfgDisabled := &config.Config{
+		Profiles: map[string]config.ProfileConfig{
+			"testprof": {StatuslineGlobal: &fl},
+		},
+	}
+	if err := adapter.SyncHostSettings(t.Context(), "testprof", profileDir, cfgDisabled); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	destSettings := filepath.Join(profileDir, ".gemini", "antigravity-cli", "settings.json")
+	if _, err := os.Stat(destSettings); !os.IsNotExist(err) {
+		t.Errorf("expected dest settings.json NOT to be created when statusline_global is disabled")
+	}
+
+	// 2. When statusline_global is enabled (default), SyncHostSettings merges statusLine
+	cfgEnabled := &config.Config{}
+	if err := adapter.SyncHostSettings(t.Context(), "testprof", profileDir, cfgEnabled); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	destBytes, err := os.ReadFile(destSettings)
+	if err != nil {
+		t.Fatalf("expected dest settings to exist after SyncHostSettings: %v", err)
+	}
+	var destMap map[string]any
+	if err := json.Unmarshal(destBytes, &destMap); err != nil {
+		t.Fatalf("failed to parse dest settings: %v", err)
+	}
+	if destMap["statusLine"] == nil {
+		t.Errorf("expected statusLine to be present when statusline_global is enabled")
+	}
+}

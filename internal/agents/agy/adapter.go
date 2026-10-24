@@ -279,6 +279,23 @@ func copyHostSettings(realHome, tokenDir string) {
 	_ = mergeHostStatusLineSettings(realHome, tokenDir)
 }
 
+// SyncHostSettings synchronizes host status line settings into the profile's settings.json
+// unless statusline_global is disabled for the profile in config.
+func (a *Adapter) SyncHostSettings(ctx context.Context, profileName, profileDir string, cfg *config.Config) error {
+	if cfg != nil && !cfg.StatuslineGlobalEnabled(profileName) {
+		return nil
+	}
+
+	realHome := config.RealHomeDir()
+	tokenDir := filepath.Join(profileDir, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(tokenDir, 0700); err != nil {
+		return err
+	}
+
+	copyHostSettings(realHome, tokenDir)
+	return nil
+}
+
 // SeedDefaultCredentials copies the host's existing Antigravity CLI token to an
 // eligible profile (such as "personal", "default", "p", or the configured default profile)
 // if the profile doesn't have credentials yet.
@@ -492,8 +509,9 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	// Auto-seed credentials for personal/default profile if missing in profileDir but available on host
 	_ = a.SeedDefaultCredentials(profileName, profileDir)
 
-	// Also copy settings.json from host if not present in profile
-	copyHostSettings(realHome, tokenDir)
+	// Synchronize host status line settings if enabled
+	cfg, _ := config.LoadConfig()
+	_ = a.SyncHostSettings(ctx, profileName, profileDir, cfg)
 
 	bin := a.ResolveBinary()
 	logger.Debug("[agy] Resolved binary: %s", bin)

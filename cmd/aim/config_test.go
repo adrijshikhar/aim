@@ -239,4 +239,47 @@ func TestCLI_Config_Completions(t *testing.T) {
 	if len(valComps) != 4 {
 		t.Errorf("expected 4 auto_update completions, got: %v", valComps)
 	}
+
+	// Test set completions for statusline_global values
+	slComps, _ := setCmd.ValidArgsFunction(setCmd, []string{"statusline_global"}, "")
+	if len(slComps) != 4 {
+		t.Errorf("expected 4 statusline_global completions, got: %v", slComps)
+	}
+}
+
+func TestCLI_Config_StatuslineGlobal(t *testing.T) {
+	_, reg, pm := setupConfigTestEnv(t)
+
+	// Default get
+	var getBuf bytes.Buffer
+	cmdGet := newConfigCmd(reg, pm)
+	cmdGet.SetOut(&getBuf)
+	cmdGet.SetArgs([]string{"get", "statusline_global"})
+	if err := cmdGet.Execute(); err != nil {
+		t.Fatalf("config get statusline_global failed: %v", err)
+	}
+	if strings.TrimSpace(getBuf.String()) != "true" {
+		t.Errorf("expected default statusline_global 'true', got %q", strings.TrimSpace(getBuf.String()))
+	}
+
+	// Set false
+	var setBuf bytes.Buffer
+	cmdSet := newConfigCmd(reg, pm)
+	cmdSet.SetOut(&setBuf)
+	cmdSet.SetArgs([]string{"set", "statusline_global", "off"})
+	if err := cmdSet.Execute(); err != nil {
+		t.Fatalf("config set statusline_global off failed: %v", err)
+	}
+	if !strings.Contains(setBuf.String(), "Set statusline_global = false") {
+		t.Errorf("expected success message, got: %s", setBuf.String())
+	}
+
+	// Verify loaded config
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("failed to reload config: %v", err)
+	}
+	if cfg.StatuslineGlobal == nil || *cfg.StatuslineGlobal != false {
+		t.Errorf("expected StatuslineGlobal to be false in loaded config")
+	}
 }

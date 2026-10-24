@@ -13,11 +13,12 @@ import (
 )
 
 type ProfileConfig struct {
-	Agents        []string          `json:"agents,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
-	Args          []string          `json:"args,omitempty"`
-	MCPGlobal     *bool             `json:"mcp_global,omitempty"`
-	PluginsGlobal *bool             `json:"plugins_global,omitempty"`
+	Agents           []string          `json:"agents,omitempty"`
+	Env              map[string]string `json:"env,omitempty"`
+	Args             []string          `json:"args,omitempty"`
+	MCPGlobal        *bool             `json:"mcp_global,omitempty"`
+	PluginsGlobal    *bool             `json:"plugins_global,omitempty"`
+	StatuslineGlobal *bool             `json:"statusline_global,omitempty"`
 }
 
 func (p *ProfileConfig) UnmarshalJSON(data []byte) error {
@@ -43,6 +44,7 @@ type Config struct {
 	Debug                  bool                     `json:"debug,omitempty"`
 	TelemetryDisabled      bool                     `json:"telemetry_disabled,omitempty"`
 	AutoUpdate             string                   `json:"auto_update,omitempty"`
+	StatuslineGlobal       *bool                    `json:"statusline_global,omitempty"`
 	Profiles               map[string]ProfileConfig `json:"profiles"`
 }
 
@@ -106,8 +108,13 @@ func (c *Config) Get(key string) (string, error) {
 			return "true", nil
 		}
 		return "false", nil
+	case "statusline_global":
+		if c.StatuslineGlobal == nil || *c.StatuslineGlobal {
+			return "true", nil
+		}
+		return "false", nil
 	default:
-		return "", fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, telemetry_disabled, debug)", key)
+		return "", fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, telemetry_disabled, debug, statusline_global)", key)
 	}
 }
 
@@ -169,8 +176,15 @@ func (c *Config) Set(key, val string) error {
 		}
 		c.TelemetryDisabled = b
 		return nil
+	case "statusline_global":
+		b, err := parseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for statusline_global %q: must be true or false", val)
+		}
+		c.StatuslineGlobal = &b
+		return nil
 	default:
-		return fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, telemetry_disabled, debug)", key)
+		return fmt.Errorf("unknown config key %q (supported: default_agent, default_profile, auto_update, telemetry, telemetry_disabled, debug, statusline_global)", key)
 	}
 }
 
@@ -407,6 +421,31 @@ func (c *Config) PluginsGlobalEnabled(profile string) bool {
 		return true
 	}
 	return *p.PluginsGlobal
+}
+
+// StatuslineGlobalEnabled reports whether host status line configuration and tooling
+// are bridged into the profile. Defaults to true if unspecified.
+func (c *Config) StatuslineGlobalEnabled(profile string) bool {
+	if c == nil {
+		return true
+	}
+	if p, ok := c.Profiles[profile]; ok && p.StatuslineGlobal != nil {
+		return *p.StatuslineGlobal
+	}
+	if c.StatuslineGlobal != nil {
+		return *c.StatuslineGlobal
+	}
+	return true
+}
+
+// SetProfileStatuslineGlobal sets or clears the statusline_global setting for a specific profile.
+func (c *Config) SetProfileStatuslineGlobal(profile string, enabled *bool) {
+	if c.Profiles == nil {
+		c.Profiles = make(map[string]ProfileConfig)
+	}
+	p := c.Profiles[profile]
+	p.StatuslineGlobal = enabled
+	c.Profiles[profile] = p
 }
 
 // GroupEnabled reports whether the host merge of a collection group is on for

@@ -53,7 +53,7 @@ Subcommands:
 	}
 	listCmd.Flags().BoolVarP(&jsonFlag, "json", "j", false, "Output configuration as JSON")
 
-	configKeys := []string{"default_agent", "default_profile", "auto_update", "telemetry", "debug"}
+	configKeys := []string{"default_agent", "default_profile", "auto_update", "telemetry", "debug", "statusline_global"}
 
 	getCmd := &cobra.Command{
 		Use:   "get <key>",
@@ -103,6 +103,8 @@ Subcommands:
 					return []string{"on", "off"}, cobra.ShellCompDirectiveNoFileComp
 				case "debug":
 					return []string{"true", "false"}, cobra.ShellCompDirectiveNoFileComp
+				case "statusline_global":
+					return []string{"true", "false", "on", "off"}, cobra.ShellCompDirectiveNoFileComp
 				case "default_agent":
 					return completeAgents(reg, toComplete), cobra.ShellCompDirectiveNoFileComp
 				case "default_profile":
@@ -150,11 +152,17 @@ func runConfigList(out io.Writer, asJSON bool) error {
 		debugStatus = "true"
 	}
 
+	slStatus := "true"
+	if cfg.StatuslineGlobal != nil && !*cfg.StatuslineGlobal {
+		slStatus = "false"
+	}
+
 	t.Row("default_agent", cfg.DefaultAgent, "Default agent to launch when unspecified")
 	t.Row("default_profile", cfg.DefaultProfile, "Default profile activated when none specified")
 	t.Row("auto_update", cfg.GetAutoUpdate(), "Update policy (prompt, notify, auto, off)")
 	t.Row("telemetry", telStatus, "Anonymous usage telemetry (on, off)")
 	t.Row("debug", debugStatus, "Verbose debug logging to stderr and aim-debug.log")
+	t.Row("statusline_global", slStatus, "Bridge host status line config into profiles (true, false)")
 	t.Row("custom_bridged_paths", fmt.Sprintf("%d path(s)", len(cfg.CustomBridgedPaths)), "Host paths bridged into profile sandboxes")
 	t.Row("profiles", fmt.Sprintf("%d configured", len(cfg.Profiles)), "Profiles registered in config")
 

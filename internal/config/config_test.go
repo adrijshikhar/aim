@@ -822,3 +822,104 @@ func TestConfig_UnmarshalPreservesExistingDefaults(t *testing.T) {
 		t.Errorf("expected TelemetryDisabled=true from partial payload")
 	}
 }
+
+func TestStatuslineGlobalEnabled(t *testing.T) {
+	tr := true
+	fl := false
+
+	t.Run("default true when unset", func(t *testing.T) {
+		c := &Config{Profiles: map[string]ProfileConfig{"work": {}}}
+		if !c.StatuslineGlobalEnabled("work") {
+			t.Errorf("expected default true for profile with unset statusline_global")
+		}
+		if !c.StatuslineGlobalEnabled("nonexistent") {
+			t.Errorf("expected default true for nonexistent profile")
+		}
+		var nilCfg *Config
+		if !nilCfg.StatuslineGlobalEnabled("work") {
+			t.Errorf("expected default true for nil config")
+		}
+	})
+
+	t.Run("profile-level override", func(t *testing.T) {
+		c := &Config{
+			Profiles: map[string]ProfileConfig{
+				"disabled": {StatuslineGlobal: &fl},
+				"enabled":  {StatuslineGlobal: &tr},
+				"default":  {},
+			},
+		}
+		if c.StatuslineGlobalEnabled("disabled") {
+			t.Errorf("expected false for profile with statusline_global: false")
+		}
+		if !c.StatuslineGlobalEnabled("enabled") {
+			t.Errorf("expected true for profile with statusline_global: true")
+		}
+		if !c.StatuslineGlobalEnabled("default") {
+			t.Errorf("expected true for profile with unset statusline_global")
+		}
+	})
+
+	t.Run("global setting with profile inheritance and override", func(t *testing.T) {
+		c := &Config{
+			StatuslineGlobal: &fl,
+			Profiles: map[string]ProfileConfig{
+				"inherited":  {},
+				"overridden": {StatuslineGlobal: &tr},
+			},
+		}
+		if c.StatuslineGlobalEnabled("inherited") {
+			t.Errorf("expected false when inheriting global statusline_global: false")
+		}
+		if !c.StatuslineGlobalEnabled("overridden") {
+			t.Errorf("expected true when profile overrides global false with true")
+		}
+	})
+
+	t.Run("Get and Set statusline_global", func(t *testing.T) {
+		c := NewDefaultConfig()
+		val, err := c.Get("statusline_global")
+		if err != nil {
+			t.Fatalf("unexpected error on Get: %v", err)
+		}
+		if val != "true" {
+			t.Errorf("expected default 'true', got %q", val)
+		}
+
+		if err := c.Set("statusline_global", "off"); err != nil {
+			t.Fatalf("unexpected error on Set off: %v", err)
+		}
+		if c.StatuslineGlobal == nil || *c.StatuslineGlobal != false {
+			t.Errorf("expected StatuslineGlobal to be false")
+		}
+		val, _ = c.Get("statusline_global")
+		if val != "false" {
+			t.Errorf("expected 'false', got %q", val)
+		}
+
+		if err := c.Set("statusline_global", "on"); err != nil {
+			t.Fatalf("unexpected error on Set on: %v", err)
+		}
+		if c.StatuslineGlobal == nil || *c.StatuslineGlobal != true {
+			t.Errorf("expected StatuslineGlobal to be true")
+		}
+
+		if err := c.Set("statusline_global", "invalid"); err == nil {
+			t.Errorf("expected error setting invalid boolean value")
+		}
+	})
+
+	t.Run("JSON serialization", func(t *testing.T) {
+		data := []byte(`{"statusline_global": false, "profiles": {"p": {"statusline_global": true}}}`)
+		var c Config
+		if err := json.Unmarshal(data, &c); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		if c.StatuslineGlobal == nil || *c.StatuslineGlobal != false {
+			t.Errorf("expected global false")
+		}
+		if p, ok := c.Profiles["p"]; !ok || p.StatuslineGlobal == nil || *p.StatuslineGlobal != true {
+			t.Errorf("expected profile true")
+		}
+	})
+}
