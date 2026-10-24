@@ -848,3 +848,118 @@ func TestProfileManager_StatuslineGlobalIntegration(t *testing.T) {
 		}
 	}
 }
+
+func TestCloneProfile_PreservesStatuslineGlobal(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	aimHome := filepath.Join(tempDir, "aim")
+	t.Setenv("AIM_REAL_HOME", hostHome)
+	t.Setenv("HOME", hostHome)
+	t.Setenv("AIM_HOME", aimHome)
+
+	// Create host statusline directories
+	for _, sl := range []string{
+		filepath.Join(".config", "cxstatusline"),
+		filepath.Join(".config", "agstatusline"),
+		filepath.Join(".config", "ccstatusline"),
+	} {
+		hostDir := filepath.Join(hostHome, sl)
+		_ = os.MkdirAll(hostDir, 0755)
+		_ = os.WriteFile(filepath.Join(hostDir, "settings.json"), []byte(`{}`), 0644)
+	}
+
+	fl := false
+	cfg := config.NewDefaultConfig()
+	cfg.Profiles["src-isolated"] = config.ProfileConfig{
+		StatuslineGlobal: &fl,
+	}
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	checker := &stubSessionChecker{}
+	pm := NewProfileManager(aimHome, checker)
+	if _, err := pm.EnsureProfile("src-isolated"); err != nil {
+		t.Fatalf("EnsureProfile failed: %v", err)
+	}
+
+	// Clone "src-isolated" to "dst-clone"
+	if err := pm.CloneProfile("src-isolated", "dst-clone", "", cfg); err != nil {
+		t.Fatalf("CloneProfile failed: %v", err)
+	}
+
+	// Verify cfg preserved StatuslineGlobal
+	reloaded, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("failed to reload config: %v", err)
+	}
+	dstProf, ok := reloaded.Profiles["dst-clone"]
+	if !ok {
+		t.Fatalf("dst-clone profile not found in config")
+	}
+	if dstProf.StatuslineGlobal == nil || *dstProf.StatuslineGlobal != false {
+		t.Fatalf("expected dst-clone to have StatuslineGlobal=false, got %v", dstProf.StatuslineGlobal)
+	}
+
+	// Verify cloned profile has no statusline symlinks
+	cloneDir := pm.ProfileDir("dst-clone")
+	for _, sl := range []string{
+		filepath.Join(".config", "cxstatusline"),
+		filepath.Join(".config", "agstatusline"),
+		filepath.Join(".config", "ccstatusline"),
+	} {
+		target := filepath.Join(cloneDir, sl)
+		if _, err := os.Lstat(target); !os.IsNotExist(err) {
+			t.Errorf("expected %s NOT to exist in cloned isolated profile", sl)
+		}
+	}
+}
+
+func TestCleanStatuslineSymlinksIfDisabled_PreservesCustomDir(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	aimHome := filepath.Join(tempDir, "aim")
+	t.Setenv("AIM_REAL_HOME", hostHome)
+	t.Setenv("HOME", hostHome)
+	t.Setenv("AIM_HOME", aimHome)
+
+	fl := false
+	cfg := config.NewDefaultConfig()
+	cfg.Profiles["custom-prof"] = config.ProfileConfig{
+		StatuslineGlobal: &fl,
+	}
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	checker := &stubSessionChecker{}
+	pm := NewProfileManager(aimHome, checker)
+	profDir, err := pm.EnsureProfile("custom-prof")
+	if err != nil {
+		t.Fatalf("EnsureProfile failed: %v", err)
+	}
+
+	// Create a real directory with custom user settings.json in the profile
+	customAgDir := filepath.Join(profDir, ".config", "agstatusline")
+	if err := os.MkdirAll(customAgDir, 0755); err != nil {
+		t.Fatalf("failed to create custom agstatusline dir: %v", err)
+	}
+	customSettings := filepath.Join(customAgDir, "settings.json")
+	if err := os.WriteFile(customSettings, []byte(`{"custom":"user-profile-statusline"}`), 0644); err != nil {
+		t.Fatalf("failed to write custom settings: %v", err)
+	}
+
+	// Call EnsureAllProfilesDotfiles (which triggers cleanStatuslineSymlinksIfDisabled)
+	if err := pm.EnsureAllProfilesDotfiles(); err != nil {
+		t.Fatalf("EnsureAllProfilesDotfiles failed: %v", err)
+	}
+
+	// Verify the custom settings.json was NOT deleted
+	data, err := os.ReadFile(customSettings)
+	if err != nil {
+		t.Fatalf("custom settings.json was deleted! Data loss bug: %v", err)
+	}
+	if string(data) != `{"custom":"user-profile-statusline"}` {
+		t.Fatalf("custom settings.json content altered: %s", string(data))
+	}
+}

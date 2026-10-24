@@ -1392,7 +1392,8 @@ func TestAgyAdapter_SyncHostSettings_StatuslineGlobal(t *testing.T) {
 		t.Errorf("expected statusLine to be present when statusline_global is enabled")
 	}
 
-	// 3. When toggled from enabled to disabled, SyncHostSettings strips statusLine and unlinks .config/agstatusline
+	// 3. When toggled from enabled to disabled, SyncHostSettings unlinks .config/agstatusline
+	// and preserves custom profile statusLine settings
 	agSymlink := filepath.Join(profileDir, ".config", "agstatusline")
 	_ = os.MkdirAll(filepath.Dir(agSymlink), 0755)
 	hostAgDir := filepath.Join(realHome, ".config", "agstatusline")
@@ -1413,8 +1414,8 @@ func TestAgyAdapter_SyncHostSettings_StatuslineGlobal(t *testing.T) {
 	if err := json.Unmarshal(destBytes, &destMap); err != nil {
 		t.Fatalf("failed to parse dest settings: %v", err)
 	}
-	if _, exists := destMap["statusLine"]; exists {
-		t.Errorf("expected statusLine to be stripped when statusline_global is disabled")
+	if destMap["statusLine"] == nil {
+		t.Errorf("expected custom profile statusLine to be preserved when statusline_global is disabled")
 	}
 
 	// 4. SeedDefaultCredentials does not create or seed statusLine settings.json
@@ -1428,5 +1429,53 @@ func TestAgyAdapter_SyncHostSettings_StatuslineGlobal(t *testing.T) {
 	personalSettings := filepath.Join(personalDir, ".gemini", "antigravity-cli", "settings.json")
 	if _, err := os.Stat(personalSettings); !os.IsNotExist(err) {
 		t.Errorf("expected SeedDefaultCredentials NOT to create or copy settings.json")
+	}
+}
+
+func TestAgyAdapter_SyncHostSettings_DoesNotLeakHostMCP(t *testing.T) {
+	tempDir := t.TempDir()
+	realHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+	t.Setenv("AIM_REAL_HOME", realHome)
+	t.Setenv("HOME", realHome)
+
+	hostDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(hostDir, 0755); err != nil {
+		t.Fatalf("failed to create hostDir: %v", err)
+	}
+	hostSettings := filepath.Join(hostDir, "settings.json")
+	hostData, _ := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{
+			"secretServer": map[string]any{"command": "super-secret-mcp"},
+		},
+		"statusLine": map[string]any{
+			"command": "agstatusline",
+			"enabled": true,
+		},
+	})
+	if err := os.WriteFile(hostSettings, hostData, 0644); err != nil {
+		t.Fatalf("failed to write host settings: %v", err)
+	}
+
+	adapter := NewAdapter()
+	cfgEnabled := &config.Config{}
+	if err := adapter.SyncHostSettings(t.Context(), "testprof", profileDir, cfgEnabled); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	destSettings := filepath.Join(profileDir, ".gemini", "antigravity-cli", "settings.json")
+	destBytes, err := os.ReadFile(destSettings)
+	if err != nil {
+		t.Fatalf("expected dest settings to exist: %v", err)
+	}
+	var destMap map[string]any
+	if err := json.Unmarshal(destBytes, &destMap); err != nil {
+		t.Fatalf("failed to parse dest settings: %v", err)
+	}
+	if destMap["statusLine"] == nil {
+		t.Errorf("expected statusLine to be copied")
+	}
+	if destMap["mcpServers"] != nil {
+		t.Errorf("host mcpServers must NOT be leaked into profile settings.json")
 	}
 }

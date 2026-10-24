@@ -192,10 +192,7 @@ func (m Model) fetchDoctorDiagnosticsCmd() tea.Cmd {
 			}
 		}
 		if pDir != "" {
-			var extraPaths []string
-			if cfg != nil {
-				extraPaths = cfg.CustomBridgedPaths
-			}
+			extraPaths := profile.ProfileExtraPaths(cfg, targetProfile)
 			results = append(results, profile.BridgeDiagnostics(targetProfile, config.RealHomeDir(), pDir, extraPaths...)...)
 		}
 		if cfg != nil {
@@ -296,10 +293,7 @@ func (m Model) fetchDoctorDiagnostics() Model {
 		}
 	}
 	if pDir != "" {
-		var extraPaths []string
-		if m.cfg != nil {
-			extraPaths = m.cfg.CustomBridgedPaths
-		}
+		extraPaths := profile.ProfileExtraPaths(m.cfg, p)
 		results = append(results, profile.BridgeDiagnostics(p, config.RealHomeDir(), pDir, extraPaths...)...)
 	}
 	if m.cfg != nil {

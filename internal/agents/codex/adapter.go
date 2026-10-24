@@ -407,7 +407,9 @@ func (a *Adapter) SyncHostSettings(ctx context.Context, profileName, profileDir 
 	destConfig := filepath.Join(profileDir, ".config", "cxstatusline")
 	if cfg != nil && !cfg.StatuslineGlobalEnabled(profileName) {
 		if fi, err := os.Lstat(destConfig); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			_ = os.Remove(destConfig)
+			if err := os.Remove(destConfig); err != nil {
+				logger.Debug("[codex] Failed to remove cxstatusline symlink: %v", err)
+			}
 		}
 		return nil
 	}

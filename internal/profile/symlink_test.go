@@ -374,7 +374,7 @@ func TestEnsureDotfiles_ClaudeBridgedPaths(t *testing.T) {
 		t.Fatalf("failed to create profile dir: %v", err)
 	}
 
-	if err := EnsureDotfiles(hostHome, profileDir); err != nil {
+	if err := EnsureDotfiles(hostHome, profileDir, StatuslineBridgedPaths...); err != nil {
 		t.Fatalf("EnsureDotfiles failed: %v", err)
 	}
 
@@ -455,7 +455,7 @@ func TestEnsureDotfiles_ReplacesStubStatuslineDirectory(t *testing.T) {
 		t.Fatalf("failed to write stub settings: %v", err)
 	}
 
-	if err := EnsureDotfiles(hostHome, profileDir); err != nil {
+	if err := EnsureDotfiles(hostHome, profileDir, StatuslineBridgedPaths...); err != nil {
 		t.Fatalf("EnsureDotfiles failed: %v", err)
 	}
 
@@ -519,7 +519,7 @@ func TestEnsureDotfiles_BridgesAgstatusline(t *testing.T) {
 		t.Fatalf("failed to write custom conf: %v", err)
 	}
 
-	if err := EnsureDotfiles(hostHome, profileDir); err != nil {
+	if err := EnsureDotfiles(hostHome, profileDir, StatuslineBridgedPaths...); err != nil {
 		t.Fatalf("EnsureDotfiles failed: %v", err)
 	}
 

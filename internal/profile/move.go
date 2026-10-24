@@ -92,11 +92,9 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 
 	// Guarantee dotfiles in destination
 	realHome := config.RealHomeDir()
-	var extraPaths []string
-	if len(cfg.CustomBridgedPaths) > 0 {
-		extraPaths = cfg.CustomBridgedPaths
-	}
+	extraPaths := ProfileExtraPaths(cfg, targetProfile)
 	_ = EnsureDotfiles(realHome, dstDir, extraPaths...)
+	cleanStatuslineSymlinksIfDisabled(dstDir, targetProfile, cfg)
 
 	// Update config
 	cfg.RemoveProfileAgent(sourceProfile, canonicalAgent)

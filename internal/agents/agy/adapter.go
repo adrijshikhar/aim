@@ -269,16 +269,6 @@ func mergeHostStatusLineSettings(realHome, tokenDir string) error {
 }
 
 func copyHostSettings(realHome, tokenDir string) {
-	realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
-	destSettings := filepath.Join(tokenDir, "settings.json")
-	if _, err := os.Stat(destSettings); os.IsNotExist(err) {
-		if sData, err := os.ReadFile(realSettings); err == nil {
-			if err := merge.AtomicWrite(destSettings, sData, 0644); err != nil {
-				logger.Debug("[agy] Failed to copy host settings: %v", err)
-			}
-			return
-		}
-	}
 	if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
 		logger.Debug("[agy] Failed to merge host statusLine: %v", err)
 	}
@@ -296,23 +286,8 @@ func (a *Adapter) SyncHostSettings(ctx context.Context, profileName, profileDir 
 		// When disabled, remove .config/agstatusline symlink if present
 		agConfig := filepath.Join(profileDir, ".config", "agstatusline")
 		if fi, err := os.Lstat(agConfig); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			_ = os.Remove(agConfig)
-		}
-
-		// Also strip statusLine from settings.json if present
-		destSettings := filepath.Join(tokenDir, "settings.json")
-		if destData, err := os.ReadFile(destSettings); err == nil {
-			var destJSON map[string]any
-			if err := json.Unmarshal(destData, &destJSON); err == nil && destJSON != nil {
-				if _, exists := destJSON["statusLine"]; exists {
-					delete(destJSON, "statusLine")
-					if data, err := json.MarshalIndent(destJSON, "", "  "); err == nil {
-						data = append(data, '\n')
-						if err := merge.AtomicWrite(destSettings, data, 0644); err != nil {
-							logger.Debug("[agy] Failed to save settings without statusLine: %v", err)
-						}
-					}
-				}
+			if err := os.Remove(agConfig); err != nil {
+				logger.Debug("[agy] Failed to remove agstatusline symlink: %v", err)
 			}
 		}
 		return nil

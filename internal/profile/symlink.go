@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 )
 
@@ -82,9 +83,6 @@ var nestedBridgedPaths = []string{
 	filepath.Join(".config", "glab"),
 	filepath.Join(".config", "fish"),
 	filepath.Join(".config", "gcloud"),
-	filepath.Join(".config", "cxstatusline"),
-	filepath.Join(".config", "agstatusline"),
-	filepath.Join(".config", "ccstatusline"),
 	filepath.Join(".local", "share", "omf"),
 	filepath.Join(".local", "share", "fish"),
 	filepath.Join(".pip", "pip.conf"),
@@ -92,6 +90,28 @@ var nestedBridgedPaths = []string{
 	filepath.Join(".cargo", "credentials.toml"),
 	filepath.Join(".cargo", "env.fish"),
 	filepath.Join(".cargo", "env"),
+}
+
+// StatuslineBridgedPaths are the statusline configuration directories bridged
+// when statusline_global is enabled.
+var StatuslineBridgedPaths = []string{
+	filepath.Join(".config", "cxstatusline"),
+	filepath.Join(".config", "agstatusline"),
+	filepath.Join(".config", "ccstatusline"),
+}
+
+// ProfileExtraPaths returns the extra paths to bridge into the profile.
+// It includes any CustomBridgedPaths configured in cfg, and appends
+// StatuslineBridgedPaths when statusline_global is enabled (the default).
+func ProfileExtraPaths(cfg *config.Config, profileName string) []string {
+	var extraPaths []string
+	if cfg != nil && len(cfg.CustomBridgedPaths) > 0 {
+		extraPaths = append(extraPaths, cfg.CustomBridgedPaths...)
+	}
+	if cfg == nil || cfg.StatuslineGlobalEnabled(profileName) {
+		extraPaths = append(extraPaths, StatuslineBridgedPaths...)
+	}
+	return extraPaths
 }
 
 // GetBridgedPaths returns the paths to bridge from realHome, relative to it:
