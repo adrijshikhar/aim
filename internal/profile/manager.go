@@ -206,6 +206,7 @@ func (m *ProfileManager) EnsureProfile(name string) (string, error) {
 		extraPaths = cfg.CustomBridgedPaths
 	}
 	_ = EnsureDotfiles(realHome, pDir, extraPaths...)
+	cleanStatuslineSymlinksIfDisabled(pDir, name, cfg)
 	return pDir, nil
 }
 
@@ -228,8 +229,76 @@ func (m *ProfileManager) EnsureAllProfilesDotfiles() error {
 		if err := EnsureDotfiles(realHome, pDir, extraPaths...); err != nil {
 			errs = append(errs, err)
 		}
+		cleanStatuslineSymlinksIfDisabled(pDir, p, cfg)
 	}
 	return errors.Join(errs...)
+}
+
+func cleanStatuslineSymlinksIfDisabled(pDir, profileName string, cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	configDir := filepath.Join(pDir, ".config")
+	if !cfg.StatuslineGlobalEnabled(profileName) {
+		fi, err := os.Lstat(configDir)
+		if err != nil {
+			return
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			// .config itself is a symlink to host. We must unpack it so statusline configs are isolated.
+			realHostConfig, err := filepath.EvalSymlinks(configDir)
+			if err == nil {
+				if err := os.Remove(configDir); err == nil {
+					if err := os.MkdirAll(configDir, 0755); err == nil {
+						_ = os.WriteFile(filepath.Join(configDir, ".aim-statusline-isolated"), []byte("1"), 0644)
+						if entries, err := os.ReadDir(realHostConfig); err == nil {
+							for _, e := range entries {
+								name := e.Name()
+								if name == "cxstatusline" || name == "agstatusline" || name == "ccstatusline" {
+									continue
+								}
+								_ = os.Symlink(filepath.Join(realHostConfig, name), filepath.Join(configDir, name))
+							}
+						}
+					}
+				}
+			}
+			return
+		}
+
+		if fi.IsDir() {
+			for _, sl := range []string{"cxstatusline", "agstatusline", "ccstatusline"} {
+				target := filepath.Join(configDir, sl)
+				if lfi, err := os.Lstat(target); err == nil {
+					if lfi.Mode()&os.ModeSymlink != 0 {
+						_ = os.Remove(target)
+					} else if lfi.IsDir() {
+						entries, readErr := os.ReadDir(target)
+						if readErr == nil && (len(entries) == 0 || (len(entries) == 1 && entries[0].Name() == "settings.json")) {
+							_ = os.RemoveAll(target)
+						}
+					}
+				}
+			}
+		}
+	} else {
+		// When enabled, remove isolation marker if present
+		marker := filepath.Join(configDir, ".aim-statusline-isolated")
+		if _, err := os.Lstat(marker); err == nil {
+			_ = os.Remove(marker)
+			// Re-link statusline directories from host if host has them
+			realHome := config.RealHomeDir()
+			for _, sl := range []string{"cxstatusline", "agstatusline", "ccstatusline"} {
+				hostSl := filepath.Join(realHome, ".config", sl)
+				destSl := filepath.Join(configDir, sl)
+				if sfi, err := os.Stat(hostSl); err == nil && sfi.IsDir() {
+					if _, err := os.Lstat(destSl); os.IsNotExist(err) {
+						_ = os.Symlink(hostSl, destSl)
+					}
+				}
+			}
+		}
+	}
 }
 
 // IsLeased reports whether a profile directory represents an ephemeral peer lease.

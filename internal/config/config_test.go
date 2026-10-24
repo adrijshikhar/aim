@@ -922,4 +922,26 @@ func TestStatuslineGlobalEnabled(t *testing.T) {
 			t.Errorf("expected profile true")
 		}
 	})
+
+	t.Run("SetProfileStatuslineGlobal nil guard and mutation", func(t *testing.T) {
+		var nilCfg *Config
+		// Must not panic on nil receiver
+		nilCfg.SetProfileStatuslineGlobal("work", &fl)
+
+		c := &Config{}
+		c.SetProfileStatuslineGlobal("work", &fl)
+		if c.StatuslineGlobalEnabled("work") {
+			t.Errorf("expected false for profile work after SetProfileStatuslineGlobal")
+		}
+
+		c.SetProfileStatuslineGlobal("work", &tr)
+		if !c.StatuslineGlobalEnabled("work") {
+			t.Errorf("expected true for profile work after SetProfileStatuslineGlobal true")
+		}
+
+		c.SetProfileStatuslineGlobal("work", nil)
+		if !c.StatuslineGlobalEnabled("work") {
+			t.Errorf("expected default true after resetting to nil")
+		}
+	})
 }

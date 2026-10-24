@@ -1391,4 +1391,42 @@ func TestAgyAdapter_SyncHostSettings_StatuslineGlobal(t *testing.T) {
 	if destMap["statusLine"] == nil {
 		t.Errorf("expected statusLine to be present when statusline_global is enabled")
 	}
+
+	// 3. When toggled from enabled to disabled, SyncHostSettings strips statusLine and unlinks .config/agstatusline
+	agSymlink := filepath.Join(profileDir, ".config", "agstatusline")
+	_ = os.MkdirAll(filepath.Dir(agSymlink), 0755)
+	hostAgDir := filepath.Join(realHome, ".config", "agstatusline")
+	_ = os.MkdirAll(hostAgDir, 0755)
+	_ = os.Symlink(hostAgDir, agSymlink)
+
+	if err := adapter.SyncHostSettings(t.Context(), "testprof", profileDir, cfgDisabled); err != nil {
+		t.Fatalf("unexpected error on disable sync: %v", err)
+	}
+	if _, err := os.Lstat(agSymlink); !os.IsNotExist(err) {
+		t.Errorf("expected .config/agstatusline symlink to be removed when statusline_global is disabled")
+	}
+	destBytes, err = os.ReadFile(destSettings)
+	if err != nil {
+		t.Fatalf("expected dest settings to exist: %v", err)
+	}
+	destMap = nil
+	if err := json.Unmarshal(destBytes, &destMap); err != nil {
+		t.Fatalf("failed to parse dest settings: %v", err)
+	}
+	if _, exists := destMap["statusLine"]; exists {
+		t.Errorf("expected statusLine to be stripped when statusline_global is disabled")
+	}
+
+	// 4. SeedDefaultCredentials does not create or seed statusLine settings.json
+	personalDir := filepath.Join(tempDir, "personal")
+	_ = os.MkdirAll(personalDir, 0755)
+	hostTokenPath := filepath.Join(realHome, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	_ = os.WriteFile(hostTokenPath, []byte(`{"token":{"access_token":"seeded"}}`), 0600)
+	if !adapter.SeedDefaultCredentials("personal", personalDir) {
+		t.Errorf("expected SeedDefaultCredentials to return true")
+	}
+	personalSettings := filepath.Join(personalDir, ".gemini", "antigravity-cli", "settings.json")
+	if _, err := os.Stat(personalSettings); !os.IsNotExist(err) {
+		t.Errorf("expected SeedDefaultCredentials NOT to create or copy settings.json")
+	}
 }

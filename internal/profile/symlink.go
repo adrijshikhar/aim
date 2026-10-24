@@ -376,7 +376,9 @@ func isStubOrEmptyDir(path, src, cleanName string) bool {
 			return len(manifest.Plugins) == 0
 		}
 	}
-	if cleanName == ".config/ccstatusline" || cleanName == ".config/cxstatusline" || cleanName == ".config/agstatusline" {
+	if cleanName == filepath.Join(".config", "ccstatusline") ||
+		cleanName == filepath.Join(".config", "cxstatusline") ||
+		cleanName == filepath.Join(".config", "agstatusline") {
 		if len(entries) == 1 && entries[0].Name() == "settings.json" {
 			return true
 		}

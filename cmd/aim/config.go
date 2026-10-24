@@ -152,10 +152,7 @@ func runConfigList(out io.Writer, asJSON bool) error {
 		debugStatus = "true"
 	}
 
-	slStatus := "true"
-	if cfg.StatuslineGlobal != nil && !*cfg.StatuslineGlobal {
-		slStatus = "false"
-	}
+	slStatus, _ := cfg.Get("statusline_global")
 
 	t.Row("default_agent", cfg.DefaultAgent, "Default agent to launch when unspecified")
 	t.Row("default_profile", cfg.DefaultProfile, "Default profile activated when none specified")

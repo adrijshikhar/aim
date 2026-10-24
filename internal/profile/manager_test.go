@@ -761,3 +761,90 @@ func TestProfileManager_SessionCheckerMock(t *testing.T) {
 		t.Fatalf("expected refusal with codex session, got %v", err)
 	}
 }
+
+func TestProfileManager_StatuslineGlobalIntegration(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	aimHome := filepath.Join(tempDir, "aim")
+	t.Setenv("AIM_REAL_HOME", hostHome)
+	t.Setenv("HOME", hostHome)
+	t.Setenv("AIM_HOME", aimHome)
+
+	// Create host statusline directories
+	for _, sl := range []string{
+		filepath.Join(".config", "cxstatusline"),
+		filepath.Join(".config", "agstatusline"),
+		filepath.Join(".config", "ccstatusline"),
+	} {
+		hostDir := filepath.Join(hostHome, sl)
+		if err := os.MkdirAll(hostDir, 0755); err != nil {
+			t.Fatalf("failed to create host statusline dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(hostDir, "settings.json"), []byte(`{}`), 0644); err != nil {
+			t.Fatalf("failed to write host settings: %v", err)
+		}
+	}
+
+	fl := false
+	cfg := config.NewDefaultConfig()
+	cfg.Profiles["isolated"] = config.ProfileConfig{
+		StatuslineGlobal: &fl,
+	}
+	cfg.Profiles["standard"] = config.ProfileConfig{}
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	checker := &stubSessionChecker{}
+	pm := NewProfileManager(aimHome, checker)
+
+	// 1. EnsureProfile for "isolated" should NOT contain statusline symlinks
+	isoDir, err := pm.EnsureProfile("isolated")
+	if err != nil {
+		t.Fatalf("EnsureProfile isolated failed: %v", err)
+	}
+	for _, sl := range []string{
+		filepath.Join(".config", "cxstatusline"),
+		filepath.Join(".config", "agstatusline"),
+		filepath.Join(".config", "ccstatusline"),
+	} {
+		target := filepath.Join(isoDir, sl)
+		if _, err := os.Lstat(target); !os.IsNotExist(err) {
+			t.Errorf("expected %s NOT to exist in isolated profile", sl)
+		}
+	}
+
+	// 2. EnsureProfile for "standard" SHOULD share statusline directories with host
+	stdDir, err := pm.EnsureProfile("standard")
+	if err != nil {
+		t.Fatalf("EnsureProfile standard failed: %v", err)
+	}
+	for _, sl := range []string{
+		filepath.Join(".config", "cxstatusline"),
+		filepath.Join(".config", "agstatusline"),
+		filepath.Join(".config", "ccstatusline"),
+	} {
+		assertSharedWithHost(t, stdDir, hostHome, sl)
+	}
+
+	// 3. Toggle standard to disabled, run EnsureAllProfilesDotfiles, symlinks should be removed
+	cfg.Profiles["standard"] = config.ProfileConfig{
+		StatuslineGlobal: &fl,
+	}
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+	if err := pm.EnsureAllProfilesDotfiles(); err != nil {
+		t.Fatalf("EnsureAllProfilesDotfiles failed: %v", err)
+	}
+	for _, sl := range []string{
+		filepath.Join(".config", "cxstatusline"),
+		filepath.Join(".config", "agstatusline"),
+		filepath.Join(".config", "ccstatusline"),
+	} {
+		target := filepath.Join(stdDir, sl)
+		if _, err := os.Lstat(target); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be removed from standard profile after disabling: %v", sl, err)
+		}
+	}
+}

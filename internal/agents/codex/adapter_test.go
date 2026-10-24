@@ -387,6 +387,14 @@ func TestCodexAdapter_SyncHostSettings_StatuslineGlobal(t *testing.T) {
 	if fi.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("expected bridged cxstatusline to be a symlink")
 	}
+
+	// 3. When toggling statusline_global from enabled to disabled, SyncHostSettings unlinks cxstatusline symlink
+	if err := a.SyncHostSettings(t.Context(), "testprof", profileDirEnabled, cfgDisabled); err != nil {
+		t.Fatalf("unexpected error on disable sync: %v", err)
+	}
+	if _, err := os.Lstat(destEnabled); !os.IsNotExist(err) {
+		t.Errorf("expected bridged cxstatusline to be removed when toggled to disabled")
+	}
 }
 
 func TestCodexAdapter_CopyHostConfig_HookTrustPathRewriting(t *testing.T) {

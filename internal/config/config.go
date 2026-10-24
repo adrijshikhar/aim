@@ -440,6 +440,9 @@ func (c *Config) StatuslineGlobalEnabled(profile string) bool {
 
 // SetProfileStatuslineGlobal sets or clears the statusline_global setting for a specific profile.
 func (c *Config) SetProfileStatuslineGlobal(profile string, enabled *bool) {
+	if c == nil {
+		return
+	}
 	if c.Profiles == nil {
 		c.Profiles = make(map[string]ProfileConfig)
 	}

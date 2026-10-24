@@ -180,7 +180,10 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	bridgePluginsAndHooks(realHome, codexDir)
 
 	// Bridge host cxstatusline config into profile if statusline_global enabled
-	cfg, _ := config.LoadConfig()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		logger.Debug("[codex] Failed to load config in PrepareEnv: %v", err)
+	}
 	_ = a.SyncHostSettings(ctx, profileName, profileDir, cfg)
 
 	bin := a.ResolveBinary()
@@ -401,7 +404,11 @@ func bridgePluginsAndHooks(realHome, profileCodexDir string) {
 // SyncHostSettings synchronizes host cxstatusline configuration into the profile sandbox
 // unless statusline_global is disabled for the profile in config.
 func (a *Adapter) SyncHostSettings(ctx context.Context, profileName, profileDir string, cfg *config.Config) error {
+	destConfig := filepath.Join(profileDir, ".config", "cxstatusline")
 	if cfg != nil && !cfg.StatuslineGlobalEnabled(profileName) {
+		if fi, err := os.Lstat(destConfig); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			_ = os.Remove(destConfig)
+		}
 		return nil
 	}
 
