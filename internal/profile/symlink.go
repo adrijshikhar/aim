@@ -83,6 +83,7 @@ var nestedBridgedPaths = []string{
 	filepath.Join(".config", "fish"),
 	filepath.Join(".config", "gcloud"),
 	filepath.Join(".config", "cxstatusline"),
+	filepath.Join(".config", "agstatusline"),
 	filepath.Join(".config", "ccstatusline"),
 	filepath.Join(".local", "share", "omf"),
 	filepath.Join(".local", "share", "fish"),
@@ -375,7 +376,7 @@ func isStubOrEmptyDir(path, src, cleanName string) bool {
 			return len(manifest.Plugins) == 0
 		}
 	}
-	if cleanName == ".config/ccstatusline" || cleanName == ".config/cxstatusline" {
+	if cleanName == ".config/ccstatusline" || cleanName == ".config/cxstatusline" || cleanName == ".config/agstatusline" {
 		if len(entries) == 1 && entries[0].Name() == "settings.json" {
 			return true
 		}

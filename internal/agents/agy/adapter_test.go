@@ -1058,3 +1058,280 @@ func TestAdapter_HarvestCredentials(t *testing.T) {
 		t.Errorf("expected file mode 0600, got %#o", fi.Mode().Perm())
 	}
 }
+
+func TestAgyAdapter_MergeHostStatusLineSettings(t *testing.T) {
+	t.Run("Case 1: Copies statusLine when dest settings.json does not exist", func(t *testing.T) {
+		tempDir := t.TempDir()
+		realHome := filepath.Join(tempDir, "host")
+		tokenDir := filepath.Join(tempDir, "profile", ".gemini", "antigravity-cli")
+
+		hostDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
+		if err := os.MkdirAll(hostDir, 0755); err != nil {
+			t.Fatalf("failed to create hostDir: %v", err)
+		}
+		hostSettings := filepath.Join(hostDir, "settings.json")
+		statusLineConfig := map[string]any{
+			"command": "agstatusline",
+			"type":    "command",
+		}
+		hostData, _ := json.Marshal(map[string]any{
+			"statusLine": statusLineConfig,
+		})
+		if err := os.WriteFile(hostSettings, hostData, 0644); err != nil {
+			t.Fatalf("failed to write host settings: %v", err)
+		}
+
+		if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
+			t.Fatalf("mergeHostStatusLineSettings returned error: %v", err)
+		}
+
+		destSettings := filepath.Join(tokenDir, "settings.json")
+		destBytes, err := os.ReadFile(destSettings)
+		if err != nil {
+			t.Fatalf("dest settings.json was not created: %v", err)
+		}
+
+		var destMap map[string]any
+		if err := json.Unmarshal(destBytes, &destMap); err != nil {
+			t.Fatalf("failed to parse dest settings: %v", err)
+		}
+
+		gotStatusLine, ok := destMap["statusLine"]
+		if !ok {
+			t.Fatalf("expected statusLine in dest settings, got: %s", string(destBytes))
+		}
+		gotMap, ok := gotStatusLine.(map[string]any)
+		if !ok || gotMap["command"] != "agstatusline" {
+			t.Errorf("unexpected statusLine value: %v", gotStatusLine)
+		}
+	})
+
+	t.Run("Case 2: Merges statusLine when dest settings.json already exists but lacks statusLine", func(t *testing.T) {
+		tempDir := t.TempDir()
+		realHome := filepath.Join(tempDir, "host")
+		tokenDir := filepath.Join(tempDir, "profile", ".gemini", "antigravity-cli")
+
+		hostDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
+		if err := os.MkdirAll(hostDir, 0755); err != nil {
+			t.Fatalf("failed to create hostDir: %v", err)
+		}
+		hostSettings := filepath.Join(hostDir, "settings.json")
+		hostData, _ := json.Marshal(map[string]any{
+			"statusLine": map[string]any{
+				"command": "agstatusline",
+			},
+		})
+		if err := os.WriteFile(hostSettings, hostData, 0644); err != nil {
+			t.Fatalf("failed to write host settings: %v", err)
+		}
+
+		if err := os.MkdirAll(tokenDir, 0755); err != nil {
+			t.Fatalf("failed to create tokenDir: %v", err)
+		}
+		destSettings := filepath.Join(tokenDir, "settings.json")
+		initialDest := map[string]any{
+			"colorScheme":       "dark",
+			"trustedWorkspaces": []any{"/my/ws"},
+		}
+		initialBytes, _ := json.MarshalIndent(initialDest, "", "  ")
+		if err := os.WriteFile(destSettings, initialBytes, 0644); err != nil {
+			t.Fatalf("failed to write initial dest settings: %v", err)
+		}
+
+		if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
+			t.Fatalf("mergeHostStatusLineSettings returned error: %v", err)
+		}
+
+		destBytes, err := os.ReadFile(destSettings)
+		if err != nil {
+			t.Fatalf("failed to read dest settings: %v", err)
+		}
+
+		var destMap map[string]any
+		if err := json.Unmarshal(destBytes, &destMap); err != nil {
+			t.Fatalf("failed to parse dest settings: %v", err)
+		}
+
+		if destMap["colorScheme"] != "dark" {
+			t.Errorf("expected colorScheme 'dark', got %v", destMap["colorScheme"])
+		}
+		workspaces, ok := destMap["trustedWorkspaces"].([]any)
+		if !ok || len(workspaces) != 1 || workspaces[0] != "/my/ws" {
+			t.Errorf("expected trustedWorkspaces ['/my/ws'], got %v", destMap["trustedWorkspaces"])
+		}
+		statusLine, ok := destMap["statusLine"].(map[string]any)
+		if !ok || statusLine["command"] != "agstatusline" {
+			t.Errorf("expected statusLine with command 'agstatusline', got %v", destMap["statusLine"])
+		}
+	})
+
+	t.Run("Case 3: Preserves existing custom statusLine in dest (does not overwrite)", func(t *testing.T) {
+		tempDir := t.TempDir()
+		realHome := filepath.Join(tempDir, "host")
+		tokenDir := filepath.Join(tempDir, "profile", ".gemini", "antigravity-cli")
+
+		hostDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
+		if err := os.MkdirAll(hostDir, 0755); err != nil {
+			t.Fatalf("failed to create hostDir: %v", err)
+		}
+		hostSettings := filepath.Join(hostDir, "settings.json")
+		hostData, _ := json.Marshal(map[string]any{
+			"statusLine": map[string]any{
+				"command": "host-statusline",
+			},
+		})
+		if err := os.WriteFile(hostSettings, hostData, 0644); err != nil {
+			t.Fatalf("failed to write host settings: %v", err)
+		}
+
+		if err := os.MkdirAll(tokenDir, 0755); err != nil {
+			t.Fatalf("failed to create tokenDir: %v", err)
+		}
+		destSettings := filepath.Join(tokenDir, "settings.json")
+		initialDest := map[string]any{
+			"statusLine": map[string]any{
+				"command": "custom-statusline",
+			},
+		}
+		initialBytes, _ := json.MarshalIndent(initialDest, "", "  ")
+		if err := os.WriteFile(destSettings, initialBytes, 0644); err != nil {
+			t.Fatalf("failed to write initial dest settings: %v", err)
+		}
+
+		if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
+			t.Fatalf("mergeHostStatusLineSettings returned error: %v", err)
+		}
+
+		destBytes, err := os.ReadFile(destSettings)
+		if err != nil {
+			t.Fatalf("failed to read dest settings: %v", err)
+		}
+
+		var destMap map[string]any
+		if err := json.Unmarshal(destBytes, &destMap); err != nil {
+			t.Fatalf("failed to parse dest settings: %v", err)
+		}
+
+		statusLine, ok := destMap["statusLine"].(map[string]any)
+		if !ok || statusLine["command"] != "custom-statusline" {
+			t.Errorf("expected custom-statusline to be preserved, got %v", destMap["statusLine"])
+		}
+	})
+
+	t.Run("Case 4: Noop when host has no settings.json or host lacks statusLine", func(t *testing.T) {
+		tempDir := t.TempDir()
+		realHome := filepath.Join(tempDir, "host")
+		tokenDir := filepath.Join(tempDir, "profile", ".gemini", "antigravity-cli")
+
+		// Subcase 4a: Host has no settings.json at all
+		if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
+			t.Fatalf("mergeHostStatusLineSettings returned error on missing host settings: %v", err)
+		}
+		destSettings := filepath.Join(tokenDir, "settings.json")
+		if _, err := os.Stat(destSettings); !os.IsNotExist(err) {
+			t.Errorf("expected dest settings.json not to exist when host has no settings")
+		}
+
+		// Subcase 4b: Host has settings.json but lacks statusLine
+		hostDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
+		if err := os.MkdirAll(hostDir, 0755); err != nil {
+			t.Fatalf("failed to create hostDir: %v", err)
+		}
+		hostSettings := filepath.Join(hostDir, "settings.json")
+		hostData, _ := json.Marshal(map[string]any{
+			"colorScheme": "dark",
+		})
+		if err := os.WriteFile(hostSettings, hostData, 0644); err != nil {
+			t.Fatalf("failed to write host settings: %v", err)
+		}
+
+		if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
+			t.Fatalf("mergeHostStatusLineSettings returned error: %v", err)
+		}
+		if _, err := os.Stat(destSettings); !os.IsNotExist(err) {
+			t.Errorf("expected dest settings.json not to exist when host lacks statusLine")
+		}
+
+		// Subcase 4c: Host has statusLine set to null
+		nullData, _ := json.Marshal(map[string]any{
+			"statusLine": nil,
+		})
+		if err := os.WriteFile(hostSettings, nullData, 0644); err != nil {
+			t.Fatalf("failed to write host settings: %v", err)
+		}
+
+		if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
+			t.Fatalf("mergeHostStatusLineSettings returned error: %v", err)
+		}
+		if _, err := os.Stat(destSettings); !os.IsNotExist(err) {
+			t.Errorf("expected dest settings.json not to exist when host statusLine is null")
+		}
+
+		// Subcase 4d: Dest exists, host lacks statusLine -> dest is not modified
+		if err := os.MkdirAll(tokenDir, 0755); err != nil {
+			t.Fatalf("failed to create tokenDir: %v", err)
+		}
+		existingDest := `{"preserved":true}`
+		if err := os.WriteFile(destSettings, []byte(existingDest), 0644); err != nil {
+			t.Fatalf("failed to write dest settings: %v", err)
+		}
+		if err := mergeHostStatusLineSettings(realHome, tokenDir); err != nil {
+			t.Fatalf("mergeHostStatusLineSettings returned error: %v", err)
+		}
+		destBytes, err := os.ReadFile(destSettings)
+		if err != nil {
+			t.Fatalf("failed to read dest settings: %v", err)
+		}
+		if string(destBytes) != existingDest {
+			t.Errorf("expected dest settings to remain unchanged, got: %s", string(destBytes))
+		}
+	})
+
+	t.Run("copyHostSettings calls mergeHostStatusLineSettings", func(t *testing.T) {
+		tempDir := t.TempDir()
+		realHome := filepath.Join(tempDir, "host")
+		tokenDir := filepath.Join(tempDir, "profile", ".gemini", "antigravity-cli")
+
+		hostDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
+		if err := os.MkdirAll(hostDir, 0755); err != nil {
+			t.Fatalf("failed to create hostDir: %v", err)
+		}
+		hostSettings := filepath.Join(hostDir, "settings.json")
+		hostData, _ := json.Marshal(map[string]any{
+			"statusLine": map[string]any{
+				"command": "agstatusline",
+			},
+		})
+		if err := os.WriteFile(hostSettings, hostData, 0644); err != nil {
+			t.Fatalf("failed to write host settings: %v", err)
+		}
+
+		// Pre-create dest with existing settings
+		if err := os.MkdirAll(tokenDir, 0755); err != nil {
+			t.Fatalf("failed to create tokenDir: %v", err)
+		}
+		destSettings := filepath.Join(tokenDir, "settings.json")
+		if err := os.WriteFile(destSettings, []byte(`{"existing":true}`), 0644); err != nil {
+			t.Fatalf("failed to write dest settings: %v", err)
+		}
+
+		copyHostSettings(realHome, tokenDir)
+
+		destBytes, err := os.ReadFile(destSettings)
+		if err != nil {
+			t.Fatalf("failed to read dest settings: %v", err)
+		}
+
+		var destMap map[string]any
+		if err := json.Unmarshal(destBytes, &destMap); err != nil {
+			t.Fatalf("failed to parse dest settings: %v", err)
+		}
+		if destMap["existing"] != true {
+			t.Errorf("expected existing setting preserved")
+		}
+		statusLine, ok := destMap["statusLine"].(map[string]any)
+		if !ok || statusLine["command"] != "agstatusline" {
+			t.Errorf("expected statusLine to be merged by copyHostSettings")
+		}
+	})
+}

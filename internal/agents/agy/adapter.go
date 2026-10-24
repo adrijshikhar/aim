@@ -208,14 +208,75 @@ func (a *Adapter) IsTokenHealthy(profileName, profileDir string) bool {
 	return true
 }
 
+// mergeHostStatusLineSettings reads the host's settings.json and copies or merges
+// its statusLine configuration into the profile's settings.json atomically.
+// If the host settings or statusLine is missing, it is a no-op.
+// If dest settings.json does not exist, it is created with the statusLine key.
+// If dest settings.json already exists, statusLine is added only if not already present.
+func mergeHostStatusLineSettings(realHome, tokenDir string) error {
+	realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
+	hostData, err := os.ReadFile(realSettings)
+	if err != nil {
+		return nil
+	}
+
+	var hostJSON map[string]any
+	if err := json.Unmarshal(hostData, &hostJSON); err != nil {
+		return nil
+	}
+
+	statusLine, exists := hostJSON["statusLine"]
+	if !exists || statusLine == nil {
+		return nil
+	}
+
+	destSettings := filepath.Join(tokenDir, "settings.json")
+	destData, err := os.ReadFile(destSettings)
+	if os.IsNotExist(err) {
+		outMap := map[string]any{
+			"statusLine": statusLine,
+		}
+		data, err := json.MarshalIndent(outMap, "", "  ")
+		if err != nil {
+			return err
+		}
+		data = append(data, '\n')
+		return merge.AtomicWrite(destSettings, data, 0644)
+	} else if err != nil {
+		return nil
+	}
+
+	var destJSON map[string]any
+	if err := json.Unmarshal(destData, &destJSON); err != nil {
+		return nil
+	}
+	if destJSON == nil {
+		destJSON = make(map[string]any)
+	}
+
+	if _, exists := destJSON["statusLine"]; exists {
+		return nil
+	}
+
+	destJSON["statusLine"] = statusLine
+	data, err := json.MarshalIndent(destJSON, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return merge.AtomicWrite(destSettings, data, 0644)
+}
+
 func copyHostSettings(realHome, tokenDir string) {
 	realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
 	destSettings := filepath.Join(tokenDir, "settings.json")
 	if _, err := os.Stat(destSettings); os.IsNotExist(err) {
 		if sData, err := os.ReadFile(realSettings); err == nil {
-			_ = os.WriteFile(destSettings, sData, 0644)
+			_ = merge.AtomicWrite(destSettings, sData, 0644)
+			return
 		}
 	}
+	_ = mergeHostStatusLineSettings(realHome, tokenDir)
 }
 
 // SeedDefaultCredentials copies the host's existing Antigravity CLI token to an
@@ -323,6 +384,8 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			return fmt.Errorf("OAuth client credentials not configured and '%s' binary not found in PATH", a.BinaryName())
 		}
 		realHome := config.RealHomeDir()
+		tokenDir := filepath.Join(profileDir, ".gemini", "antigravity-cli")
+		copyHostSettings(realHome, tokenDir)
 		_ = bridgeSharedState(realHome, profileDir)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
@@ -355,6 +418,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			return err
 		}
 		_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
+		copyHostSettings(realHome, tokenDir)
 		return nil
 	}
 	cfg := oauth.ProviderConfig{
@@ -408,16 +472,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		return err
 	}
 
-	realHome, err := os.UserHomeDir()
-	if err == nil {
-		realSettings := filepath.Join(realHome, ".gemini", "antigravity-cli", "settings.json")
-		destSettings := filepath.Join(tokenDir, "settings.json")
-		if _, err := os.Stat(destSettings); os.IsNotExist(err) {
-			if sData, err := os.ReadFile(realSettings); err == nil {
-				_ = os.WriteFile(destSettings, sData, 0644)
-			}
-		}
-	}
+	copyHostSettings(config.RealHomeDir(), tokenDir)
 
 	okBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#98c379")).Bold(true).Render("✔")
 	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("#56b6c2"))

@@ -495,3 +495,46 @@ func TestEnsureDotfiles_FishAndCargoSupport(t *testing.T) {
 		assertSharedWithHost(t, profileDir, hostHome, check)
 	}
 }
+
+func TestEnsureDotfiles_BridgesAgstatusline(t *testing.T) {
+	tempDir := t.TempDir()
+	hostHome := filepath.Join(tempDir, "host")
+	profileDir := filepath.Join(tempDir, "profile")
+
+	// Host has agstatusline config
+	hostAgDir := filepath.Join(hostHome, ".config", "agstatusline")
+	if err := os.MkdirAll(hostAgDir, 0755); err != nil {
+		t.Fatalf("failed to create host agstatusline dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hostAgDir, "settings.json"), []byte(`{"theme":"dark"}`), 0644); err != nil {
+		t.Fatalf("failed to write host settings: %v", err)
+	}
+
+	// Profile has its own overriding .config directory with a file
+	profileConfig := filepath.Join(profileDir, ".config", "custom")
+	if err := os.MkdirAll(profileConfig, 0755); err != nil {
+		t.Fatalf("failed to create profile .config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileConfig, "profile.conf"), []byte("custom"), 0644); err != nil {
+		t.Fatalf("failed to write custom conf: %v", err)
+	}
+
+	if err := EnsureDotfiles(hostHome, profileDir); err != nil {
+		t.Fatalf("EnsureDotfiles failed: %v", err)
+	}
+
+	if isSymlink(filepath.Join(profileDir, ".config")) {
+		t.Fatalf("the overriding .config must be kept as a real directory")
+	}
+
+	target := filepath.Join(profileDir, ".config", "agstatusline")
+	fi, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("expected .config/agstatusline to exist: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected .config/agstatusline to be a symlink")
+	}
+
+	assertSharedWithHost(t, profileDir, hostHome, filepath.Join(".config", "agstatusline"))
+}
