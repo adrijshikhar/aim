@@ -2,11 +2,14 @@ package codex
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/merge"
 )
 
@@ -128,6 +131,10 @@ func TestArgs_Codex_ProfileArgsFirst(t *testing.T) {
 }
 
 func TestCodex_ListMCPServers_FallbackConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIM_REAL_HOME", home)
+	t.Setenv("HOME", home)
+
 	prof := t.TempDir()
 	codexDir := filepath.Join(prof, ".codex")
 	_ = os.MkdirAll(codexDir, 0o700)
@@ -151,10 +158,10 @@ args = ["-c", "url=\"http://localhost\"; exec env URL=\"$url\" uvx mcp-hevo"]
 	_ = os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(cfg), 0o600)
 
 	a := &Adapter{}
-	// Test direct fallback config parser
-	servers, err := a.listMCPServersFromConfig(prof)
+	// Test public ListMCPServers method
+	servers, err := a.ListMCPServers(context.Background(), "dev", prof)
 	if err != nil {
-		t.Fatalf("listMCPServersFromConfig failed: %v", err)
+		t.Fatalf("ListMCPServers failed: %v", err)
 	}
 
 	if len(servers) != 4 {
@@ -187,5 +194,172 @@ args = ["-c", "url=\"http://localhost\"; exec env URL=\"$url\" uvx mcp-hevo"]
 	// Check playwright
 	if servers[3].Target != "npx @playwright/mcp@latest" {
 		t.Errorf("playwright target mismatch: %s", servers[3].Target)
+	}
+}
+
+func TestCodex_AddAndRemoveHostMCPServer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AIM_REAL_HOME", home)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		Command: "npx",
+		Args:    []string{"-y", "agentation-mcp", "server"},
+	}
+
+	if err := a.AddHostMCPServer(ctx, "agentation", cfg); err != nil {
+		t.Fatalf("AddHostMCPServer failed: %v", err)
+	}
+
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	data, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("failed to read codex config: %v", err)
+	}
+	if !strings.Contains(string(data), "[mcp_servers.agentation]") || !strings.Contains(string(data), "agentation-mcp") {
+		t.Fatalf("expected [mcp_servers.agentation] in config, got:\n%s", string(data))
+	}
+
+	// Remove server
+	if err := a.RemoveHostMCPServer(ctx, "agentation"); err != nil {
+		t.Fatalf("RemoveHostMCPServer failed: %v", err)
+	}
+
+	data, err = os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("failed to read codex config after remove: %v", err)
+	}
+	if strings.Contains(string(data), "agentation") {
+		t.Fatalf("expected agentation to be removed, got:\n%s", string(data))
+	}
+
+	// Removing again must return os.ErrNotExist
+	if err := a.RemoveHostMCPServer(ctx, "agentation"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist when removing nonexistent server, got: %v", err)
+	}
+}
+
+func TestCodex_AddProfileMCPServer_Isolation(t *testing.T) {
+	home := t.TempDir()
+	profDir := filepath.Join(home, "profiles", "work")
+	_ = os.MkdirAll(profDir, 0o700)
+	t.Setenv("HOME", home)
+	t.Setenv("AIM_REAL_HOME", home)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		Command: "fetch",
+		Args:    []string{"https://example.com"},
+	}
+
+	if err := a.AddProfileMCPServer(ctx, "work", profDir, "fetch", cfg); err != nil {
+		t.Fatalf("AddProfileMCPServer failed: %v", err)
+	}
+
+	// Profile config must exist
+	pConfig := filepath.Join(profDir, ".codex", "config.toml")
+	if _, err := os.Stat(pConfig); os.IsNotExist(err) {
+		t.Fatalf("profile config was not created at %s", pConfig)
+	}
+
+	// Host config must NOT exist
+	hConfig := filepath.Join(home, ".codex", "config.toml")
+	if _, err := os.Stat(hConfig); !os.IsNotExist(err) {
+		t.Fatalf("host config was mutated during profile operation!")
+	}
+
+	// Remove from profile
+	if err := a.RemoveProfileMCPServer(ctx, "work", profDir, "fetch"); err != nil {
+		t.Fatalf("RemoveProfileMCPServer failed: %v", err)
+	}
+	data, err := os.ReadFile(pConfig)
+	if err != nil {
+		t.Fatalf("failed to read profile config: %v", err)
+	}
+	if strings.Contains(string(data), "fetch") {
+		t.Fatalf("expected fetch to be removed from profile config, got:\n%s", string(data))
+	}
+}
+
+func TestCodex_PreservesExistingTOMLCommentsAndKeys(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AIM_REAL_HOME", home)
+
+	codexDir := filepath.Join(home, ".codex")
+	_ = os.MkdirAll(codexDir, 0o700)
+	initialTOML := `# Global Codex Settings
+model = "o3"
+
+# Existing server comment
+[mcp_servers.existing]
+command = "echo"
+args = ["hello"]
+`
+	configPath := filepath.Join(codexDir, "config.toml")
+	_ = os.WriteFile(configPath, []byte(initialTOML), 0o600)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		Command: "npx",
+		Args:    []string{"new-mcp"},
+	}
+
+	if err := a.AddHostMCPServer(ctx, "new-mcp", cfg); err != nil {
+		t.Fatalf("AddHostMCPServer failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	str := string(data)
+	if !strings.Contains(str, "# Global Codex Settings") {
+		t.Errorf("comment # Global Codex Settings was lost:\n%s", str)
+	}
+	if !strings.Contains(str, `model = "o3"`) {
+		t.Errorf(`model = "o3" was lost:\n%s`, str)
+	}
+	if !strings.Contains(str, "[mcp_servers.existing]") {
+		t.Errorf("existing server was lost:\n%s", str)
+	}
+	if !strings.Contains(str, "[mcp_servers.new-mcp]") {
+		t.Errorf("new-mcp server missing:\n%s", str)
+	}
+
+	// Remove new-mcp
+	if err := a.RemoveHostMCPServer(ctx, "new-mcp"); err != nil {
+		t.Fatalf("RemoveHostMCPServer failed: %v", err)
+	}
+	data, _ = os.ReadFile(configPath)
+	str = string(data)
+	if !strings.Contains(str, "# Global Codex Settings") || !strings.Contains(str, `model = "o3"`) {
+		t.Errorf("comments or model lost after removal:\n%s", str)
+	}
+	if strings.Contains(str, "new-mcp") {
+		t.Errorf("new-mcp still present after removal:\n%s", str)
+	}
+}
+
+func TestCodex_DetectInstalled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PATH", t.TempDir()) // Ensure binary not in PATH
+	a := &Adapter{}
+	if a.DetectInstalled(home) {
+		t.Errorf("expected not installed in empty home without binary in path")
+	}
+
+	codexDir := filepath.Join(home, ".codex")
+	_ = os.MkdirAll(codexDir, 0o700)
+	_ = os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(""), 0o600)
+	if !a.DetectInstalled(home) {
+		t.Errorf("expected installed when ~/.codex/config.toml exists")
 	}
 }

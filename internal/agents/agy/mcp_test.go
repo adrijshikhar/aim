@@ -2,10 +2,13 @@ package agy
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/merge"
 )
 
@@ -128,5 +131,135 @@ func TestAgy_ListMCPServers(t *testing.T) {
 
 	if servers[2].Name != "shared-api" || servers[2].Origin != "profile" || servers[2].Target != "https://mcp.shared.com/v2" {
 		t.Errorf("shared-api mismatch: %+v", servers[2])
+	}
+}
+
+func TestAgy_AddAndRemoveHostMCPServer(t *testing.T) {
+	home := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(home, ".gemini", "config"), 0o755)
+	t.Setenv("HOME", home)
+	t.Setenv("AIM_REAL_HOME", home)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		Command: "npx",
+		Args:    []string{"-y", "agentation-mcp", "server"},
+	}
+
+	if err := a.AddHostMCPServer(ctx, "agentation", cfg); err != nil {
+		t.Fatalf("AddHostMCPServer failed: %v", err)
+	}
+
+	agyPath := filepath.Join(home, ".gemini", "config", "mcp_config.json")
+	data, err := os.ReadFile(agyPath)
+	if err != nil {
+		t.Fatalf("failed to read agy config: %v", err)
+	}
+	if !strings.Contains(string(data), "agentation-mcp") {
+		t.Fatalf("expected agentation in agy config, got:\n%s", string(data))
+	}
+
+	// Remove server
+	if err := a.RemoveHostMCPServer(ctx, "agentation"); err != nil {
+		t.Fatalf("RemoveHostMCPServer failed: %v", err)
+	}
+
+	data, err = os.ReadFile(agyPath)
+	if err != nil {
+		t.Fatalf("failed to read agy config after remove: %v", err)
+	}
+	if strings.Contains(string(data), "agentation-mcp") {
+		t.Fatalf("expected agentation to be removed, got:\n%s", string(data))
+	}
+
+	// Removing again must return os.ErrNotExist
+	if err := a.RemoveHostMCPServer(ctx, "agentation"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist when removing nonexistent server, got: %v", err)
+	}
+}
+
+func TestAgy_AddProfileMCPServer_Isolation(t *testing.T) {
+	home := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(home, ".gemini", "config"), 0o755)
+	profDir := filepath.Join(home, "profiles", "work")
+	_ = os.MkdirAll(profDir, 0o700)
+	t.Setenv("HOME", home)
+	t.Setenv("AIM_REAL_HOME", home)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		Command: "fetch",
+		Args:    []string{"https://example.com"},
+	}
+
+	if err := a.AddProfileMCPServer(ctx, "work", profDir, "fetch", cfg); err != nil {
+		t.Fatalf("AddProfileMCPServer failed: %v", err)
+	}
+
+	// Profile config must exist
+	pConfig := filepath.Join(profDir, ".gemini", "config", "mcp_config.json")
+	if _, err := os.Stat(pConfig); os.IsNotExist(err) {
+		t.Fatalf("profile config was not created at %s", pConfig)
+	}
+
+	// Host config must NOT have been created or modified with fetch
+	hConfig := filepath.Join(home, ".gemini", "config", "mcp_config.json")
+	if data, err := os.ReadFile(hConfig); err == nil && strings.Contains(string(data), "fetch") {
+		t.Fatalf("host config was mutated during profile operation!")
+	}
+
+	// Remove from profile
+	if err := a.RemoveProfileMCPServer(ctx, "work", profDir, "fetch"); err != nil {
+		t.Fatalf("RemoveProfileMCPServer failed: %v", err)
+	}
+	data, err := os.ReadFile(pConfig)
+	if err != nil {
+		t.Fatalf("failed to read profile config: %v", err)
+	}
+	if strings.Contains(string(data), "fetch") {
+		t.Fatalf("expected fetch to be removed from profile config, got:\n%s", string(data))
+	}
+}
+
+func TestAgy_HonorsNormalization(t *testing.T) {
+	home := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(home, ".gemini", "config"), 0o755)
+	t.Setenv("HOME", home)
+	t.Setenv("AIM_REAL_HOME", home)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		Command:  "echo",
+		Disabled: false, // Should be normalized away
+	}
+
+	if err := a.AddHostMCPServer(ctx, "norm-test", cfg); err != nil {
+		t.Fatalf("AddHostMCPServer failed: %v", err)
+	}
+
+	agyPath := filepath.Join(home, ".gemini", "config", "mcp_config.json")
+	data, _ := os.ReadFile(agyPath)
+	if strings.Contains(string(data), `"disabled": false`) {
+		t.Errorf("expected disabled: false to be dropped by normalization, got:\n%s", string(data))
+	}
+}
+
+func TestAgy_DetectInstalled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PATH", t.TempDir()) // Ensure binary not in PATH
+	a := &Adapter{}
+	if a.DetectInstalled(home) {
+		t.Errorf("expected not installed in empty home without binary in path")
+	}
+
+	_ = os.MkdirAll(filepath.Join(home, ".gemini"), 0o755)
+	if !a.DetectInstalled(home) {
+		t.Errorf("expected installed when ~/.gemini directory exists")
 	}
 }
