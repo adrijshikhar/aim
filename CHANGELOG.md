@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.0](https://github.com/adrijshikhar/aim/compare/v0.18.0...v0.19.0) (2026-10-25)
+
+
+### Features
+
+* **config:** add user-configurable statusline_global setting and adapter synchronization ([#104](https://github.com/adrijshikhar/aim/issues/104)) ([7652620](https://github.com/adrijshikhar/aim/commit/7652620d57dedc522f74f25b290a79da4224af5a))
+
+
+### Bug Fixes
+
+* **agy:** bridge agstatusline and merge host statusLine into profile settings ([5435ec4](https://github.com/adrijshikhar/aim/commit/5435ec485d61efffcd92d9b8e4b096e9dbc41a1e))
+
 ## [0.18.0](https://github.com/adrijshikhar/aim/compare/v0.17.0...v0.18.0) (2026-10-23)
 
 
