@@ -27,6 +27,36 @@ type MCPListProvider interface {
 	ListMCPServers(ctx context.Context, profileName, profileDir string) ([]MCPServerInfo, error)
 }
 
+// MCPServerConfig defines an MCP server configuration to add or update.
+type MCPServerConfig struct {
+	Command  string            `json:"command,omitempty"`
+	Args     []string          `json:"args,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	URL      string            `json:"url,omitempty"`
+	Disabled bool              `json:"disabled,omitempty"`
+}
+
+// MCPConfigManager is optionally implemented by adapters that support
+// programmatic MCP server lifecycle management across host and profile sandboxes.
+type MCPConfigManager interface {
+	MCPListProvider
+
+	// AddHostMCPServer registers or updates an MCP server definition in the host configuration.
+	AddHostMCPServer(ctx context.Context, name string, cfg MCPServerConfig) error
+
+	// RemoveHostMCPServer removes an MCP server definition from the host configuration.
+	RemoveHostMCPServer(ctx context.Context, name string) error
+
+	// AddProfileMCPServer registers or updates an MCP server definition in an isolated profile directory.
+	AddProfileMCPServer(ctx context.Context, profileName, profileDir, name string, cfg MCPServerConfig) error
+
+	// RemoveProfileMCPServer removes an MCP server definition from an isolated profile directory.
+	RemoveProfileMCPServer(ctx context.Context, profileName, profileDir, name string) error
+
+	// DetectInstalled reports whether the agent is installed or configured on the host machine.
+	DetectInstalled(realHome string) bool
+}
+
 var (
 	reNodeCjs = regexp.MustCompile(`([a-zA-Z0-9_\-\.]+\.(?:cjs|mjs|js|py|sh))`)
 	reURLHost = regexp.MustCompile(`https?://([^/\s]+)`)

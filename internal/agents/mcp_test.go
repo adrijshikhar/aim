@@ -1,6 +1,39 @@
 package agents
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
+
+type mockMCPManager struct{}
+
+func (m *mockMCPManager) ListMCPServers(ctx context.Context, profileName, profileDir string) ([]MCPServerInfo, error) {
+	return nil, nil
+}
+
+func (m *mockMCPManager) AddHostMCPServer(ctx context.Context, name string, cfg MCPServerConfig) error {
+	return nil
+}
+
+func (m *mockMCPManager) RemoveHostMCPServer(ctx context.Context, name string) error {
+	return nil
+}
+
+func (m *mockMCPManager) AddProfileMCPServer(ctx context.Context, profileName, profileDir, name string, cfg MCPServerConfig) error {
+	return nil
+}
+
+func (m *mockMCPManager) RemoveProfileMCPServer(ctx context.Context, profileName, profileDir, name string) error {
+	return nil
+}
+
+func (m *mockMCPManager) DetectInstalled(realHome string) bool {
+	return true
+}
+
+func TestMCPConfigManager_InterfaceAssertion(t *testing.T) {
+	var _ MCPConfigManager = (*mockMCPManager)(nil)
+}
 
 func TestArgsMatch(t *testing.T) {
 	flags := []string{"--bg", "--background"}
