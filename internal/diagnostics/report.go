@@ -140,10 +140,7 @@ func GenerateReport(reg *agents.Registry, pm *profile.ProfileManager, cfg *confi
 			}
 			if !bridged[p] {
 				bridged[p] = true
-				var extraPaths []string
-				if cfg != nil {
-					extraPaths = cfg.CustomBridgedPaths
-				}
+				extraPaths := profile.ProfileExtraPaths(cfg, p)
 				results = append(results, profile.BridgeDiagnostics(p, config.RealHomeDir(), pm.ProfileDir(p), extraPaths...)...)
 			}
 			profRegex := regexp.MustCompile(`\b` + regexp.QuoteMeta(p) + `\b`)

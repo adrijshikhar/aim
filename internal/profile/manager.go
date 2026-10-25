@@ -200,12 +200,10 @@ func (m *ProfileManager) EnsureProfile(name string) (string, error) {
 		return "", fmt.Errorf("failed to create profile directory: %w", err)
 	}
 	realHome := config.RealHomeDir()
-	var extraPaths []string
 	cfg, _ := config.LoadConfig()
-	if cfg != nil && len(cfg.CustomBridgedPaths) > 0 {
-		extraPaths = cfg.CustomBridgedPaths
-	}
+	extraPaths := ProfileExtraPaths(cfg, name)
 	_ = EnsureDotfiles(realHome, pDir, extraPaths...)
+	cleanStatuslineSymlinksIfDisabled(pDir, name, cfg)
 	return pDir, nil
 }
 
@@ -217,19 +215,110 @@ func (m *ProfileManager) EnsureAllProfilesDotfiles() error {
 		return err
 	}
 	realHome := config.RealHomeDir()
-	var extraPaths []string
 	cfg, _ := config.LoadConfig()
-	if cfg != nil && len(cfg.CustomBridgedPaths) > 0 {
-		extraPaths = cfg.CustomBridgedPaths
-	}
 	var errs []error
 	for _, p := range profiles {
 		pDir := m.ProfileDir(p)
+		extraPaths := ProfileExtraPaths(cfg, p)
 		if err := EnsureDotfiles(realHome, pDir, extraPaths...); err != nil {
 			errs = append(errs, err)
 		}
+		cleanStatuslineSymlinksIfDisabled(pDir, p, cfg)
 	}
 	return errors.Join(errs...)
+}
+
+func cleanStatuslineSymlinksIfDisabled(pDir, profileName string, cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	configDir := filepath.Join(pDir, ".config")
+	if !cfg.StatuslineGlobalEnabled(profileName) {
+		fi, err := os.Lstat(configDir)
+		if err != nil {
+			return
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			// .config itself is a symlink to host. We must unpack it so statusline configs are isolated.
+			realHostConfig, err := filepath.EvalSymlinks(configDir)
+			if err != nil {
+				logger.Debug("[statusline] Failed to resolve .config symlink %s: %v", configDir, err)
+				return
+			}
+			tmpDir, err := os.MkdirTemp(pDir, ".config.tmp*")
+			if err != nil {
+				logger.Debug("[statusline] Failed to create temp dir for unpacking .config: %v", err)
+				return
+			}
+			defer os.RemoveAll(tmpDir)
+
+			if err := os.Chmod(tmpDir, 0755); err != nil {
+				logger.Debug("[statusline] Failed to chmod temp dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(tmpDir, ".aim-statusline-isolated"), []byte("1"), 0644); err != nil {
+				logger.Debug("[statusline] Failed to write isolation marker: %v", err)
+			}
+			if entries, err := os.ReadDir(realHostConfig); err == nil {
+				for _, e := range entries {
+					name := e.Name()
+					if name == "cxstatusline" || name == "agstatusline" || name == "ccstatusline" {
+						continue
+					}
+					if err := os.Symlink(filepath.Join(realHostConfig, name), filepath.Join(tmpDir, name)); err != nil {
+						logger.Debug("[statusline] Failed to symlink %s in temp config: %v", name, err)
+					}
+				}
+			} else {
+				logger.Debug("[statusline] Failed to read real host config %s: %v", realHostConfig, err)
+			}
+			// Atomically replace configDir symlink with unpacked directory
+			if err := os.Rename(tmpDir, configDir); err != nil {
+				// Fallback if direct rename over symlink fails on certain filesystems
+				if errRemove := os.Remove(configDir); errRemove == nil {
+					if errRename := os.Rename(tmpDir, configDir); errRename != nil {
+						logger.Debug("[statusline] Failed to rename temp config over symlink: %v", errRename)
+					}
+				} else {
+					logger.Debug("[statusline] Failed to remove .config symlink for replacement: %v", errRemove)
+				}
+			}
+			return
+		}
+
+		if fi.IsDir() {
+			for _, sl := range StatuslineBridgedPaths {
+				target := filepath.Join(pDir, sl)
+				if lfi, err := os.Lstat(target); err == nil {
+					if lfi.Mode()&os.ModeSymlink != 0 {
+						if err := os.Remove(target); err != nil {
+							logger.Debug("[statusline] Failed to remove statusline symlink %s: %v", target, err)
+						}
+					}
+				}
+			}
+		}
+	} else {
+		// When enabled, remove isolation marker if present
+		marker := filepath.Join(configDir, ".aim-statusline-isolated")
+		if _, err := os.Lstat(marker); err == nil {
+			if err := os.Remove(marker); err != nil {
+				logger.Debug("[statusline] Failed to remove isolation marker: %v", err)
+			}
+			// Re-link statusline directories from host if host has them
+			realHome := config.RealHomeDir()
+			for _, sl := range StatuslineBridgedPaths {
+				hostSl := filepath.Join(realHome, sl)
+				destSl := filepath.Join(pDir, sl)
+				if sfi, err := os.Stat(hostSl); err == nil && sfi.IsDir() {
+					if _, err := os.Lstat(destSl); os.IsNotExist(err) {
+						if err := os.Symlink(hostSl, destSl); err != nil {
+							logger.Debug("[statusline] Failed to relink %s: %v", destSl, err)
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // IsLeased reports whether a profile directory represents an ephemeral peer lease.
@@ -481,14 +570,6 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 		}
 	}
 
-	// Guarantee dotfiles are linked
-	realHome := config.RealHomeDir()
-	var extraPaths []string
-	if cfg != nil && len(cfg.CustomBridgedPaths) > 0 {
-		extraPaths = cfg.CustomBridgedPaths
-	}
-	_ = EnsureDotfiles(realHome, dstDir, extraPaths...)
-
 	// Update config
 	srcAgents := cfg.GetProfileAgents(sourceProfile)
 	var dstAgents []string
@@ -522,7 +603,17 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 		v := *srcProf.PluginsGlobal
 		dstProf.PluginsGlobal = &v
 	}
+	if srcProf.StatuslineGlobal != nil {
+		v := *srcProf.StatuslineGlobal
+		dstProf.StatuslineGlobal = &v
+	}
 	cfg.Profiles[newProfile] = dstProf
+
+	// Guarantee dotfiles are linked
+	realHome := config.RealHomeDir()
+	extraPaths := ProfileExtraPaths(cfg, newProfile)
+	_ = EnsureDotfiles(realHome, dstDir, extraPaths...)
+	cleanStatuslineSymlinksIfDisabled(dstDir, newProfile, cfg)
 
 	return config.SaveConfig(cfg)
 }
@@ -591,11 +682,9 @@ func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Conf
 
 	// Ensure dotfile symlinks in new location are intact
 	realHome := config.RealHomeDir()
-	var extraPaths []string
-	if len(cfg.CustomBridgedPaths) > 0 {
-		extraPaths = cfg.CustomBridgedPaths
-	}
+	extraPaths := ProfileExtraPaths(cfg, newName)
 	_ = EnsureDotfiles(realHome, newDir, extraPaths...)
+	cleanStatuslineSymlinksIfDisabled(newDir, newName, cfg)
 
 	return nil
 }

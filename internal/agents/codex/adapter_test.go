@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -340,6 +341,60 @@ func TestCodexAdapter_BridgeCxStatusline(t *testing.T) {
 			t.Errorf("expected no cxstatusline bridged when host has none")
 		}
 	})
+}
+
+func TestCodexAdapter_SyncHostSettings_StatuslineGlobal(t *testing.T) {
+	mockHome := t.TempDir()
+	hostCxDir := filepath.Join(mockHome, ".config", "cxstatusline")
+	if err := os.MkdirAll(hostCxDir, 0755); err != nil {
+		t.Fatalf("mkdir host cxstatusline failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hostCxDir, "settings.json"), []byte(`{"lines":[]}`), 0644); err != nil {
+		t.Fatalf("write host settings failed: %v", err)
+	}
+	t.Setenv("AIM_REAL_HOME", mockHome)
+	t.Setenv("HOME", mockHome)
+
+	a := NewAdapter()
+
+	// 1. When statusline_global is disabled, SyncHostSettings is a no-op
+	fl := false
+	profileDirDisabled := t.TempDir()
+	cfgDisabled := &config.Config{
+		Profiles: map[string]config.ProfileConfig{
+			"testprof": {StatuslineGlobal: &fl},
+		},
+	}
+	if err := a.SyncHostSettings(t.Context(), "testprof", profileDirDisabled, cfgDisabled); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	destDisabled := filepath.Join(profileDirDisabled, ".config", "cxstatusline")
+	if _, err := os.Lstat(destDisabled); !os.IsNotExist(err) {
+		t.Errorf("expected no cxstatusline bridged when statusline_global is disabled")
+	}
+
+	// 2. When statusline_global is enabled (default), cxstatusline is bridged
+	profileDirEnabled := t.TempDir()
+	cfgEnabled := &config.Config{}
+	if err := a.SyncHostSettings(t.Context(), "testprof", profileDirEnabled, cfgEnabled); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	destEnabled := filepath.Join(profileDirEnabled, ".config", "cxstatusline")
+	fi, err := os.Lstat(destEnabled)
+	if err != nil {
+		t.Fatalf("expected bridged cxstatusline to exist: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected bridged cxstatusline to be a symlink")
+	}
+
+	// 3. When toggling statusline_global from enabled to disabled, SyncHostSettings unlinks cxstatusline symlink
+	if err := a.SyncHostSettings(t.Context(), "testprof", profileDirEnabled, cfgDisabled); err != nil {
+		t.Fatalf("unexpected error on disable sync: %v", err)
+	}
+	if _, err := os.Lstat(destEnabled); !os.IsNotExist(err) {
+		t.Errorf("expected bridged cxstatusline to be removed when toggled to disabled")
+	}
 }
 
 func TestCodexAdapter_CopyHostConfig_HookTrustPathRewriting(t *testing.T) {
