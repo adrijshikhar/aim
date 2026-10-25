@@ -9,33 +9,28 @@ import (
 
 func TestClientDrivers_Registry(t *testing.T) {
 	drivers := AllDrivers()
-	if len(drivers) < 4 {
-		t.Fatalf("expected at least 4 drivers, got %d", len(drivers))
+	if len(drivers) != 1 {
+		t.Fatalf("expected 1 driver (claude), got %d", len(drivers))
 	}
 
-	expectedIDs := []ClientID{ClientClaudeCode, ClientClaudeDesktop, ClientCursor, ClientWindsurf}
-	for _, id := range expectedIDs {
-		d, ok := GetDriver(id)
-		if !ok || d == nil {
-			t.Errorf("expected driver for %q to exist", id)
-		}
-		if d.ID() != id {
-			t.Errorf("expected driver ID %q, got %q", id, d.ID())
-		}
-		if d.Name() == "" {
-			t.Errorf("expected non-empty Name for driver %q", id)
-		}
+	d, ok := GetDriver(ClientClaudeCode)
+	if !ok || d == nil {
+		t.Errorf("expected driver for %q to exist", ClientClaudeCode)
+	}
+	if d.ID() != ClientClaudeCode {
+		t.Errorf("expected driver ID %q, got %q", ClientClaudeCode, d.ID())
+	}
+	if d.Name() == "" {
+		t.Errorf("expected non-empty Name for driver %q", ClientClaudeCode)
 	}
 
-	_, ok := GetDriver(ClientID("unknown-client"))
+	_, ok = GetDriver(ClientID("unknown-client"))
 	if ok {
 		t.Errorf("expected unknown client to return false")
 	}
 }
 
 func TestClientDrivers_ConfigPaths(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("APPDATA", "")
 	fakeHome := filepath.Join(string(filepath.Separator), "tmp", "fake-home")
 	fakeProfile := filepath.Join(string(filepath.Separator), "tmp", "fake-profile")
 
@@ -55,80 +50,19 @@ func TestClientDrivers_ConfigPaths(t *testing.T) {
 	if pProf != filepath.Join(fakeProfile, ".claude", ".claude.json") {
 		t.Errorf("unexpected profile claude path: %s", pProf)
 	}
-
-	cursor, _ := GetDriver(ClientCursor)
-	pCursor, err := cursor.ConfigPath(fakeHome, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pCursor != filepath.Join(fakeHome, ".cursor", "mcp.json") {
-		t.Errorf("unexpected cursor path: %s", pCursor)
-	}
-
-	pCursorProf, err := cursor.ConfigPath(fakeHome, fakeProfile)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pCursorProf != filepath.Join(fakeProfile, ".cursor", "mcp.json") {
-		t.Errorf("unexpected profile cursor path: %s", pCursorProf)
-	}
-
-	windsurf, _ := GetDriver(ClientWindsurf)
-	pWindsurf, err := windsurf.ConfigPath(fakeHome, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pWindsurf != filepath.Join(fakeHome, ".codeium", "windsurf", "mcp_config.json") {
-		t.Errorf("unexpected windsurf path: %s", pWindsurf)
-	}
-
-	pWindsurfProf, err := windsurf.ConfigPath(fakeHome, fakeProfile)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pWindsurfProf != filepath.Join(fakeProfile, ".codeium", "windsurf", "mcp_config.json") {
-		t.Errorf("unexpected profile windsurf path: %s", pWindsurfProf)
-	}
-
-	desktop, _ := GetDriver(ClientClaudeDesktop)
-	if _, err := desktop.ConfigPath(fakeHome, fakeProfile); err == nil {
-		t.Errorf("expected error when requesting profile-scoped path for claude-desktop, got nil")
-	}
-
-	pDesktop, err := desktop.ConfigPath(fakeHome, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		expected := filepath.Join(fakeHome, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-		if pDesktop != expected {
-			t.Errorf("expected desktop path %q, got %q", expected, pDesktop)
-		}
-	case "windows":
-		// On Windows, expected to be in Roaming/Claude
-		if !filepath.IsAbs(pDesktop) {
-			t.Errorf("expected absolute path on Windows: %s", pDesktop)
-		}
-	default:
-		expected := filepath.Join(fakeHome, ".config", "Claude", "claude_desktop_config.json")
-		if pDesktop != expected {
-			t.Errorf("expected linux desktop path %q, got %q", expected, pDesktop)
-		}
-	}
 }
 
 func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 	tempDir := t.TempDir()
-	cursor, _ := GetDriver(ClientCursor)
+	claude, _ := GetDriver(ClientClaudeCode)
 
-	cfgPath, err := cursor.ConfigPath(tempDir, "")
+	cfgPath, err := claude.ConfigPath(tempDir, "")
 	if err != nil {
-		t.Fatalf("failed to resolve cursor path: %v", err)
+		t.Fatalf("failed to resolve claude path: %v", err)
 	}
 
 	// 1. Initial read on non-existent file returns empty map, no error
-	servers, err := cursor.ReadServers(cfgPath)
+	servers, err := claude.ReadServers(cfgPath)
 	if err != nil {
 		t.Fatalf("expected nil error on missing config, got: %v", err)
 	}
@@ -141,7 +75,7 @@ func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 		Command: "aim",
 		Args:    []string{"mcp", "serve"},
 	}
-	if err := cursor.WriteServer(cfgPath, "aim", aimEntry); err != nil {
+	if err := claude.WriteServer(cfgPath, "aim", aimEntry); err != nil {
 		t.Fatalf("failed to write aim server: %v", err)
 	}
 
@@ -158,7 +92,7 @@ func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 	}
 
 	// 3. Read back
-	servers, err = cursor.ReadServers(cfgPath)
+	servers, err = claude.ReadServers(cfgPath)
 	if err != nil {
 		t.Fatalf("failed to read back servers: %v", err)
 	}
@@ -175,11 +109,11 @@ func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 		Command: "npx",
 		Args:    []string{"-y", "@modelcontextprotocol/server-github"},
 	}
-	if err := cursor.WriteServer(cfgPath, "github", ghEntry); err != nil {
+	if err := claude.WriteServer(cfgPath, "github", ghEntry); err != nil {
 		t.Fatalf("failed to write github server: %v", err)
 	}
 
-	servers, err = cursor.ReadServers(cfgPath)
+	servers, err = claude.ReadServers(cfgPath)
 	if err != nil {
 		t.Fatalf("failed to read back servers: %v", err)
 	}
@@ -194,11 +128,11 @@ func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 	}
 
 	// 5. Delete server
-	if err := cursor.DeleteServer(cfgPath, "aim"); err != nil {
+	if err := claude.DeleteServer(cfgPath, "aim"); err != nil {
 		t.Fatalf("failed to delete aim server: %v", err)
 	}
 
-	servers, err = cursor.ReadServers(cfgPath)
+	servers, err = claude.ReadServers(cfgPath)
 	if err != nil {
 		t.Fatalf("failed to read back servers after deletion: %v", err)
 	}
@@ -217,7 +151,7 @@ func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 	if err := os.WriteFile(emptyFile, []byte(""), 0600); err != nil {
 		t.Fatalf("failed to create empty file: %v", err)
 	}
-	if err := cursor.DeleteServer(emptyFile, "nonexistent"); err != nil {
+	if err := claude.DeleteServer(emptyFile, "nonexistent"); err != nil {
 		t.Errorf("expected no error deleting from empty file, got: %v", err)
 	}
 }
@@ -225,19 +159,7 @@ func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 func TestClientDrivers_Detect(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Initially, none are detected in empty tempDir (unless client is on PATH)
 	claude, _ := GetDriver(ClientClaudeCode)
-	cursor, _ := GetDriver(ClientCursor)
-
-	// Create fake cursor directory
-	cursorDir := filepath.Join(tempDir, ".cursor")
-	if err := os.MkdirAll(cursorDir, 0700); err != nil {
-		t.Fatalf("failed to create cursor dir: %v", err)
-	}
-
-	if !cursor.Detect(tempDir) {
-		t.Errorf("expected cursor to be detected when ~/.cursor exists")
-	}
 
 	// Create fake claude file
 	claudeFile := filepath.Join(tempDir, ".claude.json")
@@ -250,7 +172,8 @@ func TestClientDrivers_Detect(t *testing.T) {
 	}
 
 	detected := DetectInstalledClients(tempDir)
-	if len(detected) < 2 {
-		t.Errorf("expected at least 2 detected clients, got %d", len(detected))
+	if len(detected) != 1 {
+		t.Errorf("expected 1 detected client, got %d", len(detected))
 	}
 }
+

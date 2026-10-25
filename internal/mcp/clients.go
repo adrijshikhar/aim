@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -14,10 +13,7 @@ import (
 type ClientID string
 
 const (
-	ClientClaudeCode    ClientID = "claude"
-	ClientClaudeDesktop ClientID = "claude-desktop"
-	ClientCursor        ClientID = "cursor"
-	ClientWindsurf      ClientID = "windsurf"
+	ClientClaudeCode ClientID = "claude"
 )
 
 // RawMCPEntry represents an MCP server entry in client configuration files.
@@ -46,24 +42,6 @@ var allDrivers = []ClientConfigDriver{
 		baseJSONDriver: baseJSONDriver{
 			id:   ClientClaudeCode,
 			name: "Claude Code",
-		},
-	},
-	&claudeDesktopDriver{
-		baseJSONDriver: baseJSONDriver{
-			id:   ClientClaudeDesktop,
-			name: "Claude Desktop",
-		},
-	},
-	&cursorDriver{
-		baseJSONDriver: baseJSONDriver{
-			id:   ClientCursor,
-			name: "Cursor IDE",
-		},
-	},
-	&windsurfDriver{
-		baseJSONDriver: baseJSONDriver{
-			id:   ClientWindsurf,
-			name: "Windsurf IDE",
 		},
 	},
 }
@@ -276,98 +254,4 @@ func (d *claudeCodeDriver) ConfigPath(homeDir string, profileDir string) (string
 		return filepath.Join(profileDir, ".claude", ".claude.json"), nil
 	}
 	return filepath.Join(homeDir, ".claude.json"), nil
-}
-
-// Claude Desktop Driver
-type claudeDesktopDriver struct {
-	baseJSONDriver
-}
-
-func (d *claudeDesktopDriver) Detect(homeDir string) bool {
-	cfg, err := d.ConfigPath(homeDir, "")
-	if err == nil {
-		if _, err := os.Stat(cfg); err == nil {
-			return true
-		}
-		if _, err := os.Stat(filepath.Dir(cfg)); err == nil {
-			return true
-		}
-	}
-	if runtime.GOOS == "darwin" {
-		if _, err := os.Stat("/Applications/Claude.app"); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
-func (d *claudeDesktopDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
-	if profileDir != "" {
-		return "", fmt.Errorf("claude-desktop does not support profile-scoped configurations")
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		return filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"), nil
-	case "windows":
-		appData := filepath.Join(homeDir, "AppData", "Roaming")
-		if homeDir == os.Getenv("USERPROFILE") {
-			if env := os.Getenv("APPDATA"); env != "" {
-				appData = env
-			}
-		}
-		return filepath.Join(appData, "Claude", "claude_desktop_config.json"), nil
-	default:
-		// Linux / other XDG
-		configDir := filepath.Join(homeDir, ".config")
-		if homeDir == os.Getenv("HOME") {
-			if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-				configDir = xdg
-			}
-		}
-		return filepath.Join(configDir, "Claude", "claude_desktop_config.json"), nil
-	}
-}
-
-// Cursor Driver
-type cursorDriver struct {
-	baseJSONDriver
-}
-
-func (d *cursorDriver) Detect(homeDir string) bool {
-	if _, err := os.Stat(filepath.Join(homeDir, ".cursor")); err == nil {
-		return true
-	}
-	if _, err := exec.LookPath("cursor"); err == nil {
-		return true
-	}
-	return false
-}
-
-func (d *cursorDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
-	if profileDir != "" {
-		return filepath.Join(profileDir, ".cursor", "mcp.json"), nil
-	}
-	return filepath.Join(homeDir, ".cursor", "mcp.json"), nil
-}
-
-// Windsurf Driver
-type windsurfDriver struct {
-	baseJSONDriver
-}
-
-func (d *windsurfDriver) Detect(homeDir string) bool {
-	if _, err := os.Stat(filepath.Join(homeDir, ".codeium", "windsurf")); err == nil {
-		return true
-	}
-	if _, err := exec.LookPath("windsurf"); err == nil {
-		return true
-	}
-	return false
-}
-
-func (d *windsurfDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
-	if profileDir != "" {
-		return filepath.Join(profileDir, ".codeium", "windsurf", "mcp_config.json"), nil
-	}
-	return filepath.Join(homeDir, ".codeium", "windsurf", "mcp_config.json"), nil
 }
