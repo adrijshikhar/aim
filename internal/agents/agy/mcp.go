@@ -60,10 +60,12 @@ func (a *Adapter) ListMCPServers(ctx context.Context, profileName, profileDir st
 	}
 
 	// 2. Read profile mcp_config.json (overrides host)
-	profJSON := filepath.Join(profileDir, ".gemini", "config", "mcp_config.json")
-	if profEntries, ok, err := merge.ReadJSONKey(profJSON, "mcpServers"); err == nil && ok {
-		for _, name := range profEntries.Order {
-			serverMap[name] = agents.ParseMCPServerMap(name, profEntries.Values[name], "profile")
+	if profileDir != "" {
+		profJSON := filepath.Join(profileDir, ".gemini", "config", "mcp_config.json")
+		if profEntries, ok, err := merge.ReadJSONKey(profJSON, "mcpServers"); err == nil && ok {
+			for _, name := range profEntries.Order {
+				serverMap[name] = agents.ParseMCPServerMap(name, profEntries.Values[name], "profile")
+			}
 		}
 	}
 
@@ -122,8 +124,11 @@ func (a *Adapter) RemoveHostMCPServer(ctx context.Context, name string) error {
 	realHome := config.RealHomeDir()
 	path := filepath.Join(sharedConfigDir(realHome), "mcp_config.json")
 	entries, ok, err := merge.ReadJSONKey(path, "mcpServers")
-	if err != nil || !ok {
-		return nil
+	if err != nil {
+		return err
+	}
+	if !ok || !entries.Has(name) {
+		return os.ErrNotExist
 	}
 	entries.Delete(name)
 	return merge.WriteJSONKey(path, "mcpServers", entries, 0o600)
@@ -150,8 +155,11 @@ func (a *Adapter) RemoveProfileMCPServer(ctx context.Context, profileName, profi
 	}
 	path := filepath.Join(profileDir, ".gemini", "config", "mcp_config.json")
 	entries, ok, err := merge.ReadJSONKey(path, "mcpServers")
-	if err != nil || !ok {
-		return nil
+	if err != nil {
+		return err
+	}
+	if !ok || !entries.Has(name) {
+		return os.ErrNotExist
 	}
 	entries.Delete(name)
 	return merge.WriteJSONKey(path, "mcpServers", entries, 0o600)

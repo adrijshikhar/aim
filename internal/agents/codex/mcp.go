@@ -1,15 +1,12 @@
 package codex
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -45,79 +42,8 @@ func (a *Adapter) IsSession(profileArgs, args []string) bool {
 	return !agents.ArgsMatch(profileArgs, args, []string{"-V", "--version", "-h", "--help"}, []string{"help"})
 }
 
-type codexTransportJSON struct {
-	Type    string   `json:"type"`
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
-	URL     string   `json:"url"`
-}
-
-type codexServerJSON struct {
-	Name       string             `json:"name"`
-	Enabled    bool               `json:"enabled"`
-	Transport  codexTransportJSON `json:"transport"`
-	AuthStatus string             `json:"auth_status"`
-}
-
-// ListMCPServers returns all MCP servers configured for the profile.
-// It queries `codex mcp list --json` first for live auth status and enablement,
-// and falls back to inspecting the merged config.toml if codex CLI is not present.
+// ListMCPServers returns all MCP servers configured for the profile and host.
 func (a *Adapter) ListMCPServers(ctx context.Context, profileName, profileDir string) ([]agents.MCPServerInfo, error) {
-	codexDir := filepath.Join(profileDir, ".codex")
-	bin := a.ResolveBinary()
-	if bin != "" {
-		timeoutCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-		defer cancel()
-
-		cmd := exec.CommandContext(timeoutCtx, bin, "mcp", "list", "--json")
-		cmd.Dir = profileDir
-		cmd.Env = append(os.Environ(),
-			"HOME="+profileDir,
-			"CODEX_HOME="+codexDir,
-			"AIM_AGENT=codex",
-			"AIM_PROFILE="+profileName,
-		)
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		if err := cmd.Run(); err == nil {
-			var parsed []codexServerJSON
-			if jsonErr := json.Unmarshal(stdout.Bytes(), &parsed); jsonErr == nil && len(parsed) > 0 {
-				var res []agents.MCPServerInfo
-				for _, s := range parsed {
-					status := "enabled"
-					if !s.Enabled {
-						status = "disabled"
-					}
-					target := s.Transport.URL
-					if target == "" {
-						target = agents.CollapseCommand(s.Transport.Command, s.Transport.Args)
-					}
-					typ := s.Transport.Type
-					if typ == "" {
-						if s.Transport.URL != "" {
-							typ = "http"
-						} else {
-							typ = "stdio"
-						}
-					}
-					res = append(res, agents.MCPServerInfo{
-						Name:   s.Name,
-						Type:   typ,
-						Status: status,
-						Auth:   agents.NormalizeAuth(s.AuthStatus),
-						Target: target,
-					})
-				}
-				sort.Slice(res, func(i, j int) bool {
-					return res[i].Name < res[j].Name
-				})
-				return res, nil
-			}
-		}
-	}
-
 	return a.listMCPServersFromConfig(profileDir)
 }
 
@@ -220,8 +146,11 @@ func (a *Adapter) RemoveHostMCPServer(ctx context.Context, name string) error {
 	realHome := config.RealHomeDir()
 	path := filepath.Join(realHome, ".codex", "config.toml")
 	entries, ok, err := merge.ReadTOMLKey(path, "mcp_servers")
-	if err != nil || !ok {
-		return nil
+	if err != nil {
+		return err
+	}
+	if !ok || !entries.Has(name) {
+		return os.ErrNotExist
 	}
 	entries.Delete(name)
 	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)
@@ -250,8 +179,11 @@ func (a *Adapter) RemoveProfileMCPServer(ctx context.Context, profileName, profi
 	}
 	path := filepath.Join(profileDir, ".codex", "config.toml")
 	entries, ok, err := merge.ReadTOMLKey(path, "mcp_servers")
-	if err != nil || !ok {
-		return nil
+	if err != nil {
+		return err
+	}
+	if !ok || !entries.Has(name) {
+		return os.ErrNotExist
 	}
 	entries.Delete(name)
 	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)

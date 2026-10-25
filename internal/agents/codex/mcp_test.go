@@ -3,6 +3,7 @@ package codex
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,10 +158,10 @@ args = ["-c", "url=\"http://localhost\"; exec env URL=\"$url\" uvx mcp-hevo"]
 	_ = os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(cfg), 0o600)
 
 	a := &Adapter{}
-	// Test direct fallback config parser
-	servers, err := a.listMCPServersFromConfig(prof)
+	// Test public ListMCPServers method
+	servers, err := a.ListMCPServers(context.Background(), "dev", prof)
 	if err != nil {
-		t.Fatalf("listMCPServersFromConfig failed: %v", err)
+		t.Fatalf("ListMCPServers failed: %v", err)
 	}
 
 	if len(servers) != 4 {
@@ -233,6 +234,11 @@ func TestCodex_AddAndRemoveHostMCPServer(t *testing.T) {
 	}
 	if strings.Contains(string(data), "agentation") {
 		t.Fatalf("expected agentation to be removed, got:\n%s", string(data))
+	}
+
+	// Removing again must return os.ErrNotExist
+	if err := a.RemoveHostMCPServer(ctx, "agentation"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist when removing nonexistent server, got: %v", err)
 	}
 }
 

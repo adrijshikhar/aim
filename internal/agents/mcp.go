@@ -194,18 +194,22 @@ func CollapseCommand(cmd string, args []string) string {
 	var parts []string
 	parts = append(parts, displayCmd)
 	for _, a := range args {
-		if strings.Contains(a, "Authorization:") || strings.Contains(a, "KEY=") || strings.Contains(a, "TOKEN=") {
+		low := strings.ToLower(a)
+		if strings.Contains(low, "authorization:") || strings.Contains(low, "key=") ||
+			strings.Contains(low, "token=") || strings.Contains(low, "secret=") ||
+			strings.Contains(low, "password=") || strings.HasPrefix(low, "sk-") {
 			parts = append(parts, "***")
-		} else if len(a) > 40 {
-			parts = append(parts, a[:37]+"...")
+		} else if len([]rune(a)) > 40 {
+			parts = append(parts, string([]rune(a)[:37])+"...")
 		} else {
 			parts = append(parts, a)
 		}
 	}
 
 	res := strings.Join(parts, " ")
-	if len(res) > 60 {
-		return res[:57] + "..."
+	runes := []rune(res)
+	if len(runes) > 60 {
+		return string(runes[:57]) + "..."
 	}
 	return res
 }

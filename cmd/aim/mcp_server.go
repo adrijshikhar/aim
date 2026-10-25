@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -81,6 +82,9 @@ func resolveProfileTargets(pm *profile.ProfileManager, profileFlag string, allFl
 			}
 			targets = append(targets, ProfileTarget{Name: name, Dir: pDir})
 		}
+		if len(targets) == 0 {
+			return nil, fmt.Errorf("no valid profile names specified in --profile")
+		}
 		return targets, nil
 	}
 	return nil, nil // Nil slice explicitly signifies Host target
@@ -139,6 +143,9 @@ func resolveTargetAdapters(reg *agents.Registry, clientsFlag string, realHome st
 }
 
 func appendUniqueManager(list []agents.MCPConfigManager, item agents.MCPConfigManager) []agents.MCPConfigManager {
+	if item == nil {
+		return list
+	}
 	for _, existing := range list {
 		if a1, ok1 := existing.(agents.AgentAdapter); ok1 {
 			if a2, ok2 := item.(agents.AgentAdapter); ok2 && a1.Name() == a2.Name() {
@@ -208,7 +215,7 @@ func newMCPDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 		Short: "Diagnose MCP protocol conformance, client configs, and binaries",
 		Long: `Performs a multi-stage diagnostic check of the AIM MCP ecosystem:
 1. Self-test: Verifies in-process stdio JSON-RPC 2.0 protocol handshake and tool definitions.
-2. Client audit: Checks detected AI coding clients (Claude Code, Cursor, Claude Desktop, Windsurf) for valid configuration and 'aim' registration.
+2. Client audit: Checks detected AI coding agents (Claude Code, Codex, Antigravity) for valid configuration and 'aim' registration.
 3. Binary audit: Verifies that third-party MCP server executables exist in PATH.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -362,11 +369,15 @@ Supports 'claude', 'codex', 'agy', or 'all'.`,
 					if err := adapter.RemoveHostMCPServer(ctx, "aim"); err == nil {
 						fmt.Fprintf(out, "Removed aim MCP server from %s at %s\n", adName, homeDir)
 						removedCount++
+					} else if !errors.Is(err, os.ErrNotExist) {
+						return fmt.Errorf("failed to remove aim from %s: %w", adName, err)
 					}
 				} else {
 					if err := adapter.RemoveProfileMCPServer(ctx, profileFlag, profileDir, "aim"); err == nil {
 						fmt.Fprintf(out, "Removed aim MCP server from %s at %s\n", adName, profileDir)
 						removedCount++
+					} else if !errors.Is(err, os.ErrNotExist) {
+						return fmt.Errorf("failed to remove aim from %s: %w", adName, err)
 					}
 				}
 			}
@@ -488,17 +499,11 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 
 			var tableRows [][]string
 			for _, r := range rows {
-				statusDisplay := r.Status
-				if r.Status == "enabled" {
-					statusDisplay = lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(r.Status)
-				} else {
-					statusDisplay = lipgloss.NewStyle().Foreground(tui.TextMuted).Render(r.Status)
-				}
 				tableRows = append(tableRows, []string{
 					r.Name,
 					r.Client,
 					r.Command,
-					statusDisplay,
+					r.Status,
 				})
 			}
 
@@ -519,6 +524,11 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 					return lipgloss.NewStyle().Foreground(tui.AccentCyan)
 				case 2:
 					return lipgloss.NewStyle().Foreground(tui.TextPrimary)
+				case 3:
+					if row >= 0 && row < len(rows) && rows[row].Status == "enabled" {
+						return lipgloss.NewStyle().Foreground(tui.StatusGreen)
+					}
+					return lipgloss.NewStyle().Foreground(tui.TextMuted)
 				default:
 					return lipgloss.NewStyle().Foreground(tui.TextSecondary)
 				}
@@ -573,9 +583,12 @@ Example:
 				return fmt.Errorf("no target agent clients found to register server into")
 			}
 
-			cfg := agents.MCPServerConfig{
-				Command: serverCommand,
-				Args:    serverArgs,
+			cfg := agents.MCPServerConfig{}
+			if strings.HasPrefix(serverCommand, "http://") || strings.HasPrefix(serverCommand, "https://") {
+				cfg.URL = serverCommand
+			} else {
+				cfg.Command = serverCommand
+				cfg.Args = serverArgs
 			}
 
 			ctx := cmd.Context()
@@ -662,12 +675,16 @@ func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 					if err := adapter.RemoveHostMCPServer(ctx, serverName); err == nil {
 						fmt.Fprintf(out, "Removed MCP server '%s' from %s at %s\n", serverName, adName, homeDir)
 						removedCount++
+					} else if !errors.Is(err, os.ErrNotExist) {
+						return fmt.Errorf("failed to remove MCP server %q from %s: %w", serverName, adName, err)
 					}
 				} else {
 					for _, p := range profileTargets {
 						if err := adapter.RemoveProfileMCPServer(ctx, p.Name, p.Dir, serverName); err == nil {
 							fmt.Fprintf(out, "Removed MCP server '%s' from %s (profile %s)\n", serverName, adName, p.Name)
 							removedCount++
+						} else if !errors.Is(err, os.ErrNotExist) {
+							return fmt.Errorf("failed to remove MCP server %q from %s (profile %s): %w", serverName, adName, p.Name, err)
 						}
 					}
 				}

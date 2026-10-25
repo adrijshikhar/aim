@@ -2,6 +2,7 @@ package agy
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,6 +172,11 @@ func TestAgy_AddAndRemoveHostMCPServer(t *testing.T) {
 	}
 	if strings.Contains(string(data), "agentation-mcp") {
 		t.Fatalf("expected agentation to be removed, got:\n%s", string(data))
+	}
+
+	// Removing again must return os.ErrNotExist
+	if err := a.RemoveHostMCPServer(ctx, "agentation"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist when removing nonexistent server, got: %v", err)
 	}
 }
 

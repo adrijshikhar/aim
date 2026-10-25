@@ -17,6 +17,8 @@ func TestMCPCmd_Help(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -41,6 +43,8 @@ func TestMCPServeCmd_Execution(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -86,6 +90,8 @@ func TestMCPInstallCmd_ClaudeGlobal(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -132,6 +138,8 @@ func TestMCPInstallCmd_ClaudeProfile(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -197,6 +205,8 @@ func TestMCPServeCmd_WhoamiTool(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -253,6 +263,8 @@ func TestMCPInstallCmd_ProfilePathTraversal(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -274,6 +286,8 @@ func TestMCPInstallCmd_ProfileNotFound(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -295,6 +309,8 @@ func TestMCPServeCmd_InvalidProfile(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -316,6 +332,8 @@ func TestMCPServeCmd_NonexistentProfile(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -337,6 +355,8 @@ func TestMCPServeCmd_NoArgsConstraint(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -355,6 +375,8 @@ func TestMCPInstallCmd_CorruptConfigRefusesOverwrite(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -381,6 +403,8 @@ func TestMCPDoctorCmd_Execution(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -763,6 +787,8 @@ func TestMCPCommands_InvalidProfileRefused(t *testing.T) {
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
 
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
@@ -787,5 +813,145 @@ func TestMCPCommands_InvalidProfileRefused(t *testing.T) {
 				t.Errorf("expected 'does not exist' error, got: %v", err)
 			}
 		})
+	}
+}
+
+func TestMCPAddCmd_HTTPURLTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "add", "remote-sse", "https://example.com/sse", "--clients", "codex"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add HTTP URL failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Added MCP server 'remote-sse' to Codex CLI") {
+		t.Errorf("expected confirmation output, got: %s", out)
+	}
+
+	codexCfg := filepath.Join(tempDir, ".codex", "config.toml")
+	data, err := os.ReadFile(codexCfg)
+	if err != nil {
+		t.Fatalf("failed to read codex config: %v", err)
+	}
+	cfgStr := string(data)
+	if !strings.Contains(cfgStr, `url = `) || !strings.Contains(cfgStr, `https://example.com/sse`) {
+		t.Errorf("expected url in codex config, got: %s", cfgStr)
+	}
+	if strings.Contains(cfgStr, "command =") {
+		t.Errorf("expected no command field in codex config for URL server, got: %s", cfgStr)
+	}
+}
+
+func TestMCPRemoveCmd_NonexistentServer(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	// Add an empty config so codex manager is considered installed
+	codexDir := filepath.Join(tempDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+	_ = os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte("[mcp_servers]\n"), 0600)
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "remove", "missing-server", "--clients", "codex"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp remove failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Server 'missing-server' was not found in selected agent configs.") {
+		t.Errorf("expected not found message, got: %s", out)
+	}
+}
+
+func TestMCPAddAndRemoveCmd_UnknownClient(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	addCmd := newRootCmd(reg, pm)
+	addCmd.SetArgs([]string{"mcp", "add", "test", "echo", "1", "--clients", "unknown-client"})
+	err := addCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error with unknown client in mcp add, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported or unconfigurable agent client") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+
+	rmCmd := newRootCmd(reg, pm)
+	rmCmd.SetArgs([]string{"mcp", "remove", "test", "--clients", "unknown-client"})
+	err = rmCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error with unknown client in mcp remove, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported or unconfigurable agent client") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestMCPCommands_ProfilePathTraversalProhibited(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	traversalProfiles := []string{
+		"../../evil",
+		"../escape",
+		"profile/subdir",
+		"profile\\backslash",
+		"bad@name!",
+	}
+
+	for _, badProfile := range traversalProfiles {
+		subcommands := [][]string{
+			{"mcp", "install", "--profile", badProfile},
+			{"mcp", "uninstall", "--profile", badProfile},
+			{"mcp", "list", "--profile", badProfile},
+			{"mcp", "add", "dummy", "echo", "hi", "--profile", badProfile},
+			{"mcp", "remove", "dummy", "--profile", badProfile},
+		}
+
+		for _, args := range subcommands {
+			testName := badProfile + "_" + strings.Join(args, "_")
+			t.Run(testName, func(t *testing.T) {
+				cmd := newRootCmd(reg, pm)
+				cmd.SetArgs(args)
+				err := cmd.Execute()
+				if err == nil {
+					t.Fatalf("expected error for invalid profile traversal '%s' with %v, got nil", badProfile, args)
+				}
+			})
+		}
 	}
 }
