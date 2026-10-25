@@ -122,6 +122,18 @@ func (s *ShareDB) initSchema() error {
 	return err
 }
 
+// dbTimeFormat stores timestamps in fixed-width UTC RFC3339 format with 9 zero-padded nanosecond digits.
+// Unlike time.RFC3339Nano which trims trailing zeros and disrupts SQLite lexicographical sorting,
+// dbTimeFormat preserves exact fixed width (30 chars) so ORDER BY string comparisons strictly match chronological order.
+const dbTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
+
+func formatDBTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(dbTimeFormat)
+}
+
 func parseDBTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
@@ -180,7 +192,7 @@ func (s *ShareDB) migrateLegacyAuditLogs(aimDir string) {
 		if entry.ID == "" {
 			entry.ID = GenerateID("aud")
 		}
-		_, _ = stmt.ExecContext(ctx, entry.ID, entry.Timestamp.Format(time.RFC3339Nano), entry.Action, entry.Actor, entry.Profile, entry.Agent, entry.Details)
+		_, _ = stmt.ExecContext(ctx, entry.ID, formatDBTime(entry.Timestamp), entry.Action, entry.Actor, entry.Profile, entry.Agent, entry.Details)
 	}
 
 	_ = tx.Commit()
@@ -235,8 +247,8 @@ func (s *ShareDB) SaveRequest(ctx context.Context, req ShareRequestRecord) error
 	_, err := s.db.ExecContext(ctx, query,
 		req.ID, req.Direction, req.PeerID, req.PeerIP, req.ProfileName, req.Agent,
 		req.RequestedHours, req.Status,
-		req.CreatedAt.Format(time.RFC3339Nano),
-		req.ExpiresAt.Format(time.RFC3339Nano),
+		formatDBTime(req.CreatedAt),
+		formatDBTime(req.ExpiresAt),
 		req.LeaseID, req.ErrorMessage,
 	)
 	return err
@@ -297,7 +309,7 @@ func (s *ShareDB) GetPendingIncomingRequests(ctx context.Context) ([]ShareReques
 	       requested_hours, status, created_at, expires_at, lease_id, error_message
 	FROM share_requests
 	WHERE direction = 'incoming' AND status = 'pending'
-	ORDER BY created_at DESC
+	ORDER BY created_at DESC, rowid DESC
 	`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
@@ -355,7 +367,7 @@ func (s *ShareDB) GetPendingOutgoingRequests(ctx context.Context) ([]ShareReques
 	       requested_hours, status, created_at, expires_at, lease_id, error_message
 	FROM share_requests
 	WHERE direction = 'outgoing' AND status = 'pending'
-	ORDER BY created_at DESC
+	ORDER BY created_at DESC, rowid DESC
 	`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
@@ -479,7 +491,7 @@ func (s *ShareDB) AppendAudit(ctx context.Context, entry AuditEntry) error {
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		entry.ID,
-		entry.Timestamp.Format(time.RFC3339Nano),
+		formatDBTime(entry.Timestamp),
 		entry.Action,
 		entry.Actor,
 		entry.Profile,
@@ -501,7 +513,7 @@ func (s *ShareDB) GetAuditLogs(ctx context.Context, limit int) ([]AuditEntry, er
 	query := `
 	SELECT id, timestamp, action, actor, profile, agent, details
 	FROM share_audit_logs
-	ORDER BY timestamp DESC
+	ORDER BY timestamp DESC, rowid DESC
 	LIMIT ?
 	`
 	rows, err := s.db.QueryContext(ctx, query, limit)

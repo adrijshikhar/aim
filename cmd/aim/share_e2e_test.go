@@ -628,10 +628,11 @@ func TestShare_AuditLog_Integrity(t *testing.T) {
 	tempDir, _, store := setupIsolatedNode(t, "audit-node")
 	t.Setenv("AIM_HOME", tempDir)
 
+	baseTime := time.Now().Add(-1 * time.Hour)
 	for i := 1; i <= 55; i++ {
 		_ = store.AppendAudit(share.AuditEntry{
 			ID:        fmt.Sprintf("aud_%d", i),
-			Timestamp: time.Now(),
+			Timestamp: baseTime.Add(time.Duration(i) * time.Second),
 			Action:    "LEASE_REQUESTED",
 			Actor:     fmt.Sprintf("peer_%d", i),
 			Profile:   "work",

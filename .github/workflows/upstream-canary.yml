@@ -50,7 +50,7 @@ jobs:
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -81,7 +81,7 @@ jobs:
 
       - name: Upload Canary Report
         if: always() && hashFiles('canary-report.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: canary-report
           path: canary-report.json
