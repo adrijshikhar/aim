@@ -628,25 +628,52 @@ func TestShare_AuditLog_Integrity(t *testing.T) {
 	tempDir, _, store := setupIsolatedNode(t, "audit-node")
 	t.Setenv("AIM_HOME", tempDir)
 
+	// 1. Verify zero logs behavior on clean node
+	initialLogs := store.GetAuditLogs(10)
+	if len(initialLogs) != 0 {
+		t.Errorf("expected 0 audit logs on fresh node, got %d", len(initialLogs))
+	}
+
+	baseTime := time.Now().Add(-1 * time.Hour)
 	for i := 1; i <= 55; i++ {
-		_ = store.AppendAudit(share.AuditEntry{
+		err := store.AppendAudit(share.AuditEntry{
 			ID:        fmt.Sprintf("aud_%d", i),
-			Timestamp: time.Now(),
+			Timestamp: baseTime.Add(time.Duration(i) * time.Second),
 			Action:    "LEASE_REQUESTED",
 			Actor:     fmt.Sprintf("peer_%d", i),
 			Profile:   "work",
 			Agent:     "claude",
 			Details:   fmt.Sprintf("Audit log test entry #%d", i),
 		})
+		if err != nil {
+			t.Fatalf("failed to append audit entry #%d: %v", i, err)
+		}
 	}
 
+	// 2. Verify all 55 entries in reverse chronological order
 	logs := store.GetAuditLogs(100)
 	if len(logs) != 55 {
-		t.Errorf("expected 55 audit logs, got %d", len(logs))
+		t.Fatalf("expected 55 audit logs, got %d", len(logs))
 	}
 
-	// Verify reverse chronological order (newest first)
-	if logs[0].Details != "Audit log test entry #55" {
-		t.Errorf("expected newest entry first, got: %s", logs[0].Details)
+	for i, entry := range logs {
+		expectedNum := 55 - i
+		expectedDetails := fmt.Sprintf("Audit log test entry #%d", expectedNum)
+		if entry.Details != expectedDetails {
+			t.Errorf("logs[%d]: expected %q, got %q", i, expectedDetails, entry.Details)
+		}
+		if i > 0 && !logs[i-1].Timestamp.After(entry.Timestamp) {
+			t.Errorf("logs[%d] timestamp (%v) is not strictly after logs[%d] (%v)",
+				i-1, logs[i-1].Timestamp, i, entry.Timestamp)
+		}
+	}
+
+	// 3. Verify limit parameter bounds to top N newest
+	top10 := store.GetAuditLogs(10)
+	if len(top10) != 10 {
+		t.Fatalf("expected 10 logs with limit=10, got %d", len(top10))
+	}
+	if top10[0].Details != "Audit log test entry #55" || top10[9].Details != "Audit log test entry #46" {
+		t.Errorf("unexpected limit window: first=%q, last=%q", top10[0].Details, top10[9].Details)
 	}
 }

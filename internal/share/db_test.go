@@ -3,6 +3,7 @@ package share
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -239,5 +240,86 @@ func TestShareDB_AuditLogs(t *testing.T) {
 	// First should be newest (LEASE_CANCELLED)
 	if logs[0].Action != "LEASE_CANCELLED" {
 		t.Errorf("expected newest log to be LEASE_CANCELLED, got %s", logs[0].Action)
+	}
+}
+
+func TestShareDB_TimeFormatAndParse_Monotonicity(t *testing.T) {
+	// 1. Zero time
+	if got := formatDBTime(time.Time{}); got != "" {
+		t.Errorf("expected empty string for zero time, got %q", got)
+	}
+	if got := parseDBTime(""); !got.IsZero() {
+		t.Errorf("expected zero time for empty string, got %v", got)
+	}
+
+	// 2. Trailing zeros preserved (exactly 30 chars)
+	t0 := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	s0 := formatDBTime(t0)
+	if len(s0) != 30 || s0 != "2026-10-25T12:00:00.000000000Z" {
+		t.Fatalf("expected 30 chars with 9 zeros, got %q (len %d)", s0, len(s0))
+	}
+
+	// 3. Strict monotonic string ordering vs nanosecond increments
+	tA := t0.Add(100 * time.Millisecond) // .100000000 (ends in 8 trailing zeros)
+	tB := tA.Add(1 * time.Nanosecond)    // .100000001
+	sA := formatDBTime(tA)
+	sB := formatDBTime(tB)
+
+	if len(sA) != 30 || len(sB) != 30 {
+		t.Fatalf("expected both strings to be 30 chars, got %d and %d", len(sA), len(sB))
+	}
+	if sA >= sB {
+		t.Fatalf("expected sA < sB lexicographically, got %q vs %q", sA, sB)
+	}
+
+	// 4. Round-trip through parseDBTime
+	parsedA := parseDBTime(sA)
+	if !parsedA.Equal(tA) {
+		t.Errorf("roundtrip failed: got %v, want %v", parsedA, tA)
+	}
+	parsedB := parseDBTime(sB)
+	if !parsedB.Equal(tB) {
+		t.Errorf("roundtrip failed: got %v, want %v", parsedB, tB)
+	}
+}
+
+func TestShareDB_IdenticalTimestamps_TieBreaker(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := NewShareDB(tempDir)
+	if err != nil {
+		t.Fatalf("NewShareDB failed: %v", err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	fixedTime := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+
+	for i := 1; i <= 5; i++ {
+		err := db.AppendAudit(ctx, AuditEntry{
+			ID:        fmt.Sprintf("aud_tie_%d", i),
+			Timestamp: fixedTime,
+			Action:    "LEASE_REQUESTED",
+			Actor:     "local",
+			Details:   fmt.Sprintf("Tie entry #%d", i),
+		})
+		if err != nil {
+			t.Fatalf("AppendAudit failed: %v", err)
+		}
+	}
+
+	logs, err := db.GetAuditLogs(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetAuditLogs failed: %v", err)
+	}
+	if len(logs) != 5 {
+		t.Fatalf("expected 5 logs, got %d", len(logs))
+	}
+
+	// Must return reverse insertion order (LIFO) via rowid DESC
+	for i, entry := range logs {
+		expectedDetails := fmt.Sprintf("Tie entry #%d", 5-i)
+		if entry.Details != expectedDetails {
+			t.Errorf("logs[%d]: expected %q, got %q", i, expectedDetails, entry.Details)
+		}
 	}
 }

@@ -483,7 +483,7 @@ func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
 	if s.db != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if logs, err := s.db.GetAuditLogs(ctx, limit); err == nil && len(logs) > 0 {
+		if logs, err := s.db.GetAuditLogs(ctx, limit); err == nil {
 			return logs
 		}
 	}
