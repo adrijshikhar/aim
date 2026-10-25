@@ -257,4 +257,3 @@ func TestAgy_DetectInstalled(t *testing.T) {
 		t.Errorf("expected installed when ~/.gemini directory exists")
 	}
 }
-

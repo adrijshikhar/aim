@@ -271,4 +271,3 @@ func (a *Adapter) DetectInstalled(realHome string) bool {
 	}
 	return false
 }
-

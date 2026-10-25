@@ -176,4 +176,3 @@ func TestClientDrivers_Detect(t *testing.T) {
 		t.Errorf("expected 1 detected client, got %d", len(detected))
 	}
 }
-

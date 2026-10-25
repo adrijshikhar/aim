@@ -357,4 +357,3 @@ func TestCodex_DetectInstalled(t *testing.T) {
 		t.Errorf("expected installed when ~/.codex/config.toml exists")
 	}
 }
-
