@@ -19,6 +19,9 @@ import (
 )
 
 func newMCPCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
+	if reg == nil || len(reg.All()) == 0 {
+		reg = defaultRegistry()
+	}
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Model Context Protocol (MCP) server and integration commands",
@@ -29,14 +32,121 @@ Provides a read-only stdio MCP server for agent self-inspection (whoami, quota, 
 	mcpCmd.AddCommand(
 		newMCPServeCmd(reg, pm),
 		newMCPDoctorCmd(reg, pm),
-		newMCPInstallCmd(pm),
-		newMCPUninstallCmd(pm),
-		newMCPListCmd(pm),
-		newMCPAddCmd(pm),
-		newMCPRemoveCmd(pm),
+		newMCPInstallCmd(reg, pm),
+		newMCPUninstallCmd(reg, pm),
+		newMCPListCmd(reg, pm),
+		newMCPAddCmd(reg, pm),
+		newMCPRemoveCmd(reg, pm),
 	)
 
 	return mcpCmd
+}
+
+type ProfileTarget struct {
+	Name string
+	Dir  string
+}
+
+func resolveProfileTargets(pm *profile.ProfileManager, profileFlag string, allFlag bool) ([]ProfileTarget, error) {
+	if allFlag {
+		if pm == nil {
+			return nil, fmt.Errorf("profile manager not initialized")
+		}
+		profs, err := pm.ListProfiles()
+		if err != nil {
+			return nil, err
+		}
+		var targets []ProfileTarget
+		for _, name := range profs {
+			targets = append(targets, ProfileTarget{Name: name, Dir: pm.ProfileDir(name)})
+		}
+		return targets, nil
+	}
+	if profileFlag != "" {
+		if pm == nil {
+			return nil, fmt.Errorf("profile manager not initialized")
+		}
+		var targets []ProfileTarget
+		for _, name := range strings.Split(profileFlag, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			pDir, err := pm.ResolveProfile(name)
+			if err != nil {
+				return nil, err
+			}
+			if !pm.ProfileExists(name) {
+				return nil, fmt.Errorf("profile %q does not exist", name)
+			}
+			targets = append(targets, ProfileTarget{Name: name, Dir: pDir})
+		}
+		return targets, nil
+	}
+	return nil, nil // Nil slice explicitly signifies Host target
+}
+
+func resolveTargetAdapters(reg *agents.Registry, clientsFlag string, realHome string) ([]agents.MCPConfigManager, error) {
+	if reg == nil || len(reg.All()) == 0 {
+		reg = defaultRegistry()
+	}
+	clientsFlag = strings.TrimSpace(clientsFlag)
+
+	allAdapters := reg.All()
+
+	adapterByName := make(map[string]agents.MCPConfigManager)
+	for _, a := range allAdapters {
+		if mgr, ok := a.(agents.MCPConfigManager); ok {
+			adapterByName[strings.ToLower(a.Name())] = mgr
+			for _, alias := range a.Aliases() {
+				adapterByName[strings.ToLower(alias)] = mgr
+			}
+		}
+	}
+
+	var targets []agents.MCPConfigManager
+	if clientsFlag == "" || clientsFlag == "all" {
+		for _, a := range allAdapters {
+			if mgr, ok := a.(agents.MCPConfigManager); ok {
+				if mgr.DetectInstalled(realHome) {
+					targets = appendUniqueManager(targets, mgr)
+				}
+			}
+		}
+		if len(targets) == 0 {
+			for _, a := range allAdapters {
+				if mgr, ok := a.(agents.MCPConfigManager); ok {
+					targets = appendUniqueManager(targets, mgr)
+				}
+			}
+		}
+		return targets, nil
+	}
+
+	parts := strings.Split(clientsFlag, ",")
+	for _, part := range parts {
+		name := strings.ToLower(strings.TrimSpace(part))
+		if name == "" {
+			continue
+		}
+		mgr, ok := adapterByName[name]
+		if !ok {
+			return nil, fmt.Errorf("unsupported or unconfigurable agent client %q", part)
+		}
+		targets = appendUniqueManager(targets, mgr)
+	}
+	return targets, nil
+}
+
+func appendUniqueManager(list []agents.MCPConfigManager, item agents.MCPConfigManager) []agents.MCPConfigManager {
+	for _, existing := range list {
+		if a1, ok1 := existing.(agents.AgentAdapter); ok1 {
+			if a2, ok2 := item.(agents.AgentAdapter); ok2 && a1.Name() == a2.Name() {
+				return list
+			}
+		}
+	}
+	return append(list, item)
 }
 
 func resolveProfileDir(pm *profile.ProfileManager, profileFlag string) (string, error) {
@@ -142,82 +252,15 @@ func newMCPDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 	return doctorCmd
 }
 
-func newMCPInstallCmd(pm *profile.ProfileManager) *cobra.Command {
+func newMCPInstallCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var profileFlag string
 
 	installCmd := &cobra.Command{
 		Use:   "install [client]",
-		Short: "Register aim MCP server into agent/IDE configuration (e.g. cursor, claude)",
-		Long: `Registers 'aim mcp serve' as an MCP server in target client configuration files.
-Supports 'claude' (Claude Code), 'claude-desktop', 'cursor', 'windsurf', or 'all'.
-When run without arguments, scans and auto-detects installed clients.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			homeDir := config.RealHomeDir()
-			profileDir, err := resolveProfileDir(pm, profileFlag)
-			if err != nil {
-				return err
-			}
-
-			targetClient := ""
-			if len(args) > 0 {
-				targetClient = strings.ToLower(strings.TrimSpace(args[0]))
-			}
-
-			var targets []mcp.ClientConfigDriver
-			if targetClient == "all" {
-				targets = mcp.AllDrivers()
-			} else if targetClient != "" {
-				driver, ok := mcp.GetDriver(mcp.ClientID(targetClient))
-				if !ok {
-					fmt.Fprintf(cmd.OutOrStdout(), "Auto-install is currently supported for 'claude', 'claude-desktop', 'cursor', 'windsurf'.\nFor %s, register:\n  Command: aim\n  Args: [\"mcp\", \"serve\"]\n", targetClient)
-					return nil
-				}
-				targets = append(targets, driver)
-			} else {
-				detected := mcp.DetectInstalledClients(homeDir)
-				if len(detected) == 0 {
-					// Fall back to claude driver if none detected
-					if d, ok := mcp.GetDriver(mcp.ClientClaudeCode); ok {
-						detected = append(detected, d)
-					}
-				}
-				targets = detected
-			}
-
-			aimEntry := mcp.RawMCPEntry{
-				Command: "aim",
-				Args:    []string{"mcp", "serve"},
-			}
-
-			for _, driver := range targets {
-				cfgPath, err := driver.ConfigPath(homeDir, profileDir)
-				if err != nil {
-					return err
-				}
-				if err := driver.WriteServer(cfgPath, "aim", aimEntry); err != nil {
-					return fmt.Errorf("failed to register into %s at %s: %w", driver.Name(), cfgPath, err)
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Installed aim MCP server into %s at %s\n", driver.Name(), cfgPath)
-			}
-
-			return nil
-		},
-	}
-
-	installCmd.Flags().StringVar(&profileFlag, "profile", "", "Target specific profile instead of global host config")
-
-	return installCmd
-}
-
-func newMCPUninstallCmd(pm *profile.ProfileManager) *cobra.Command {
-	var profileFlag string
-
-	uninstallCmd := &cobra.Command{
-		Use:   "uninstall [client]",
-		Short: "Remove aim MCP server from client configuration (e.g. cursor, claude)",
-		Long: `Removes the 'aim' MCP server definition from client configuration files without disturbing other servers.
-Supports 'claude', 'claude-desktop', 'cursor', 'windsurf', or 'all'.`,
+		Short: "Register aim MCP server into agent configuration (e.g. claude, codex, agy)",
+		Long: `Registers 'aim mcp serve' as an MCP server in target agent configuration files.
+Supports 'claude' (Claude Code), 'codex', 'agy', or 'all'.
+When run without arguments, scans and auto-detects installed agents.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
@@ -231,38 +274,105 @@ Supports 'claude', 'claude-desktop', 'cursor', 'windsurf', or 'all'.`,
 				targetClient = strings.ToLower(strings.TrimSpace(args[0]))
 			}
 
-			var targets []mcp.ClientConfigDriver
-			if targetClient != "all" {
-				d, ok := mcp.GetDriver(mcp.ClientID(targetClient))
-				if !ok {
-					return fmt.Errorf("unsupported client %q", targetClient)
+			targets, err := resolveTargetAdapters(reg, targetClient, homeDir)
+			if err != nil {
+				if targetClient != "all" {
+					fmt.Fprintf(cmd.OutOrStdout(), "Auto-install is currently supported for 'claude', 'codex', 'agy'.\nFor %s, register:\n  Command: aim\n  Args: [\"mcp\", \"serve\"]\n", targetClient)
+					return nil
 				}
-				targets = append(targets, d)
-			} else {
-				targets = mcp.AllDrivers()
+				return err
+			}
+			if len(targets) == 0 {
+				return fmt.Errorf("no target agent clients found to register server into")
 			}
 
-			removedCount := 0
-			for _, driver := range targets {
-				cfgPath, err := driver.ConfigPath(homeDir, profileDir)
-				if err != nil {
-					continue
+			aimEntry := agents.MCPServerConfig{
+				Command: "aim",
+				Args:    []string{"mcp", "serve"},
+			}
+
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+
+			for _, adapter := range targets {
+				adName := "agent"
+				if a, ok := adapter.(agents.AgentAdapter); ok {
+					adName = a.DisplayName()
 				}
-				servers, err := driver.ReadServers(cfgPath)
-				if err != nil || servers == nil {
-					continue
-				}
-				if _, exists := servers["aim"]; exists {
-					if err := driver.DeleteServer(cfgPath, "aim"); err != nil {
-						return fmt.Errorf("failed to remove aim MCP server from %s at %s: %w", driver.Name(), cfgPath, err)
+
+				if profileDir == "" {
+					if err := adapter.AddHostMCPServer(ctx, "aim", aimEntry); err != nil {
+						return fmt.Errorf("failed to register into %s (host): %w", adName, err)
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "Removed aim MCP server from %s at %s\n", driver.Name(), cfgPath)
-					removedCount++
+					fmt.Fprintf(out, "Installed aim MCP server into %s at %s\n", adName, homeDir)
+				} else {
+					if err := adapter.AddProfileMCPServer(ctx, profileFlag, profileDir, "aim", aimEntry); err != nil {
+						return fmt.Errorf("failed to register into %s (profile %s): %w", adName, profileFlag, err)
+					}
+					fmt.Fprintf(out, "Installed aim MCP server into %s at %s\n", adName, profileDir)
+				}
+			}
+
+			return nil
+		},
+	}
+
+	installCmd.Flags().StringVar(&profileFlag, "profile", "", "Target specific profile instead of global host config")
+
+	return installCmd
+}
+
+func newMCPUninstallCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
+	var profileFlag string
+
+	uninstallCmd := &cobra.Command{
+		Use:   "uninstall [client]",
+		Short: "Remove aim MCP server from agent configuration (e.g. claude, codex, agy)",
+		Long: `Removes the 'aim' MCP server definition from agent configuration files without disturbing other servers.
+Supports 'claude', 'codex', 'agy', or 'all'.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			homeDir := config.RealHomeDir()
+			profileDir, err := resolveProfileDir(pm, profileFlag)
+			if err != nil {
+				return err
+			}
+
+			targetClient := "all"
+			if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+				targetClient = strings.ToLower(strings.TrimSpace(args[0]))
+			}
+
+			targets, err := resolveTargetAdapters(reg, targetClient, homeDir)
+			if err != nil {
+				return err
+			}
+
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+			removedCount := 0
+
+			for _, adapter := range targets {
+				adName := "agent"
+				if a, ok := adapter.(agents.AgentAdapter); ok {
+					adName = a.DisplayName()
+				}
+
+				if profileDir == "" {
+					if err := adapter.RemoveHostMCPServer(ctx, "aim"); err == nil {
+						fmt.Fprintf(out, "Removed aim MCP server from %s at %s\n", adName, homeDir)
+						removedCount++
+					}
+				} else {
+					if err := adapter.RemoveProfileMCPServer(ctx, profileFlag, profileDir, "aim"); err == nil {
+						fmt.Fprintf(out, "Removed aim MCP server from %s at %s\n", adName, profileDir)
+						removedCount++
+					}
 				}
 			}
 
 			if removedCount == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No active 'aim' MCP server registrations found.")
+				fmt.Fprintln(out, "No active 'aim' MCP server registrations found.")
 			}
 			return nil
 		},
@@ -272,15 +382,16 @@ Supports 'claude', 'claude-desktop', 'cursor', 'windsurf', or 'all'.`,
 	return uninstallCmd
 }
 
-func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
+func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var profileFlag string
 	var clientFlag string
+	var clientsFlag string
 	var jsonFlag bool
 
 	listCmd := &cobra.Command{
 		Use:   "list",
-		Short: "List configured MCP servers across client configurations",
-		Long:  `Displays all Model Context Protocol (MCP) servers configured across detected AI coding clients and profiles.`,
+		Short: "List configured MCP servers across agent configurations",
+		Long:  `Displays all Model Context Protocol (MCP) servers configured across detected AI coding agents and profiles.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
@@ -298,47 +409,56 @@ func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
 			}
 
 			var rows []serverRow
+			ctx := cmd.Context()
 
-			drivers := mcp.AllDrivers()
-			if clientFlag != "" {
-				d, ok := mcp.GetDriver(mcp.ClientID(strings.ToLower(clientFlag)))
-				if ok {
-					drivers = []mcp.ClientConfigDriver{d}
+			selectedClient := clientFlag
+			if selectedClient == "" && clientsFlag != "" {
+				selectedClient = clientsFlag
+			}
+
+			if reg == nil || len(reg.All()) == 0 {
+				reg = defaultRegistry()
+			}
+
+			var targets []agents.MCPConfigManager
+			if selectedClient == "" || selectedClient == "all" {
+				for _, a := range reg.All() {
+					if mgr, ok := a.(agents.MCPConfigManager); ok {
+						targets = appendUniqueManager(targets, mgr)
+					}
+				}
+			} else {
+				var err error
+				targets, err = resolveTargetAdapters(reg, selectedClient, homeDir)
+				if err != nil {
+					return err
 				}
 			}
 
-			for _, driver := range drivers {
-				cfgPath, err := driver.ConfigPath(homeDir, profileDir)
-				if err != nil {
-					continue
+			for _, adapter := range targets {
+				adName := "Agent"
+				if a, ok := adapter.(agents.AgentAdapter); ok {
+					adName = a.DisplayName()
 				}
-				servers, err := driver.ReadServers(cfgPath)
-				if err != nil || len(servers) == 0 {
-					continue
-				}
-
-				scopeLabel := driver.Name()
+				scopeLabel := adName
 				if profileFlag != "" {
 					scopeLabel += " (" + profileFlag + ")"
 				}
 
-				for sName, entry := range servers {
-					target := entry.Command
-					if target == "" {
-						target = entry.ServerURL
-						if target == "" {
-							target = entry.URL
-						}
-					}
-					status := "enabled"
-					if entry.Disabled {
-						status = "disabled"
+				servers, err := adapter.ListMCPServers(ctx, profileFlag, profileDir)
+				if err != nil || len(servers) == 0 {
+					continue
+				}
+
+				for _, s := range servers {
+					status := s.Status
+					if status == "" {
+						status = "enabled"
 					}
 					rows = append(rows, serverRow{
-						Name:    sName,
+						Name:    s.Name,
 						Client:  scopeLabel,
-						Command: target,
-						Args:    strings.Join(entry.Args, " "),
+						Command: s.Target,
 						Status:  status,
 					})
 				}
@@ -368,10 +488,6 @@ func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
 
 			var tableRows [][]string
 			for _, r := range rows {
-				cmdDisplay := r.Command
-				if r.Args != "" {
-					cmdDisplay += " " + r.Args
-				}
 				statusDisplay := r.Status
 				if r.Status == "enabled" {
 					statusDisplay = lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(r.Status)
@@ -381,7 +497,7 @@ func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
 				tableRows = append(tableRows, []string{
 					r.Name,
 					r.Client,
-					cmdDisplay,
+					r.Command,
 					statusDisplay,
 				})
 			}
@@ -414,26 +530,30 @@ func newMCPListCmd(pm *profile.ProfileManager) *cobra.Command {
 	}
 
 	listCmd.Flags().StringVar(&profileFlag, "profile", "", "Filter or inspect specific profile")
-	listCmd.Flags().StringVar(&clientFlag, "client", "", "Filter by client (e.g. 'cursor', 'claude')")
+	listCmd.Flags().StringVar(&clientFlag, "client", "", "Filter by client (e.g. 'claude', 'codex')")
+	listCmd.Flags().StringVar(&clientsFlag, "clients", "", "Filter by clients (e.g. 'claude', 'codex')")
 	listCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results in JSON format")
 
 	return listCmd
 }
 
-func newMCPAddCmd(pm *profile.ProfileManager) *cobra.Command {
+func newMCPAddCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var clientsFlag string
 	var profileFlag string
+	var allFlag bool
 
 	addCmd := &cobra.Command{
 		Use:   "add <name> <command> [args...]",
-		Short: "Register a third-party MCP server across client configurations",
-		Long: `Registers a new MCP server definition across selected or all detected AI client configurations.
+		Short: "Register an MCP server across agent configurations",
+		Long: `Registers a new MCP server definition across selected or detected agent configurations.
 Example:
-  aim mcp add fetch uvx mcp-server-fetch --clients cursor,claude`,
+  aim mcp add fetch uvx mcp-server-fetch --clients codex,claude
+  aim mcp add fetch uvx mcp-server-fetch --profile work,staging
+  aim mcp add fetch uvx mcp-server-fetch --all`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			profileDir, err := resolveProfileDir(pm, profileFlag)
+			profileTargets, err := resolveProfileTargets(pm, profileFlag, allFlag)
 			if err != nil {
 				return err
 			}
@@ -445,106 +565,124 @@ Example:
 				serverArgs = args[2:]
 			}
 
-			targets := resolveTargetDrivers(clientsFlag, homeDir)
+			targets, err := resolveTargetAdapters(reg, clientsFlag, homeDir)
+			if err != nil {
+				return err
+			}
 			if len(targets) == 0 {
-				return fmt.Errorf("no target clients found to register server into")
+				return fmt.Errorf("no target agent clients found to register server into")
 			}
 
-			entry := mcp.RawMCPEntry{
+			cfg := agents.MCPServerConfig{
 				Command: serverCommand,
 				Args:    serverArgs,
 			}
 
-			for _, driver := range targets {
-				cfgPath, err := driver.ConfigPath(homeDir, profileDir)
-				if err != nil {
-					return err
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+
+			if allFlag && len(profileTargets) == 0 {
+				fmt.Fprintln(out, "No profiles configured.")
+				return nil
+			}
+
+			for _, adapter := range targets {
+				adName := "agent"
+				if a, ok := adapter.(agents.AgentAdapter); ok {
+					adName = a.DisplayName()
 				}
-				if err := driver.WriteServer(cfgPath, serverName, entry); err != nil {
-					return fmt.Errorf("failed to add server to %s: %w", driver.Name(), err)
+
+				if !allFlag && profileFlag == "" {
+					if err := adapter.AddHostMCPServer(ctx, serverName, cfg); err != nil {
+						return fmt.Errorf("failed to add server to %s (host): %w", adName, err)
+					}
+					fmt.Fprintf(out, "Added MCP server '%s' to %s at %s\n", serverName, adName, homeDir)
+				} else {
+					for _, p := range profileTargets {
+						if err := adapter.AddProfileMCPServer(ctx, p.Name, p.Dir, serverName, cfg); err != nil {
+							return fmt.Errorf("failed to add server to %s (profile %s): %w", adName, p.Name, err)
+						}
+						fmt.Fprintf(out, "Added MCP server '%s' to %s (profile %s)\n", serverName, adName, p.Name)
+					}
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Added MCP server '%s' to %s at %s\n", serverName, driver.Name(), cfgPath)
 			}
 			return nil
 		},
 	}
 
-	addCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Comma-separated list of target clients (e.g. 'cursor,claude') or 'all'")
-	addCmd.Flags().StringVar(&profileFlag, "profile", "", "Target specific profile instead of global host config")
+	addCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Comma-separated list of target clients (e.g. 'claude,codex') or 'all'")
+	addCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles (e.g. 'work,dev')")
+	addCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
 
 	return addCmd
 }
 
-func newMCPRemoveCmd(pm *profile.ProfileManager) *cobra.Command {
+func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var clientsFlag string
 	var profileFlag string
+	var allFlag bool
 
 	removeCmd := &cobra.Command{
 		Use:   "remove <name>",
-		Short: "Unregister an MCP server from client configurations",
+		Short: "Unregister an MCP server from agent configurations",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			profileDir, err := resolveProfileDir(pm, profileFlag)
+			profileTargets, err := resolveProfileTargets(pm, profileFlag, allFlag)
 			if err != nil {
 				return err
 			}
 
 			serverName := args[0]
-			targets := resolveTargetDrivers(clientsFlag, homeDir)
+			targets, err := resolveTargetAdapters(reg, clientsFlag, homeDir)
+			if err != nil {
+				return err
+			}
 			if len(targets) == 0 {
-				return fmt.Errorf("no target clients found")
+				return fmt.Errorf("no target agent clients found")
+			}
+
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+
+			if allFlag && len(profileTargets) == 0 {
+				fmt.Fprintln(out, "No profiles configured.")
+				return nil
 			}
 
 			removedCount := 0
-			for _, driver := range targets {
-				cfgPath, err := driver.ConfigPath(homeDir, profileDir)
-				if err != nil {
-					continue
+
+			for _, adapter := range targets {
+				adName := "agent"
+				if a, ok := adapter.(agents.AgentAdapter); ok {
+					adName = a.DisplayName()
 				}
-				servers, err := driver.ReadServers(cfgPath)
-				if err != nil || servers == nil {
-					continue
-				}
-				if _, exists := servers[serverName]; exists {
-					if err := driver.DeleteServer(cfgPath, serverName); err != nil {
-						return fmt.Errorf("failed to remove MCP server %q from %s at %s: %w", serverName, driver.Name(), cfgPath, err)
+
+				if !allFlag && profileFlag == "" {
+					if err := adapter.RemoveHostMCPServer(ctx, serverName); err == nil {
+						fmt.Fprintf(out, "Removed MCP server '%s' from %s at %s\n", serverName, adName, homeDir)
+						removedCount++
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "Removed MCP server '%s' from %s at %s\n", serverName, driver.Name(), cfgPath)
-					removedCount++
+				} else {
+					for _, p := range profileTargets {
+						if err := adapter.RemoveProfileMCPServer(ctx, p.Name, p.Dir, serverName); err == nil {
+							fmt.Fprintf(out, "Removed MCP server '%s' from %s (profile %s)\n", serverName, adName, p.Name)
+							removedCount++
+						}
+					}
 				}
 			}
 
 			if removedCount == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "Server '%s' was not found in selected client configs.\n", serverName)
+				fmt.Fprintf(out, "Server '%s' was not found in selected agent configs.\n", serverName)
 			}
 			return nil
 		},
 	}
 
 	removeCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Comma-separated list of target clients or 'all'")
-	removeCmd.Flags().StringVar(&profileFlag, "profile", "", "Target specific profile instead of global host config")
+	removeCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles")
+	removeCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
 
 	return removeCmd
-}
-
-func resolveTargetDrivers(clientsFlag string, homeDir string) []mcp.ClientConfigDriver {
-	clientsFlag = strings.TrimSpace(clientsFlag)
-	if clientsFlag == "" || clientsFlag == "all" {
-		detected := mcp.DetectInstalledClients(homeDir)
-		if len(detected) > 0 {
-			return detected
-		}
-		return mcp.AllDrivers()
-	}
-
-	var targets []mcp.ClientConfigDriver
-	parts := strings.Split(clientsFlag, ",")
-	for _, part := range parts {
-		cID := mcp.ClientID(strings.ToLower(strings.TrimSpace(part)))
-		if d, ok := mcp.GetDriver(cID); ok {
-			targets = append(targets, d)
-		}
-	}
-	return targets
 }

@@ -122,16 +122,34 @@ func (a *Adapter) ListMCPServers(ctx context.Context, profileName, profileDir st
 }
 
 func (a *Adapter) listMCPServersFromConfig(profileDir string) ([]agents.MCPServerInfo, error) {
-	configPath := filepath.Join(profileDir, ".codex", "config.toml")
-	entries, ok, err := merge.ReadTOMLKey(configPath, "mcp_servers")
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to read mcp_servers from %s: %w", configPath, err)
+	serverMap := make(map[string]agents.MCPServerInfo)
+
+	// 1. Read host ~/.codex/config.toml
+	realHome := config.RealHomeDir()
+	hostConfig := filepath.Join(realHome, ".codex", "config.toml")
+	readCodexConfigFile(hostConfig, "host", serverMap)
+
+	// 2. Read profile .codex/config.toml (overrides host)
+	if profileDir != "" {
+		profConfig := filepath.Join(profileDir, ".codex", "config.toml")
+		readCodexConfigFile(profConfig, "profile", serverMap)
 	}
 
-	serverMap := make(map[string]agents.MCPServerInfo)
-	if ok {
+	var res []agents.MCPServerInfo
+	for _, s := range serverMap {
+		res = append(res, s)
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Name < res[j].Name
+	})
+	return res, nil
+}
+
+func readCodexConfigFile(configPath string, scope string, serverMap map[string]agents.MCPServerInfo) {
+	entries, ok, err := merge.ReadTOMLKey(configPath, "mcp_servers")
+	if err == nil && ok {
 		for _, name := range entries.Order {
-			serverMap[name] = agents.ParseMCPServerMap(name, entries.Values[name], "profile")
+			serverMap[name] = agents.ParseMCPServerMap(name, entries.Values[name], scope)
 		}
 	}
 
@@ -154,15 +172,6 @@ func (a *Adapter) listMCPServersFromConfig(profileDir string) ([]agents.MCPServe
 			}
 		}
 	}
-
-	var res []agents.MCPServerInfo
-	for _, s := range serverMap {
-		res = append(res, s)
-	}
-	sort.Slice(res, func(i, j int) bool {
-		return res[i].Name < res[j].Name
-	})
-	return res, nil
 }
 
 func codexConfigToMap(cfg agents.MCPServerConfig) map[string]any {

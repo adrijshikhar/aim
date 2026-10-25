@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,18 +176,18 @@ func TestMCPInstallCmd_OtherAgent(t *testing.T) {
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
-	reg := agents.NewRegistry()
+	reg := defaultRegistry()
 	pm := profile.NewProfileManager(tempDir)
 
 	out, _ := captureOutput(t, func() {
 		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"mcp", "install", "codex"})
+		cmd.SetArgs([]string{"mcp", "install", "cursor"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
-	if !strings.Contains(out, "Auto-install is currently supported for 'claude'") {
+	if !strings.Contains(out, "Auto-install is currently supported for 'claude', 'codex', 'agy'") {
 		t.Errorf("expected guidance for non-supported agent, got: %s", out)
 	}
 }
@@ -402,47 +401,46 @@ func TestMCPDoctorCmd_Execution(t *testing.T) {
 	}
 }
 
-func TestMCPInstallAndUninstallCmd_MultiClient(t *testing.T) {
+func TestMCPInstallAndUninstallCmd_AdapterDriven(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
-	reg := agents.NewRegistry()
+	reg := defaultRegistry()
 	pm := profile.NewProfileManager(tempDir)
 
-	// Create dummy Cursor dir
-	cursorDir := filepath.Join(tempDir, ".cursor")
-	_ = os.MkdirAll(cursorDir, 0700)
+	codexDir := filepath.Join(tempDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
 
-	// 1. Install to cursor
+	// 1. Install to codex
 	out, _ := captureOutput(t, func() {
 		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"mcp", "install", "cursor"})
+		cmd.SetArgs([]string{"mcp", "install", "codex"})
 		if err := cmd.Execute(); err != nil {
-			t.Fatalf("mcp install cursor failed: %v", err)
+			t.Fatalf("mcp install codex failed: %v", err)
 		}
 	})
 
-	if !strings.Contains(out, "Cursor IDE") {
-		t.Errorf("expected Cursor confirmation: %s", out)
+	if !strings.Contains(out, "Codex CLI") {
+		t.Errorf("expected Codex confirmation: %s", out)
 	}
 
-	cursorConfig := filepath.Join(cursorDir, "mcp.json")
-	data, err := os.ReadFile(cursorConfig)
+	codexConfig := filepath.Join(codexDir, "config.toml")
+	data, err := os.ReadFile(codexConfig)
 	if err != nil {
-		t.Fatalf("failed to read cursor mcp.json: %v", err)
+		t.Fatalf("failed to read codex config: %v", err)
 	}
-	if !strings.Contains(string(data), `"aim"`) {
-		t.Errorf("expected aim entry in cursor mcp.json: %s", string(data))
+	if !strings.Contains(string(data), `[mcp_servers.aim]`) {
+		t.Errorf("expected [mcp_servers.aim] in codex config: %s", string(data))
 	}
 
-	// 2. Uninstall from cursor
+	// 2. Uninstall from codex
 	out, _ = captureOutput(t, func() {
 		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"mcp", "uninstall", "cursor"})
+		cmd.SetArgs([]string{"mcp", "uninstall", "codex"})
 		if err := cmd.Execute(); err != nil {
-			t.Fatalf("mcp uninstall cursor failed: %v", err)
+			t.Fatalf("mcp uninstall codex failed: %v", err)
 		}
 	})
 
@@ -450,9 +448,9 @@ func TestMCPInstallAndUninstallCmd_MultiClient(t *testing.T) {
 		t.Errorf("expected uninstall confirmation: %s", out)
 	}
 
-	data, _ = os.ReadFile(cursorConfig)
-	if strings.Contains(string(data), `"aim"`) {
-		t.Errorf("aim should have been removed from cursor mcp.json: %s", string(data))
+	data, _ = os.ReadFile(codexConfig)
+	if strings.Contains(string(data), `[mcp_servers.aim]`) {
+		t.Errorf("aim should have been removed from codex config: %s", string(data))
 	}
 }
 
@@ -462,13 +460,11 @@ func TestMCPListCmd_Execution(t *testing.T) {
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
-	reg := agents.NewRegistry()
+	reg := defaultRegistry()
 	pm := profile.NewProfileManager(tempDir)
 
-	cursorDir := filepath.Join(tempDir, ".cursor")
-	_ = os.MkdirAll(cursorDir, 0700)
-	cursorCfg := filepath.Join(cursorDir, "mcp.json")
-	_ = os.WriteFile(cursorCfg, []byte(`{"mcpServers":{"demo":{"command":"echo","args":["hello"]}}}`), 0600)
+	claudeCfg := filepath.Join(tempDir, ".claude.json")
+	_ = os.WriteFile(claudeCfg, []byte(`{"mcpServers":{"demo":{"command":"echo","args":["hello"]}}}`), 0600)
 
 	// 1. Table output
 	out, _ := captureOutput(t, func() {
@@ -507,15 +503,12 @@ func TestMCPListCmd_TruncatesLongCommand(t *testing.T) {
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
-	reg := agents.NewRegistry()
+	reg := defaultRegistry()
 	pm := profile.NewProfileManager(tempDir)
 	t.Setenv("AIM_TERMINAL_WIDTH", "100")
 
-	cursorDir := filepath.Join(tempDir, ".cursor")
-	_ = os.MkdirAll(cursorDir, 0700)
-	cursorCfg := filepath.Join(cursorDir, "mcp.json")
-	longCmd := "java -cp /very/long/path/to/some/dependency/wiremock-standalone.jar:/another/very/long/classpath/entry/here wiremock.Run --port 8080 --verbose --debug"
-	_ = os.WriteFile(cursorCfg, []byte(fmt.Sprintf(`{"mcpServers":{"wiremock":{"command":"%s"}}}`, longCmd)), 0600)
+	claudeCfg := filepath.Join(tempDir, ".claude.json")
+	_ = os.WriteFile(claudeCfg, []byte(`{"mcpServers":{"wiremock":{"command":"java","args":["-cp","/very/long/path/to/some/dependency/wiremock-standalone.jar:/another/very/long/classpath/entry/here","wiremock.Run","--port","8080","--verbose","--debug"]}}}`), 0600)
 
 	out, _ := captureOutput(t, func() {
 		cmd := newRootCmd(reg, pm)
@@ -542,16 +535,16 @@ func TestMCPAddAndRemoveCmd_Execution(t *testing.T) {
 	t.Setenv("AIM_REAL_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 
-	reg := agents.NewRegistry()
+	reg := defaultRegistry()
 	pm := profile.NewProfileManager(tempDir)
 
-	cursorDir := filepath.Join(tempDir, ".cursor")
-	_ = os.MkdirAll(cursorDir, 0700)
+	codexDir := filepath.Join(tempDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
 
 	// 1. Add server
 	out, _ := captureOutput(t, func() {
 		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"mcp", "add", "fetcher", "uvx", "mcp-server-fetch", "--clients", "cursor"})
+		cmd.SetArgs([]string{"mcp", "add", "fetcher", "uvx", "mcp-server-fetch", "--clients", "codex"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("mcp add failed: %v", err)
 		}
@@ -561,16 +554,16 @@ func TestMCPAddAndRemoveCmd_Execution(t *testing.T) {
 		t.Errorf("expected add confirmation: %s", out)
 	}
 
-	cursorCfg := filepath.Join(cursorDir, "mcp.json")
-	data, _ := os.ReadFile(cursorCfg)
-	if !strings.Contains(string(data), `"fetcher"`) {
-		t.Errorf("expected fetcher in cursor config: %s", string(data))
+	codexCfg := filepath.Join(codexDir, "config.toml")
+	data, _ := os.ReadFile(codexCfg)
+	if !strings.Contains(string(data), `[mcp_servers.fetcher]`) {
+		t.Errorf("expected fetcher in codex config: %s", string(data))
 	}
 
 	// 2. Remove server
 	out, _ = captureOutput(t, func() {
 		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"mcp", "remove", "fetcher", "--clients", "cursor"})
+		cmd.SetArgs([]string{"mcp", "remove", "fetcher", "--clients", "codex"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("mcp remove failed: %v", err)
 		}
@@ -580,9 +573,188 @@ func TestMCPAddAndRemoveCmd_Execution(t *testing.T) {
 		t.Errorf("expected remove confirmation: %s", out)
 	}
 
-	data, _ = os.ReadFile(cursorCfg)
-	if strings.Contains(string(data), `"fetcher"`) {
-		t.Errorf("fetcher should be removed from cursor config: %s", string(data))
+	data, _ = os.ReadFile(codexCfg)
+	if strings.Contains(string(data), `fetcher`) {
+		t.Errorf("fetcher should be removed from codex config: %s", string(data))
+	}
+}
+
+func TestMCPAddCmd_AutoDetectInstalled(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("PATH", t.TempDir())
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	codexDir := filepath.Join(tempDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+	codexCfg := filepath.Join(codexDir, "config.toml")
+	_ = os.WriteFile(codexCfg, []byte("[mcp_servers]\n"), 0600)
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "add", "my-server", "echo", "hello"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Added MCP server 'my-server' to Codex CLI") {
+		t.Errorf("expected server added to detected Codex CLI, got: %s", out)
+	}
+
+	data, _ := os.ReadFile(codexCfg)
+	if !strings.Contains(string(data), "[mcp_servers.my-server]") {
+		t.Errorf("expected my-server in codex config: %s", string(data))
+	}
+
+	claudeCfg := filepath.Join(tempDir, ".claude.json")
+	if _, err := os.Stat(claudeCfg); err == nil {
+		t.Errorf("claude config should not have been created")
+	}
+}
+
+func TestMCPAddCmd_MultiProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+	_, _ = pm.EnsureProfile("staging")
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "add", "fetcher", "uvx", "mcp-server-fetch", "--profile", "work,staging", "--clients", "codex"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "(profile work)") || !strings.Contains(out, "(profile staging)") {
+		t.Errorf("expected output confirming addition to both profiles: %s", out)
+	}
+
+	for _, p := range []string{"work", "staging"} {
+		cfgPath := filepath.Join(pm.ProfileDir(p), ".codex", "config.toml")
+		data, err := os.ReadFile(cfgPath)
+		if err != nil {
+			t.Fatalf("failed to read profile %s codex config: %v", p, err)
+		}
+		if !strings.Contains(string(data), "[mcp_servers.fetcher]") {
+			t.Errorf("profile %s missing fetcher server: %s", p, string(data))
+		}
+	}
+}
+
+func TestMCPAddCmd_AllProfiles(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("alpha")
+	_, _ = pm.EnsureProfile("beta")
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "add", "shared-tool", "npx", "tool", "--all", "--clients", "codex"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add --all failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "(profile alpha)") || !strings.Contains(out, "(profile beta)") {
+		t.Errorf("expected output confirming addition to both profiles: %s", out)
+	}
+
+	for _, p := range []string{"alpha", "beta"} {
+		cfgPath := filepath.Join(pm.ProfileDir(p), ".codex", "config.toml")
+		data, err := os.ReadFile(cfgPath)
+		if err != nil {
+			t.Fatalf("failed to read profile %s codex config: %v", p, err)
+		}
+		if !strings.Contains(string(data), "[mcp_servers.shared-tool]") {
+			t.Errorf("profile %s missing shared-tool: %s", p, string(data))
+		}
+	}
+}
+
+func TestMCPAddCmd_ExplicitClients(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "add", "codex-only", "echo", "target", "--clients", "codex"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add --clients codex failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Added MCP server 'codex-only' to Codex CLI") {
+		t.Errorf("expected confirmation for Codex CLI, got: %s", out)
+	}
+
+	codexCfg := filepath.Join(tempDir, ".codex", "config.toml")
+	data, err := os.ReadFile(codexCfg)
+	if err != nil {
+		t.Fatalf("failed to read codex config: %v", err)
+	}
+	if !strings.Contains(string(data), "[mcp_servers.codex-only]") {
+		t.Errorf("expected codex-only in codex config: %s", string(data))
+	}
+
+	claudeCfg := filepath.Join(tempDir, ".claude.json")
+	if _, err := os.Stat(claudeCfg); err == nil {
+		t.Errorf("claude config should NOT have been created when --clients codex was given")
+	}
+}
+
+func TestMCPListCmd_UnifiedView(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	// Create Claude server
+	claudeCfg := filepath.Join(tempDir, ".claude.json")
+	_ = os.WriteFile(claudeCfg, []byte(`{"mcpServers":{"claude-srv":{"command":"node","args":["server.js"]}}}`), 0600)
+
+	// Create Codex server
+	codexDir := filepath.Join(tempDir, ".codex")
+	_ = os.MkdirAll(codexDir, 0700)
+	codexCfg := filepath.Join(codexDir, "config.toml")
+	_ = os.WriteFile(codexCfg, []byte("[mcp_servers.codex-srv]\ncommand = \"python\"\nargs = [\"main.py\"]\n"), 0600)
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "list"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp list failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "claude-srv") {
+		t.Errorf("expected 'claude-srv' in unified list output: %s", out)
+	}
+	if !strings.Contains(out, "codex-srv") {
+		t.Errorf("expected 'codex-srv' in unified list output: %s", out)
 	}
 }
 

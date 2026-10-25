@@ -130,6 +130,10 @@ func TestArgs_Codex_ProfileArgsFirst(t *testing.T) {
 }
 
 func TestCodex_ListMCPServers_FallbackConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIM_REAL_HOME", home)
+	t.Setenv("HOME", home)
+
 	prof := t.TempDir()
 	codexDir := filepath.Join(prof, ".codex")
 	_ = os.MkdirAll(codexDir, 0o700)
