@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/merge"
 )
 
@@ -74,6 +76,115 @@ func TestIsSession_Claude(t *testing.T) {
 		if got := a.IsSession(nil, c.args); got != c.want {
 			t.Errorf("%v: got %v want %v", c.args, got, c.want)
 		}
+	}
+}
+
+func TestClaude_AddAndRemoveHostMCPServer(t *testing.T) {
+	home := isolatedHome(t)
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		Command: "npx",
+		Args:    []string{"-y", "agentation-mcp", "server"},
+	}
+
+	if err := a.AddHostMCPServer(ctx, "agentation", cfg); err != nil {
+		t.Fatalf("AddHostMCPServer failed: %v", err)
+	}
+
+	claudePath := filepath.Join(home, ".claude.json")
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("failed to read claude config: %v", err)
+	}
+	if !strings.Contains(string(data), "agentation-mcp") {
+		t.Fatalf("expected agentation in claude config, got: %s", string(data))
+	}
+
+	// Verify via ListMCPServers
+	list, err := a.ListMCPServers(ctx, "default", filepath.Join(home, "profiles", "none"))
+	if err != nil {
+		t.Fatalf("ListMCPServers failed: %v", err)
+	}
+	var found bool
+	for _, s := range list {
+		if s.Name == "agentation" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected agentation in ListMCPServers")
+	}
+
+	// Remove server
+	if err := a.RemoveHostMCPServer(ctx, "agentation"); err != nil {
+		t.Fatalf("RemoveHostMCPServer failed: %v", err)
+	}
+
+	data, err = os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("failed to read claude config after remove: %v", err)
+	}
+	if strings.Contains(string(data), "agentation-mcp") {
+		t.Fatalf("expected agentation to be removed, got: %s", string(data))
+	}
+}
+
+func TestClaude_AddProfileMCPServer_Isolation(t *testing.T) {
+	home := isolatedHome(t)
+	profDir := filepath.Join(home, "profiles", "work")
+	_ = os.MkdirAll(profDir, 0o700)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		Command: "fetch",
+		Args:    []string{"https://example.com"},
+	}
+
+	if err := a.AddProfileMCPServer(ctx, "work", profDir, "fetch", cfg); err != nil {
+		t.Fatalf("AddProfileMCPServer failed: %v", err)
+	}
+
+	// Profile config must exist
+	pConfig := filepath.Join(profDir, ".claude", ".claude.json")
+	if _, err := os.Stat(pConfig); os.IsNotExist(err) {
+		t.Fatalf("profile config was not created at %s", pConfig)
+	}
+
+	// Host config must NOT exist
+	hConfig := filepath.Join(home, ".claude.json")
+	if _, err := os.Stat(hConfig); !os.IsNotExist(err) {
+		t.Fatalf("host config was mutated during profile operation!")
+	}
+
+	// Remove from profile
+	if err := a.RemoveProfileMCPServer(ctx, "work", profDir, "fetch"); err != nil {
+		t.Fatalf("RemoveProfileMCPServer failed: %v", err)
+	}
+	data, err := os.ReadFile(pConfig)
+	if err != nil {
+		t.Fatalf("failed to read profile config: %v", err)
+	}
+	if strings.Contains(string(data), "fetch") {
+		t.Fatalf("expected fetch to be removed from profile config, got: %s", string(data))
+	}
+}
+
+func TestClaude_DetectInstalled(t *testing.T) {
+	home := isolatedHome(t)
+	t.Setenv("PATH", t.TempDir()) // Ensure binary is not in PATH for isolated test
+	a := &Adapter{}
+	if a.DetectInstalled(home) {
+		t.Errorf("expected not installed in empty home without binary in path")
+	}
+
+	_ = os.WriteFile(filepath.Join(home, ".claude.json"), []byte("{}"), 0o600)
+	if !a.DetectInstalled(home) {
+		t.Errorf("expected installed when ~/.claude.json exists")
 	}
 }
 
