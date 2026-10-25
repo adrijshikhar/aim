@@ -12,8 +12,11 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/merge"
 )
+
+var _ agents.MCPConfigManager = (*Adapter)(nil)
 
 // MCPCollections: servers and plugins share config.toml. A [plugins."<id>"]
 // entry carries its enabled flag and any [plugins."<id>".mcp_servers.*]
@@ -161,3 +164,102 @@ func (a *Adapter) listMCPServersFromConfig(profileDir string) ([]agents.MCPServe
 	})
 	return res, nil
 }
+
+func codexConfigToMap(cfg agents.MCPServerConfig) map[string]any {
+	m := make(map[string]any)
+	if cfg.Command != "" {
+		m["command"] = cfg.Command
+	}
+	if len(cfg.Args) > 0 {
+		args := make([]any, len(cfg.Args))
+		for i, a := range cfg.Args {
+			args[i] = a
+		}
+		m["args"] = args
+	}
+	if len(cfg.Env) > 0 {
+		env := make(map[string]any, len(cfg.Env))
+		for k, v := range cfg.Env {
+			env[k] = v
+		}
+		m["env"] = env
+	}
+	if cfg.URL != "" {
+		m["url"] = cfg.URL
+	}
+	if cfg.Disabled {
+		m["enabled"] = false
+	}
+	return m
+}
+
+// AddHostMCPServer registers or updates an MCP server in ~/.codex/config.toml.
+func (a *Adapter) AddHostMCPServer(ctx context.Context, name string, cfg agents.MCPServerConfig) error {
+	realHome := config.RealHomeDir()
+	path := filepath.Join(realHome, ".codex", "config.toml")
+	entries, ok, err := merge.ReadTOMLKey(path, "mcp_servers")
+	if err != nil || !ok {
+		entries = merge.NewEntries()
+	}
+	entries.Set(name, codexConfigToMap(cfg), nil)
+	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)
+	return err
+}
+
+// RemoveHostMCPServer unregisters an MCP server from ~/.codex/config.toml.
+func (a *Adapter) RemoveHostMCPServer(ctx context.Context, name string) error {
+	realHome := config.RealHomeDir()
+	path := filepath.Join(realHome, ".codex", "config.toml")
+	entries, ok, err := merge.ReadTOMLKey(path, "mcp_servers")
+	if err != nil || !ok {
+		return nil
+	}
+	entries.Delete(name)
+	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)
+	return err
+}
+
+// AddProfileMCPServer registers or updates an MCP server in <profileDir>/.codex/config.toml.
+func (a *Adapter) AddProfileMCPServer(ctx context.Context, profileName, profileDir, name string, cfg agents.MCPServerConfig) error {
+	if profileDir == "" {
+		return fmt.Errorf("profileDir is required")
+	}
+	path := filepath.Join(profileDir, ".codex", "config.toml")
+	entries, ok, err := merge.ReadTOMLKey(path, "mcp_servers")
+	if err != nil || !ok {
+		entries = merge.NewEntries()
+	}
+	entries.Set(name, codexConfigToMap(cfg), nil)
+	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)
+	return err
+}
+
+// RemoveProfileMCPServer unregisters an MCP server from <profileDir>/.codex/config.toml.
+func (a *Adapter) RemoveProfileMCPServer(ctx context.Context, profileName, profileDir, name string) error {
+	if profileDir == "" {
+		return fmt.Errorf("profileDir is required")
+	}
+	path := filepath.Join(profileDir, ".codex", "config.toml")
+	entries, ok, err := merge.ReadTOMLKey(path, "mcp_servers")
+	if err != nil || !ok {
+		return nil
+	}
+	entries.Delete(name)
+	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)
+	return err
+}
+
+// DetectInstalled reports whether codex is in PATH or ~/.codex/config.toml exists.
+func (a *Adapter) DetectInstalled(realHome string) bool {
+	if _, err := exec.LookPath("codex"); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(realHome, ".codex", "config.toml")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(realHome, ".codex")); err == nil {
+		return true
+	}
+	return false
+}
+
