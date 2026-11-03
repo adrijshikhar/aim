@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -19,8 +21,35 @@ import (
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 )
+
+var (
+	leaseMu                sync.RWMutex
+	newShareClient         = share.NewClient
+	leaseHeartbeatInterval = 60 * time.Second
+)
+
+func getShareClient(port int) *share.Client {
+	leaseMu.RLock()
+	defer leaseMu.RUnlock()
+	return newShareClient(port)
+}
+
+func getHeartbeatInterval() time.Duration {
+	leaseMu.RLock()
+	defer leaseMu.RUnlock()
+	if env := os.Getenv("AIM_LEASE_HEARTBEAT_INTERVAL"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil && d > 0 {
+			return d
+		}
+	}
+	if leaseHeartbeatInterval <= 0 {
+		return 60 * time.Second
+	}
+	return leaseHeartbeatInterval
+}
 
 func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	cmd := &cobra.Command{
@@ -64,6 +93,13 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 
 			if len(extraArgs) > 0 && extraArgs[0] == "--" {
 				extraArgs = extraArgs[1:]
+			}
+			if profile.IsLeased(profileName) || (pm != nil && pm.IsLeased(profileName)) {
+				sanitized, err := sanitizeLeasedRunFlags(extraArgs)
+				if err != nil {
+					return err
+				}
+				extraArgs = sanitized
 			}
 			if !strings.Contains(profileName, ":") {
 				ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName), autoCreate)
@@ -273,19 +309,35 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 
 	applyProfileOverrides(&launchEnv, cfg, opts.ProfileName, true)
 
+	if profile.IsLeased(opts.ProfileName) || (pm != nil && pm.IsLeased(opts.ProfileName)) {
+		sanitized, sErr := sanitizeLeasedRunFlags(opts.ExtraArgs)
+		if sErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", sErr)
+			return 1
+		}
+		opts.ExtraArgs = sanitized
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	if profile.IsLeased(opts.ProfileName) || (pm != nil && pm.IsLeased(opts.ProfileName)) {
+		startLeaseSupervisor(runCtx, pDir, opts.ProfileName, cancel)
+	}
+
 	r := runner.NewRunner(adapter)
 	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", opts.ExtraArgs)
 	code := withSessionMerge(adapter, pm.MergeStateStore(), opts.ProfileName, pDir, cfg, opts.ExtraArgs, func() int {
 		if isMCPListInvocation(opts.ExtraArgs) {
 			if listProv, ok := adapter.(agents.MCPListProvider); ok {
-				servers, listErr := listProv.ListMCPServers(ctx, opts.ProfileName, pDir)
+				servers, listErr := listProv.ListMCPServers(runCtx, opts.ProfileName, pDir)
 				if listErr == nil {
 					presenter.RenderMCPListTable(os.Stdout, adapter.Name(), opts.ProfileName, servers)
 					return 0
 				}
 			}
 		}
-		c, runErr := r.Run(ctx, launchEnv, opts.ExtraArgs)
+		c, runErr := r.Run(runCtx, launchEnv, opts.ExtraArgs)
 		err = runErr
 		return c
 	})
@@ -405,6 +457,203 @@ func isMCPListInvocation(extraArgs []string) bool {
 			}
 		}
 		return true
+	}
+	return false
+}
+
+func sanitizeLeasedRunFlags(extraArgs []string) ([]string, error) {
+	banned := map[string]bool{
+		"--no-hooks":                     true,
+		"--hooks=false":                  true,
+		"--dangerously-skip-permissions": true,
+		"--config-dir":                   true,
+		"--profile":                      true,
+	}
+	for _, arg := range extraArgs {
+		if banned[arg] || strings.HasPrefix(arg, "--hooks=") || strings.HasPrefix(arg, "--config-dir=") || strings.HasPrefix(arg, "--profile=") {
+			return nil, fmt.Errorf("flag %q is prohibited on leased profiles to maintain security compliance", arg)
+		}
+	}
+	return extraArgs, nil
+}
+
+func startLeaseSupervisor(ctx context.Context, profDir, profileName string, cancel context.CancelFunc) {
+	go runLeaseSupervisor(ctx, profDir, profileName, cancel)
+}
+
+func isHookFileName(name string) bool {
+	base := filepath.Base(name)
+	return base == "hooks.json" || base == "settings.json"
+}
+
+func checkHookTampered(monitoredHooks map[string]bool, event fsnotify.Event) bool {
+	if isHookFileName(event.Name) {
+		if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+			data, err := os.ReadFile(event.Name)
+			if err != nil || len(data) == 0 || !strings.Contains(string(data), "aim hook guard") {
+				return true
+			}
+		}
+		if event.Op&(fsnotify.Write|fsnotify.Chmod) != 0 {
+			data, err := os.ReadFile(event.Name)
+			if err != nil || len(data) == 0 || !strings.Contains(string(data), "aim hook guard") {
+				return true
+			}
+		}
+	}
+
+	for h := range monitoredHooks {
+		data, err := os.ReadFile(h)
+		if err != nil || len(data) == 0 || !strings.Contains(string(data), "aim hook guard") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func runLeaseSupervisor(ctx context.Context, profDir, profileName string, cancel context.CancelFunc) {
+	var watcher *fsnotify.Watcher
+	if w, err := fsnotify.NewWatcher(); err == nil {
+		watcher = w
+		defer watcher.Close()
+
+		watchDirs := []string{
+			filepath.Join(profDir, ".gemini", "config"),
+			filepath.Join(profDir, ".codex"),
+			filepath.Join(profDir, ".claude"),
+			profDir,
+		}
+		for _, d := range watchDirs {
+			if fi, err := os.Stat(d); err == nil && fi.IsDir() {
+				_ = watcher.Add(d)
+			}
+		}
+	} else {
+		logger.Debug("[supervisor] fsnotify watcher init error: %v", err)
+	}
+
+	candidateHooks := []string{
+		filepath.Join(profDir, ".gemini", "config", "hooks.json"),
+		filepath.Join(profDir, ".codex", "hooks.json"),
+		filepath.Join(profDir, ".claude", "settings.json"),
+		filepath.Join(profDir, "hooks.json"),
+		filepath.Join(profDir, "settings.json"),
+	}
+
+	monitoredHooks := make(map[string]bool)
+	for _, h := range candidateHooks {
+		if data, err := os.ReadFile(h); err == nil && strings.Contains(string(data), "aim hook guard") {
+			monitoredHooks[h] = true
+		}
+	}
+
+	interval := getHeartbeatInterval()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	var eventsChan <-chan fsnotify.Event
+	var errorsChan <-chan error
+	if watcher != nil {
+		eventsChan = watcher.Events
+		errorsChan = watcher.Errors
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case event, ok := <-eventsChan:
+			if !ok {
+				eventsChan = nil
+				continue
+			}
+			// Dynamically watch newly created subdirectories
+			if event.Op&fsnotify.Create != 0 && watcher != nil {
+				if fi, err := os.Stat(event.Name); err == nil && fi.IsDir() {
+					_ = watcher.Add(event.Name)
+				}
+			}
+
+			// If a new hook file was created with aim hook guard, track it
+			if isHookFileName(event.Name) && (event.Op&(fsnotify.Create|fsnotify.Write) != 0) {
+				if data, err := os.ReadFile(event.Name); err == nil && strings.Contains(string(data), "aim hook guard") {
+					monitoredHooks[event.Name] = true
+				}
+			}
+
+			if event.Op&(fsnotify.Write|fsnotify.Remove|fsnotify.Rename|fsnotify.Chmod) != 0 {
+				if checkHookTampered(monitoredHooks, event) {
+					fmt.Fprintf(os.Stderr, "[aim] ⚠️ Tamper detected on hook configuration! Session terminated.\n")
+					cancel()
+					return
+				}
+			}
+
+		case err, ok := <-errorsChan:
+			if !ok {
+				errorsChan = nil
+				continue
+			}
+			logger.Debug("[supervisor] fsnotify watcher error: %v", err)
+
+		case <-ticker.C:
+			if performLeaseHeartbeat(ctx, profDir, profileName, cancel) {
+				return
+			}
+		}
+	}
+}
+
+func performLeaseHeartbeat(ctx context.Context, profDir, profileName string, cancel context.CancelFunc) bool {
+	leaseFile := filepath.Join(profDir, ".aim-lease.json")
+	data, err := os.ReadFile(leaseFile)
+	if err != nil {
+		return false
+	}
+	var meta share.LeaseMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return false
+	}
+
+	if meta.Revoked {
+		mgr := share.NewLeaseManager(filepath.Dir(profDir))
+		_ = mgr.RevokeLease(profileName)
+		fmt.Fprintf(os.Stderr, "[aim] 🔒 Lease has been revoked by lender. Terminating session.\n")
+		cancel()
+		return true
+	}
+
+	targetPeer := meta.SourcePeer
+	if targetPeer == "" {
+		targetPeer = meta.LenderNodeID
+	}
+	if targetPeer == "" || meta.LeaseID == "" {
+		return false
+	}
+
+	client := getShareClient(4319)
+	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+	st, checkErr := client.CheckLeaseStatus(checkCtx, targetPeer, meta.LeaseID)
+	checkCancel()
+
+	if checkErr == nil && st != nil {
+		if st.Revoked || !st.Active {
+			mgr := share.NewLeaseManager(filepath.Dir(profDir))
+			_ = mgr.RevokeLease(profileName)
+			fmt.Fprintf(os.Stderr, "[aim] 🔒 Lease has been revoked by lender. Terminating session.\n")
+			cancel()
+			return true
+		}
+
+		meta.LastVerifiedAt = time.Now()
+		if updated, err := json.MarshalIndent(meta, "", "  "); err == nil {
+			tmp := fmt.Sprintf("%s.tmp.%d", leaseFile, time.Now().UnixNano())
+			if err := os.WriteFile(tmp, updated, 0600); err == nil {
+				_ = os.Rename(tmp, leaseFile)
+			}
+		}
 	}
 	return false
 }

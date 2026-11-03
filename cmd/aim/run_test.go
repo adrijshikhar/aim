@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -845,4 +847,271 @@ func TestRunCmd_RegistersAimShareMCP_OnLeasedProfile(t *testing.T) {
 	if srv.Command != "aim" || len(srv.Args) != 4 || srv.Args[0] != "mcp" || srv.Args[1] != "serve-share" || srv.Args[2] != "--profile" || srv.Args[3] != profName {
 		t.Errorf("unexpected aim_share config: %+v", srv)
 	}
+}
+
+func TestSanitizeLeasedRunFlags(t *testing.T) {
+	bannedFlags := []string{
+		"--no-hooks",
+		"--hooks=false",
+		"--dangerously-skip-permissions",
+		"--hooks=something",
+		"--config-dir=/custom/dir",
+		"--profile=p2p-test",
+		"--config-dir",
+		"--profile",
+	}
+	for _, flag := range bannedFlags {
+		_, err := sanitizeLeasedRunFlags([]string{flag})
+		if err == nil {
+			t.Errorf("expected banned flag %q to be rejected on leased profile", flag)
+		}
+		expectedMsg := fmt.Sprintf("flag %q is prohibited on leased profiles to maintain security compliance", flag)
+		if err != nil && err.Error() != expectedMsg {
+			t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+		}
+	}
+
+	validArgs := []string{"--verbose", "fix", "main.go"}
+	cleaned, err := sanitizeLeasedRunFlags(validArgs)
+	if err != nil || len(cleaned) != 3 {
+		t.Errorf("valid args should pass sanitization, got: %v (err: %v)", cleaned, err)
+	}
+
+	mixed := []string{"--verbose", "--no-hooks", "main.go"}
+	if _, err := sanitizeLeasedRunFlags(mixed); err == nil {
+		t.Errorf("expected mixed args containing --no-hooks to be rejected")
+	}
+}
+
+func TestRunCmd_RejectsBannedFlags_OnLeasedProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("p2p-test-lease")
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "codex", "p2p-test-lease", "--no-hooks"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error when running banned flag on leased profile")
+	}
+	if !strings.Contains(err.Error(), "is prohibited on leased profiles") {
+		t.Errorf("expected error message to mention prohibited flag, got: %v", err)
+	}
+
+	// Also test with colon notation
+	cmd.SetArgs([]string{"run", "codex", "peer:office", "--hooks=false"})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error when running banned flag on peer:office")
+	}
+	if !strings.Contains(err.Error(), "is prohibited on leased profiles") {
+		t.Errorf("expected error message to mention prohibited flag, got: %v", err)
+	}
+}
+
+func TestLeaseSupervisor_HookTamperDetection(t *testing.T) {
+	t.Run("ModifyHookFile", func(t *testing.T) {
+		profDir := t.TempDir()
+		codexDir := filepath.Join(profDir, ".codex")
+		if err := os.MkdirAll(codexDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		hookFile := filepath.Join(codexDir, "hooks.json")
+		if err := os.WriteFile(hookFile, []byte(`{"command": "aim hook guard test --agent codex"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
+
+		// Allow watcher to register
+		time.Sleep(50 * time.Millisecond)
+
+		// Tamper with hook file
+		if err := os.WriteFile(hookFile, []byte(`{"command": "tampered"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		select {
+		case <-ctx.Done():
+			// Pass: context was cancelled by supervisor
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for lease supervisor to cancel context after hook tamper")
+		}
+	})
+
+	t.Run("DeleteHookFile", func(t *testing.T) {
+		profDir := t.TempDir()
+		hookFile := filepath.Join(profDir, "hooks.json")
+		if err := os.WriteFile(hookFile, []byte(`{"command": "aim hook guard test"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
+
+		time.Sleep(50 * time.Millisecond)
+
+		// Delete hook file
+		if err := os.Remove(hookFile); err != nil {
+			t.Fatal(err)
+		}
+
+		select {
+		case <-ctx.Done():
+			// Pass: context was cancelled by supervisor
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for lease supervisor to cancel context after hook deletion")
+		}
+	})
+}
+
+func TestLeaseSupervisor_Heartbeat(t *testing.T) {
+	t.Run("HeartbeatRevoked", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/share/lease/status" {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(share.LeaseStatusResponse{
+					LeaseID: "ls_revoked",
+					Active:  false,
+					Revoked: true,
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer ts.Close()
+
+		leaseMu.Lock()
+		oldClient := newShareClient
+		newShareClient = func(port int) *share.Client {
+			c := share.NewClient(port)
+			c.SetBaseURLOverride(ts.URL)
+			return c
+		}
+		oldInterval := leaseHeartbeatInterval
+		leaseHeartbeatInterval = 20 * time.Millisecond
+		leaseMu.Unlock()
+
+		defer func() {
+			leaseMu.Lock()
+			newShareClient = oldClient
+			leaseHeartbeatInterval = oldInterval
+			leaseMu.Unlock()
+		}()
+
+		tempDir := t.TempDir()
+		profDir := filepath.Join(tempDir, "p2p-revoked")
+		_ = os.MkdirAll(profDir, 0700)
+		leaseMeta := share.LeaseMeta{
+			LeaseID:        "ls_revoked",
+			SourcePeer:     "lender-peer",
+			SourceProfile:  "work",
+			LastVerifiedAt: time.Now(),
+		}
+		data, _ := json.Marshal(leaseMeta)
+		_ = os.WriteFile(filepath.Join(profDir, ".aim-lease.json"), data, 0600)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		startLeaseSupervisor(ctx, profDir, "p2p-revoked", cancel)
+
+		select {
+		case <-ctx.Done():
+			// Pass: cancelled due to revocation
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for supervisor to cancel context after lender revoked lease")
+		}
+
+		time.Sleep(50 * time.Millisecond)
+
+		updatedData, err := os.ReadFile(filepath.Join(profDir, ".aim-lease.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var updatedMeta share.LeaseMeta
+		_ = json.Unmarshal(updatedData, &updatedMeta)
+		if !updatedMeta.Revoked {
+			t.Errorf("expected lease meta to be marked revoked on disk")
+		}
+	})
+
+	t.Run("HeartbeatActive", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/share/lease/status" {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(share.LeaseStatusResponse{
+					LeaseID: "ls_active",
+					Active:  true,
+					Revoked: false,
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer ts.Close()
+
+		leaseMu.Lock()
+		oldClient := newShareClient
+		newShareClient = func(port int) *share.Client {
+			c := share.NewClient(port)
+			c.SetBaseURLOverride(ts.URL)
+			return c
+		}
+		oldInterval := leaseHeartbeatInterval
+		leaseHeartbeatInterval = 20 * time.Millisecond
+		leaseMu.Unlock()
+
+		defer func() {
+			leaseMu.Lock()
+			newShareClient = oldClient
+			leaseHeartbeatInterval = oldInterval
+			leaseMu.Unlock()
+		}()
+
+		tempDir := t.TempDir()
+		profDir := filepath.Join(tempDir, "p2p-active")
+		_ = os.MkdirAll(profDir, 0700)
+		initialTime := time.Now().Add(-1 * time.Hour)
+		leaseMeta := share.LeaseMeta{
+			LeaseID:        "ls_active",
+			SourcePeer:     "lender-peer",
+			SourceProfile:  "work",
+			LastVerifiedAt: initialTime,
+		}
+		data, _ := json.Marshal(leaseMeta)
+		_ = os.WriteFile(filepath.Join(profDir, ".aim-lease.json"), data, 0600)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		startLeaseSupervisor(ctx, profDir, "p2p-active", cancel)
+
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+		time.Sleep(50 * time.Millisecond)
+
+		updatedData, err := os.ReadFile(filepath.Join(profDir, ".aim-lease.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var updatedMeta share.LeaseMeta
+		_ = json.Unmarshal(updatedData, &updatedMeta)
+		if !updatedMeta.LastVerifiedAt.After(initialTime) {
+			t.Errorf("expected LastVerifiedAt to be updated, was %v, now %v", initialTime, updatedMeta.LastVerifiedAt)
+		}
+	})
 }
