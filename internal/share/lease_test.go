@@ -554,3 +554,94 @@ func TestLeaseManagerRevokeLeaseAndScrub(t *testing.T) {
 		t.Errorf("expected IsLeaseExpired to be true for revoked lease")
 	}
 }
+
+func TestLeaseManager_SignatureRecordingAndPinnedVerification(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("AIM_HOME", tempHome)
+	profilesDir := filepath.Join(tempHome, "profiles")
+	_ = os.MkdirAll(profilesDir, 0700)
+
+	mgr := NewLeaseManager(profilesDir)
+	mgr.SetAimDir(tempHome)
+	mgr.NotifyFn = func(sourcePeer, leaseID string) {}
+
+	store := NewStore(tempHome)
+	mgr.SetStore(store)
+
+	pub, priv, err := EnsureNodeKeypair(tempHome)
+	if err != nil {
+		t.Fatalf("failed to generate keypair: %v", err)
+	}
+
+	borrowerID, _ := os.Hostname()
+	if borrowerID == "" {
+		borrowerID = "borrower-node"
+	}
+	expiresAt := time.Now().Add(2 * time.Hour)
+	expStr := expiresAt.Format(time.RFC3339)
+	sig := SignLease(priv, "ls_100", "lender1", borrowerID, "work", "claude", expStr)
+
+	resp := &LeaseResponse{
+		Status:       "approved",
+		LeaseID:      "ls_100",
+		ProfileName:  "work",
+		Agent:        "claude",
+		ExpiresAt:    expiresAt,
+		Signature:    sig,
+		LenderNodeID: "lender1",
+		BorrowerID:   borrowerID,
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/.credentials.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"secret"}`)),
+			},
+		},
+	}
+
+	// 1. Unpinned lender: install succeeds and writes metadata
+	localName, err := mgr.InstallLease("lender1", "work", resp)
+	if err != nil {
+		t.Fatalf("unpinned install failed: %v", err)
+	}
+	meta, err := mgr.GetLeaseMeta(localName)
+	if err != nil {
+		t.Fatalf("GetLeaseMeta failed: %v", err)
+	}
+	if meta.Signature != sig {
+		t.Errorf("expected signature %q in meta, got %q", sig, meta.Signature)
+	}
+	if meta.LenderNodeID != "lender1" {
+		t.Errorf("expected lender_node_id lender1 in meta, got %q", meta.LenderNodeID)
+	}
+	if meta.LastVerifiedAt.IsZero() {
+		t.Errorf("expected non-zero last_verified_at in meta")
+	}
+
+	// 2. Pin lender public key in peers.json
+	_ = store.SavePeer(PeerInfo{
+		ID:        "lender1",
+		HostName:  "lender1",
+		PublicKey: pub,
+	})
+
+	// 3. Pinned lender with valid signature: renewal / install succeeds
+	_, err = mgr.InstallLease("lender1", "work", resp)
+	if err != nil {
+		t.Fatalf("pinned install with valid signature failed: %v", err)
+	}
+
+	// 4. Tampered signature: must fail verification and reject
+	tamperedResp := *resp
+	tamperedResp.Signature = sig[:len(sig)-4] + "dead"
+	_, err = mgr.InstallLease("lender1", "work", &tamperedResp)
+	if err == nil || !strings.Contains(err.Error(), "cryptographic verification failed") {
+		t.Fatalf("expected cryptographic verification failure on tampered signature, got: %v", err)
+	}
+
+	// 5. Missing signature when key is pinned: must reject
+	missingSigResp := *resp
+	missingSigResp.Signature = ""
+	_, err = mgr.InstallLease("lender1", "work", &missingSigResp)
+	if err == nil || !strings.Contains(err.Error(), "provided no signature") {
+		t.Fatalf("expected rejection when signature is missing for pinned lender, got: %v", err)
+	}
+}

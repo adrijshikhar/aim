@@ -1,6 +1,10 @@
 package share
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -22,6 +26,82 @@ type PeerInfo struct {
 	LastSeen       time.Time             `json:"last_seen"`
 	Profiles       []string              `json:"profiles"`
 	SharedProfiles []SharedProfileConfig `json:"shared_profiles,omitempty"`
+	PublicKey      ed25519.PublicKey     `json:"public_key,omitempty"`
+}
+
+type peerInfoWire struct {
+	ID             string                `json:"id"`
+	HostName       string                `json:"hostname"`
+	VPNIP          string                `json:"vpn_ip"`
+	Port           int                   `json:"port"`
+	LastSeen       time.Time             `json:"last_seen"`
+	Profiles       []string              `json:"profiles"`
+	SharedProfiles []SharedProfileConfig `json:"shared_profiles,omitempty"`
+	PublicKey      string                `json:"public_key,omitempty"`
+}
+
+func (p PeerInfo) MarshalJSON() ([]byte, error) {
+	var pubKeyHex string
+	if len(p.PublicKey) > 0 {
+		pubKeyHex = hex.EncodeToString(p.PublicKey)
+	}
+	return json.Marshal(peerInfoWire{
+		ID:             p.ID,
+		HostName:       p.HostName,
+		VPNIP:          p.VPNIP,
+		Port:           p.Port,
+		LastSeen:       p.LastSeen,
+		Profiles:       p.Profiles,
+		SharedProfiles: p.SharedProfiles,
+		PublicKey:      pubKeyHex,
+	})
+}
+
+func (p *PeerInfo) UnmarshalJSON(data []byte) error {
+	type rawPeer struct {
+		ID             string                `json:"id"`
+		HostName       string                `json:"hostname"`
+		VPNIP          string                `json:"vpn_ip"`
+		Port           int                   `json:"port"`
+		LastSeen       time.Time             `json:"last_seen"`
+		Profiles       []string              `json:"profiles"`
+		SharedProfiles []SharedProfileConfig `json:"shared_profiles,omitempty"`
+		RawPubKey      any                   `json:"public_key,omitempty"`
+	}
+	var raw rawPeer
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.ID = raw.ID
+	p.HostName = raw.HostName
+	p.VPNIP = raw.VPNIP
+	p.Port = raw.Port
+	p.LastSeen = raw.LastSeen
+	p.Profiles = raw.Profiles
+	p.SharedProfiles = raw.SharedProfiles
+	p.PublicKey = nil
+
+	if raw.RawPubKey != nil {
+		switch v := raw.RawPubKey.(type) {
+		case string:
+			if b, err := hex.DecodeString(v); err == nil && len(b) == ed25519.PublicKeySize {
+				p.PublicKey = ed25519.PublicKey(b)
+			} else if b, err := base64.StdEncoding.DecodeString(v); err == nil && len(b) == ed25519.PublicKeySize {
+				p.PublicKey = ed25519.PublicKey(b)
+			}
+		case []any:
+			if len(v) == ed25519.PublicKeySize {
+				b := make([]byte, len(v))
+				for i, num := range v {
+					if n, ok := num.(float64); ok {
+						b[i] = byte(n)
+					}
+				}
+				p.PublicKey = ed25519.PublicKey(b)
+			}
+		}
+	}
+	return nil
 }
 
 type LeaseRecord struct {
@@ -85,15 +165,18 @@ func (r *ShareRequestRecord) ToPendingInfo() PendingRequestInfo {
 }
 
 type LeaseResponse struct {
-	Status      string        `json:"status"` // "approved", "pending", "denied"
-	RequestID   string        `json:"request_id,omitempty"`
-	LeaseID     string        `json:"lease_id,omitempty"`
-	ProfileName string        `json:"profile_name,omitempty"`
-	Agent       string        `json:"agent,omitempty"`
-	Agents      []string      `json:"agents,omitempty"`
-	ExpiresAt   time.Time     `json:"expires_at,omitempty"`
-	Payload     *SharePayload `json:"payload,omitempty"`
-	Message     string        `json:"message,omitempty"`
+	Status       string        `json:"status"` // "approved", "pending", "denied"
+	RequestID    string        `json:"request_id,omitempty"`
+	LeaseID      string        `json:"lease_id,omitempty"`
+	ProfileName  string        `json:"profile_name,omitempty"`
+	Agent        string        `json:"agent,omitempty"`
+	Agents       []string      `json:"agents,omitempty"`
+	ExpiresAt    time.Time     `json:"expires_at,omitempty"`
+	Payload      *SharePayload `json:"payload,omitempty"`
+	Message      string        `json:"message,omitempty"`
+	Signature    string        `json:"signature,omitempty"`
+	LenderNodeID string        `json:"lender_node_id,omitempty"`
+	BorrowerID   string        `json:"borrower_id,omitempty"`
 }
 
 type GrantedLease struct {
@@ -107,6 +190,8 @@ type GrantedLease struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 	Revoked      bool      `json:"revoked"`
 	AutoApproved bool      `json:"auto_approved"`
+	Signature    string    `json:"signature,omitempty"`
+	LenderNodeID string    `json:"lender_node_id,omitempty"`
 }
 
 type SchedulePolicy struct {

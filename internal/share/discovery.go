@@ -2,6 +2,9 @@ package share
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -34,6 +37,74 @@ type PingResponse struct {
 	VPNIP          string                `json:"vpn_ip"`
 	Profiles       []string              `json:"profiles"`
 	SharedProfiles []SharedProfileConfig `json:"shared_profiles,omitempty"`
+	PublicKey      ed25519.PublicKey     `json:"public_key,omitempty"`
+}
+
+type pingResponseWire struct {
+	NodeID         string                `json:"node_id"`
+	HostName       string                `json:"hostname"`
+	VPNIP          string                `json:"vpn_ip"`
+	Profiles       []string              `json:"profiles"`
+	SharedProfiles []SharedProfileConfig `json:"shared_profiles,omitempty"`
+	PublicKey      string                `json:"public_key,omitempty"`
+}
+
+func (pr PingResponse) MarshalJSON() ([]byte, error) {
+	var pubKeyHex string
+	if len(pr.PublicKey) > 0 {
+		pubKeyHex = hex.EncodeToString(pr.PublicKey)
+	}
+	return json.Marshal(pingResponseWire{
+		NodeID:         pr.NodeID,
+		HostName:       pr.HostName,
+		VPNIP:          pr.VPNIP,
+		Profiles:       pr.Profiles,
+		SharedProfiles: pr.SharedProfiles,
+		PublicKey:      pubKeyHex,
+	})
+}
+
+func (pr *PingResponse) UnmarshalJSON(data []byte) error {
+	type rawPing struct {
+		NodeID         string                `json:"node_id"`
+		HostName       string                `json:"hostname"`
+		VPNIP          string                `json:"vpn_ip"`
+		Profiles       []string              `json:"profiles"`
+		SharedProfiles []SharedProfileConfig `json:"shared_profiles,omitempty"`
+		RawPubKey      any                   `json:"public_key,omitempty"`
+	}
+	var raw rawPing
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	pr.NodeID = raw.NodeID
+	pr.HostName = raw.HostName
+	pr.VPNIP = raw.VPNIP
+	pr.Profiles = raw.Profiles
+	pr.SharedProfiles = raw.SharedProfiles
+	pr.PublicKey = nil
+
+	if raw.RawPubKey != nil {
+		switch v := raw.RawPubKey.(type) {
+		case string:
+			if b, err := hex.DecodeString(v); err == nil && len(b) == ed25519.PublicKeySize {
+				pr.PublicKey = ed25519.PublicKey(b)
+			} else if b, err := base64.StdEncoding.DecodeString(v); err == nil && len(b) == ed25519.PublicKeySize {
+				pr.PublicKey = ed25519.PublicKey(b)
+			}
+		case []any:
+			if len(v) == ed25519.PublicKeySize {
+				b := make([]byte, len(v))
+				for i, num := range v {
+					if n, ok := num.(float64); ok {
+						b[i] = byte(n)
+					}
+				}
+				pr.PublicKey = ed25519.PublicKey(b)
+			}
+		}
+	}
+	return nil
 }
 
 func (d *DiscoveryService) PingPeerWithURL(ctx context.Context, rawURL string) (*PeerInfo, error) {
@@ -64,6 +135,7 @@ func (d *DiscoveryService) PingPeerWithURL(ctx context.Context, rawURL string) (
 		LastSeen:       time.Now(),
 		Profiles:       pr.Profiles,
 		SharedProfiles: pr.SharedProfiles,
+		PublicKey:      pr.PublicKey,
 	}
 	_ = d.store.SavePeer(*peer)
 	return peer, nil

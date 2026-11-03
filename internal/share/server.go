@@ -2,6 +2,7 @@ package share
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -32,6 +33,8 @@ type Server struct {
 	pending         map[string]*pendingRequest
 	approvedResults map[string]*LeaseResponse
 	deniedResults   map[string]bool
+	pubKey          ed25519.PublicKey
+	privKey         ed25519.PrivateKey
 }
 
 type pendingRequest struct {
@@ -40,6 +43,20 @@ type pendingRequest struct {
 }
 
 func NewServer(store *ShareStore, profilesDir string, nodeID string, port int) *Server {
+	var pubKey ed25519.PublicKey
+	var privKey ed25519.PrivateKey
+	if store != nil && store.aimDir != "" {
+		if pub, priv, err := EnsureNodeKeypair(store.aimDir); err == nil {
+			pubKey = pub
+			privKey = priv
+		}
+	}
+	if len(privKey) == 0 {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		pubKey = pub
+		privKey = priv
+	}
+
 	s := &Server{
 		store:           store,
 		profilesDir:     profilesDir,
@@ -49,9 +66,24 @@ func NewServer(store *ShareStore, profilesDir string, nodeID string, port int) *
 		pending:         make(map[string]*pendingRequest),
 		approvedResults: make(map[string]*LeaseResponse),
 		deniedResults:   make(map[string]bool),
+		pubKey:          pubKey,
+		privKey:         privKey,
 	}
 	s.routes()
 	return s
+}
+
+func (s *Server) PublicKey() ed25519.PublicKey {
+	return s.pubKey
+}
+
+func (s *Server) PrivateKey() ed25519.PrivateKey {
+	return s.privKey
+}
+
+func (s *Server) SetKeypair(pub ed25519.PublicKey, priv ed25519.PrivateKey) {
+	s.pubKey = pub
+	s.privKey = priv
 }
 
 func (s *Server) Handler() http.Handler {
@@ -273,6 +305,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		VPNIP:          r.Host,
 		Profiles:       names,
 		SharedProfiles: profiles,
+		PublicKey:      s.pubKey,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -365,20 +398,34 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		expiresAt := time.Now().Add(duration)
 		detectedAgents := DetectAgentsInFiles(payload.Files)
-		resp := LeaseResponse{
-			Status:      "approved",
-			LeaseID:     leaseID,
-			ProfileName: matched.Name,
-			Agent:       matched.Agent,
-			Agents:      detectedAgents,
-			ExpiresAt:   expiresAt,
-			Payload:     payload,
-		}
 
+		lenderID := s.nodeID
+		if lenderID == "" {
+			lenderID, _ = os.Hostname()
+		}
 		borrowerID := req.RequesterID
 		if borrowerID == "" {
 			borrowerID = hostIP
 		}
+		expiresAtStr := expiresAt.Format(time.RFC3339)
+		sig := ""
+		if len(s.privKey) > 0 {
+			sig = SignLease(s.privKey, leaseID, lenderID, borrowerID, matched.Name, matched.Agent, expiresAtStr)
+		}
+
+		resp := LeaseResponse{
+			Status:       "approved",
+			LeaseID:      leaseID,
+			ProfileName:  matched.Name,
+			Agent:        matched.Agent,
+			Agents:       detectedAgents,
+			ExpiresAt:    expiresAt,
+			Payload:      payload,
+			Signature:    sig,
+			LenderNodeID: lenderID,
+			BorrowerID:   borrowerID,
+		}
+
 		if err := s.store.SaveGrantedLease(GrantedLease{
 			LeaseID:      leaseID,
 			ProfileName:  matched.Name,
@@ -390,6 +437,8 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt:    expiresAt,
 			Revoked:      false,
 			AutoApproved: true,
+			Signature:    sig,
+			LenderNodeID: lenderID,
 		}); err != nil {
 			http.Error(w, "failed to record granted lease: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -551,12 +600,15 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 						payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
 						w.Header().Set("Content-Type", "application/json")
 						_ = json.NewEncoder(w).Encode(LeaseResponse{
-							Status:      "approved",
-							LeaseID:     gl.LeaseID,
-							ProfileName: gl.ProfileName,
-							Agent:       gl.Agent,
-							ExpiresAt:   gl.ExpiresAt,
-							Payload:     payload,
+							Status:       "approved",
+							LeaseID:      gl.LeaseID,
+							ProfileName:  gl.ProfileName,
+							Agent:        gl.Agent,
+							ExpiresAt:    gl.ExpiresAt,
+							Payload:      payload,
+							Signature:    gl.Signature,
+							LenderNodeID: gl.LenderNodeID,
+							BorrowerID:   gl.BorrowerID,
 						})
 						return
 					}
@@ -924,12 +976,15 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 				if gl.LeaseID == rec.LeaseID {
 					payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
 					return &LeaseResponse{
-						Status:      "approved",
-						LeaseID:     gl.LeaseID,
-						ProfileName: gl.ProfileName,
-						Agent:       gl.Agent,
-						ExpiresAt:   gl.ExpiresAt,
-						Payload:     payload,
+						Status:       "approved",
+						LeaseID:      gl.LeaseID,
+						ProfileName:  gl.ProfileName,
+						Agent:        gl.Agent,
+						ExpiresAt:    gl.ExpiresAt,
+						Payload:      payload,
+						Signature:    gl.Signature,
+						LenderNodeID: gl.LenderNodeID,
+						BorrowerID:   gl.BorrowerID,
 					}, nil
 				}
 			}
@@ -977,12 +1032,15 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 				if gl.LeaseID == rec.LeaseID {
 					payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
 					return &LeaseResponse{
-						Status:      "approved",
-						LeaseID:     gl.LeaseID,
-						ProfileName: gl.ProfileName,
-						Agent:       gl.Agent,
-						ExpiresAt:   gl.ExpiresAt,
-						Payload:     payload,
+						Status:       "approved",
+						LeaseID:      gl.LeaseID,
+						ProfileName:  gl.ProfileName,
+						Agent:        gl.Agent,
+						ExpiresAt:    gl.ExpiresAt,
+						Payload:      payload,
+						Signature:    gl.Signature,
+						LenderNodeID: gl.LenderNodeID,
+						BorrowerID:   gl.BorrowerID,
 					}, nil
 				}
 			}
@@ -1000,14 +1058,27 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	}
 
 	detectedAgents := DetectAgentsInFiles(payload.Files)
+	lenderID := s.nodeID
+	if lenderID == "" {
+		lenderID, _ = os.Hostname()
+	}
+	expiresAtStr := expiresAt.Format(time.RFC3339)
+	sig := ""
+	if len(s.privKey) > 0 {
+		sig = SignLease(s.privKey, leaseID, lenderID, requesterID, profileName, agent, expiresAtStr)
+	}
+
 	resp := &LeaseResponse{
-		Status:      "approved",
-		LeaseID:     leaseID,
-		ProfileName: profileName,
-		Agent:       agent,
-		Agents:      detectedAgents,
-		ExpiresAt:   expiresAt,
-		Payload:     payload,
+		Status:       "approved",
+		LeaseID:      leaseID,
+		ProfileName:  profileName,
+		Agent:        agent,
+		Agents:       detectedAgents,
+		ExpiresAt:    expiresAt,
+		Payload:      payload,
+		Signature:    sig,
+		LenderNodeID: lenderID,
+		BorrowerID:   requesterID,
 	}
 
 	if err := s.store.SaveGrantedLease(GrantedLease{
@@ -1021,6 +1092,8 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		ExpiresAt:    expiresAt,
 		Revoked:      false,
 		AutoApproved: false,
+		Signature:    sig,
+		LenderNodeID: lenderID,
 	}); err != nil {
 		_ = s.store.UpdateRequestStatus(reqID, "pending", "", "Failed to record granted lease: "+err.Error())
 		return nil, fmt.Errorf("failed to record granted lease: %w", err)

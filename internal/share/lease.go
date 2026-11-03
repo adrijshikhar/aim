@@ -3,6 +3,7 @@ package share
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,23 +19,47 @@ import (
 )
 
 type LeaseMeta struct {
-	LeaseID       string    `json:"lease_id"`
-	SourcePeer    string    `json:"source_peer"`
-	SourceProfile string    `json:"source_profile"`
-	Agent         string    `json:"agent"`
-	Agents        []string  `json:"agents,omitempty"`
-	GrantedAt     time.Time `json:"granted_at"`
-	ExpiresAt     time.Time `json:"expires_at"`
-	Revoked       bool      `json:"revoked,omitempty"`
+	LeaseID        string    `json:"lease_id"`
+	SourcePeer     string    `json:"source_peer"`
+	SourceProfile  string    `json:"source_profile"`
+	Agent          string    `json:"agent"`
+	Agents         []string  `json:"agents,omitempty"`
+	GrantedAt      time.Time `json:"granted_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	Revoked        bool      `json:"revoked,omitempty"`
+	Signature      string    `json:"signature,omitempty"`
+	LenderNodeID   string    `json:"lender_node_id,omitempty"`
+	LastVerifiedAt time.Time `json:"last_verified_at,omitempty"`
 }
 
 type LeaseManager struct {
 	profilesDir string
+	aimDir      string
+	store       *ShareStore
 	NotifyFn    func(sourcePeer, leaseID string)
 }
 
 func NewLeaseManager(profilesDir string) *LeaseManager {
 	return &LeaseManager{profilesDir: profilesDir}
+}
+
+func (m *LeaseManager) SetAimDir(dir string) {
+	m.aimDir = dir
+}
+
+func (m *LeaseManager) SetStore(s *ShareStore) {
+	m.store = s
+}
+
+func (m *LeaseManager) getAimDir() string {
+	if m.aimDir != "" {
+		return m.aimDir
+	}
+	parent := filepath.Dir(m.profilesDir)
+	if _, err := os.Stat(filepath.Join(parent, "peers.json")); err == nil {
+		return parent
+	}
+	return config.BaseDir()
 }
 
 func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseResponse) (string, error) {
@@ -153,14 +178,69 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		}
 	}
 
+	lenderNodeID := resp.LenderNodeID
+	if lenderNodeID == "" {
+		lenderNodeID = sourcePeer
+	}
+
+	// Verify cryptographic signature if lender has a pinned public key in peers.json
+	var pinnedPubKey ed25519.PublicKey
+	aimDir := m.getAimDir()
+	store := m.store
+	var closeStore bool
+	if store == nil && aimDir != "" {
+		store = NewStore(aimDir)
+		closeStore = true
+	}
+	if store != nil {
+		for _, p := range store.GetPeers() {
+			if (resp.LenderNodeID != "" && p.ID == resp.LenderNodeID) ||
+				strings.EqualFold(p.HostName, sourcePeer) ||
+				p.ID == sourcePeer ||
+				p.VPNIP == sourcePeer {
+				if len(p.PublicKey) == ed25519.PublicKeySize {
+					pinnedPubKey = p.PublicKey
+					break
+				}
+			}
+		}
+		if closeStore {
+			_ = store.Close()
+		}
+	}
+
+	if len(pinnedPubKey) > 0 {
+		if resp.Signature == "" {
+			return "", fmt.Errorf("lease rejected: lender %q has pinned public key but provided no signature", sourcePeer)
+		}
+		borrowerID := resp.BorrowerID
+		if borrowerID == "" {
+			borrowerID, _ = os.Hostname()
+		}
+		expStr := resp.ExpiresAt.Format(time.RFC3339)
+		valid := VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, lenderNodeID, borrowerID, profileName, resp.Agent, expStr, resp.Signature)
+		if !valid && resp.ProfileName != "" && resp.ProfileName != profileName {
+			valid = VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, lenderNodeID, borrowerID, resp.ProfileName, resp.Agent, expStr, resp.Signature)
+		}
+		if !valid && sourcePeer != lenderNodeID {
+			valid = VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, sourcePeer, borrowerID, profileName, resp.Agent, expStr, resp.Signature)
+		}
+		if !valid {
+			return "", fmt.Errorf("lease rejected: cryptographic verification failed against pinned public key for lender %q", sourcePeer)
+		}
+	}
+
 	meta := LeaseMeta{
-		LeaseID:       resp.LeaseID,
-		SourcePeer:    sourcePeer,
-		SourceProfile: profileName,
-		Agent:         resp.Agent,
-		Agents:        detectedAgents,
-		GrantedAt:     time.Now(),
-		ExpiresAt:     resp.ExpiresAt,
+		LeaseID:        resp.LeaseID,
+		SourcePeer:     sourcePeer,
+		SourceProfile:  profileName,
+		Agent:          resp.Agent,
+		Agents:         detectedAgents,
+		GrantedAt:      time.Now(),
+		ExpiresAt:      resp.ExpiresAt,
+		Signature:      resp.Signature,
+		LenderNodeID:   lenderNodeID,
+		LastVerifiedAt: time.Now(),
 	}
 	metaData, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
