@@ -204,6 +204,7 @@ Flags:
 		newConfigCmd(reg, pm),
 		newWebCmd(reg, pm),
 		newShareCmd(reg, pm),
+		newHookCmd(),
 	)
 
 	return rootCmd

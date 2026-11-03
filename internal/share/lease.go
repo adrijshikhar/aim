@@ -30,6 +30,7 @@ type LeaseMeta struct {
 	Signature      string    `json:"signature,omitempty"`
 	LenderNodeID   string    `json:"lender_node_id,omitempty"`
 	LastVerifiedAt time.Time `json:"last_verified_at,omitempty"`
+	BorrowerID     string    `json:"borrower_id,omitempty"`
 }
 
 type LeaseManager struct {
@@ -209,13 +210,14 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		}
 	}
 
+	borrowerID := resp.BorrowerID
+	if borrowerID == "" {
+		borrowerID, _ = os.Hostname()
+	}
+
 	if len(pinnedPubKey) > 0 {
 		if resp.Signature == "" {
 			return "", fmt.Errorf("lease rejected: lender %q has pinned public key but provided no signature", sourcePeer)
-		}
-		borrowerID := resp.BorrowerID
-		if borrowerID == "" {
-			borrowerID, _ = os.Hostname()
 		}
 		expStr := resp.ExpiresAt.Format(time.RFC3339)
 		valid := VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, lenderNodeID, borrowerID, profileName, resp.Agent, expStr, resp.Signature)
@@ -241,6 +243,7 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		Signature:      resp.Signature,
 		LenderNodeID:   lenderNodeID,
 		LastVerifiedAt: time.Now(),
+		BorrowerID:     borrowerID,
 	}
 	metaData, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
