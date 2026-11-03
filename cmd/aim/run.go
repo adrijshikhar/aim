@@ -270,12 +270,8 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 
 	if profile.IsLeased(opts.ProfileName) {
 		if mcpMgr, ok := adapter.(agents.MCPConfigManager); ok {
-			aimBin := "aim"
-			if bin, err := os.Executable(); err == nil && bin != "" {
-				aimBin = bin
-			}
 			_ = mcpMgr.AddProfileMCPServer(ctx, opts.ProfileName, pDir, "aim_share", agents.MCPServerConfig{
-				Command: aimBin,
+				Command: "aim",
 				Args:    []string{"mcp", "serve-share", "--profile", opts.ProfileName},
 			})
 		}
