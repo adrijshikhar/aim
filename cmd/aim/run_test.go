@@ -1029,23 +1029,23 @@ func TestLeaseSupervisor_Heartbeat(t *testing.T) {
 
 		startLeaseSupervisor(ctx, profDir, "p2p-revoked", cancel)
 
-		select {
-		case <-ctx.Done():
-			// Pass: cancelled due to revocation
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for supervisor to cancel context after lender revoked lease")
+		var revoked bool
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if updatedData, err := os.ReadFile(filepath.Join(profDir, ".aim-lease.json")); err == nil {
+				var updatedMeta share.LeaseMeta
+				if json.Unmarshal(updatedData, &updatedMeta) == nil && updatedMeta.Revoked {
+					revoked = true
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
-
-		time.Sleep(50 * time.Millisecond)
-
-		updatedData, err := os.ReadFile(filepath.Join(profDir, ".aim-lease.json"))
-		if err != nil {
-			t.Fatal(err)
+		if !revoked {
+			t.Fatalf("expected lease meta to be marked revoked on disk by heartbeat")
 		}
-		var updatedMeta share.LeaseMeta
-		_ = json.Unmarshal(updatedData, &updatedMeta)
-		if !updatedMeta.Revoked {
-			t.Errorf("expected lease meta to be marked revoked on disk")
+		if ctx.Err() != nil {
+			t.Errorf("non-destructive freeze must NOT cancel context on heartbeat revocation")
 		}
 	})
 

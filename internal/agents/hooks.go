@@ -31,13 +31,13 @@ func setupLeasedProfileHooks(agentName, profileName, profileDir string) error {
 		isolatedHooks := fmt.Sprintf(`{
   "hooks": {
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "aim hook guard %s --agent codex" } ] }
+      { "hooks": [ { "type": "command", "command": "aim hook guard \"%s\" --agent codex" } ] }
     ],
     "PreToolUse": [
-      { "hooks": [ { "type": "command", "command": "aim hook guard %s --agent codex" } ] }
+      { "hooks": [ { "type": "command", "command": "aim hook guard \"%s\" --agent codex" } ] }
     ],
     "SubagentStart": [
-      { "hooks": [ { "type": "command", "command": "aim hook guard %s --agent codex" } ] }
+      { "hooks": [ { "type": "command", "command": "aim hook guard \"%s\" --agent codex" } ] }
     ]
   }
 }`, profileName, profileName, profileName)
@@ -55,10 +55,10 @@ func setupLeasedProfileHooks(agentName, profileName, profileDir string) error {
 		isolatedSettings := fmt.Sprintf(`{
   "hooks": {
     "UserPromptSubmit": [
-      { "command": "aim hook guard %s --agent claude", "type": "command" }
+      { "command": "aim hook guard \"%s\" --agent claude", "type": "command" }
     ],
     "PreToolUse": [
-      { "command": "aim hook guard %s --agent claude", "type": "command" }
+      { "command": "aim hook guard \"%s\" --agent claude", "type": "command" }
     ]
   }
 }`, profileName, profileName)
@@ -80,10 +80,10 @@ func setupLeasedProfileHooks(agentName, profileName, profileDir string) error {
 		isolatedHooks := fmt.Sprintf(`{
   "aim-guard": {
     "PreInvocation": [
-      { "type": "command", "command": "aim hook guard %s --agent agy", "timeout": 10 }
+      { "type": "command", "command": "aim hook guard \"%s\" --agent agy", "timeout": 10 }
     ],
     "PreToolUse": [
-      { "type": "command", "command": "aim hook guard %s --agent agy", "timeout": 10 }
+      { "type": "command", "command": "aim hook guard \"%s\" --agent agy", "timeout": 10 }
     ]
   }
 }`, profileName, profileName)

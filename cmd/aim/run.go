@@ -270,8 +270,12 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 
 	if profile.IsLeased(opts.ProfileName) {
 		if mcpMgr, ok := adapter.(agents.MCPConfigManager); ok {
+			aimBin := "aim"
+			if bin, err := os.Executable(); err == nil && bin != "" {
+				aimBin = bin
+			}
 			_ = mcpMgr.AddProfileMCPServer(ctx, opts.ProfileName, pDir, "aim_share", agents.MCPServerConfig{
-				Command: "aim",
+				Command: aimBin,
 				Args:    []string{"mcp", "serve-share", "--profile", opts.ProfileName},
 			})
 		}
@@ -470,7 +474,7 @@ func sanitizeLeasedRunFlags(extraArgs []string) ([]string, error) {
 		"--profile":                      true,
 	}
 	for _, arg := range extraArgs {
-		if banned[arg] || strings.HasPrefix(arg, "--hooks=") || strings.HasPrefix(arg, "--config-dir=") || strings.HasPrefix(arg, "--profile=") {
+		if banned[arg] || strings.HasPrefix(arg, "--hooks=") || strings.HasPrefix(arg, "--config-dir=") || strings.HasPrefix(arg, "--profile=") || strings.HasPrefix(arg, "--dangerously-skip-") {
 			return nil, fmt.Errorf("flag %q is prohibited on leased profiles to maintain security compliance", arg)
 		}
 	}
@@ -620,8 +624,6 @@ func performLeaseHeartbeat(ctx context.Context, profDir, profileName string, can
 	if meta.Revoked {
 		mgr := share.NewLeaseManager(filepath.Dir(profDir))
 		_ = mgr.RevokeLease(profileName)
-		fmt.Fprintf(os.Stderr, "[aim] 🔒 Lease has been revoked by lender. Terminating session.\n")
-		cancel()
 		return true
 	}
 
@@ -642,14 +644,12 @@ func performLeaseHeartbeat(ctx context.Context, profDir, profileName string, can
 		if st.Revoked || !st.Active {
 			mgr := share.NewLeaseManager(filepath.Dir(profDir))
 			_ = mgr.RevokeLease(profileName)
-			fmt.Fprintf(os.Stderr, "[aim] 🔒 Lease has been revoked by lender. Terminating session.\n")
-			cancel()
 			return true
 		}
 
 		meta.LastVerifiedAt = time.Now()
 		if updated, err := json.MarshalIndent(meta, "", "  "); err == nil {
-			tmp := fmt.Sprintf("%s.tmp.%d", leaseFile, time.Now().UnixNano())
+			tmp := fmt.Sprintf("%s.tmp.%d.%d", leaseFile, os.Getpid(), time.Now().UnixNano())
 			if err := os.WriteFile(tmp, updated, 0600); err == nil {
 				_ = os.Rename(tmp, leaseFile)
 			}
