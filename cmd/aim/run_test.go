@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
 	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/share"
 )
 
 func TestRunCmd_ProfileExists_NoPrompt(t *testing.T) {
@@ -755,5 +757,92 @@ func TestReplaceResumedSessionID(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+type mockMCPConfigManagerAdapter struct {
+	mockAdapter
+	addedServers map[string]agents.MCPServerConfig
+}
+
+func (m *mockMCPConfigManagerAdapter) AddProfileMCPServer(ctx context.Context, profileName, profileDir, name string, cfg agents.MCPServerConfig) error {
+	if m.addedServers == nil {
+		m.addedServers = make(map[string]agents.MCPServerConfig)
+	}
+	m.addedServers[name] = cfg
+	return nil
+}
+
+func (m *mockMCPConfigManagerAdapter) RemoveProfileMCPServer(ctx context.Context, profileName, profileDir, name string) error {
+	delete(m.addedServers, name)
+	return nil
+}
+
+func (m *mockMCPConfigManagerAdapter) AddHostMCPServer(ctx context.Context, name string, cfg agents.MCPServerConfig) error {
+	return nil
+}
+
+func (m *mockMCPConfigManagerAdapter) RemoveHostMCPServer(ctx context.Context, name string) error {
+	return nil
+}
+
+func (m *mockMCPConfigManagerAdapter) ListMCPServers(ctx context.Context, profileName, profileDir string) ([]agents.MCPServerInfo, error) {
+	return nil, nil
+}
+
+func (m *mockMCPConfigManagerAdapter) DetectInstalled(realHome string) bool {
+	return true
+}
+
+func TestRunCmd_RegistersAimShareMCP_OnLeasedProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	profName := "peer1:testprof"
+	profDir := filepath.Join(pm.ProfilesRoot(), profName)
+	_ = os.MkdirAll(profDir, 0700)
+
+	meta := share.LeaseMeta{
+		LeaseID:        "ls_123",
+		SourcePeer:     "peer1",
+		SourceProfile:  "testprof",
+		Agent:          "mcpagent",
+		GrantedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(2 * time.Hour),
+		LastVerifiedAt: time.Now(),
+	}
+	metaBytes, _ := json.Marshal(meta)
+	_ = os.WriteFile(filepath.Join(profDir, ".aim-lease.json"), metaBytes, 0600)
+
+	mock := &mockMCPConfigManagerAdapter{
+		mockAdapter: mockAdapter{
+			name:       "mcpagent",
+			binaryPath: "/bin/sh",
+			args:       []string{"-c", "exit 0"},
+		},
+		addedServers: make(map[string]agents.MCPServerConfig),
+	}
+
+	reg := agents.NewRegistry()
+	reg.Register(mock)
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRootCmd(reg, pm)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"run", "mcpagent", profName})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	srv, ok := mock.addedServers["aim_share"]
+	if !ok {
+		t.Fatalf("expected aim_share MCP server to be registered for leased profile")
+	}
+	if srv.Command != "aim" || len(srv.Args) != 4 || srv.Args[0] != "mcp" || srv.Args[1] != "serve-share" || srv.Args[2] != "--profile" || srv.Args[3] != profName {
+		t.Errorf("unexpected aim_share config: %+v", srv)
 	}
 }

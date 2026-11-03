@@ -232,6 +232,15 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		return 1
 	}
 
+	if profile.IsLeased(opts.ProfileName) {
+		if mcpMgr, ok := adapter.(agents.MCPConfigManager); ok {
+			_ = mcpMgr.AddProfileMCPServer(ctx, opts.ProfileName, pDir, "aim_share", agents.MCPServerConfig{
+				Command: "aim",
+				Args:    []string{"mcp", "serve-share", "--profile", opts.ProfileName},
+			})
+		}
+	}
+
 	if opts.WorkingDir != "" {
 		if fi, err := os.Stat(opts.WorkingDir); err == nil && fi.IsDir() {
 			launchEnv.WorkingDir = opts.WorkingDir
