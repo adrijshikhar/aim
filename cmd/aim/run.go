@@ -270,10 +270,12 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 
 	if profile.IsLeased(opts.ProfileName) {
 		if mcpMgr, ok := adapter.(agents.MCPConfigManager); ok {
-			_ = mcpMgr.AddProfileMCPServer(ctx, opts.ProfileName, pDir, "aim_share", agents.MCPServerConfig{
+			if err := mcpMgr.AddProfileMCPServer(ctx, opts.ProfileName, pDir, "aim_share", agents.MCPServerConfig{
 				Command: "aim",
 				Args:    []string{"mcp", "serve-share", "--profile", opts.ProfileName},
-			})
+			}); err != nil {
+				logger.Debug("[run] Failed to register aim_share MCP server: %v", err)
+			}
 		}
 	}
 
@@ -462,23 +464,23 @@ func isMCPListInvocation(extraArgs []string) bool {
 }
 
 func sanitizeLeasedRunFlags(extraArgs []string) ([]string, error) {
-	banned := map[string]bool{
-		"--no-hooks":                     true,
-		"--hooks=false":                  true,
-		"--dangerously-skip-permissions": true,
-		"--config-dir":                   true,
-		"--profile":                      true,
-	}
 	for _, arg := range extraArgs {
-		if banned[arg] || strings.HasPrefix(arg, "--hooks=") || strings.HasPrefix(arg, "--config-dir=") || strings.HasPrefix(arg, "--profile=") || strings.HasPrefix(arg, "--dangerously-skip-") {
+		baseFlag := strings.SplitN(arg, "=", 2)[0]
+		switch baseFlag {
+		case "--no-hooks", "--hooks", "--config-dir", "--profile", "--settings", "--config", "-c":
+			return nil, fmt.Errorf("flag %q is prohibited on leased profiles to maintain security compliance", arg)
+		}
+		if strings.HasPrefix(arg, "--dangerously-skip-") {
 			return nil, fmt.Errorf("flag %q is prohibited on leased profiles to maintain security compliance", arg)
 		}
 	}
 	return extraArgs, nil
 }
 
-func startLeaseSupervisor(ctx context.Context, profDir, profileName string, cancel context.CancelFunc) {
-	go runLeaseSupervisor(ctx, profDir, profileName, cancel)
+func startLeaseSupervisor(ctx context.Context, profDir, profileName string, cancel context.CancelFunc) <-chan struct{} {
+	ready := make(chan struct{})
+	go runLeaseSupervisor(ctx, profDir, profileName, cancel, ready)
+	return ready
 }
 
 func isHookFileName(name string) bool {
@@ -512,7 +514,7 @@ func checkHookTampered(monitoredHooks map[string]bool, event fsnotify.Event) boo
 	return false
 }
 
-func runLeaseSupervisor(ctx context.Context, profDir, profileName string, cancel context.CancelFunc) {
+func runLeaseSupervisor(ctx context.Context, profDir, profileName string, cancel context.CancelFunc, ready chan<- struct{}) {
 	var watcher *fsnotify.Watcher
 	if w, err := fsnotify.NewWatcher(); err == nil {
 		watcher = w
@@ -546,6 +548,10 @@ func runLeaseSupervisor(ctx context.Context, profDir, profileName string, cancel
 		if data, err := os.ReadFile(h); err == nil && strings.Contains(string(data), "aim hook guard") {
 			monitoredHooks[h] = true
 		}
+	}
+
+	if ready != nil {
+		close(ready)
 	}
 
 	interval := getHeartbeatInterval()
@@ -599,28 +605,24 @@ func runLeaseSupervisor(ctx context.Context, profDir, profileName string, cancel
 			logger.Debug("[supervisor] fsnotify watcher error: %v", err)
 
 		case <-ticker.C:
-			if performLeaseHeartbeat(ctx, profDir, profileName, cancel) {
-				return
-			}
+			performLeaseHeartbeat(ctx, profDir, profileName)
 		}
 	}
 }
 
-func performLeaseHeartbeat(ctx context.Context, profDir, profileName string, cancel context.CancelFunc) bool {
+func performLeaseHeartbeat(ctx context.Context, profDir, profileName string) {
 	leaseFile := filepath.Join(profDir, ".aim-lease.json")
 	data, err := os.ReadFile(leaseFile)
 	if err != nil {
-		return false
+		return
 	}
 	var meta share.LeaseMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
-		return false
+		return
 	}
 
 	if meta.Revoked {
-		mgr := share.NewLeaseManager(filepath.Dir(profDir))
-		_ = mgr.RevokeLease(profileName)
-		return true
+		return
 	}
 
 	targetPeer := meta.SourcePeer
@@ -628,28 +630,59 @@ func performLeaseHeartbeat(ctx context.Context, profDir, profileName string, can
 		targetPeer = meta.LenderNodeID
 	}
 	if targetPeer == "" || meta.LeaseID == "" {
-		return false
+		return
 	}
+
+	// Resolve targetPeer from peers.json preferring VPNIP with fallback to .local
+	store := share.NewStore(config.BaseDir())
+	targetHost := targetPeer
+	for _, p := range store.GetPeers() {
+		shortHost := strings.TrimSuffix(strings.ToLower(p.HostName), ".local")
+		if (meta.LenderNodeID != "" && p.ID == meta.LenderNodeID) ||
+			strings.EqualFold(p.HostName, targetPeer) ||
+			strings.EqualFold(shortHost, strings.ToLower(targetPeer)) ||
+			p.ID == targetPeer ||
+			p.VPNIP == targetPeer {
+			if p.VPNIP != "" {
+				targetHost = p.VPNIP
+			} else if p.HostName != "" {
+				targetHost = p.HostName
+			}
+			break
+		}
+	}
+	_ = store.Close()
 
 	client := getShareClient(4319)
 	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
-	st, checkErr := client.CheckLeaseStatus(checkCtx, targetPeer, meta.LeaseID)
+	st, checkErr := client.CheckLeaseStatus(checkCtx, targetHost, meta.LeaseID)
 	checkCancel()
+	if checkErr != nil && !strings.Contains(targetHost, ".") && !strings.Contains(targetHost, ":") {
+		retryCtx, retryCancel := context.WithTimeout(ctx, 5*time.Second)
+		st, checkErr = client.CheckLeaseStatus(retryCtx, targetHost+".local", meta.LeaseID)
+		retryCancel()
+	}
 
 	if checkErr == nil && st != nil {
 		if st.Revoked || !st.Active {
 			mgr := share.NewLeaseManager(filepath.Dir(profDir))
 			_ = mgr.RevokeLease(profileName)
-			return true
+			return
 		}
 
-		meta.LastVerifiedAt = time.Now()
-		if updated, err := json.MarshalIndent(meta, "", "  "); err == nil {
-			tmp := fmt.Sprintf("%s.tmp.%d.%d", leaseFile, os.Getpid(), time.Now().UnixNano())
-			if err := os.WriteFile(tmp, updated, 0600); err == nil {
-				_ = os.Rename(tmp, leaseFile)
+		// Re-read .aim-lease.json from disk to avoid clobbering out-of-band renewals
+		latestData, err := os.ReadFile(leaseFile)
+		if err == nil {
+			var latestMeta share.LeaseMeta
+			if json.Unmarshal(latestData, &latestMeta) == nil && !latestMeta.Revoked {
+				latestMeta.LastVerifiedAt = time.Now()
+				if updated, err := json.MarshalIndent(latestMeta, "", "  "); err == nil {
+					tmp := fmt.Sprintf("%s.tmp.%d.%d", leaseFile, os.Getpid(), time.Now().UnixNano())
+					if err := os.WriteFile(tmp, updated, 0600); err == nil {
+						_ = os.Rename(tmp, leaseFile)
+					}
+				}
 			}
 		}
 	}
-	return false
 }

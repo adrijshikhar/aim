@@ -550,7 +550,13 @@ func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) 
 				cleanIP = cleanIP[:idx]
 			}
 			url := fmt.Sprintf("http://%s:4319/api/share/lease/revoke", cleanIP)
-			body, _ := json.Marshal(map[string]string{"lease_id": leaseID})
+			bodyMap := map[string]string{"lease_id": leaseID}
+			if _, priv, err := share.EnsureNodeKeypair(config.BaseDir()); err == nil && len(priv) > 0 {
+				nodeID, _ := os.Hostname()
+				bodyMap["lender_id"] = nodeID
+				bodyMap["signature"] = share.SignRevocation(priv, leaseID, nodeID)
+			}
+			body, _ := json.Marshal(bodyMap)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			nReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))

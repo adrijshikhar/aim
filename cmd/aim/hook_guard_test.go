@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ func TestHookGuard_ActiveAndRevoked(t *testing.T) {
 	_ = os.MkdirAll(profDir, 0700)
 
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	expStr := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
+	expStr := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
 	sig := share.SignLease(priv, "ls_1", "lender1", "borrower1", "work", "codex", expStr)
 
 	meta := share.LeaseMeta{
@@ -186,14 +187,30 @@ func TestHookGuard_CommandAndFlags(t *testing.T) {
 	profDir := filepath.Join(tempHome, "profiles", "test-lease")
 	_ = os.MkdirAll(profDir, 0700)
 
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	store := share.NewStore(tempHome)
+	_ = store.SavePeer(share.PeerInfo{
+		ID:        "pinned-peer",
+		HostName:  "pinned-peer",
+		PublicKey: pub,
+	})
+	_ = store.Close()
+
+	expiresAt := time.Now().Add(1 * time.Hour)
+	expStr := expiresAt.UTC().Format(time.RFC3339)
+	h, _ := os.Hostname()
+	sig := share.SignLease(priv, "ls_2", "pinned-peer", h, "work", "codex", expStr)
+
 	meta := share.LeaseMeta{
 		LeaseID:        "ls_2",
-		SourcePeer:     "unpinned-peer",
+		SourcePeer:     "pinned-peer",
 		SourceProfile:  "work",
 		Agent:          "codex",
-		ExpiresAt:      time.Now().Add(1 * time.Hour),
+		ExpiresAt:      expiresAt,
 		LastVerifiedAt: time.Now(),
 		Revoked:        false,
+		Signature:      sig,
+		BorrowerID:     h,
 	}
 	data, _ := json.MarshalIndent(meta, "", "  ")
 	_ = os.WriteFile(filepath.Join(profDir, ".aim-lease.json"), data, 0600)
@@ -211,5 +228,47 @@ func TestHookGuard_CommandAndFlags(t *testing.T) {
 	// Calling runHookGuard with no args returns error
 	if err := runHookGuard(nil, nil, nil); err == nil {
 		t.Errorf("expected error when args is empty")
+	}
+}
+
+func BenchmarkHookGuard_Active(b *testing.B) {
+	tempHome := b.TempDir()
+	profDir := filepath.Join(tempHome, "profiles", "bench-prof")
+	_ = os.MkdirAll(profDir, 0700)
+
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	store := share.NewStore(tempHome)
+	_ = store.SavePeer(share.PeerInfo{
+		ID:        "bench-peer",
+		HostName:  "bench-peer",
+		PublicKey: pub,
+	})
+	_ = store.Close()
+
+	expiresAt := time.Now().Add(2 * time.Hour)
+	expStr := expiresAt.UTC().Format(time.RFC3339)
+	h, _ := os.Hostname()
+	sig := share.SignLease(priv, "ls_bench", "bench-peer", h, "bench-prof", "codex", expStr)
+
+	meta := share.LeaseMeta{
+		LeaseID:        "ls_bench",
+		SourcePeer:     "bench-peer",
+		SourceProfile:  "bench-prof",
+		Agent:          "codex",
+		ExpiresAt:      expiresAt,
+		LastVerifiedAt: time.Now(),
+		Revoked:        false,
+		Signature:      sig,
+		BorrowerID:     h,
+	}
+	data, _ := json.MarshalIndent(meta, "", "  ")
+	_ = os.WriteFile(filepath.Join(profDir, ".aim-lease.json"), data, 0600)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := executeHookGuardForDir(tempHome, profDir, "bench-prof", nil, io.Discard)
+		if err != nil {
+			b.Fatalf("hook guard benchmark failed: %v", err)
+		}
 	}
 }

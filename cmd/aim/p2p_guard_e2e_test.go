@@ -228,6 +228,15 @@ func TestP2PGuard_MA2_ClaudeIsolation(t *testing.T) {
 func TestP2PGuard_MA3_AntigravitySchemaIntegrity(t *testing.T) {
 	tempDir := t.TempDir()
 	mockHost := filepath.Join(tempDir, "host")
+	hostAgyConfig := filepath.Join(mockHost, ".gemini", "config")
+	if err := os.MkdirAll(hostAgyConfig, 0700); err != nil {
+		t.Fatal(err)
+	}
+	hostHooksPath := filepath.Join(hostAgyConfig, "hooks.json")
+	if err := os.WriteFile(hostHooksPath, []byte(`{"user":"host-custom-hook"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Setenv("AIM_REAL_HOME", mockHost)
 	t.Setenv("HOME", mockHost)
 	t.Setenv("AIM_HOME", tempDir)
@@ -243,6 +252,12 @@ func TestP2PGuard_MA3_AntigravitySchemaIntegrity(t *testing.T) {
 	_, err := adapter.PrepareEnv(ctx, profileName, profileDir)
 	if err != nil {
 		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+
+	// Verify host file was untouched (zero pollution)
+	hostData, err := os.ReadFile(hostHooksPath)
+	if err != nil || string(hostData) != `{"user":"host-custom-hook"}` {
+		t.Fatalf("host agy hooks.json was modified or polluted: %v", err)
 	}
 
 	hooksPath := filepath.Join(profileDir, ".gemini", "config", "hooks.json")
@@ -318,7 +333,7 @@ func TestP2PGuard_MA4_NonDestructiveFreeze(t *testing.T) {
 
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	exp := time.Now().Add(2 * time.Hour)
-	expStr := exp.Format(time.RFC3339)
+	expStr := exp.UTC().Format(time.RFC3339)
 	sig := share.SignLease(priv, "ls_freeze_1", "peer1", "borrower1", "freeze-test", "codex", expStr)
 
 	meta := share.LeaseMeta{
@@ -534,7 +549,7 @@ func TestP2PGuard_MA6_OutOfBandCLIRenewal(t *testing.T) {
 	mockLender := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/share/request" {
 			newExp := time.Now().Add(2 * time.Hour)
-			newExpStr := newExp.Format(time.RFC3339)
+			newExpStr := newExp.UTC().Format(time.RFC3339)
 			sig := share.SignLease(priv, "ls_renewed_cli", "lender-node", borrowerHost, "cli-prof", "all", newExpStr)
 
 			w.Header().Set("Content-Type", "application/json")
@@ -579,7 +594,7 @@ func TestP2PGuard_MA6_OutOfBandCLIRenewal(t *testing.T) {
 		BorrowerID:   borrowerHost,
 		Agent:        "all",
 		ExpiresAt:    time.Now().Add(1 * time.Hour),
-		Signature:    share.SignLease(priv, "ls_initial_cli", "lender-node", borrowerHost, "cli-prof", "all", time.Now().Add(1*time.Hour).Format(time.RFC3339)),
+		Signature:    share.SignLease(priv, "ls_initial_cli", "lender-node", borrowerHost, "cli-prof", "all", time.Now().Add(1*time.Hour).UTC().Format(time.RFC3339)),
 		Payload: &share.SharePayload{
 			Files: map[string]string{
 				".codex/auth.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"secret-cli-old"}`)),
@@ -659,7 +674,7 @@ func TestP2PGuard_MA7_TamperEditExpiration(t *testing.T) {
 	}
 
 	originalExp := time.Now().Add(2 * time.Hour)
-	expStr := originalExp.Format(time.RFC3339)
+	expStr := originalExp.UTC().Format(time.RFC3339)
 	sig := share.SignLease(priv, "ls_tamper", "peer1", borrowerHost, "tamper-exp", "codex", expStr)
 
 	meta := share.LeaseMeta{
@@ -733,8 +748,8 @@ func TestP2PGuard_MA8_TamperDeleteHooksFile(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
-		time.Sleep(50 * time.Millisecond)
+		ready := startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
+		<-ready
 
 		// Delete hook file
 		if err := os.Remove(hookFile); err != nil {
@@ -759,8 +774,8 @@ func TestP2PGuard_MA8_TamperDeleteHooksFile(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
-		time.Sleep(50 * time.Millisecond)
+		ready := startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
+		<-ready
 
 		// Truncate/tamper with hook file
 		if err := os.WriteFile(hookFile, []byte(`{}`), 0600); err != nil {
@@ -925,7 +940,7 @@ func TestP2PGuard_MA11_ConcurrentDualAgentFreeze(t *testing.T) {
 	}
 
 	exp1 := time.Now().Add(1 * time.Hour)
-	expStr1 := exp1.Format(time.RFC3339)
+	expStr1 := exp1.UTC().Format(time.RFC3339)
 	sig1 := share.SignLease(priv, "ls_dual_1", "peer1", borrowerHost, "dual-agent", "all", expStr1)
 
 	meta := share.LeaseMeta{
@@ -1004,7 +1019,7 @@ func TestP2PGuard_MA11_ConcurrentDualAgentFreeze(t *testing.T) {
 
 	// 3. Perform renewal once
 	exp2 := time.Now().Add(3 * time.Hour)
-	expStr2 := exp2.Format(time.RFC3339)
+	expStr2 := exp2.UTC().Format(time.RFC3339)
 	sig2 := share.SignLease(priv, "ls_dual_renewed", "peer1", borrowerHost, "dual-agent", "all", expStr2)
 	meta.LeaseID = "ls_dual_renewed"
 	meta.ExpiresAt = exp2

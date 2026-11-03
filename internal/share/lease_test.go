@@ -578,7 +578,7 @@ func TestLeaseManager_SignatureRecordingAndPinnedVerification(t *testing.T) {
 		borrowerID = "borrower-node"
 	}
 	expiresAt := time.Now().Add(2 * time.Hour)
-	expStr := expiresAt.Format(time.RFC3339)
+	expStr := expiresAt.UTC().Format(time.RFC3339)
 	sig := SignLease(priv, "ls_100", "lender1", borrowerID, "work", "claude", expStr)
 
 	resp := &LeaseResponse{
@@ -597,10 +597,23 @@ func TestLeaseManager_SignatureRecordingAndPinnedVerification(t *testing.T) {
 		},
 	}
 
-	// 1. Unpinned lender: install succeeds and writes metadata
+	// 1. Unpinned lender when store is present: fails closed and rejects
+	_, err = mgr.InstallLease("lender1", "work", resp)
+	if err == nil || !strings.Contains(err.Error(), "no pinned public key") {
+		t.Fatalf("expected unpinned lender to be rejected, got: %v", err)
+	}
+
+	// 2. Pin lender public key in peers.json
+	_ = store.SavePeer(PeerInfo{
+		ID:        "lender1",
+		HostName:  "lender1",
+		PublicKey: pub,
+	})
+
+	// 3. Pinned lender with valid signature: install succeeds and writes metadata
 	localName, err := mgr.InstallLease("lender1", "work", resp)
 	if err != nil {
-		t.Fatalf("unpinned install failed: %v", err)
+		t.Fatalf("pinned install failed: %v", err)
 	}
 	meta, err := mgr.GetLeaseMeta(localName)
 	if err != nil {
@@ -616,14 +629,7 @@ func TestLeaseManager_SignatureRecordingAndPinnedVerification(t *testing.T) {
 		t.Errorf("expected non-zero last_verified_at in meta")
 	}
 
-	// 2. Pin lender public key in peers.json
-	_ = store.SavePeer(PeerInfo{
-		ID:        "lender1",
-		HostName:  "lender1",
-		PublicKey: pub,
-	})
-
-	// 3. Pinned lender with valid signature: renewal / install succeeds
+	// 4. Pinned lender with valid signature: renewal / re-install succeeds
 	_, err = mgr.InstallLease("lender1", "work", resp)
 	if err != nil {
 		t.Fatalf("pinned install with valid signature failed: %v", err)

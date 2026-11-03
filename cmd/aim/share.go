@@ -521,7 +521,11 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			defer signal.Stop(sigCh)
 			select {
+			case <-cmd.Context().Done():
+				_ = server.Close()
+				return nil
 			case sig := <-sigCh:
 				_ = server.Close()
 				fmt.Printf("\nShare server stopped (%s).\n", sig)

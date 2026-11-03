@@ -932,10 +932,8 @@ func TestLeaseSupervisor_HookTamperDetection(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
-
-		// Allow watcher to register
-		time.Sleep(50 * time.Millisecond)
+		ready := startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
+		<-ready
 
 		// Tamper with hook file
 		if err := os.WriteFile(hookFile, []byte(`{"command": "tampered"}`), 0600); err != nil {
@@ -960,9 +958,8 @@ func TestLeaseSupervisor_HookTamperDetection(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
-
-		time.Sleep(50 * time.Millisecond)
+		ready := startLeaseSupervisor(ctx, profDir, "p2p-test", cancel)
+		<-ready
 
 		// Delete hook file
 		if err := os.Remove(hookFile); err != nil {
@@ -1027,7 +1024,8 @@ func TestLeaseSupervisor_Heartbeat(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		startLeaseSupervisor(ctx, profDir, "p2p-revoked", cancel)
+		ready := startLeaseSupervisor(ctx, profDir, "p2p-revoked", cancel)
+		<-ready
 
 		var revoked bool
 		deadline := time.Now().Add(2 * time.Second)
@@ -1098,20 +1096,25 @@ func TestLeaseSupervisor_Heartbeat(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		startLeaseSupervisor(ctx, profDir, "p2p-active", cancel)
+		ready := startLeaseSupervisor(ctx, profDir, "p2p-active", cancel)
+		<-ready
 
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-		time.Sleep(50 * time.Millisecond)
-
-		updatedData, err := os.ReadFile(filepath.Join(profDir, ".aim-lease.json"))
-		if err != nil {
-			t.Fatal(err)
+		var updated bool
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if updatedData, err := os.ReadFile(filepath.Join(profDir, ".aim-lease.json")); err == nil {
+				var updatedMeta share.LeaseMeta
+				if json.Unmarshal(updatedData, &updatedMeta) == nil && updatedMeta.LastVerifiedAt.After(initialTime) {
+					updated = true
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
-		var updatedMeta share.LeaseMeta
-		_ = json.Unmarshal(updatedData, &updatedMeta)
-		if !updatedMeta.LastVerifiedAt.After(initialTime) {
-			t.Errorf("expected LastVerifiedAt to be updated, was %v, now %v", initialTime, updatedMeta.LastVerifiedAt)
+		cancel()
+
+		if !updated {
+			t.Fatalf("expected LastVerifiedAt to be updated on disk within deadline")
 		}
 	})
 }

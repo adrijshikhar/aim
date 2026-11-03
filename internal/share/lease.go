@@ -215,11 +215,29 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		borrowerID, _ = os.Hostname()
 	}
 
-	if len(pinnedPubKey) > 0 {
+	if m.store != nil {
+		if len(pinnedPubKey) != ed25519.PublicKeySize {
+			return "", fmt.Errorf("lease rejected: lender %q has no pinned public key in peers.json", sourcePeer)
+		}
+		if resp.Signature == "" {
+			return "", fmt.Errorf("lease rejected: lender %q provided no signature", sourcePeer)
+		}
+		expStr := resp.ExpiresAt.UTC().Format(time.RFC3339)
+		valid := VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, lenderNodeID, borrowerID, profileName, resp.Agent, expStr, resp.Signature)
+		if !valid && resp.ProfileName != "" && resp.ProfileName != profileName {
+			valid = VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, lenderNodeID, borrowerID, resp.ProfileName, resp.Agent, expStr, resp.Signature)
+		}
+		if !valid && sourcePeer != lenderNodeID {
+			valid = VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, sourcePeer, borrowerID, profileName, resp.Agent, expStr, resp.Signature)
+		}
+		if !valid {
+			return "", fmt.Errorf("lease rejected: cryptographic verification failed against pinned public key for lender %q", sourcePeer)
+		}
+	} else if len(pinnedPubKey) > 0 {
 		if resp.Signature == "" {
 			return "", fmt.Errorf("lease rejected: lender %q has pinned public key but provided no signature", sourcePeer)
 		}
-		expStr := resp.ExpiresAt.Format(time.RFC3339)
+		expStr := resp.ExpiresAt.UTC().Format(time.RFC3339)
 		valid := VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, lenderNodeID, borrowerID, profileName, resp.Agent, expStr, resp.Signature)
 		if !valid && resp.ProfileName != "" && resp.ProfileName != profileName {
 			valid = VerifyLeaseSignature(pinnedPubKey, resp.LeaseID, lenderNodeID, borrowerID, resp.ProfileName, resp.Agent, expStr, resp.Signature)

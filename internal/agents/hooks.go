@@ -4,12 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 )
+
+var validProfileNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.:]+$`)
 
 // SetupLeasedProfileHooks provisions isolated, agent-native guard hooks for a leased profile.
 // It ensures host hooks, host hooks.json, and host plugins are never symlinked or executed,
 // and installs the aim hook guard for prompt/tool execution.
 func SetupLeasedProfileHooks(agentName, profileName, profileDir string) error {
+	if !validProfileNameRegex.MatchString(profileName) {
+		return fmt.Errorf("invalid profile name %q: contains unsafe characters", profileName)
+	}
 	return setupLeasedProfileHooks(agentName, profileName, profileDir)
 }
 

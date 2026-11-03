@@ -538,7 +538,7 @@ func TestServer_LeaseCryptographicSigning(t *testing.T) {
 	if borrowerID == "" {
 		borrowerID = "local-node"
 	}
-	expStr := resp.ExpiresAt.Format(time.RFC3339)
+	expStr := resp.ExpiresAt.UTC().Format(time.RFC3339)
 	valid := VerifyLeaseSignature(pubKey, resp.LeaseID, "alice-node", borrowerID, "work", "claude", expStr, resp.Signature)
 	if !valid {
 		t.Errorf("expected auto-approved lease signature to verify successfully")

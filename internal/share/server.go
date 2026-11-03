@@ -407,7 +407,7 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		if borrowerID == "" {
 			borrowerID = hostIP
 		}
-		expiresAtStr := expiresAt.Format(time.RFC3339)
+		expiresAtStr := expiresAt.UTC().Format(time.RFC3339)
 		sig := ""
 		if len(s.privKey) > 0 {
 			sig = SignLease(s.privKey, leaseID, lenderID, borrowerID, matched.Name, matched.Agent, expiresAtStr)
@@ -829,7 +829,9 @@ func (s *Server) handleNotifyRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		LeaseID string `json:"lease_id"`
+		LeaseID   string `json:"lease_id"`
+		LenderID  string `json:"lender_id,omitempty"`
+		Signature string `json:"signature,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LeaseID == "" {
 		http.Error(w, "lease_id is required", http.StatusBadRequest)
@@ -837,6 +839,44 @@ func (s *Server) handleNotifyRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mgr := NewLeaseManager(s.profilesDir)
+
+	// If the lease exists locally and has a pinned public key, verify signature
+	profiles, _ := os.ReadDir(s.profilesDir)
+	for _, entry := range profiles {
+		if entry.IsDir() {
+			meta, err := mgr.GetLeaseMeta(entry.Name())
+			if err == nil && meta != nil && meta.LeaseID == req.LeaseID {
+				lenderID := meta.LenderNodeID
+				if lenderID == "" {
+					lenderID = meta.SourcePeer
+				}
+
+				if s.store != nil {
+					var pinnedPubKey ed25519.PublicKey
+					for _, p := range s.store.GetPeers() {
+						if (lenderID != "" && p.ID == lenderID) ||
+							strings.EqualFold(p.HostName, lenderID) ||
+							p.ID == lenderID ||
+							p.VPNIP == lenderID {
+							if len(p.PublicKey) == ed25519.PublicKeySize {
+								pinnedPubKey = p.PublicKey
+								break
+							}
+						}
+					}
+
+					if len(pinnedPubKey) == ed25519.PublicKeySize {
+						if req.Signature == "" || !VerifyRevocationSignature(pinnedPubKey, req.LeaseID, lenderID, req.Signature) {
+							http.Error(w, "Forbidden: invalid or missing lender revocation signature", http.StatusForbidden)
+							return
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+
 	localProf, err := mgr.RevokeLeaseByID(req.LeaseID)
 	if err == nil && localProf != "" {
 		_ = s.store.AppendAudit(AuditEntry{

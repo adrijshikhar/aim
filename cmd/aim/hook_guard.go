@@ -120,19 +120,21 @@ func executeHookGuardForDir(aimDir, profDir, profName string, stdinBytes []byte,
 	isRevoked := meta.Revoked
 	isExpired := now.After(meta.ExpiresAt)
 
-	// Anti-hoarding 5-minute heartbeat check
+	// Anti-hoarding 5-minute heartbeat check (also checks negative duration to prevent future clock bypass)
 	isOfflineStale := false
 	if !meta.LastVerifiedAt.IsZero() {
-		isOfflineStale = now.Sub(meta.LastVerifiedAt) > 5*time.Minute
+		diff := now.Sub(meta.LastVerifiedAt)
+		isOfflineStale = diff > 5*time.Minute || diff < -1*time.Minute
 	} else if !meta.GrantedAt.IsZero() {
-		isOfflineStale = now.Sub(meta.GrantedAt) > 5*time.Minute
+		diff := now.Sub(meta.GrantedAt)
+		isOfflineStale = diff > 5*time.Minute || diff < -1*time.Minute
 	}
 
-	// Cryptographic signature check against pinned lender key in peers.json
+	// Cryptographic signature check against pinned lender key in peers.json (fail closed)
 	isInvalidSig := false
+	var pinnedPubKey ed25519.PublicKey
 	if aimDir != "" {
 		store := share.NewStore(aimDir)
-		var pinnedPubKey ed25519.PublicKey
 		for _, p := range store.GetPeers() {
 			if (meta.LenderNodeID != "" && p.ID == meta.LenderNodeID) ||
 				strings.EqualFold(p.HostName, meta.SourcePeer) ||
@@ -145,43 +147,41 @@ func executeHookGuardForDir(aimDir, profDir, profName string, stdinBytes []byte,
 			}
 		}
 		_ = store.Close()
+	}
 
-		if len(pinnedPubKey) > 0 {
-			if meta.Signature == "" {
-				isInvalidSig = true
-			} else {
-				lenderID := meta.LenderNodeID
-				if lenderID == "" {
-					lenderID = meta.SourcePeer
-				}
-				expStr := meta.ExpiresAt.Format(time.RFC3339)
+	if len(pinnedPubKey) != ed25519.PublicKeySize || meta.Signature == "" {
+		isInvalidSig = true
+	} else {
+		lenderID := meta.LenderNodeID
+		if lenderID == "" {
+			lenderID = meta.SourcePeer
+		}
+		expStr := meta.ExpiresAt.UTC().Format(time.RFC3339)
 
-				valid := false
-				if meta.BorrowerID != "" {
-					valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, lenderID, meta.BorrowerID, meta.SourceProfile, meta.Agent, expStr, meta.Signature)
-					if !valid && meta.SourceProfile != profName {
-						valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, lenderID, meta.BorrowerID, profName, meta.Agent, expStr, meta.Signature)
-					}
-					if !valid && meta.SourcePeer != lenderID {
-						valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, meta.SourcePeer, meta.BorrowerID, meta.SourceProfile, meta.Agent, expStr, meta.Signature)
-					}
+		valid := false
+		if meta.BorrowerID != "" {
+			valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, lenderID, meta.BorrowerID, meta.SourceProfile, meta.Agent, expStr, meta.Signature)
+			if !valid && meta.SourceProfile != profName {
+				valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, lenderID, meta.BorrowerID, profName, meta.Agent, expStr, meta.Signature)
+			}
+			if !valid && meta.SourcePeer != lenderID {
+				valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, meta.SourcePeer, meta.BorrowerID, meta.SourceProfile, meta.Agent, expStr, meta.Signature)
+			}
+		}
+		if !valid {
+			h, _ := os.Hostname()
+			if h != "" {
+				valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, lenderID, h, meta.SourceProfile, meta.Agent, expStr, meta.Signature)
+				if !valid && meta.SourceProfile != profName {
+					valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, lenderID, h, profName, meta.Agent, expStr, meta.Signature)
 				}
-				if !valid {
-					h, _ := os.Hostname()
-					if h != "" {
-						valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, lenderID, h, meta.SourceProfile, meta.Agent, expStr, meta.Signature)
-						if !valid && meta.SourceProfile != profName {
-							valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, lenderID, h, profName, meta.Agent, expStr, meta.Signature)
-						}
-						if !valid && meta.SourcePeer != lenderID {
-							valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, meta.SourcePeer, h, meta.SourceProfile, meta.Agent, expStr, meta.Signature)
-						}
-					}
-				}
-				if !valid {
-					isInvalidSig = true
+				if !valid && meta.SourcePeer != lenderID {
+					valid = share.VerifyLeaseSignature(pinnedPubKey, meta.LeaseID, meta.SourcePeer, h, meta.SourceProfile, meta.Agent, expStr, meta.Signature)
 				}
 			}
+		}
+		if !valid {
+			isInvalidSig = true
 		}
 	}
 

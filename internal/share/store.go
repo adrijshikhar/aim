@@ -1,7 +1,9 @@
 package share
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -190,6 +192,15 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 			match = true
 		}
 		if match {
+			if len(peers[i].PublicKey) == ed25519.PublicKeySize && len(peer.PublicKey) > 0 {
+				if !bytes.Equal(peers[i].PublicKey, peer.PublicKey) {
+					return fmt.Errorf("security alert: public key for peer %s has changed (possible MITM attack)", peer.ID)
+				}
+			}
+			// If existing peer had a pinned public key but new incoming update is missing it, preserve the pinned key
+			if len(peer.PublicKey) == 0 && len(peers[i].PublicKey) == ed25519.PublicKeySize {
+				peer.PublicKey = peers[i].PublicKey
+			}
 			peers[i] = peer
 			found = true
 			break
@@ -205,9 +216,17 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 		return err
 	}
 	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.peerFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
 		return err
 	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	_ = f.Sync()
+	_ = f.Close()
 	return os.Rename(tmp, s.peerFile)
 }
 
