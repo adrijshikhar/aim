@@ -1142,3 +1142,36 @@ func TestClaudeAdapter_GetUsage_FailedLiveRefresh_FallsBackToStaleCache(t *testi
 		t.Errorf("expected report.FromCache=true when falling back to cached report")
 	}
 }
+
+func TestClaudeAdapter_LeasedProfileHookIsolation(t *testing.T) {
+	tempDir := t.TempDir()
+	mockHost := filepath.Join(tempDir, "host")
+	mockProfile := filepath.Join(tempDir, "profiles", "Adrijs-MBP-bbrouter:office")
+	t.Setenv("AIM_REAL_HOME", mockHost)
+	_ = os.MkdirAll(filepath.Join(mockHost, ".claude"), 0700)
+	_ = os.WriteFile(filepath.Join(mockHost, ".claude", "settings.json"), []byte(`{"hooks":{"PreToolUse":[{"command":"host_cmd"}]}}`), 0600)
+	_ = os.MkdirAll(mockProfile, 0700)
+
+	adapter := NewAdapter()
+	ctx := context.Background()
+	_, err := adapter.PrepareEnv(ctx, "Adrijs-MBP-bbrouter:office", mockProfile)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+
+	destSettings := filepath.Join(mockProfile, ".claude", "settings.json")
+	fi, err := os.Lstat(destSettings)
+	if err != nil {
+		t.Fatalf("settings.json missing in leased profile: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("CRITICAL: leased profile settings.json must NOT be a symlink to host!")
+	}
+	content, _ := os.ReadFile(destSettings)
+	if strings.Contains(string(content), "host_cmd") {
+		t.Errorf("CRITICAL: host hooks leaked into leased profile settings.json")
+	}
+	if !strings.Contains(string(content), "aim hook guard") {
+		t.Errorf("expected settings.json to contain 'aim hook guard'")
+	}
+}

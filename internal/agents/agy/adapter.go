@@ -406,7 +406,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 			logger.Debug("[agy] Failed to load config in Login: %v", cfgErr)
 		}
 		_ = a.SyncHostSettings(ctx, profileName, profileDir, loginCfg)
-		_ = bridgeSharedState(realHome, profileDir)
+		_ = bridgeSharedState(realHome, profileDir, profileName)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
 		storageEnv := config.StorageEnv()
@@ -515,7 +515,7 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	}
 
 	realHome := config.RealHomeDir()
-	_ = bridgeSharedState(realHome, profileDir)
+	_ = bridgeSharedState(realHome, profileDir, profileName)
 
 	// Auto-seed credentials for personal/default profile if missing in profileDir but available on host
 	_ = a.SeedDefaultCredentials(profileName, profileDir)
@@ -591,7 +591,13 @@ func sharedConfigDir(realHome string) string {
 	return filepath.Join(config.BaseDir(), "shared", "gemini-config")
 }
 
-func bridgeSharedState(realHome, profileDir string) error {
+func bridgeSharedState(realHome, profileDir string, optProfileName ...string) error {
+	profileName := filepath.Base(profileDir)
+	if len(optProfileName) > 0 && optProfileName[0] != "" {
+		profileName = optProfileName[0]
+	}
+	isLeased := profile.IsLeased(profileName)
+
 	var sharedDir string
 	realAgyDir := filepath.Join(realHome, ".gemini", "antigravity-cli")
 	if _, err := os.Stat(realAgyDir); err == nil {
@@ -629,10 +635,12 @@ func bridgeSharedState(realHome, profileDir string) error {
 	bridgeFile(pHist, sHist)
 
 	// 5. plugin_data (plugin runtime cache & storage)
-	pPluginData := filepath.Join(tokenDir, "plugin_data")
-	sPluginData := filepath.Join(sharedDir, "plugin_data")
-	_ = os.MkdirAll(sPluginData, 0755)
-	bridgeDir(pPluginData, sPluginData)
+	if !isLeased {
+		pPluginData := filepath.Join(tokenDir, "plugin_data")
+		sPluginData := filepath.Join(sharedDir, "plugin_data")
+		_ = os.MkdirAll(sPluginData, 0755)
+		bridgeDir(pPluginData, sPluginData)
+	}
 
 	// 6. Gemini config directory (plugins, import_manifest.json, hooks, settings)
 	sharedDirCfg := sharedConfigDir(realHome)
@@ -641,17 +649,25 @@ func bridgeSharedState(realHome, profileDir string) error {
 	profileConfigDir := filepath.Join(profileDir, ".gemini", "config")
 	_ = os.MkdirAll(profileConfigDir, 0755)
 
-	// 6a. plugins directory
-	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "plugins"), 0755)
-	bridgeDir(filepath.Join(profileConfigDir, "plugins"), filepath.Join(sharedDirCfg, "plugins"))
+	if isLeased {
+		// Strictly do NOT bridge host plugins or host hooks.
+		// Provision clean, isolated .gemini/config/hooks.json for the lease guard.
+		if err := agents.SetupLeasedProfileHooks("agy", profileName, profileDir); err != nil {
+			logger.Debug("[agy] Failed to setup leased profile hooks: %v", err)
+		}
+	} else {
+		// 6a. plugins directory
+		_ = os.MkdirAll(filepath.Join(sharedDirCfg, "plugins"), 0755)
+		bridgeDir(filepath.Join(profileConfigDir, "plugins"), filepath.Join(sharedDirCfg, "plugins"))
 
-	// 6b. import_manifest.json
-	bridgeFile(filepath.Join(profileConfigDir, "import_manifest.json"), filepath.Join(sharedDirCfg, "import_manifest.json"))
+		// 6b. import_manifest.json
+		bridgeFile(filepath.Join(profileConfigDir, "import_manifest.json"), filepath.Join(sharedDirCfg, "import_manifest.json"))
 
-	// 6c. hooks.json & hooks directory
-	bridgeFile(filepath.Join(profileConfigDir, "hooks.json"), filepath.Join(sharedDirCfg, "hooks.json"))
-	_ = os.MkdirAll(filepath.Join(sharedDirCfg, "hooks"), 0755)
-	bridgeDir(filepath.Join(profileConfigDir, "hooks"), filepath.Join(sharedDirCfg, "hooks"))
+		// 6c. hooks.json & hooks directory
+		bridgeFile(filepath.Join(profileConfigDir, "hooks.json"), filepath.Join(sharedDirCfg, "hooks.json"))
+		_ = os.MkdirAll(filepath.Join(sharedDirCfg, "hooks"), 0755)
+		bridgeDir(filepath.Join(profileConfigDir, "hooks"), filepath.Join(sharedDirCfg, "hooks"))
+	}
 
 	// 6d. config.json & mcp_config.json
 	bridgeFile(filepath.Join(profileConfigDir, "config.json"), filepath.Join(sharedDirCfg, "config.json"))

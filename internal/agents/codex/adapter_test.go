@@ -599,3 +599,36 @@ trusted_hash = "sha256:222"
 		t.Errorf("expected file to be deduplicated on disk, got:\n%s", string(repairedData))
 	}
 }
+
+func TestCodexAdapter_LeasedProfileHookIsolation(t *testing.T) {
+	tempDir := t.TempDir()
+	mockHost := filepath.Join(tempDir, "host")
+	mockProfile := filepath.Join(tempDir, "profiles", "Adrijs-MBP-bbrouter:office")
+	t.Setenv("AIM_REAL_HOME", mockHost)
+	_ = os.MkdirAll(filepath.Join(mockHost, ".codex", "hooks"), 0755)
+	_ = os.WriteFile(filepath.Join(mockHost, ".codex", "hooks.json"), []byte(`{"host":"hook"}`), 0644)
+	_ = os.MkdirAll(mockProfile, 0700)
+
+	adapter := NewAdapter()
+	ctx := context.Background()
+	_, err := adapter.PrepareEnv(ctx, "Adrijs-MBP-bbrouter:office", mockProfile)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+
+	destHooksJSON := filepath.Join(mockProfile, ".codex", "hooks.json")
+	fi, err := os.Lstat(destHooksJSON)
+	if err != nil {
+		t.Fatalf("hooks.json missing in leased profile: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("CRITICAL: leased profile hooks.json must NOT be a symlink to host!")
+	}
+	content, _ := os.ReadFile(destHooksJSON)
+	if strings.Contains(string(content), `"host":"hook"`) {
+		t.Errorf("CRITICAL: host hooks leaked into leased profile hooks.json")
+	}
+	if !strings.Contains(string(content), "aim hook guard") {
+		t.Errorf("expected hooks.json to contain 'aim hook guard'")
+	}
+}

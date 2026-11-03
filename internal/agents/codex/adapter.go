@@ -177,7 +177,16 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	ensureSidecarDaemons(ctx, realHome, codexDir)
 
 	// Bridge host plugins and hooks (e.g. Catalyst) into profile
-	bridgePluginsAndHooks(realHome, codexDir)
+	isLeased := profile.IsLeased(profileName)
+	if isLeased {
+		// Strictly do NOT bridge host plugins or host hooks.
+		// Provision clean, isolated .codex/hooks.json for the lease guard.
+		if err := agents.SetupLeasedProfileHooks("codex", profileName, profileDir); err != nil {
+			logger.Debug("[codex] Failed to setup leased profile hooks: %v", err)
+		}
+	} else {
+		bridgePluginsAndHooks(realHome, codexDir)
+	}
 
 	// Bridge host cxstatusline config into profile if statusline_global enabled
 	cfg, err := config.LoadConfig()
@@ -376,6 +385,11 @@ func ensureSidecarDaemons(ctx context.Context, realHome, profileCodexDir string)
 }
 
 func bridgePluginsAndHooks(realHome, profileCodexDir string) {
+	profileName := filepath.Base(filepath.Dir(profileCodexDir))
+	if profile.IsLeased(profileName) {
+		return
+	}
+
 	hostPlugins := filepath.Join(realHome, ".codex", "plugins")
 	destPlugins := filepath.Join(profileCodexDir, "plugins")
 	if fi, err := os.Stat(hostPlugins); err == nil && fi.IsDir() {
