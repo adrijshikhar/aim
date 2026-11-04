@@ -1,6 +1,8 @@
 package share
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,6 +14,37 @@ import (
 	"time"
 )
 
+var (
+	testLenderPub  ed25519.PublicKey
+	testLenderPriv ed25519.PrivateKey
+)
+
+func signTestResp(resp *LeaseResponse, peer string) *LeaseResponse {
+	if resp != nil && len(testLenderPriv) > 0 {
+		lenderID := resp.LenderNodeID
+		if lenderID == "" {
+			lenderID = peer
+		}
+		borrowerID := resp.BorrowerID
+		if borrowerID == "" {
+			borrowerID, _ = os.Hostname()
+		}
+		if borrowerID == "" {
+			borrowerID = "borrower"
+		}
+		expStr := resp.ExpiresAt.UTC().Format(time.RFC3339)
+		resp.Signature = SignLease(testLenderPriv, resp.LeaseID, lenderID, borrowerID, resp.ProfileName, resp.Agent, expStr)
+	}
+	return resp
+}
+
+func installTestLease(mgr *LeaseManager, sourcePeer, profileName string, resp *LeaseResponse) (string, error) {
+	if resp != nil && resp.Signature == "" {
+		signTestResp(resp, sourcePeer)
+	}
+	return mgr.InstallLease(sourcePeer, profileName, resp)
+}
+
 func setupTestLeaseManager(t *testing.T) (*LeaseManager, string) {
 	t.Helper()
 	tempHome := t.TempDir()
@@ -22,6 +55,20 @@ func setupTestLeaseManager(t *testing.T) (*LeaseManager, string) {
 	}
 	mgr := NewLeaseManager(profilesDir)
 	mgr.NotifyFn = func(sourcePeer, leaseID string) {} // stub network notifications in tests
+
+	if len(testLenderPub) == 0 {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err == nil {
+			testLenderPub = pub
+			testLenderPriv = priv
+		}
+	}
+	store := NewStore(tempHome)
+	for _, p := range []string{"alice", "attacker", "peer1", "peer2", "lender1"} {
+		_ = store.SavePeer(PeerInfo{ID: p, HostName: p, PublicKey: testLenderPub})
+	}
+	_ = store.Close()
+
 	return mgr, profilesDir
 }
 
@@ -41,7 +88,7 @@ func TestLeaseManagerInstallAndExpiry(t *testing.T) {
 		},
 	}
 
-	localName, err := mgr.InstallLease("alice", "work", resp)
+	localName, err := installTestLease(mgr, "alice", "work", resp)
 	if err != nil {
 		t.Fatalf("failed to install lease: %v", err)
 	}
@@ -85,7 +132,7 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 		},
 	}
 
-	_, err := mgr.InstallLease("attacker", "work", resp)
+	_, err := installTestLease(mgr, "attacker", "work", resp)
 	if err == nil {
 		t.Fatalf("expected InstallLease to reject path traversal, but succeeded")
 	}
@@ -107,7 +154,7 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 		},
 	}
 
-	_, err = mgr.InstallLease("attacker", "work", resp2)
+	_, err = installTestLease(mgr, "attacker", "work", resp2)
 	if err == nil {
 		t.Fatalf("expected InstallLease to reject non-credential file .ssh/authorized_keys, but succeeded")
 	}
@@ -128,7 +175,7 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 			},
 		},
 	}
-	localName, err := mgr.InstallLease("attacker", "work", respValidRetry)
+	localName, err := installTestLease(mgr, "attacker", "work", respValidRetry)
 	if err != nil {
 		t.Fatalf("expected subsequent valid install to succeed after failed attempts, but got: %v", err)
 	}
@@ -150,7 +197,7 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 			},
 		},
 	}
-	_, err = mgr.InstallLease("attacker", "work", resp3)
+	_, err = installTestLease(mgr, "attacker", "work", resp3)
 	if err == nil {
 		t.Fatalf("expected InstallLease to reject sibling file injection .claude_backdoor.sh")
 	}
@@ -172,7 +219,7 @@ func TestLeaseManagerPathTraversalRejection(t *testing.T) {
 			},
 		},
 	}
-	_, err = mgr.InstallLease("", "permanent_user", respPerm)
+	_, err = installTestLease(mgr, "", "permanent_user", respPerm)
 	if err == nil {
 		t.Fatalf("expected InstallLease to reject overwriting permanent user profile")
 	}
@@ -216,7 +263,7 @@ func TestLeaseManagerCleanExpired(t *testing.T) {
 		Agent:       "claude",
 		ExpiresAt:   time.Now().Add(-10 * time.Minute), // expired
 	}
-	p1, err := mgr.InstallLease("peer1", "old", expiredResp)
+	p1, err := installTestLease(mgr, "peer1", "old", expiredResp)
 	if err != nil {
 		t.Fatalf("failed to install expired lease: %v", err)
 	}
@@ -229,7 +276,7 @@ func TestLeaseManagerCleanExpired(t *testing.T) {
 		Agent:       "claude",
 		ExpiresAt:   time.Now().Add(2 * time.Hour), // active
 	}
-	p2, err := mgr.InstallLease("peer2", "current", activeResp)
+	p2, err := installTestLease(mgr, "peer2", "current", activeResp)
 	if err != nil {
 		t.Fatalf("failed to install active lease: %v", err)
 	}
@@ -266,7 +313,7 @@ func TestLeaseManagerRenewalPreservesHistory(t *testing.T) {
 			},
 		},
 	}
-	pName, err := mgr.InstallLease("peer1", "work", resp1)
+	pName, err := installTestLease(mgr, "peer1", "work", resp1)
 	if err != nil {
 		t.Fatalf("initial InstallLease failed: %v", err)
 	}
@@ -291,7 +338,7 @@ func TestLeaseManagerRenewalPreservesHistory(t *testing.T) {
 			},
 		},
 	}
-	pName2, err := mgr.InstallLease("peer1", "work", resp2)
+	pName2, err := installTestLease(mgr, "peer1", "work", resp2)
 	if err != nil {
 		t.Fatalf("renewal InstallLease failed: %v", err)
 	}
@@ -331,7 +378,7 @@ func TestLeaseManagerRenewalAtomicRollbackOnFailure(t *testing.T) {
 			},
 		},
 	}
-	pName, err := mgr.InstallLease("peer1", "work", resp1)
+	pName, err := installTestLease(mgr, "peer1", "work", resp1)
 	if err != nil {
 		t.Fatalf("initial InstallLease failed: %v", err)
 	}
@@ -362,7 +409,7 @@ func TestLeaseManagerRenewalAtomicRollbackOnFailure(t *testing.T) {
 		},
 	}
 
-	_, err = mgr.InstallLease("peer1", "work", resp2)
+	_, err = installTestLease(mgr, "peer1", "work", resp2)
 	if err == nil {
 		t.Fatalf("expected InstallLease to fail on unwritable dir, but it succeeded")
 	}
@@ -418,7 +465,7 @@ func TestLeaseManagerConcurrentRenewals(t *testing.T) {
 			},
 		},
 	}
-	pName, err := mgr.InstallLease("peer1", "work", resp1)
+	pName, err := installTestLease(mgr, "peer1", "work", resp1)
 	if err != nil {
 		t.Fatalf("initial InstallLease failed: %v", err)
 	}
@@ -443,7 +490,7 @@ func TestLeaseManagerConcurrentRenewals(t *testing.T) {
 					},
 				},
 			}
-			_, err := mgr.InstallLease("peer1", "work", r)
+			_, err := installTestLease(mgr, "peer1", "work", r)
 			if err != nil {
 				errCh <- err
 			}
@@ -522,7 +569,7 @@ func TestLeaseManagerRevokeLeaseAndScrub(t *testing.T) {
 		},
 	}
 
-	localName, err := mgr.InstallLease("peer1", "work", resp)
+	localName, err := installTestLease(mgr, "peer1", "work", resp)
 	if err != nil {
 		t.Fatalf("InstallLease failed: %v", err)
 	}

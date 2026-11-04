@@ -865,11 +865,13 @@ func (s *Server) handleNotifyRevoke(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 
-					if len(pinnedPubKey) == ed25519.PublicKeySize {
-						if req.Signature == "" || !VerifyRevocationSignature(pinnedPubKey, req.LeaseID, lenderID, req.Signature) {
-							http.Error(w, "Forbidden: invalid or missing lender revocation signature", http.StatusForbidden)
-							return
-						}
+					if len(pinnedPubKey) != ed25519.PublicKeySize {
+						http.Error(w, "Forbidden: lender public key is not pinned in peers.json", http.StatusForbidden)
+						return
+					}
+					if req.Signature == "" || !VerifyRevocationSignature(pinnedPubKey, req.LeaseID, lenderID, req.Signature) {
+						http.Error(w, "Forbidden: invalid or missing lender revocation signature", http.StatusForbidden)
+						return
 					}
 				}
 				break
@@ -1102,7 +1104,7 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	if lenderID == "" {
 		lenderID, _ = os.Hostname()
 	}
-	expiresAtStr := expiresAt.Format(time.RFC3339)
+	expiresAtStr := expiresAt.UTC().Format(time.RFC3339)
 	sig := ""
 	if len(s.privKey) > 0 {
 		sig = SignLease(s.privKey, leaseID, lenderID, requesterID, profileName, agent, expiresAtStr)

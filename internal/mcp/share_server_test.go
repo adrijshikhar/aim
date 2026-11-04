@@ -3,6 +3,8 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +152,20 @@ func TestShareMCPServer_CallRequestLease(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	borrowerHost, _ := os.Hostname()
+	if borrowerHost == "" {
+		borrowerHost = "borrower"
+	}
+
+	store := share.NewStore(tempDir)
+	_ = store.SavePeer(share.PeerInfo{
+		ID:        "peer1",
+		HostName:  "peer1",
+		PublicKey: pub,
+	})
+	_ = store.Close()
+
 	newExp := time.Now().Add(4 * time.Hour).Truncate(time.Second)
 
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -159,6 +175,7 @@ func TestShareMCPServer_CallRequestLease(t *testing.T) {
 			if req.RequestedHours != 4 {
 				t.Errorf("expected 4 requested hours, got %d", req.RequestedHours)
 			}
+			sig := share.SignLease(priv, "ls_renewed_456", "peer1", borrowerHost, "testprof", "codex", newExp.UTC().Format(time.RFC3339))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(share.LeaseResponse{
 				Status:       "approved",
@@ -167,6 +184,8 @@ func TestShareMCPServer_CallRequestLease(t *testing.T) {
 				Agent:        "codex",
 				ExpiresAt:    newExp,
 				LenderNodeID: "peer1",
+				BorrowerID:   borrowerHost,
+				Signature:    sig,
 			})
 			return
 		}
@@ -273,7 +292,22 @@ func TestShareMCPServer_CallRequestLease_PendingPoll(t *testing.T) {
 	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
 	_ = os.WriteFile(filepath.Join(profDir, ".aim-lease.json"), metaBytes, 0600)
 
+	pollPub, pollPriv, _ := ed25519.GenerateKey(rand.Reader)
+	pollBorrowerHost, _ := os.Hostname()
+	if pollBorrowerHost == "" {
+		pollBorrowerHost = "borrower"
+	}
+
+	pollStore := share.NewStore(tempDir)
+	_ = pollStore.SavePeer(share.PeerInfo{
+		ID:        "peer1",
+		HostName:  "peer1",
+		PublicKey: pollPub,
+	})
+	_ = pollStore.Close()
+
 	pollCount := 0
+	pollExp := time.Now().Add(3 * time.Hour)
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/share/request" {
@@ -292,13 +326,16 @@ func TestShareMCPServer_CallRequestLease_PendingPoll(t *testing.T) {
 				})
 				return
 			}
+			pollSig := share.SignLease(pollPriv, "ls_polled_999", "peer1", pollBorrowerHost, "testprof", "codex", pollExp.UTC().Format(time.RFC3339))
 			_ = json.NewEncoder(w).Encode(share.LeaseResponse{
 				Status:       "approved",
 				LeaseID:      "ls_polled_999",
 				ProfileName:  "testprof",
 				Agent:        "codex",
-				ExpiresAt:    time.Now().Add(3 * time.Hour),
+				ExpiresAt:    pollExp,
 				LenderNodeID: "peer1",
+				BorrowerID:   pollBorrowerHost,
+				Signature:    pollSig,
 			})
 			return
 		}

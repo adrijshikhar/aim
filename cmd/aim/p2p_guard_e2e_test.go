@@ -451,16 +451,34 @@ func TestP2PGuard_MA5_InChatMCPExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	borrowerHost, _ := os.Hostname()
+	if borrowerHost == "" {
+		borrowerHost = "borrower"
+	}
+
+	store := share.NewStore(tempDir)
+	_ = store.SavePeer(share.PeerInfo{
+		ID:        "lender-host",
+		HostName:  "lender-host",
+		PublicKey: pub,
+	})
+	_ = store.Close()
+
 	renewedExp := time.Now().Add(4 * time.Hour)
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/share/request" {
+			sig := share.SignLease(priv, "ls_renewed_mcp", "lender-host", borrowerHost, "mcp-prof", "codex", renewedExp.UTC().Format(time.RFC3339))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(share.LeaseResponse{
-				Status:      "approved",
-				LeaseID:     "ls_renewed_mcp",
-				ProfileName: "mcp-prof",
-				Agent:       "codex",
-				ExpiresAt:   renewedExp,
+				Status:       "approved",
+				LeaseID:      "ls_renewed_mcp",
+				LenderNodeID: "lender-host",
+				BorrowerID:   borrowerHost,
+				Signature:    sig,
+				ProfileName:  "mcp-prof",
+				Agent:        "codex",
+				ExpiresAt:    renewedExp,
 				Payload: &share.SharePayload{
 					Files: map[string]string{
 						".codex/auth.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"new-secret-renewed"}`)),

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -107,6 +109,13 @@ func TestShareRenewCommand_WithMockServer(t *testing.T) {
 	requestCount := 0
 	pollCount := 0
 
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	borrowerHost, _ := os.Hostname()
+	if borrowerHost == "" {
+		borrowerHost = "borrower"
+	}
+
+	var tsAddr string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -134,13 +143,18 @@ func TestShareRenewCommand_WithMockServer(t *testing.T) {
 				return
 			}
 
+			renewExp := time.Now().Add(time.Duration(req.RequestedHours) * time.Hour)
+			renewSig := share.SignLease(priv, "ls_renewed_456", tsAddr, borrowerHost, req.ProfileName, "claude", renewExp.UTC().Format(time.RFC3339))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(share.LeaseResponse{
-				Status:      "approved",
-				LeaseID:     "ls_renewed_456",
-				ProfileName: req.ProfileName,
-				Agent:       "claude",
-				ExpiresAt:   time.Now().Add(time.Duration(req.RequestedHours) * time.Hour),
+				Status:       "approved",
+				LeaseID:      "ls_renewed_456",
+				LenderNodeID: tsAddr,
+				BorrowerID:   borrowerHost,
+				Signature:    renewSig,
+				ProfileName:  req.ProfileName,
+				Agent:        "claude",
+				ExpiresAt:    renewExp,
 				Payload: &share.SharePayload{
 					Files: map[string]string{
 						".claude/.credentials.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"secret-renewed"}`)),
@@ -152,12 +166,18 @@ func TestShareRenewCommand_WithMockServer(t *testing.T) {
 
 		if r.URL.Path == "/api/share/poll" {
 			pollCount++
+			pollExp := time.Now().Add(2 * time.Hour)
+			pollSig := share.SignLease(priv, "ls_poll_approved", tsAddr, borrowerHost, "work", "claude", pollExp.UTC().Format(time.RFC3339))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(share.LeaseResponse{
-				Status:    "approved",
-				LeaseID:   "ls_poll_approved",
-				Agent:     "claude",
-				ExpiresAt: time.Now().Add(2 * time.Hour),
+				Status:       "approved",
+				LeaseID:      "ls_poll_approved",
+				LenderNodeID: tsAddr,
+				BorrowerID:   borrowerHost,
+				Signature:    pollSig,
+				ProfileName:  "work",
+				Agent:        "claude",
+				ExpiresAt:    pollExp,
 				Payload: &share.SharePayload{
 					Files: map[string]string{
 						".claude/.credentials.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"secret-polled"}`)),
@@ -170,26 +190,41 @@ func TestShareRenewCommand_WithMockServer(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer ts.Close()
+	tsAddr = ts.Listener.Addr().String()
 
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	store := share.NewStore(tempDir)
+	_ = store.SavePeer(share.PeerInfo{
+		ID:        tsAddr,
+		HostName:  tsAddr,
+		PublicKey: pub,
+	})
+	_ = store.Close()
+
 	pm := profile.NewProfileManager(tempDir)
 	reg := agents.NewRegistry()
 
 	// Install an initial lease using LeaseManager
 	mgr := share.NewLeaseManager(pm.ProfilesRoot())
+	initExp := time.Now().Add(-10 * time.Minute)
+	initSig := share.SignLease(priv, "ls_initial_111", tsAddr, borrowerHost, "work", "claude", initExp.UTC().Format(time.RFC3339))
 	respInitial := &share.LeaseResponse{
-		Status:    "approved",
-		LeaseID:   "ls_initial_111",
-		Agent:     "claude",
-		ExpiresAt: time.Now().Add(-10 * time.Minute),
+		Status:       "approved",
+		LeaseID:      "ls_initial_111",
+		LenderNodeID: tsAddr,
+		BorrowerID:   borrowerHost,
+		Signature:    initSig,
+		ProfileName:  "work",
+		Agent:        "claude",
+		ExpiresAt:    initExp,
 		Payload: &share.SharePayload{
 			Files: map[string]string{
 				".claude/.credentials.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"secret-old"}`)),
 			},
 		},
 	}
-	installedName, err := mgr.InstallLease(ts.Listener.Addr().String(), "work", respInitial)
+	installedName, err := mgr.InstallLease(tsAddr, "work", respInitial)
 	if err != nil {
 		t.Fatalf("failed to install initial lease: %v", err)
 	}

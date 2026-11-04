@@ -318,6 +318,13 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 			return 1
 		}
 		opts.ExtraArgs = sanitized
+
+		if sanitizedEnvArgs, err := sanitizeLeasedRunFlags(launchEnv.Args); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		} else {
+			launchEnv.Args = sanitizedEnvArgs
+		}
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -467,7 +474,7 @@ func sanitizeLeasedRunFlags(extraArgs []string) ([]string, error) {
 	for _, arg := range extraArgs {
 		baseFlag := strings.SplitN(arg, "=", 2)[0]
 		switch baseFlag {
-		case "--no-hooks", "--hooks", "--config-dir", "--profile", "--settings", "--config", "-c":
+		case "--no-hooks", "--hooks", "--config-dir", "--profile", "--settings", "--config":
 			return nil, fmt.Errorf("flag %q is prohibited on leased profiles to maintain security compliance", arg)
 		}
 		if strings.HasPrefix(arg, "--dangerously-skip-") {
@@ -665,8 +672,11 @@ func performLeaseHeartbeat(ctx context.Context, profDir, profileName string) {
 
 	if checkErr == nil && st != nil {
 		if st.Revoked || !st.Active {
+			// Target the exact lease ID probed by this heartbeat check.
+			// If .aim-lease.json was renewed with a different LeaseID while check was in-flight,
+			// RevokeLeaseByID safely discards this stale revocation without wiping the new lease.
 			mgr := share.NewLeaseManager(filepath.Dir(profDir))
-			_ = mgr.RevokeLease(profileName)
+			_, _ = mgr.RevokeLeaseByID(meta.LeaseID)
 			return
 		}
 

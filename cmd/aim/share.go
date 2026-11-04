@@ -497,8 +497,10 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the P2P sharing server listener",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store := share.NewStore(config.BaseDir())
+			defer store.Close()
 			host, _ := os.Hostname()
 			server := share.NewServer(store, pm.ProfilesRoot(), host, port)
 
@@ -508,7 +510,7 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 				return fmt.Errorf("failed to bind %s: %w", addr, err)
 			}
 
-			fmt.Printf("%s AIM P2P Share Server listening on %s (press Ctrl+C to stop)\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s AIM P2P Share Server listening on %s (press Ctrl+C to stop)\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 				addr)
 
@@ -528,7 +530,7 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 				return nil
 			case sig := <-sigCh:
 				_ = server.Close()
-				fmt.Printf("\nShare server stopped (%s).\n", sig)
+				fmt.Fprintf(cmd.OutOrStdout(), "\nShare server stopped (%s).\n", sig)
 				return nil
 			case err := <-errCh:
 				_ = server.Close()

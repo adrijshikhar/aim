@@ -214,8 +214,9 @@ func newMCPServeShareCmd(pm *profile.ProfileManager) *cobra.Command {
 	var profileFlag string
 
 	serveShareCmd := &cobra.Command{
-		Use:   "serve-share",
-		Short: "Run embedded stdio MCP server for leased profile self-renewal",
+		Use:    "serve-share",
+		Short:  "Run embedded stdio MCP server for leased profile self-renewal",
+		Hidden: true,
 		Long: `Starts an embedded stdio Model Context Protocol (MCP) server over stdio.
 Exposes tools for autonomous in-chat self-renewal: aim_request_lease and aim_lease_status.
 Mounted automatically inside leased profiles to let AI agents request lease extensions proactively.`,

@@ -215,7 +215,7 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		borrowerID, _ = os.Hostname()
 	}
 
-	if m.store != nil {
+	if store != nil {
 		if len(pinnedPubKey) != ed25519.PublicKeySize {
 			return "", fmt.Errorf("lease rejected: lender %q has no pinned public key in peers.json", sourcePeer)
 		}
