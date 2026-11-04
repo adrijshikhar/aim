@@ -1,6 +1,8 @@
 package share
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -123,5 +125,50 @@ func TestCrypto_PeerInfoPublicKeyJSON(t *testing.T) {
 	}
 	if !decodedB64.PublicKey.Equal(pubKey) {
 		t.Errorf("expected base64 unmarshaled public key to match original")
+	}
+}
+
+func TestCrypto_SignAndVerifyRevocation(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leaseID := "ls_test_revoke_123"
+	lenderID := "lender.node.local"
+
+	sig := SignRevocation(priv, leaseID, lenderID)
+	if sig == "" {
+		t.Fatalf("expected non-empty revocation signature")
+	}
+
+	// 1. Valid revocation signature
+	if !VerifyRevocationSignature(pub, leaseID, lenderID, sig) {
+		t.Errorf("expected valid revocation signature to pass verification")
+	}
+
+	// 2. Tampered leaseID
+	if VerifyRevocationSignature(pub, "ls_different_id", lenderID, sig) {
+		t.Errorf("expected tampered leaseID to fail verification")
+	}
+
+	// 3. Tampered lenderID
+	if VerifyRevocationSignature(pub, leaseID, "attacker.node.local", sig) {
+		t.Errorf("expected tampered lenderID to fail verification")
+	}
+
+	// 4. Corrupted signature hex
+	if VerifyRevocationSignature(pub, leaseID, lenderID, "invalid_hex") {
+		t.Errorf("expected corrupt hex to fail verification")
+	}
+
+	// 5. Short or invalid public key
+	if VerifyRevocationSignature([]byte("short"), leaseID, lenderID, sig) {
+		t.Errorf("expected short pubkey to fail verification")
+	}
+
+	// 6. Invalid private key length in SignRevocation
+	if badSig := SignRevocation([]byte("bad_priv"), leaseID, lenderID); badSig != "" {
+		t.Errorf("expected empty signature on invalid private key, got: %s", badSig)
 	}
 }

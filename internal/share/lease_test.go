@@ -698,3 +698,61 @@ func TestLeaseManager_SignatureRecordingAndPinnedVerification(t *testing.T) {
 		t.Fatalf("expected rejection when signature is missing for pinned lender, got: %v", err)
 	}
 }
+
+func TestLeaseManager_RevokeLeaseByID(t *testing.T) {
+	mgr, profilesDir := setupTestLeaseManager(t)
+
+	resp := &LeaseResponse{
+		Status:      "approved",
+		LeaseID:     "ls_revoke_target_111",
+		ProfileName: "active_prof",
+		Agent:       "claude",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/.credentials.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"secret-token"}`)),
+			},
+		},
+	}
+	pName, err := installTestLease(mgr, "peer1", "active_prof", resp)
+	if err != nil {
+		t.Fatalf("failed to install test lease: %v", err)
+	}
+
+	// 1. Empty leaseID should error
+	if _, err := mgr.RevokeLeaseByID(""); err == nil {
+		t.Errorf("expected error for empty lease_id")
+	}
+
+	// 2. Non-existent / stale leaseID should error and leave existing lease untouched
+	if _, err := mgr.RevokeLeaseByID("ls_stale_old_999"); err == nil {
+		t.Errorf("expected error for non-matching lease_id")
+	}
+	meta, err := mgr.GetLeaseMeta(pName)
+	if err != nil || meta.Revoked {
+		t.Errorf("expected lease to remain unrevoked after mismatched RevokeLeaseByID")
+	}
+
+	// 3. Matching leaseID should revoke the lease and scrub credentials
+	revokedProfile, err := mgr.RevokeLeaseByID("ls_revoke_target_111")
+	if err != nil {
+		t.Fatalf("expected successful revocation of matching lease ID, got: %v", err)
+	}
+	if revokedProfile != pName {
+		t.Errorf("expected revoked profile %s, got %s", pName, revokedProfile)
+	}
+
+	meta, err = mgr.GetLeaseMeta(pName)
+	if err != nil {
+		t.Fatalf("failed to read lease meta after revocation: %v", err)
+	}
+	if !meta.Revoked {
+		t.Errorf("expected meta.Revoked to be true")
+	}
+
+	// Verify credential file was scrubbed
+	credPath := filepath.Join(profilesDir, pName, ".claude", ".credentials.json")
+	if _, err := os.Stat(credPath); !os.IsNotExist(err) {
+		t.Errorf("expected credentials file to be scrubbed, but it still exists")
+	}
+}

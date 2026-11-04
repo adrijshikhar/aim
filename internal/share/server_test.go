@@ -2,7 +2,10 @@ package share
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -555,5 +558,105 @@ func TestServer_LeaseCryptographicSigning(t *testing.T) {
 	}
 	if gl.LenderNodeID != "alice-node" {
 		t.Errorf("expected GrantedLease to record lender node ID alice-node, got %q", gl.LenderNodeID)
+	}
+}
+
+func TestServer_HandleNotifyRevoke_Security(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewStore(tempDir)
+	defer store.Close()
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profilesDir := filepath.Join(tempDir, "profiles")
+	profDir := filepath.Join(profilesDir, "lender-peer:testprof")
+	if err := os.MkdirAll(profDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	leaseID := "ls_revoke_sec_123"
+	meta := LeaseMeta{
+		LeaseID:        leaseID,
+		SourcePeer:     "lender-peer",
+		LenderNodeID:   "lender-peer",
+		SourceProfile:  "testprof",
+		Agent:          "claude",
+		GrantedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(2 * time.Hour),
+		LastVerifiedAt: time.Now(),
+		Revoked:        false,
+	}
+	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
+	if err := os.WriteFile(filepath.Join(profDir, ".aim-lease.json"), metaBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewServer(store, profilesDir, "borrower-host", 0)
+
+	// 1. Non-private IP -> 403 Forbidden
+	reqPublic := httptest.NewRequest("POST", "/api/share/lease/revoke", strings.NewReader(`{"lease_id":"ls_revoke_sec_123"}`))
+	reqPublic.RemoteAddr = "8.8.8.8:12345"
+	wPublic := httptest.NewRecorder()
+	srv.handleNotifyRevoke(wPublic, reqPublic)
+	if wPublic.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for public IP, got %d", wPublic.Code)
+	}
+
+	// 2. Unpinned lender key -> 403 Forbidden
+	reqUnpinned := httptest.NewRequest("POST", "/api/share/lease/revoke", strings.NewReader(`{"lease_id":"ls_revoke_sec_123"}`))
+	reqUnpinned.RemoteAddr = "127.0.0.1:54321"
+	wUnpinned := httptest.NewRecorder()
+	srv.handleNotifyRevoke(wUnpinned, reqUnpinned)
+	if wUnpinned.Code != http.StatusForbidden || !strings.Contains(wUnpinned.Body.String(), "not pinned") {
+		t.Errorf("expected 403 for unpinned lender key, got %d: %s", wUnpinned.Code, wUnpinned.Body.String())
+	}
+
+	// Pin lender public key
+	_ = store.SavePeer(PeerInfo{
+		ID:        "lender-peer",
+		HostName:  "lender-peer",
+		PublicKey: pub,
+	})
+
+	// 3. Missing signature -> 403 Forbidden
+	reqMissingSig := httptest.NewRequest("POST", "/api/share/lease/revoke", strings.NewReader(`{"lease_id":"ls_revoke_sec_123"}`))
+	reqMissingSig.RemoteAddr = "127.0.0.1:54321"
+	wMissingSig := httptest.NewRecorder()
+	srv.handleNotifyRevoke(wMissingSig, reqMissingSig)
+	if wMissingSig.Code != http.StatusForbidden || !strings.Contains(wMissingSig.Body.String(), "invalid or missing") {
+		t.Errorf("expected 403 for missing signature, got %d: %s", wMissingSig.Code, wMissingSig.Body.String())
+	}
+
+	// 4. Invalid / tampered signature -> 403 Forbidden
+	reqBadSig := httptest.NewRequest("POST", "/api/share/lease/revoke", strings.NewReader(`{"lease_id":"ls_revoke_sec_123","signature":"deadbeef1234"}`))
+	reqBadSig.RemoteAddr = "127.0.0.1:54321"
+	wBadSig := httptest.NewRecorder()
+	srv.handleNotifyRevoke(wBadSig, reqBadSig)
+	if wBadSig.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for invalid signature, got %d", wBadSig.Code)
+	}
+
+	// 5. Valid signature -> 200 OK and lease marked revoked
+	validSig := SignRevocation(priv, leaseID, "lender-peer")
+	validBody := fmt.Sprintf(`{"lease_id":"%s","signature":"%s"}`, leaseID, validSig)
+	reqValid := httptest.NewRequest("POST", "/api/share/lease/revoke", strings.NewReader(validBody))
+	reqValid.RemoteAddr = "127.0.0.1:54321"
+	wValid := httptest.NewRecorder()
+	srv.handleNotifyRevoke(wValid, reqValid)
+	if wValid.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for valid revocation signature, got %d: %s", wValid.Code, wValid.Body.String())
+	}
+
+	// Verify on-disk lease metadata is revoked
+	mgr := NewLeaseManager(profilesDir)
+	updatedMeta, err := mgr.GetLeaseMeta("lender-peer:testprof")
+	if err != nil {
+		t.Fatalf("failed to read lease meta: %v", err)
+	}
+	if !updatedMeta.Revoked {
+		t.Errorf("expected lease to be marked revoked on disk")
 	}
 }
