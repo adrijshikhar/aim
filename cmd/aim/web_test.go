@@ -92,12 +92,23 @@ func TestWebCmd_ExecutionForeground(t *testing.T) {
 		done <- cmd.ExecuteContext(ctx)
 	}()
 
-	// Allow server to start listening and write PID
-	time.Sleep(150 * time.Millisecond)
-
+	// Poll until server starts listening and writes PID (up to 5s under -race / heavy CI load)
 	pidPath := filepath.Join(config.BaseDir(), "web.pid")
-	if _, err := os.Stat(pidPath); err != nil {
-		t.Errorf("expected PID file at %s during foreground execution, got: %v", pidPath, err)
+	var pidErr error
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("webCmd exited prematurely during startup: %v", err)
+		default:
+		}
+		if _, pidErr = os.Stat(pidPath); pidErr == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if pidErr != nil {
+		t.Fatalf("expected PID file at %s during foreground execution, got: %v", pidPath, pidErr)
 	}
 
 	// Trigger shutdown
@@ -117,7 +128,16 @@ func TestWebCmd_ExecutionForeground(t *testing.T) {
 	}
 
 	// PID file should be cleaned up
-	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+	removed := false
+	cleanupDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(cleanupDeadline) {
+		if _, err := os.Stat(pidPath); os.IsNotExist(err) {
+			removed = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !removed {
 		t.Errorf("expected PID file to be removed after shutdown")
 	}
 }

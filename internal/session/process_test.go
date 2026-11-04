@@ -176,8 +176,16 @@ func TestGracefulTerminate_TimeoutFallbackSIGKILL(t *testing.T) {
 		t.Fatalf("expected success on SIGKILL fallback, got error: %v", err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	if err := syscall.Kill(pid, 0); err == nil {
+	dead := false
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			dead = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !dead {
 		t.Fatalf("process %d is still running after SIGKILL fallback", pid)
 	}
 }
