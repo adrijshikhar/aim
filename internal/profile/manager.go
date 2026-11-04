@@ -321,12 +321,17 @@ func cleanStatuslineSymlinksIfDisabled(pDir, profileName string, cfg *config.Con
 	}
 }
 
+// IsLeased reports whether a profile name represents an ephemeral peer lease.
+func IsLeased(name string) bool {
+	return strings.Contains(name, ":") || strings.HasPrefix(name, "p2p-")
+}
+
 // IsLeased reports whether a profile directory represents an ephemeral peer lease.
 func (m *ProfileManager) IsLeased(name string) bool {
 	if m == nil || name == "" {
 		return false
 	}
-	if strings.Contains(name, ":") {
+	if IsLeased(name) {
 		return true
 	}
 	pDir := m.ProfileDir(name)

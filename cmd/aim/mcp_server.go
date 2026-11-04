@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -32,6 +33,7 @@ Provides a read-only stdio MCP server for agent self-inspection (whoami, quota, 
 
 	mcpCmd.AddCommand(
 		newMCPServeCmd(reg, pm),
+		newMCPServeShareCmd(pm),
 		newMCPDoctorCmd(reg, pm),
 		newMCPInstallCmd(reg, pm),
 		newMCPUninstallCmd(reg, pm),
@@ -206,6 +208,39 @@ Guarantees strict read-only operation: no profile switching, creation, or deleti
 	serveCmd.Flags().StringVar(&agentFlag, "agent", "", "Override active agent name")
 
 	return serveCmd
+}
+
+func newMCPServeShareCmd(pm *profile.ProfileManager) *cobra.Command {
+	var profileFlag string
+
+	serveShareCmd := &cobra.Command{
+		Use:    "serve-share",
+		Short:  "Run embedded stdio MCP server for leased profile self-renewal",
+		Hidden: true,
+		Long: `Starts an embedded stdio Model Context Protocol (MCP) server over stdio.
+Exposes tools for autonomous in-chat self-renewal: aim_request_lease and aim_lease_status.
+Mounted automatically inside leased profiles to let AI agents request lease extensions proactively.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profName := profileFlag
+			if profName == "" {
+				profName = os.Getenv("AIM_PROFILE")
+			}
+
+			profilesRoot := ""
+			if pm != nil {
+				profilesRoot = pm.ProfilesRoot()
+			} else {
+				profilesRoot = filepath.Join(config.BaseDir(), "profiles")
+			}
+
+			srv := mcp.NewShareMCPServer(config.BaseDir(), profilesRoot, profName)
+			return srv.ServeStdio(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
+		},
+	}
+
+	serveShareCmd.Flags().StringVar(&profileFlag, "profile", "", "Leased profile name (defaults to AIM_PROFILE)")
+	return serveShareCmd
 }
 
 func newMCPDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {

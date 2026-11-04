@@ -85,6 +85,44 @@ func TestMCPServeCmd_Execution(t *testing.T) {
 	}
 }
 
+func TestMCPServeShareCmd_Execution(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{}}}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}` + "\n"
+
+	inBuf := bytes.NewBufferString(input)
+	outBuf := new(bytes.Buffer)
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetIn(inBuf)
+	cmd.SetOut(outBuf)
+	cmd.SetArgs([]string{"mcp", "serve-share", "--profile", "peer1:testprof"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("mcp serve-share failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(outBuf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 responses, got %d: %s", len(lines), outBuf.String())
+	}
+
+	if !strings.Contains(lines[0], "aim-share") {
+		t.Errorf("expected serverInfo.name 'aim-share', got %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "aim_request_lease") || !strings.Contains(lines[1], "aim_lease_status") {
+		t.Errorf("expected tools list to contain aim_request_lease and aim_lease_status, got %s", lines[1])
+	}
+}
+
 func TestMCPInstallCmd_ClaudeGlobal(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)

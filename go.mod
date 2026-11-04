@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.2
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/mattn/go-isatty v0.0.24
 	github.com/otiai10/copy v1.14.1
 	github.com/pelletier/go-toml/v2 v2.4.3
@@ -20,6 +21,7 @@ require (
 	go.opentelemetry.io/otel/sdk/log v1.47.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.48.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -71,5 +73,4 @@ require (
 	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.60.1 // indirect
 )

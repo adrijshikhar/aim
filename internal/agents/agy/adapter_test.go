@@ -1479,3 +1479,36 @@ func TestAgyAdapter_SyncHostSettings_DoesNotLeakHostMCP(t *testing.T) {
 		t.Errorf("host mcpServers must NOT be leaked into profile settings.json")
 	}
 }
+
+func TestAgyAdapter_LeasedProfileHookIsolation(t *testing.T) {
+	tempDir := t.TempDir()
+	mockHost := filepath.Join(tempDir, "host")
+	mockProfile := filepath.Join(tempDir, "profiles", "Adrijs-MBP-bbrouter:office")
+	t.Setenv("AIM_REAL_HOME", mockHost)
+	_ = os.MkdirAll(filepath.Join(mockHost, ".gemini", "config", "hooks"), 0755)
+	_ = os.WriteFile(filepath.Join(mockHost, ".gemini", "config", "hooks.json"), []byte(`{"host":"hook"}`), 0644)
+	_ = os.MkdirAll(mockProfile, 0700)
+
+	adapter := NewAdapter()
+	ctx := context.Background()
+	_, err := adapter.PrepareEnv(ctx, "Adrijs-MBP-bbrouter:office", mockProfile)
+	if err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+
+	geminiHooks := filepath.Join(mockProfile, ".gemini", "config", "hooks.json")
+	fi, err := os.Lstat(geminiHooks)
+	if err != nil {
+		t.Fatalf("gemini hooks.json missing in leased profile: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("CRITICAL: leased profile gemini hooks.json must NOT be a symlink!")
+	}
+	content, _ := os.ReadFile(geminiHooks)
+	if strings.Contains(string(content), `"host":"hook"`) {
+		t.Errorf("CRITICAL: host hooks leaked into leased profile gemini hooks.json")
+	}
+	if !strings.Contains(string(content), "aim-guard") {
+		t.Errorf("expected gemini hooks.json to contain 'aim-guard' plugin block")
+	}
+}

@@ -494,3 +494,66 @@ func TestPackageProfileCredentials_AgentScoping(t *testing.T) {
 		t.Errorf("expected agy credentials in 'all' payload")
 	}
 }
+
+func TestServer_LeaseCryptographicSigning(t *testing.T) {
+	aimDir := t.TempDir()
+	store := NewStore(aimDir)
+	_ = store.SetGlobalMode("auto")
+	_ = store.EnableProfile("work", "claude", true, 4*time.Hour)
+
+	profilesDir := filepath.Join(aimDir, "profiles")
+	workDir := filepath.Join(profilesDir, "work", ".claude")
+	_ = os.MkdirAll(workDir, 0700)
+	_ = os.WriteFile(filepath.Join(workDir, ".credentials.json"), []byte(`{"token":"secret-token"}`), 0600)
+
+	server := NewServer(store, profilesDir, "alice-node", 4319)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	// 1. Verify server loaded/generated keypair
+	pubKey := server.PublicKey()
+	if len(pubKey) != 32 {
+		t.Fatalf("expected 32-byte public key on server, got %d", len(pubKey))
+	}
+
+	client := NewClient(4319)
+	client.baseURLOverride = ts.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := client.RequestLease(ctx, "127.0.0.1", "work", "claude", 2)
+	if err != nil {
+		t.Fatalf("RequestLease failed: %v", err)
+	}
+
+	if resp.Signature == "" {
+		t.Fatalf("expected non-empty Signature on LeaseResponse")
+	}
+	if resp.LenderNodeID != "alice-node" {
+		t.Errorf("expected LenderNodeID alice-node, got %q", resp.LenderNodeID)
+	}
+
+	borrowerID, _ := os.Hostname()
+	if borrowerID == "" {
+		borrowerID = "local-node"
+	}
+	expStr := resp.ExpiresAt.UTC().Format(time.RFC3339)
+	valid := VerifyLeaseSignature(pubKey, resp.LeaseID, "alice-node", borrowerID, "work", "claude", expStr, resp.Signature)
+	if !valid {
+		t.Errorf("expected auto-approved lease signature to verify successfully")
+	}
+
+	// Verify granted leases record signature
+	leases := store.GetGrantedLeases()
+	if len(leases) == 0 {
+		t.Fatalf("expected granted lease to be recorded")
+	}
+	gl := leases[0]
+	if gl.Signature != resp.Signature {
+		t.Errorf("expected GrantedLease to record signature %q, got %q", resp.Signature, gl.Signature)
+	}
+	if gl.LenderNodeID != "alice-node" {
+		t.Errorf("expected GrantedLease to record lender node ID alice-node, got %q", gl.LenderNodeID)
+	}
+}

@@ -206,7 +206,14 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	}
 
 	seedClaudeJSON(config.RealHomeDir(), profileDir)
-	rewriteSettingsHooks(config.RealHomeDir(), profileDir)
+	isLeased := profile.IsLeased(profileName)
+	if isLeased {
+		if err := agents.SetupLeasedProfileHooks("claude", profileName, profileDir); err != nil {
+			logger.Debug("[claude] Failed to setup leased profile hooks: %v", err)
+		}
+	} else {
+		rewriteSettingsHooks(config.RealHomeDir(), profileDir)
+	}
 	_ = a.HarvestCredentials(ctx, profileName, profileDir)
 
 	bin := a.ResolveBinary()
@@ -234,6 +241,9 @@ var writeSettings = merge.AtomicWrite
 // is merged per session (G5). Only the hooks member is rewritten, so a
 // marketplace path under the host .claude is never turned into a profile path.
 func rewriteSettingsHooks(hostHome, profileDir string) {
+	if profile.IsLeased(filepath.Base(profileDir)) {
+		return
+	}
 	destDir := filepath.Join(profileDir, ".claude")
 	_ = os.MkdirAll(destDir, 0700)
 	destSettings := filepath.Join(destDir, "settings.json")

@@ -35,6 +35,7 @@ func newShareCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 		newShareStatusCmd(pm),
 		newShareListCmd(pm),
 		newShareRequestCmd(pm),
+		newShareRenewCmd(pm),
 		newShareReleaseCmd(pm),
 		newSharePeerCmd(pm),
 		newShareServeCmd(pm),
@@ -281,6 +282,134 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 	return cmd
 }
 
+func newShareRenewCmd(pm *profile.ProfileManager) *cobra.Command {
+	var hours int
+
+	cmd := &cobra.Command{
+		Use:   "renew <peer>:<profile> (or <profile>)",
+		Short: "Renew an existing leased profile in-place",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profArg := args[0]
+			var peer, profileName string
+
+			mgr := share.NewLeaseManager(pm.ProfilesRoot())
+			meta, err := mgr.GetLeaseMeta(profArg)
+			if err != nil || meta == nil {
+				// Fallback: check if any directory in profiles root matches *:<profArg>
+				if entries, readErr := os.ReadDir(pm.ProfilesRoot()); readErr == nil {
+					for _, e := range entries {
+						if e.IsDir() && (strings.HasSuffix(e.Name(), ":"+profArg) || e.Name() == profArg) {
+							if m, mErr := mgr.GetLeaseMeta(e.Name()); mErr == nil && m != nil {
+								meta = m
+								break
+							}
+						}
+					}
+				}
+			}
+
+			if meta != nil && meta.SourcePeer != "" && meta.SourceProfile != "" {
+				peer = meta.SourcePeer
+				profileName = meta.SourceProfile
+			} else if strings.Contains(profArg, "/") {
+				parts := strings.SplitN(profArg, "/", 2)
+				peer, profileName = parts[0], parts[1]
+			} else if strings.Contains(profArg, ":") {
+				lastIdx := strings.LastIndex(profArg, ":")
+				peer, profileName = profArg[:lastIdx], profArg[lastIdx+1:]
+			} else {
+				return fmt.Errorf("could not resolve lease peer for profile %q: please specify <peer>:<profile>", profArg)
+			}
+
+			if peer == "" || profileName == "" {
+				return fmt.Errorf("could not resolve lease peer for profile %q: please specify <peer>:<profile>", profArg)
+			}
+
+			if hours <= 0 || hours > 72 {
+				return fmt.Errorf("requested hours must be between 1 and 72 (got %d)", hours)
+			}
+
+			store := share.NewStore(config.BaseDir())
+			defer func() {
+				_ = store.Close()
+			}()
+			targetHost := peer
+			for _, p := range store.GetPeers() {
+				shortHost := strings.TrimSuffix(strings.ToLower(p.HostName), ".local")
+				if strings.EqualFold(p.HostName, peer) || strings.EqualFold(shortHost, strings.ToLower(peer)) || p.VPNIP == peer {
+					if p.HostName != "" {
+						targetHost = p.HostName
+					} else {
+						targetHost = p.VPNIP
+					}
+					break
+				}
+			}
+
+			client := share.NewClient(4319)
+			reqCtx, reqCancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+			resp, err := client.RequestLease(reqCtx, targetHost, profileName, "all", hours)
+			reqCancel()
+			if err != nil && !strings.Contains(targetHost, ".") {
+				// Retry with .local for zero-conf mDNS resolution
+				retryCtx, retryCancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+				resp, err = client.RequestLease(retryCtx, targetHost+".local", profileName, "all", hours)
+				retryCancel()
+			}
+			if err != nil {
+				return fmt.Errorf("renewal request failed: %w", err)
+			}
+
+			if resp.Status == "pending" {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s Renewal request submitted (id: %s). Waiting for teammate approval (press Ctrl+C to cancel)...\n",
+					lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("⏳"),
+					resp.RequestID)
+				pollTicker := time.NewTicker(2 * time.Second)
+				defer pollTicker.Stop()
+				pollCtx, pollCancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+				defer pollCancel()
+
+				approved := false
+				for !approved {
+					select {
+					case <-pollCtx.Done():
+						return fmt.Errorf("approval timed out after 2 minutes")
+					case <-pollTicker.C:
+						pResp, pErr := client.PollLease(pollCtx, targetHost, resp.RequestID)
+						if pErr == nil && pResp != nil {
+							if pResp.Status == "approved" {
+								resp = pResp
+								approved = true
+								break
+							} else if pResp.Status == "denied" {
+								return fmt.Errorf("teammate denied lease renewal request: %s", pResp.Message)
+							}
+						}
+					}
+				}
+			} else if resp.Status != "approved" {
+				return fmt.Errorf("renewal request status: %s (%s)", resp.Status, resp.Message)
+			}
+
+			installedName, err := mgr.InstallLease(peer, profileName, resp)
+			if err != nil {
+				return fmt.Errorf("failed to install renewed lease: %w", err)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Successfully renewed lease for %s (valid until %s)\n",
+				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
+				installedName, resp.ExpiresAt.Format("15:04:05"))
+			fmt.Fprintf(cmd.OutOrStdout(), "%s Paused sessions have been automatically unfrozen.\n",
+				lipgloss.NewStyle().Foreground(tui.AccentCyan).Render("[aim]"))
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVar(&hours, "hours", 2, "Requested renewal duration in hours")
+	return cmd
+}
+
 func newShareReleaseCmd(pm *profile.ProfileManager) *cobra.Command {
 	return &cobra.Command{
 		Use:   "release <ephemeral-profile>",
@@ -368,8 +497,10 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the P2P sharing server listener",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store := share.NewStore(config.BaseDir())
+			defer store.Close()
 			host, _ := os.Hostname()
 			server := share.NewServer(store, pm.ProfilesRoot(), host, port)
 
@@ -379,7 +510,7 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 				return fmt.Errorf("failed to bind %s: %w", addr, err)
 			}
 
-			fmt.Printf("%s AIM P2P Share Server listening on %s (press Ctrl+C to stop)\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s AIM P2P Share Server listening on %s (press Ctrl+C to stop)\n",
 				lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
 				addr)
 
@@ -392,10 +523,14 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			defer signal.Stop(sigCh)
 			select {
+			case <-cmd.Context().Done():
+				_ = server.Close()
+				return nil
 			case sig := <-sigCh:
 				_ = server.Close()
-				fmt.Printf("\nShare server stopped (%s).\n", sig)
+				fmt.Fprintf(cmd.OutOrStdout(), "\nShare server stopped (%s).\n", sig)
 				return nil
 			case err := <-errCh:
 				_ = server.Close()
