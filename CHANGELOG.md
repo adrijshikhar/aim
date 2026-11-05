@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/adrijshikhar/aim/compare/v0.19.0...v0.20.0) (2026-11-05)
+
+
+### Features
+
+* **mcp:** unify MCP management under agent adapters and slice-based profile targeting ([#105](https://github.com/adrijshikhar/aim/issues/105)) ([d82d170](https://github.com/adrijshikhar/aim/commit/d82d170bb0d81b47893583907d9f57fa7d185d6d))
+* **share:** P2P multi-agent lease guard, non-destructive freeze, and hook isolation ([#108](https://github.com/adrijshikhar/aim/issues/108)) ([2b48c34](https://github.com/adrijshikhar/aim/commit/2b48c340b23c556a1405985b095dd64f07409f09))
+
+
+### Bug Fixes
+
+* **ci:** bump setup-node, action-setup, and upload-artifact, and fix SQLite audit timestamp sorting ([#107](https://github.com/adrijshikhar/aim/issues/107)) ([b53813a](https://github.com/adrijshikhar/aim/commit/b53813a706a0342ffb78f34a872f7a4cdd85c7f0))
+* **test:** eliminate timing flakes with deterministic polling loops ([#110](https://github.com/adrijshikhar/aim/issues/110)) ([41e5172](https://github.com/adrijshikhar/aim/commit/41e51727a002ac7134b5e58be8ccbd55c80f6563))
+
 ## [0.19.0](https://github.com/adrijshikhar/aim/compare/v0.18.0...v0.19.0) (2026-10-25)
 
 
