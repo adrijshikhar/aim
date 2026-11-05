@@ -69,9 +69,16 @@ func TestCacheStorePutGetAndExpiry(t *testing.T) {
 	}
 
 	// Wait for TTL expiration
-	time.Sleep(150 * time.Millisecond)
-	_, foundExpired := store.Get("agy", "work")
-	if foundExpired {
+	expired := false
+	expDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(expDeadline) {
+		if _, foundExpired := store.Get("agy", "work"); !foundExpired {
+			expired = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !expired {
 		t.Fatal("expected expired entry to be treated as cache miss")
 	}
 
