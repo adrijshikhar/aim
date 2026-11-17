@@ -1527,19 +1527,42 @@ func TestBridgeMCPTokens_MergesAndSymlinks(t *testing.T) {
 	sharedAgyDir := filepath.Join(fakeRealHome, ".gemini", "antigravity-cli")
 	_ = os.MkdirAll(sharedAgyDir, 0755)
 
-	// Profile 1 with Cloudflare token
+	// Profile 1 with Cloudflare token in real nested format with +05:30 timezone (11:30 UTC)
 	prof1Dir := t.TempDir()
 	prof1TokenDir := filepath.Join(prof1Dir, ".gemini", "antigravity-cli")
 	_ = os.MkdirAll(prof1TokenDir, 0755)
 	prof1File := filepath.Join(prof1TokenDir, "mcp_oauth_tokens.json")
-	_ = os.WriteFile(prof1File, []byte(`{"https://mcp.cloudflare.com/mcp":{"access_token":"cf_old","expiry":"2026-11-17T14:00:00Z"}}`), 0600)
+	_ = os.WriteFile(prof1File, []byte(`{
+		"https://mcp.cloudflare.com/mcp": {
+			"client_id": "cf_id",
+			"token": {
+				"access_token": "cf_old",
+				"expiry": "2026-11-17T17:00:00+05:30"
+			}
+		}
+	}`), 0600)
 
-	// Profile 2 with Supabase token and newer Cloudflare token
+	// Profile 2 with Supabase token and newer Cloudflare token at 13:00 UTC (1.5h later than 11:30 UTC)
+	// Lexicographically "17:00:00+05:30" > "13:00:00Z", but chronologically "13:00:00Z" is newer!
 	prof2Dir := t.TempDir()
 	prof2TokenDir := filepath.Join(prof2Dir, ".gemini", "antigravity-cli")
 	_ = os.MkdirAll(prof2TokenDir, 0755)
 	prof2File := filepath.Join(prof2TokenDir, "mcp_oauth_tokens.json")
-	_ = os.WriteFile(prof2File, []byte(`{"https://mcp.supabase.com/mcp":{"access_token":"sb_tok"},"https://mcp.cloudflare.com/mcp":{"access_token":"cf_newer","expiry":"2026-11-17T16:00:00Z"}}`), 0600)
+	_ = os.WriteFile(prof2File, []byte(`{
+		"https://mcp.supabase.com/mcp": {
+			"client_id": "sb_id",
+			"token": {
+				"access_token": "sb_tok"
+			}
+		},
+		"https://mcp.cloudflare.com/mcp": {
+			"client_id": "cf_id",
+			"token": {
+				"access_token": "cf_newer",
+				"expiry": "2026-11-17T13:00:00Z"
+			}
+		}
+	}`), 0600)
 
 	// Bridge Profile 1
 	if err := bridgeSharedState(fakeRealHome, prof1Dir, "prof1"); err != nil {
@@ -1565,7 +1588,11 @@ func TestBridgeMCPTokens_MergesAndSymlinks(t *testing.T) {
 		t.Errorf("expected Supabase token in shared file")
 	}
 	cfEntry := sharedMap["https://mcp.cloudflare.com/mcp"]
-	if cfEntry == nil || cfEntry["access_token"] != "cf_newer" {
+	if cfEntry == nil {
+		t.Fatalf("expected Cloudflare entry in shared file")
+	}
+	tokMap, ok := cfEntry["token"].(map[string]any)
+	if !ok || tokMap["access_token"] != "cf_newer" {
 		t.Errorf("expected newer Cloudflare token 'cf_newer', got %v", cfEntry)
 	}
 

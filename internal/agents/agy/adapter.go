@@ -783,12 +783,65 @@ func bridgeDir(profilePath, sharedPath string) {
 	}
 }
 
+func extractMCPExpiry(entry map[string]any) string {
+	if exp, ok := entry["expiry"].(string); ok && exp != "" {
+		return exp
+	}
+	if tok, ok := entry["token"].(map[string]any); ok {
+		if exp, ok := tok["expiry"].(string); ok && exp != "" {
+			return exp
+		}
+	}
+	return ""
+}
+
+func isNewerExpiry(pExp, sExp string) bool {
+	if pExp == "" {
+		return false
+	}
+	if sExp == "" {
+		return true
+	}
+	pTime, errP := time.Parse(time.RFC3339Nano, pExp)
+	if errP != nil {
+		pTime, errP = time.Parse(time.RFC3339, pExp)
+	}
+	sTime, errS := time.Parse(time.RFC3339Nano, sExp)
+	if errS != nil {
+		sTime, errS = time.Parse(time.RFC3339, sExp)
+	}
+	if errP == nil && errS == nil {
+		return pTime.After(sTime)
+	}
+	return pExp > sExp
+}
+
+func replaceWithSymlink(linkPath, target string) {
+	dir := filepath.Dir(linkPath)
+	tmpLink := filepath.Join(dir, fmt.Sprintf(".symlink.tmp.%d", time.Now().UnixNano()))
+	_ = os.Remove(tmpLink)
+	if err := os.Symlink(target, tmpLink); err == nil {
+		if err := os.Rename(tmpLink, linkPath); err != nil {
+			_ = os.Remove(tmpLink)
+			_ = os.Remove(linkPath)
+			_ = os.Symlink(target, linkPath)
+		}
+	} else {
+		_ = os.Remove(linkPath)
+		_ = os.Symlink(target, linkPath)
+	}
+}
+
 func bridgeMCPTokens(profileFile, sharedFile string) {
+	if profileFile == sharedFile {
+		return
+	}
+
 	fi, err := os.Lstat(profileFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if _, sErr := os.Stat(sharedFile); sErr == nil {
-				_ = os.Symlink(sharedFile, profileFile)
+				replaceWithSymlink(profileFile, sharedFile)
 			}
 		}
 		return
@@ -798,23 +851,32 @@ func bridgeMCPTokens(profileFile, sharedFile string) {
 		if rErr == nil && target == sharedFile {
 			return
 		}
-		_ = os.Remove(profileFile)
 		if _, sErr := os.Stat(sharedFile); sErr == nil {
-			_ = os.Symlink(sharedFile, profileFile)
+			replaceWithSymlink(profileFile, sharedFile)
 		}
 		return
+	}
+
+	// File lock shared state to prevent race conditions during concurrent merges
+	lock, lockErr := merge.LockExclusive(sharedFile+".lock", 5*time.Second)
+	if lockErr == nil {
+		defer lock.Unlock()
 	}
 
 	// Parse profile tokens
 	profMap := make(map[string]map[string]any)
 	if pData, err := os.ReadFile(profileFile); err == nil && len(pData) > 0 {
-		_ = json.Unmarshal(pData, &profMap)
+		if uErr := json.Unmarshal(pData, &profMap); uErr != nil {
+			logger.Debug("[agy] bridgeMCPTokens: unmarshal profile tokens failed: %v", uErr)
+		}
 	}
 
 	// Parse existing shared tokens
 	sharedMap := make(map[string]map[string]any)
 	if sData, err := os.ReadFile(sharedFile); err == nil && len(sData) > 0 {
-		_ = json.Unmarshal(sData, &sharedMap)
+		if uErr := json.Unmarshal(sData, &sharedMap); uErr != nil {
+			logger.Debug("[agy] bridgeMCPTokens: unmarshal shared tokens failed: %v", uErr)
+		}
 	}
 
 	// Merge: add new keys, update if profile entry has newer expiry
@@ -824,33 +886,41 @@ func bridgeMCPTokens(profileFile, sharedFile string) {
 			sharedMap[k] = pEntry
 			continue
 		}
-		pExp, _ := pEntry["expiry"].(string)
-		sExp, _ := sEntry["expiry"].(string)
-		if pExp > sExp {
+		pExp := extractMCPExpiry(pEntry)
+		sExp := extractMCPExpiry(sEntry)
+		if isNewerExpiry(pExp, sExp) {
 			sharedMap[k] = pEntry
 		}
 	}
 
 	// Write merged JSON atomically to sharedFile
 	if len(sharedMap) > 0 {
-		if out, err := json.MarshalIndent(sharedMap, "", "  "); err == nil {
-			_ = merge.AtomicWrite(sharedFile, out, 0600)
+		out, err := json.MarshalIndent(sharedMap, "", "  ")
+		if err != nil {
+			return
+		}
+		if err := merge.AtomicWrite(sharedFile, out, 0600); err != nil {
+			logger.Debug("[agy] bridgeMCPTokens: AtomicWrite shared tokens failed: %v", err)
+			return
 		}
 	}
 
-	// Replace profile file with symlink
-	_ = os.Remove(profileFile)
+	// Replace profile file with atomic symlink only after successful write
 	if _, sErr := os.Stat(sharedFile); sErr == nil {
-		_ = os.Symlink(sharedFile, profileFile)
+		replaceWithSymlink(profileFile, sharedFile)
 	}
 }
 
 func bridgeFile(profileFile, sharedFile string) {
+	if profileFile == sharedFile {
+		return
+	}
+
 	fi, err := os.Lstat(profileFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if _, sErr := os.Stat(sharedFile); sErr == nil {
-				_ = os.Symlink(sharedFile, profileFile)
+				replaceWithSymlink(profileFile, sharedFile)
 			}
 		}
 		return
@@ -860,18 +930,16 @@ func bridgeFile(profileFile, sharedFile string) {
 		if rErr == nil && target == sharedFile {
 			return
 		}
-		_ = os.Remove(profileFile)
 		if _, sErr := os.Stat(sharedFile); sErr == nil {
-			_ = os.Symlink(sharedFile, profileFile)
+			replaceWithSymlink(profileFile, sharedFile)
 		}
 		return
 	}
 	if _, sErr := os.Stat(sharedFile); os.IsNotExist(sErr) {
 		_ = copySingleFile(profileFile, sharedFile)
 	}
-	_ = os.Remove(profileFile)
 	if _, sErr := os.Stat(sharedFile); sErr == nil {
-		_ = os.Symlink(sharedFile, profileFile)
+		replaceWithSymlink(profileFile, sharedFile)
 	}
 }
 
