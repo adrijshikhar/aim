@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/adrijshikhar/aim/compare/v0.20.0...v0.20.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* profile login account isolation, mcp oauth token sync, and account email display ([#111](https://github.com/adrijshikhar/aim/issues/111)) ([eff02d2](https://github.com/adrijshikhar/aim/commit/eff02d273c080a6d87188ff1ee20ae1123545d7a))
+
 ## [0.20.0](https://github.com/adrijshikhar/aim/compare/v0.19.0...v0.20.0) (2026-11-05)
 
 
