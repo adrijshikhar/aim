@@ -640,6 +640,11 @@ func bridgeSharedState(realHome, profileDir string, optProfileName ...string) er
 		sPluginData := filepath.Join(sharedDir, "plugin_data")
 		_ = os.MkdirAll(sPluginData, 0755)
 		bridgeDir(pPluginData, sPluginData)
+
+		// 5b. mcp_oauth_tokens.json (strictly not bridged for leased profiles)
+		pMcpTokens := filepath.Join(tokenDir, "mcp_oauth_tokens.json")
+		sMcpTokens := filepath.Join(sharedDir, "mcp_oauth_tokens.json")
+		bridgeMCPTokens(pMcpTokens, sMcpTokens)
 	}
 
 	// 6. Gemini config directory (plugins, import_manifest.json, hooks, settings)
@@ -770,6 +775,68 @@ func bridgeDir(profilePath, sharedPath string) {
 				_ = os.Symlink(src, dst)
 			}
 		}
+	}
+}
+
+func bridgeMCPTokens(profileFile, sharedFile string) {
+	fi, err := os.Lstat(profileFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if _, sErr := os.Stat(sharedFile); sErr == nil {
+				_ = os.Symlink(sharedFile, profileFile)
+			}
+		}
+		return
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		target, rErr := os.Readlink(profileFile)
+		if rErr == nil && target == sharedFile {
+			return
+		}
+		_ = os.Remove(profileFile)
+		if _, sErr := os.Stat(sharedFile); sErr == nil {
+			_ = os.Symlink(sharedFile, profileFile)
+		}
+		return
+	}
+
+	// Parse profile tokens
+	profMap := make(map[string]map[string]any)
+	if pData, err := os.ReadFile(profileFile); err == nil && len(pData) > 0 {
+		_ = json.Unmarshal(pData, &profMap)
+	}
+
+	// Parse existing shared tokens
+	sharedMap := make(map[string]map[string]any)
+	if sData, err := os.ReadFile(sharedFile); err == nil && len(sData) > 0 {
+		_ = json.Unmarshal(sData, &sharedMap)
+	}
+
+	// Merge: add new keys, update if profile entry has newer expiry
+	for k, pEntry := range profMap {
+		sEntry, exists := sharedMap[k]
+		if !exists {
+			sharedMap[k] = pEntry
+			continue
+		}
+		pExp, _ := pEntry["expiry"].(string)
+		sExp, _ := sEntry["expiry"].(string)
+		if pExp > sExp {
+			sharedMap[k] = pEntry
+		}
+	}
+
+	// Write merged JSON atomically to sharedFile
+	if len(sharedMap) > 0 {
+		if out, err := json.MarshalIndent(sharedMap, "", "  "); err == nil {
+			_ = merge.AtomicWrite(sharedFile, out, 0600)
+		}
+	}
+
+	// Replace profile file with symlink
+	_ = os.Remove(profileFile)
+	if _, sErr := os.Stat(sharedFile); sErr == nil {
+		_ = os.Symlink(sharedFile, profileFile)
 	}
 }
 

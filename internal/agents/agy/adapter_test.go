@@ -1512,3 +1512,85 @@ func TestAgyAdapter_LeasedProfileHookIsolation(t *testing.T) {
 		t.Errorf("expected gemini hooks.json to contain 'aim-guard' plugin block")
 	}
 }
+
+func TestBridgeMCPTokens_MergesAndSymlinks(t *testing.T) {
+	fakeRealHome := t.TempDir()
+	sharedAgyDir := filepath.Join(fakeRealHome, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(sharedAgyDir, 0755)
+
+	// Profile 1 with Cloudflare token
+	prof1Dir := t.TempDir()
+	prof1TokenDir := filepath.Join(prof1Dir, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(prof1TokenDir, 0755)
+	prof1File := filepath.Join(prof1TokenDir, "mcp_oauth_tokens.json")
+	_ = os.WriteFile(prof1File, []byte(`{"https://mcp.cloudflare.com/mcp":{"access_token":"cf_old","expiry":"2026-11-17T14:00:00Z"}}`), 0600)
+
+	// Profile 2 with Supabase token and newer Cloudflare token
+	prof2Dir := t.TempDir()
+	prof2TokenDir := filepath.Join(prof2Dir, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(prof2TokenDir, 0755)
+	prof2File := filepath.Join(prof2TokenDir, "mcp_oauth_tokens.json")
+	_ = os.WriteFile(prof2File, []byte(`{"https://mcp.supabase.com/mcp":{"access_token":"sb_tok"},"https://mcp.cloudflare.com/mcp":{"access_token":"cf_newer","expiry":"2026-11-17T16:00:00Z"}}`), 0600)
+
+	// Bridge Profile 1
+	if err := bridgeSharedState(fakeRealHome, prof1Dir, "prof1"); err != nil {
+		t.Fatalf("bridgeSharedState prof1 failed: %v", err)
+	}
+
+	// Bridge Profile 2
+	if err := bridgeSharedState(fakeRealHome, prof2Dir, "prof2"); err != nil {
+		t.Fatalf("bridgeSharedState prof2 failed: %v", err)
+	}
+
+	// Verify shared file has BOTH tokens, with newer Cloudflare token
+	sharedFile := filepath.Join(sharedAgyDir, "mcp_oauth_tokens.json")
+	sharedBytes, err := os.ReadFile(sharedFile)
+	if err != nil {
+		t.Fatalf("failed to read shared mcp_oauth_tokens.json: %v", err)
+	}
+	var sharedMap map[string]map[string]any
+	if err := json.Unmarshal(sharedBytes, &sharedMap); err != nil {
+		t.Fatalf("failed to unmarshal sharedMap: %v", err)
+	}
+	if sharedMap["https://mcp.supabase.com/mcp"] == nil {
+		t.Errorf("expected Supabase token in shared file")
+	}
+	cfEntry := sharedMap["https://mcp.cloudflare.com/mcp"]
+	if cfEntry == nil || cfEntry["access_token"] != "cf_newer" {
+		t.Errorf("expected newer Cloudflare token 'cf_newer', got %v", cfEntry)
+	}
+
+	// Verify prof1File and prof2File are symlinks to sharedFile
+	fi1, err := os.Lstat(prof1File)
+	if err != nil || fi1.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected prof1File to be a symlink")
+	}
+	fi2, err := os.Lstat(prof2File)
+	if err != nil || fi2.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected prof2File to be a symlink")
+	}
+}
+
+func TestBridgeMCPTokens_SkippedForLeasedProfile(t *testing.T) {
+	fakeRealHome := t.TempDir()
+	leasedDir := t.TempDir()
+	leasedTokenDir := filepath.Join(leasedDir, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(leasedTokenDir, 0755)
+	leasedFile := filepath.Join(leasedTokenDir, "mcp_oauth_tokens.json")
+	_ = os.WriteFile(leasedFile, []byte(`{"https://mcp.secret.com":{"access_token":"secret"}}`), 0600)
+
+	// Profile with lease name (contains colon)
+	if err := bridgeSharedState(fakeRealHome, leasedDir, "peer:leased-prof"); err != nil {
+		t.Fatalf("bridgeSharedState leased failed: %v", err)
+	}
+
+	// Verify leasedFile is NOT symlinked
+	fi, err := os.Lstat(leasedFile)
+	if err != nil {
+		t.Fatalf("leasedFile missing: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("leased profile mcp_oauth_tokens.json must NOT be symlinked to shared state")
+	}
+}
+
