@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -69,7 +70,23 @@ func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *prof
 			_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
 		}
 		if loginSucceeded {
-			telemetry.IdentifyAccount(adapter.Name(), profile.GetProfileAccountInfoForAgent(pDir, adapter.Name()))
+			acc := profile.GetProfileAccountInfoForAgent(pDir, adapter.Name())
+			telemetry.IdentifyAccount(adapter.Name(), acc)
+			if acc.Email != "" && pm != nil {
+				if existingProfiles, err := pm.ListConfiguredProfiles(); err == nil {
+					for _, otherProf := range existingProfiles {
+						if otherProf == profileName {
+							continue
+						}
+						otherDir := pm.ProfileDir(otherProf)
+						otherAcc := profile.GetProfileAccountInfoForAgent(otherDir, adapter.Name())
+						if otherAcc.Email != "" && strings.EqualFold(otherAcc.Email, acc.Email) {
+							fmt.Fprintf(os.Stderr, "\nNotice: Profile %q authenticated with %s (already used by profile %q)\n", profileName, acc.Email, otherProf)
+							break
+						}
+					}
+				}
+			}
 		}
 	}()
 

@@ -166,20 +166,39 @@ func extractFromTokenFile(path string) AccountInfo {
 func ParseTokenAccountInfo(data []byte) AccountInfo {
 	var root struct {
 		IDToken        string `json:"id_token"`
+		IDTokenEmail   string `json:"id_token_email"`
 		AuthMethod     string `json:"auth_method"`
 		UserEmail      string `json:"user_email"`
 		Email          string `json:"email"`
 		ClientEmail    string `json:"client_email"`
+		Name           string `json:"name"`
+		UserName       string `json:"user_name"`
+		DisplayName    string `json:"display_name"`
 		ProjectID      string `json:"project_id"`
 		QuotaProjectID string `json:"quota_project_id"`
+		Token          struct {
+			IDToken      string `json:"id_token"`
+			IDTokenEmail string `json:"id_token_email"`
+			Email        string `json:"email"`
+			UserEmail    string `json:"user_email"`
+			ClientEmail  string `json:"client_email"`
+			Name         string `json:"name"`
+			UserName     string `json:"user_name"`
+			DisplayName  string `json:"display_name"`
+		} `json:"token"`
 	}
 	if err := json.Unmarshal(data, &root); err != nil {
 		return AccountInfo{}
 	}
 
+	idToken := root.IDToken
+	if idToken == "" {
+		idToken = root.Token.IDToken
+	}
+
 	var userID, email, name string
-	if root.IDToken != "" {
-		parts := strings.Split(root.IDToken, ".")
+	if idToken != "" {
+		parts := strings.Split(idToken, ".")
 		if len(parts) >= 2 {
 			payload := parts[1]
 			decoded, err := base64.RawURLEncoding.DecodeString(payload)
@@ -188,26 +207,56 @@ func ParseTokenAccountInfo(data []byte) AccountInfo {
 			}
 			if err == nil {
 				var claims struct {
-					Subject string `json:"sub"`
-					Email   string `json:"email"`
-					Name    string `json:"name"`
+					Subject     string `json:"sub"`
+					Email       string `json:"email"`
+					Name        string `json:"name"`
+					DisplayName string `json:"display_name"`
 				}
 				if err := json.Unmarshal(decoded, &claims); err == nil {
 					userID = claims.Subject
 					email = claims.Email
 					name = claims.Name
+					if name == "" {
+						name = claims.DisplayName
+					}
 				}
 			}
 		}
 	}
 
 	if email == "" {
-		if root.UserEmail != "" {
+		if root.IDTokenEmail != "" {
+			email = root.IDTokenEmail
+		} else if root.Token.IDTokenEmail != "" {
+			email = root.Token.IDTokenEmail
+		} else if root.UserEmail != "" {
 			email = root.UserEmail
+		} else if root.Token.UserEmail != "" {
+			email = root.Token.UserEmail
 		} else if root.Email != "" {
 			email = root.Email
+		} else if root.Token.Email != "" {
+			email = root.Token.Email
 		} else if root.ClientEmail != "" {
 			email = root.ClientEmail
+		} else if root.Token.ClientEmail != "" {
+			email = root.Token.ClientEmail
+		}
+	}
+
+	if name == "" {
+		if root.Name != "" {
+			name = root.Name
+		} else if root.Token.Name != "" {
+			name = root.Token.Name
+		} else if root.DisplayName != "" {
+			name = root.DisplayName
+		} else if root.Token.DisplayName != "" {
+			name = root.Token.DisplayName
+		} else if root.UserName != "" {
+			name = root.UserName
+		} else if root.Token.UserName != "" {
+			name = root.Token.UserName
 		}
 	}
 

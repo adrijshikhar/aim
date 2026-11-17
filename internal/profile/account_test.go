@@ -50,6 +50,54 @@ func TestParseTokenAccountInfo_FallbackEmail(t *testing.T) {
 	}
 }
 
+func TestParseTokenAccountInfo_IDTokenEmail(t *testing.T) {
+	// Real-world Antigravity CLI token format
+	tokenJSON := `{
+		"token": {
+			"access_token": "ya29.mock_token",
+			"token_type": "Bearer",
+			"refresh_token": "1//mock_refresh",
+			"expiry": "2026-11-17T14:43:02.208746+05:30",
+			"expires_in": 3599
+		},
+		"auth_method": "consumer",
+		"id_token_email": "bhomika1.1.2000@gmail.com"
+	}`
+
+	info := ParseTokenAccountInfo([]byte(tokenJSON))
+	if info.Email != "bhomika1.1.2000@gmail.com" {
+		t.Errorf("expected email 'bhomika1.1.2000@gmail.com', got %q", info.Email)
+	}
+	if info.AuthMethod != "Google OAuth (consumer)" {
+		t.Errorf("expected auth method 'Google OAuth (consumer)', got %q", info.AuthMethod)
+	}
+}
+
+func TestParseTokenAccountInfo_NestedIDTokenJWT(t *testing.T) {
+	claimsJSON := `{"iss":"https://accounts.google.com","sub":"456","email":"nested@example.com","name":"Nested User"}`
+	encodedPayload := base64.RawURLEncoding.EncodeToString([]byte(claimsJSON))
+	mockJWT := "eyJhbGciOiJSUzI1NiJ9." + encodedPayload + ".mockSignature"
+
+	tokenJSON := `{
+		"token": {
+			"access_token": "ya29.mock",
+			"id_token": "` + mockJWT + `"
+		},
+		"auth_method": "consumer"
+	}`
+
+	info := ParseTokenAccountInfo([]byte(tokenJSON))
+	if info.Email != "nested@example.com" {
+		t.Errorf("expected email 'nested@example.com', got %q", info.Email)
+	}
+	if info.Name != "Nested User" {
+		t.Errorf("expected name 'Nested User', got %q", info.Name)
+	}
+	if info.UserID != "456" {
+		t.Errorf("expected user_id '456', got %q", info.UserID)
+	}
+}
+
 func TestGetProfileAccountInfo_ADC(t *testing.T) {
 	tmpDir := t.TempDir()
 	adcPath := filepath.Join(tmpDir, ".config", "gcloud", "application_default_credentials.json")
@@ -210,5 +258,22 @@ func TestGetProfileAccountInfo_AgentIsolation(t *testing.T) {
 	codexInfo := GetProfileAccountInfoForAgent(tmpDir, "codex")
 	if codexInfo.Email != "codex-only@test.io" {
 		t.Errorf("expected codex email 'codex-only@test.io', got %q", codexInfo.Email)
+	}
+}
+
+func TestGetProfileAccountInfo_Agy_RealWorldToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	agyDir := filepath.Join(tmpDir, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(agyDir, 0700)
+
+	realToken := `{"token":{"access_token":"ya29.mock","token_type":"Bearer","refresh_token":"1//mock","expiry":"2026-11-17T14:43:02+05:30","expires_in":3599},"auth_method":"consumer","id_token_email":"bhomika1.1.2000@gmail.com"}`
+	_ = os.WriteFile(filepath.Join(agyDir, "antigravity-oauth-token"), []byte(realToken), 0600)
+
+	info := GetProfileAccountInfoForAgent(tmpDir, "agy")
+	if info.Email != "bhomika1.1.2000@gmail.com" {
+		t.Errorf("expected agy email 'bhomika1.1.2000@gmail.com', got %q", info.Email)
+	}
+	if info.AuthMethod != "Google OAuth (consumer)" {
+		t.Errorf("expected auth method 'Google OAuth (consumer)', got %q", info.AuthMethod)
 	}
 }

@@ -393,6 +393,27 @@ func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
 	return data, false
 }
 
+// OAuthConfig returns the provider configuration used for Antigravity OAuth 2.0 PKCE authentication.
+func (a *Adapter) OAuthConfig(clientID, clientSecret string) oauth.ProviderConfig {
+	return oauth.ProviderConfig{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL:     "https://oauth2.googleapis.com/token",
+		UserInfoURL:  "https://www.googleapis.com/oauth2/v2/userinfo",
+		Scopes: []string{
+			"openid",
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/userinfo.profile",
+			"https://www.googleapis.com/auth/cloud-platform",
+		},
+		ExtraAuthParams: map[string]string{
+			"access_type": "offline",
+			"prompt":      "select_account consent",
+		},
+	}
+}
+
 func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) error {
 	clientID, clientSecret := getOAuthCredentials()
 	if clientID == "" || clientSecret == "" {
@@ -445,23 +466,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		_ = a.SyncHostSettings(ctx, profileName, profileDir, loginCfg)
 		return nil
 	}
-	cfg := oauth.ProviderConfig{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
-		TokenURL:     "https://oauth2.googleapis.com/token",
-		UserInfoURL:  "https://www.googleapis.com/oauth2/v2/userinfo",
-		Scopes: []string{
-			"openid",
-			"https://www.googleapis.com/auth/userinfo.email",
-			"https://www.googleapis.com/auth/userinfo.profile",
-			"https://www.googleapis.com/auth/cloud-platform",
-		},
-		ExtraAuthParams: map[string]string{
-			"access_type": "offline",
-			"prompt":      "consent",
-		},
-	}
+	cfg := a.OAuthConfig(clientID, clientSecret)
 
 	tok, err := oauth.Authenticate(ctx, cfg, true)
 	if err != nil {
@@ -640,6 +645,11 @@ func bridgeSharedState(realHome, profileDir string, optProfileName ...string) er
 		sPluginData := filepath.Join(sharedDir, "plugin_data")
 		_ = os.MkdirAll(sPluginData, 0755)
 		bridgeDir(pPluginData, sPluginData)
+
+		// 5b. mcp_oauth_tokens.json (strictly not bridged for leased profiles)
+		pMcpTokens := filepath.Join(tokenDir, "mcp_oauth_tokens.json")
+		sMcpTokens := filepath.Join(sharedDir, "mcp_oauth_tokens.json")
+		bridgeMCPTokens(pMcpTokens, sMcpTokens)
 	}
 
 	// 6. Gemini config directory (plugins, import_manifest.json, hooks, settings)
@@ -773,12 +783,65 @@ func bridgeDir(profilePath, sharedPath string) {
 	}
 }
 
-func bridgeFile(profileFile, sharedFile string) {
+func extractMCPExpiry(entry map[string]any) string {
+	if exp, ok := entry["expiry"].(string); ok && exp != "" {
+		return exp
+	}
+	if tok, ok := entry["token"].(map[string]any); ok {
+		if exp, ok := tok["expiry"].(string); ok && exp != "" {
+			return exp
+		}
+	}
+	return ""
+}
+
+func isNewerExpiry(pExp, sExp string) bool {
+	if pExp == "" {
+		return false
+	}
+	if sExp == "" {
+		return true
+	}
+	pTime, errP := time.Parse(time.RFC3339Nano, pExp)
+	if errP != nil {
+		pTime, errP = time.Parse(time.RFC3339, pExp)
+	}
+	sTime, errS := time.Parse(time.RFC3339Nano, sExp)
+	if errS != nil {
+		sTime, errS = time.Parse(time.RFC3339, sExp)
+	}
+	if errP == nil && errS == nil {
+		return pTime.After(sTime)
+	}
+	return pExp > sExp
+}
+
+func replaceWithSymlink(linkPath, target string) {
+	dir := filepath.Dir(linkPath)
+	tmpLink := filepath.Join(dir, fmt.Sprintf(".symlink.tmp.%d", time.Now().UnixNano()))
+	_ = os.Remove(tmpLink)
+	if err := os.Symlink(target, tmpLink); err == nil {
+		if err := os.Rename(tmpLink, linkPath); err != nil {
+			_ = os.Remove(tmpLink)
+			_ = os.Remove(linkPath)
+			_ = os.Symlink(target, linkPath)
+		}
+	} else {
+		_ = os.Remove(linkPath)
+		_ = os.Symlink(target, linkPath)
+	}
+}
+
+func bridgeMCPTokens(profileFile, sharedFile string) {
+	if profileFile == sharedFile {
+		return
+	}
+
 	fi, err := os.Lstat(profileFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if _, sErr := os.Stat(sharedFile); sErr == nil {
-				_ = os.Symlink(sharedFile, profileFile)
+				replaceWithSymlink(profileFile, sharedFile)
 			}
 		}
 		return
@@ -788,18 +851,95 @@ func bridgeFile(profileFile, sharedFile string) {
 		if rErr == nil && target == sharedFile {
 			return
 		}
-		_ = os.Remove(profileFile)
 		if _, sErr := os.Stat(sharedFile); sErr == nil {
-			_ = os.Symlink(sharedFile, profileFile)
+			replaceWithSymlink(profileFile, sharedFile)
+		}
+		return
+	}
+
+	// File lock shared state to prevent race conditions during concurrent merges
+	lock, lockErr := merge.LockExclusive(sharedFile+".lock", 5*time.Second)
+	if lockErr == nil {
+		defer lock.Unlock()
+	}
+
+	// Parse profile tokens
+	profMap := make(map[string]map[string]any)
+	if pData, err := os.ReadFile(profileFile); err == nil && len(pData) > 0 {
+		if uErr := json.Unmarshal(pData, &profMap); uErr != nil {
+			logger.Debug("[agy] bridgeMCPTokens: unmarshal profile tokens failed: %v", uErr)
+		}
+	}
+
+	// Parse existing shared tokens
+	sharedMap := make(map[string]map[string]any)
+	if sData, err := os.ReadFile(sharedFile); err == nil && len(sData) > 0 {
+		if uErr := json.Unmarshal(sData, &sharedMap); uErr != nil {
+			logger.Debug("[agy] bridgeMCPTokens: unmarshal shared tokens failed: %v", uErr)
+		}
+	}
+
+	// Merge: add new keys, update if profile entry has newer expiry
+	for k, pEntry := range profMap {
+		sEntry, exists := sharedMap[k]
+		if !exists {
+			sharedMap[k] = pEntry
+			continue
+		}
+		pExp := extractMCPExpiry(pEntry)
+		sExp := extractMCPExpiry(sEntry)
+		if isNewerExpiry(pExp, sExp) {
+			sharedMap[k] = pEntry
+		}
+	}
+
+	// Write merged JSON atomically to sharedFile
+	if len(sharedMap) > 0 {
+		out, err := json.MarshalIndent(sharedMap, "", "  ")
+		if err != nil {
+			return
+		}
+		if err := merge.AtomicWrite(sharedFile, out, 0600); err != nil {
+			logger.Debug("[agy] bridgeMCPTokens: AtomicWrite shared tokens failed: %v", err)
+			return
+		}
+	}
+
+	// Replace profile file with atomic symlink only after successful write
+	if _, sErr := os.Stat(sharedFile); sErr == nil {
+		replaceWithSymlink(profileFile, sharedFile)
+	}
+}
+
+func bridgeFile(profileFile, sharedFile string) {
+	if profileFile == sharedFile {
+		return
+	}
+
+	fi, err := os.Lstat(profileFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if _, sErr := os.Stat(sharedFile); sErr == nil {
+				replaceWithSymlink(profileFile, sharedFile)
+			}
+		}
+		return
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		target, rErr := os.Readlink(profileFile)
+		if rErr == nil && target == sharedFile {
+			return
+		}
+		if _, sErr := os.Stat(sharedFile); sErr == nil {
+			replaceWithSymlink(profileFile, sharedFile)
 		}
 		return
 	}
 	if _, sErr := os.Stat(sharedFile); os.IsNotExist(sErr) {
 		_ = copySingleFile(profileFile, sharedFile)
 	}
-	_ = os.Remove(profileFile)
 	if _, sErr := os.Stat(sharedFile); sErr == nil {
-		_ = os.Symlink(sharedFile, profileFile)
+		replaceWithSymlink(profileFile, sharedFile)
 	}
 }
 
