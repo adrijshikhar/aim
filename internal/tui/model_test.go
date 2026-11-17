@@ -1624,6 +1624,39 @@ func TestTUI_ProfileDetails_AccountEmailDisplay(t *testing.T) {
 	}
 }
 
+func TestTUI_ProfileDetails_AccountEmailDisplay_RealAntigravityFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AIM_HOME", tmpDir)
+	pm := profile.NewProfileManager(tmpDir)
+	cfg := config.NewDefaultConfig()
+
+	pDir, err := pm.EnsureProfile("bby")
+	if err != nil {
+		t.Fatalf("EnsureProfile failed: %v", err)
+	}
+	cfg.AddProfileAgent("bby", "agy")
+
+	// Real-world Antigravity CLI token format (uses id_token_email, not JWT id_token)
+	realToken := `{"token":{"access_token":"ya29.mock","token_type":"Bearer","refresh_token":"1//mock","expiry":"2026-11-17T14:43:02+05:30","expires_in":3599},"auth_method":"consumer","id_token_email":"bhomika1.1.2000@gmail.com"}`
+	tokenFile := filepath.Join(pDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	_ = os.MkdirAll(filepath.Dir(tokenFile), 0700)
+	_ = os.WriteFile(tokenFile, []byte(realToken), 0600)
+
+	reg := agents.NewRegistry()
+	m := NewModel(reg, pm, cfg)
+
+	view := m.View()
+	if !strings.Contains(view, "Profile Details: bby") {
+		t.Errorf("expected view to display 'Profile Details: bby', got:\n%s", view)
+	}
+	if !strings.Contains(view, "bhomika1.1.2000@gmail.com") {
+		t.Errorf("expected view to display account email 'bhomika1.1.2000@gmail.com', got:\n%s", view)
+	}
+	if strings.Contains(view, "active (local credentials)") {
+		t.Errorf("view unexpectedly displayed fallback 'active (local credentials)' instead of account email:\n%s", view)
+	}
+}
+
 func TestTUI_ClaudeTab_IsolationFromCodex(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("AIM_HOME", tmpDir)

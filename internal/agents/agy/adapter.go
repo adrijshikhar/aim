@@ -393,6 +393,27 @@ func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
 	return data, false
 }
 
+// OAuthConfig returns the provider configuration used for Antigravity OAuth 2.0 PKCE authentication.
+func (a *Adapter) OAuthConfig(clientID, clientSecret string) oauth.ProviderConfig {
+	return oauth.ProviderConfig{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL:     "https://oauth2.googleapis.com/token",
+		UserInfoURL:  "https://www.googleapis.com/oauth2/v2/userinfo",
+		Scopes: []string{
+			"openid",
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/userinfo.profile",
+			"https://www.googleapis.com/auth/cloud-platform",
+		},
+		ExtraAuthParams: map[string]string{
+			"access_type": "offline",
+			"prompt":      "select_account consent",
+		},
+	}
+}
+
 func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) error {
 	clientID, clientSecret := getOAuthCredentials()
 	if clientID == "" || clientSecret == "" {
@@ -445,23 +466,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		_ = a.SyncHostSettings(ctx, profileName, profileDir, loginCfg)
 		return nil
 	}
-	cfg := oauth.ProviderConfig{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
-		TokenURL:     "https://oauth2.googleapis.com/token",
-		UserInfoURL:  "https://www.googleapis.com/oauth2/v2/userinfo",
-		Scopes: []string{
-			"openid",
-			"https://www.googleapis.com/auth/userinfo.email",
-			"https://www.googleapis.com/auth/userinfo.profile",
-			"https://www.googleapis.com/auth/cloud-platform",
-		},
-		ExtraAuthParams: map[string]string{
-			"access_type": "offline",
-			"prompt":      "consent",
-		},
-	}
+	cfg := a.OAuthConfig(clientID, clientSecret)
 
 	tok, err := oauth.Authenticate(ctx, cfg, true)
 	if err != nil {

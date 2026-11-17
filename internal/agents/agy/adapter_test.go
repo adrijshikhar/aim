@@ -1513,6 +1513,15 @@ func TestAgyAdapter_LeasedProfileHookIsolation(t *testing.T) {
 	}
 }
 
+func TestAgyOAuth_RequiresAccountSelection(t *testing.T) {
+	adapter := NewAdapter()
+	cfg := adapter.OAuthConfig("test-client-id", "test-secret")
+	prompt, ok := cfg.ExtraAuthParams["prompt"]
+	if !ok || !strings.Contains(prompt, "select_account") {
+		t.Errorf("expected prompt parameter to contain 'select_account', got %q", prompt)
+	}
+}
+
 func TestBridgeMCPTokens_MergesAndSymlinks(t *testing.T) {
 	fakeRealHome := t.TempDir()
 	sharedAgyDir := filepath.Join(fakeRealHome, ".gemini", "antigravity-cli")
@@ -1593,4 +1602,3 @@ func TestBridgeMCPTokens_SkippedForLeasedProfile(t *testing.T) {
 		t.Errorf("leased profile mcp_oauth_tokens.json must NOT be symlinked to shared state")
 	}
 }
-
