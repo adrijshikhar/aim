@@ -18,19 +18,19 @@ concurrency:
 
 jobs:
   test:
-    name: Test (${{ matrix.platform }})
+    name: Test (${{ matrix.os }})
     timeout-minutes: 25
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: Linux
+          - os: ubuntu-latest
             runner: ubuntu-latest
 
           # Public fork PRs run safely on GitHub-hosted macos-latest to prevent arbitrary host code execution.
           # Trusted repository PRs, main pushes, or manual dispatches run on self-hosted actr.
-          - platform: macOS
+          - os: macos-latest
             runner: ${{ (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && inputs.use_actr)) && fromJSON('["self-hosted", "macOS"]') || 'macos-latest' }}
 
     steps:
