@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/adrijshikhar/aim/compare/v0.20.1...v0.21.0) (2026-11-21)
+
+
+### Features
+
+* **mcp:** cross-profile MCP management, remote OAuth loopback, and web catalog ([#114](https://github.com/adrijshikhar/aim/issues/114)) ([32fc7fd](https://github.com/adrijshikhar/aim/commit/32fc7fd4d1021e7c924cac2495af63355c7c11b0))
+
 ## [0.20.1](https://github.com/adrijshikhar/aim/compare/v0.20.0...v0.20.1) (2026-11-17)
 
 
