@@ -277,7 +277,7 @@ export function ProfilesOverviewSkeleton({ count = 3 }: { count?: number }) {
 
 export function McpCatalogSkeleton({ count = 3 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-200">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start animate-in fade-in duration-200">
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}

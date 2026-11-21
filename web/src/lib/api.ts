@@ -130,10 +130,33 @@ export interface SessionTranscriptDTO {
 
 export interface MCPServerDTO {
   name: string;
-  command: string;
-  args: string[];
+  command?: string;
+  args?: string[];
   env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
   scope: string;
+  type?: string;
+  status?: string; // "enabled" | "disabled"
+  auth?: string;
+  client?: string;
+}
+
+export interface AddMCPServerRequest {
+  name: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  clients?: string[];
+  profile?: string;
+}
+
+export interface SetMCPServerStateRequest {
+  enabled: boolean;
+  clients?: string[];
+  profile?: string;
 }
 
 export interface StatusDTO {
@@ -301,6 +324,47 @@ export async function getMcpServers(profile?: string): Promise<MCPServerDTO[]> {
   const url = profile ? `${BASE_URL}/mcp?profile=${encodeURIComponent(profile)}` : `${BASE_URL}/mcp`;
   const res = await fetch(url);
   return handleResponse<MCPServerDTO[]>(res);
+}
+
+export async function addMcpServer(req: AddMCPServerRequest): Promise<void> {
+  const res = await fetch(`${BASE_URL}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(req),
+  });
+  return handleResponse<void>(res);
+}
+
+export async function setMcpServerState(
+  name: string,
+  req: SetMCPServerStateRequest
+): Promise<void> {
+  const res = await fetch(`${BASE_URL}/mcp/${encodeURIComponent(name)}/state`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(req),
+  });
+  return handleResponse<void>(res);
+}
+
+export async function deleteMcpServer(
+  name: string,
+  profile?: string,
+  clients?: string[]
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (profile) params.set('profile', profile);
+  if (clients && clients.length > 0) params.set('clients', clients.join(','));
+  const qs = params.toString();
+  const url = qs ? `${BASE_URL}/mcp/${encodeURIComponent(name)}?${qs}` : `${BASE_URL}/mcp/${encodeURIComponent(name)}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+  });
+  return handleResponse<void>(res);
 }
 
 export async function updateProfileConfig(

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/service"
@@ -746,7 +747,9 @@ func TestMCPService_ListServers(t *testing.T) {
 	// Create profile "isolated"
 	_, _ = pm.EnsureProfile("isolated")
 
-	mcpSvc := service.NewMCPService(pm)
+	reg := agents.NewRegistry()
+	reg.Register(agy.NewAdapter())
+	mcpSvc := service.NewMCPService(pm, reg)
 
 	// Query with empty profile
 	servers, err := mcpSvc.ListServers(ctx, "")
@@ -788,6 +791,71 @@ func TestMCPService_ListServers(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected to find custom-tool in isolated profile servers")
+	}
+
+	// Test AddServer
+	err = mcpSvc.AddServer(ctx, service.AddMCPServerRequest{
+		Name:    "new-remote",
+		URL:     "https://mcp.example.com/sse",
+		Profile: "isolated",
+		Clients: []string{"agy"},
+	})
+	if err != nil {
+		t.Fatalf("AddServer failed: %v", err)
+	}
+
+	updatedServers, err := mcpSvc.ListServers(ctx, "isolated")
+	if err != nil {
+		t.Fatalf("ListServers failed: %v", err)
+	}
+	var newSrv *service.MCPServerDTO
+	for _, s := range updatedServers {
+		if s.Name == "new-remote" {
+			sc := s
+			newSrv = &sc
+			break
+		}
+	}
+	if newSrv == nil {
+		t.Fatalf("expected new-remote in updated servers")
+	}
+	if newSrv.Status != "enabled" || newSrv.Type != "sse" {
+		t.Errorf("expected enabled sse server, got %+v", newSrv)
+	}
+
+	// Test SetServerState (disable)
+	err = mcpSvc.SetServerState(ctx, "new-remote", service.SetMCPServerStateRequest{
+		Enabled: false,
+		Profile: "isolated",
+		Clients: []string{"agy"},
+	})
+	if err != nil {
+		t.Fatalf("SetServerState failed: %v", err)
+	}
+
+	disabledServers, _ := mcpSvc.ListServers(ctx, "isolated")
+	var disSrv *service.MCPServerDTO
+	for _, s := range disabledServers {
+		if s.Name == "new-remote" {
+			sc := s
+			disSrv = &sc
+			break
+		}
+	}
+	if disSrv == nil || disSrv.Status != "disabled" {
+		t.Errorf("expected disabled new-remote server, got %+v", disSrv)
+	}
+
+	// Test RemoveServer
+	err = mcpSvc.RemoveServer(ctx, "new-remote", "isolated", []string{"agy"})
+	if err != nil {
+		t.Fatalf("RemoveServer failed: %v", err)
+	}
+	remainingServers, _ := mcpSvc.ListServers(ctx, "isolated")
+	for _, s := range remainingServers {
+		if s.Name == "new-remote" {
+			t.Errorf("expected new-remote to be removed")
+		}
 	}
 }
 

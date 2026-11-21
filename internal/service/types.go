@@ -162,15 +162,43 @@ type SessionService interface {
 // MCPServerDTO represents a configured MCP server.
 type MCPServerDTO struct {
 	Name    string            `json:"name"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
-	Scope   string            `json:"scope"` // global or profile-specific
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Scope   string            `json:"scope"`            // global or profile-specific
+	Type    string            `json:"type,omitempty"`   // "stdio", "http", "sse"
+	Status  string            `json:"status,omitempty"` // "enabled", "disabled"
+	Auth    string            `json:"auth,omitempty"`   // "OAuth", "connected", "none", etc.
+	Client  string            `json:"client,omitempty"` // "claude", "codex", "agy", etc.
 }
 
-// MCPService provides discovery of configured MCP servers.
+// AddMCPServerRequest defines parameters for registering an MCP server.
+type AddMCPServerRequest struct {
+	Name    string            `json:"name"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Clients []string          `json:"clients,omitempty"`
+	Profile string            `json:"profile,omitempty"` // empty = global/host
+}
+
+// SetMCPServerStateRequest defines parameters for enabling or disabling an MCP server.
+type SetMCPServerStateRequest struct {
+	Enabled bool     `json:"enabled"`
+	Clients []string `json:"clients,omitempty"`
+	Profile string   `json:"profile,omitempty"` // empty = global/host
+}
+
+// MCPService provides discovery and lifecycle management of configured MCP servers.
 type MCPService interface {
 	ListServers(ctx context.Context, profileName string) ([]MCPServerDTO, error)
+	AddServer(ctx context.Context, req AddMCPServerRequest) error
+	SetServerState(ctx context.Context, name string, req SetMCPServerStateRequest) error
+	RemoveServer(ctx context.Context, name string, profileName string, clients []string) error
 }
 
 // DaemonDTO describes the background daemon operational state.
