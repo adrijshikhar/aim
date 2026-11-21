@@ -190,3 +190,79 @@ func TestAuthorizeMCPOAuth_ContextCancellation(t *testing.T) {
 		t.Errorf("expected context canceled error, got: %v", err)
 	}
 }
+
+func TestAuthorizeMCPOAuth_DynamicClientRegistration(t *testing.T) {
+	var authServer *httptest.Server
+	authServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/register" && r.Method == http.MethodPost:
+			var regReq map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&regReq); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"client_id": "dynamic-client-999",
+			})
+		case r.URL.Path == "/token" && r.Method == http.MethodPost:
+			_ = r.ParseForm()
+			if r.Form.Get("client_id") != "dynamic-client-999" {
+				http.Error(w, "invalid client_id", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "token-from-dynamic",
+				"token_type":   "Bearer",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer authServer.Close()
+
+	disc := &OAuthDiscovery{
+		AuthURL:         authServer.URL + "/authorize",
+		TokenURL:        authServer.URL + "/token",
+		RegistrationURL: authServer.URL + "/register",
+		AuthType:        "oauth",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	receivedClientID := ""
+	tokens, err := AuthorizeMCPOAuth(ctx, disc, func(authURL string) {
+		u, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse authURL: %v", err)
+			return
+		}
+		receivedClientID = u.Query().Get("client_id")
+		redirectURI := u.Query().Get("redirect_uri")
+		state := u.Query().Get("state")
+
+		callbackURL := fmt.Sprintf("%s?code=dynamic-code-123&state=%s", redirectURI, state)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			resp, err := http.Get(callbackURL)
+			if err != nil {
+				t.Errorf("callback GET failed: %v", err)
+				return
+			}
+			_ = resp.Body.Close()
+		}()
+	})
+
+	if err != nil {
+		t.Fatalf("AuthorizeMCPOAuth failed: %v", err)
+	}
+	if receivedClientID != "dynamic-client-999" {
+		t.Errorf("expected client_id 'dynamic-client-999', got %q", receivedClientID)
+	}
+	if tokens["access_token"] != "token-from-dynamic" {
+		t.Errorf("expected access_token 'token-from-dynamic', got %v", tokens["access_token"])
+	}
+}
