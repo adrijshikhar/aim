@@ -257,7 +257,10 @@ func TestMCP_EndToEnd_WebAPI_Lifecycle(t *testing.T) {
 
 	// Verify disabled in GET
 	getReq2, _ := http.NewRequestWithContext(context.Background(), "GET", ts.URL+"/api/mcp?profile=dev", nil)
-	getResp2, _ := client.Do(getReq2)
+	getResp2, err := client.Do(getReq2)
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
 	defer getResp2.Body.Close()
 	var servers2 []service.MCPServerDTO
 	_ = json.NewDecoder(getResp2.Body).Decode(&servers2)
@@ -280,7 +283,10 @@ func TestMCP_EndToEnd_WebAPI_Lifecycle(t *testing.T) {
 
 	// Verify gone in GET
 	getReq3, _ := http.NewRequestWithContext(context.Background(), "GET", ts.URL+"/api/mcp?profile=dev", nil)
-	getResp3, _ := client.Do(getReq3)
+	getResp3, err := client.Do(getReq3)
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
 	defer getResp3.Body.Close()
 	var servers3 []service.MCPServerDTO
 	_ = json.NewDecoder(getResp3.Body).Decode(&servers3)
