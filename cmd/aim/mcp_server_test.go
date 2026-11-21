@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1274,4 +1276,73 @@ func TestMCPCmd_ActiveSessionNotice(t *testing.T) {
 	if !strings.Contains(stderr, "Notice: Active session detected for profile \"work\"") {
 		t.Errorf("expected active session warning in stderr, got: %q", stderr)
 	}
+}
+
+func TestMCPLoginCmd_Execution(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	// 1. Server not found error
+	t.Run("missing server name", func(t *testing.T) {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "login", "missing-server", "--host"})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "could not find remote URL") {
+			t.Fatalf("expected could not find remote URL error, got %v", err)
+		}
+	})
+
+	// 2. Server does not require OAuth (200 OK)
+	t.Run("non-oauth endpoint", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer ts.Close()
+
+		out, _ := captureOutput(t, func() {
+			cmd := newRootCmd(reg, pm)
+			cmd.SetArgs([]string{"mcp", "login", ts.URL, "--host"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("mcp login failed: %v", err)
+			}
+		})
+
+		if !strings.Contains(out, "Server does not require OAuth authentication") {
+			t.Errorf("expected no oauth required message, got %s", out)
+		}
+	})
+
+	// 3. Configured server by name that points to URL
+	t.Run("configured server URL resolution", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer ts.Close()
+
+		// Register server first
+		addCmd := newRootCmd(reg, pm)
+		addCmd.SetArgs([]string{"mcp", "add", "my-remote", ts.URL, "--clients", "codex", "--host"})
+		if err := addCmd.Execute(); err != nil {
+			t.Fatalf("mcp add failed: %v", err)
+		}
+
+		out, _ := captureOutput(t, func() {
+			cmd := newRootCmd(reg, pm)
+			cmd.SetArgs([]string{"mcp", "login", "my-remote", "--clients", "codex", "--host"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("mcp login by name failed: %v", err)
+			}
+		})
+
+		if !strings.Contains(out, "Discovering authentication requirements") || !strings.Contains(out, "Server does not require OAuth authentication") {
+			t.Errorf("expected discovery and no oauth message, got %s", out)
+		}
+	})
 }
