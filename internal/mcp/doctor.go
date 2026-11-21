@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -285,18 +286,23 @@ func runClientAndBinaryAudit(homeDir string) []MCPDiagnosticResult {
 
 		// Audit third-party binaries
 		for sName, entry := range servers {
+			if entry.Disabled {
+				continue
+			}
 			cmdName := strings.TrimSpace(entry.Command)
 			if cmdName == "" || cmdName == "aim" || cmdName == "remote" {
 				continue
 			}
 
 			// Extract binary name: if whole cmdName exists on disk, use it directly (e.g. "/path with spaces/bin"),
-			// otherwise extract first token.
+			// otherwise extract first token unless it's an absolute path.
 			binName := cmdName
 			if _, err := os.Stat(cmdName); err != nil {
-				tokens := strings.Fields(cmdName)
-				if len(tokens) > 0 {
-					binName = tokens[0]
+				if !filepath.IsAbs(cmdName) {
+					tokens := strings.Fields(cmdName)
+					if len(tokens) > 0 {
+						binName = tokens[0]
+					}
 				}
 			}
 

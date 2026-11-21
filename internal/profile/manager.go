@@ -272,10 +272,12 @@ func bridgeOrMigrateToShared(targetPath, sharedDir string) {
 	fi, err := os.Lstat(targetPath)
 	if err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
-			// Already a symlink
-			return
-		}
-		if fi.IsDir() {
+			target, readErr := os.Readlink(targetPath)
+			if readErr == nil && (target == sharedDir || sameFile(targetPath, sharedDir)) {
+				return
+			}
+			_ = os.Remove(targetPath)
+		} else if fi.IsDir() {
 			entries, _ := os.ReadDir(targetPath)
 			for _, e := range entries {
 				srcFile := filepath.Join(targetPath, e.Name())

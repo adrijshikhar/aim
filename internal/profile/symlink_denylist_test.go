@@ -150,6 +150,55 @@ func TestProfileManager_MCPAuthBridging(t *testing.T) {
 	}
 }
 
+func TestEnsureMCPAuth_SelfHealsBrokenOrForeignSymlink(t *testing.T) {
+	tempBase := t.TempDir()
+	host := filepath.Join(tempBase, "host")
+	if err := os.MkdirAll(host, 0755); err != nil {
+		t.Fatalf("MkdirAll host: %v", err)
+	}
+	t.Setenv("AIM_REAL_HOME", host)
+	t.Setenv("AIM_CONFIG_DIR", tempBase)
+
+	// Create dangling host .mcp-auth symlink pointing to a non-existent path
+	hostAuth := filepath.Join(host, ".mcp-auth")
+	danglingTarget := filepath.Join(tempBase, "non-existent-auth-dir")
+	if err := os.Symlink(danglingTarget, hostAuth); err != nil {
+		t.Fatalf("Symlink host dangling: %v", err)
+	}
+
+	pm := NewProfileManager(tempBase)
+	pDir, err := pm.EnsureProfile("work")
+	if err != nil {
+		t.Fatalf("EnsureProfile failed: %v", err)
+	}
+
+	// Verify hostAuth was repaired and is no longer dangling
+	fiHost, err := os.Stat(hostAuth)
+	if err != nil {
+		t.Fatalf("expected hostAuth to be self-healed, stat failed: %v", err)
+	}
+	if !fiHost.IsDir() {
+		t.Errorf("expected hostAuth to point to a valid directory")
+	}
+
+	// Verify profileAuth is valid symlink pointing to shared directory
+	profAuth := filepath.Join(pDir, ".mcp-auth")
+	fiProf, err := os.Stat(profAuth)
+	if err != nil {
+		t.Fatalf("expected profAuth to be valid, stat failed: %v", err)
+	}
+	if !fiProf.IsDir() {
+		t.Errorf("expected profAuth to point to a valid directory")
+	}
+
+	// Write token from profile and verify visible on host
+	mustWriteFile(t, filepath.Join(profAuth, "token.txt"), "healed")
+	data, err := os.ReadFile(filepath.Join(hostAuth, "token.txt"))
+	if err != nil || string(data) != "healed" {
+		t.Errorf("expected token visible from hostAuth, got %q, err: %v", string(data), err)
+	}
+}
+
 func TestEnsureDotfiles_SkipsHostOnlyNoise(t *testing.T) {
 	host := t.TempDir()
 	prof := t.TempDir()

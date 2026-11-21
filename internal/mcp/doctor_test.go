@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,5 +152,71 @@ func TestMCPDoctor_MalformedJSONConfig(t *testing.T) {
 	}
 	if !foundConfigFail {
 		t.Errorf("expected FAIL for malformed JSON config: %+v", report.Results)
+	}
+}
+
+func TestMCPDoctor_DisabledThirdPartyBinarySkipped(t *testing.T) {
+	tempDir := t.TempDir()
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	claude, _ := GetDriver(ClientClaudeCode)
+	cfgPath, _ := claude.ConfigPath(tempDir, "")
+
+	// Write an entry pointing to a non-existent binary, but marked disabled
+	_ = claude.WriteServer(cfgPath, "disabled-tool", RawMCPEntry{
+		Command:  "completely-fake-binary-xyz",
+		Disabled: true,
+	})
+	_ = claude.WriteServer(cfgPath, "aim", RawMCPEntry{
+		Command: "aim",
+		Args:    []string{"mcp", "serve"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	report := RunMCPDoctor(ctx, reg, pm, tempDir)
+
+	for _, res := range report.Results {
+		if res.Category == "Third-Party" && res.Status == StatusFail {
+			t.Errorf("expected disabled third-party binary to be skipped, got FAIL: %+v", res)
+		}
+	}
+}
+
+func TestMCPDoctor_AbsolutePathWithSpaces(t *testing.T) {
+	tempDir := t.TempDir()
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	claude, _ := GetDriver(ClientClaudeCode)
+	cfgPath, _ := claude.ConfigPath(tempDir, "")
+
+	absPath := "/Applications/NonExistent App.app/Contents/MacOS/binary"
+	_ = claude.WriteServer(cfgPath, "spaced-tool", RawMCPEntry{
+		Command: absPath,
+	})
+	_ = claude.WriteServer(cfgPath, "aim", RawMCPEntry{
+		Command: "aim",
+		Args:    []string{"mcp", "serve"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	report := RunMCPDoctor(ctx, reg, pm, tempDir)
+
+	foundExpectedFail := false
+	for _, res := range report.Results {
+		if res.Category == "Third-Party" && res.Status == StatusFail {
+			if strings.Contains(res.Message, absPath) || strings.Contains(res.Remedy, absPath) {
+				foundExpectedFail = true
+				break
+			}
+		}
+	}
+	if !foundExpectedFail {
+		t.Errorf("expected FAIL retaining full absolute path with spaces in results: %+v", report.Results)
 	}
 }
