@@ -204,6 +204,11 @@ func (m *ProfileManager) EnsureProfile(name string) (string, error) {
 	extraPaths := ProfileExtraPaths(cfg, name)
 	_ = EnsureDotfiles(realHome, pDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(pDir, name, cfg)
+	if m.IsLeased(name) {
+		_ = os.Remove(filepath.Join(pDir, ".mcp-auth"))
+	} else {
+		_ = m.EnsureMCPAuth(name)
+	}
 	return pDir, nil
 }
 
@@ -224,8 +229,68 @@ func (m *ProfileManager) EnsureAllProfilesDotfiles() error {
 			errs = append(errs, err)
 		}
 		cleanStatuslineSymlinksIfDisabled(pDir, p, cfg)
+		if m.IsLeased(p) {
+			_ = os.Remove(filepath.Join(pDir, ".mcp-auth"))
+		} else {
+			_ = m.EnsureMCPAuth(p)
+		}
 	}
 	return errors.Join(errs...)
+}
+
+// EnsureMCPAuth bridges ~/.mcp-auth to the shared mcp-auth directory for non-leased profiles.
+func (m *ProfileManager) EnsureMCPAuth(profileName string) error {
+	if m == nil || m.IsLeased(profileName) {
+		return nil
+	}
+	realHome := config.RealHomeDir()
+	pDir := m.ProfileDir(profileName)
+	return BridgeMCPAuthDirectory(realHome, pDir)
+}
+
+// BridgeMCPAuthDirectory links ~/.mcp-auth in profileDir to a shared storage directory.
+func BridgeMCPAuthDirectory(realHome, profileDir string) error {
+	sharedDir := filepath.Join(config.BaseDir(), "shared", "mcp-auth")
+	if err := os.MkdirAll(sharedDir, 0700); err != nil {
+		return err
+	}
+
+	if realHome != "" {
+		hostAuth := filepath.Join(realHome, ".mcp-auth")
+		bridgeOrMigrateToShared(hostAuth, sharedDir)
+	}
+
+	if profileDir != "" {
+		profAuth := filepath.Join(profileDir, ".mcp-auth")
+		bridgeOrMigrateToShared(profAuth, sharedDir)
+	}
+
+	return nil
+}
+
+func bridgeOrMigrateToShared(targetPath, sharedDir string) {
+	fi, err := os.Lstat(targetPath)
+	if err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			// Already a symlink
+			return
+		}
+		if fi.IsDir() {
+			entries, _ := os.ReadDir(targetPath)
+			for _, e := range entries {
+				srcFile := filepath.Join(targetPath, e.Name())
+				dstFile := filepath.Join(sharedDir, e.Name())
+				if _, statErr := os.Stat(dstFile); os.IsNotExist(statErr) {
+					data, err := os.ReadFile(srcFile)
+					if err == nil {
+						_ = os.WriteFile(dstFile, data, 0600)
+					}
+				}
+			}
+			_ = os.RemoveAll(targetPath)
+		}
+	}
+	_ = os.Symlink(sharedDir, targetPath)
 }
 
 func cleanStatuslineSymlinksIfDisabled(pDir, profileName string, cfg *config.Config) {

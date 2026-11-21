@@ -103,6 +103,53 @@ func TestEnsureDotfiles_NeverLinksIsolatedAgentState(t *testing.T) {
 	}
 }
 
+func TestProfileManager_MCPAuthBridging(t *testing.T) {
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+
+	host := t.TempDir()
+	t.Setenv("HOME", host)
+	t.Setenv("AIM_REAL_HOME", host)
+
+	// Create host .mcp-auth
+	hostAuth := filepath.Join(host, ".mcp-auth")
+	mustWriteFile(t, filepath.Join(hostAuth, "tokens.json"), `{"test": "val"}`)
+
+	pm := NewProfileManager(tempBase)
+
+	// 1. Ensure normal profile bridges .mcp-auth
+	pDir, err := pm.EnsureProfile("work")
+	if err != nil {
+		t.Fatalf("EnsureProfile work failed: %v", err)
+	}
+
+	profAuth := filepath.Join(pDir, ".mcp-auth")
+	fi, err := os.Lstat(profAuth)
+	if err != nil {
+		t.Fatalf("expected .mcp-auth in profile, got error: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected .mcp-auth to be a symlink")
+	}
+
+	// Verify token content preserved in shared directory
+	tokensPath := filepath.Join(profAuth, "tokens.json")
+	data, err := os.ReadFile(tokensPath)
+	if err != nil || !strings.Contains(string(data), "val") {
+		t.Errorf("expected token content preserved, got %s (err: %v)", string(data), err)
+	}
+
+	// 2. Leased profile strictly does NOT bridge .mcp-auth
+	leasedDir, err := pm.EnsureProfile("p2p-client")
+	if err != nil {
+		t.Fatalf("EnsureProfile leased failed: %v", err)
+	}
+	leasedAuth := filepath.Join(leasedDir, ".mcp-auth")
+	if _, err := os.Lstat(leasedAuth); err == nil {
+		t.Errorf("LEAK: leased profile has .mcp-auth bridged!")
+	}
+}
+
 func TestEnsureDotfiles_SkipsHostOnlyNoise(t *testing.T) {
 	host := t.TempDir()
 	prof := t.TempDir()
