@@ -231,14 +231,59 @@ func TestMCPInstallCmd_OtherAgent(t *testing.T) {
 
 	out, _ := captureOutput(t, func() {
 		cmd := newRootCmd(reg, pm)
-		cmd.SetArgs([]string{"mcp", "install", "cursor"})
+		cmd.SetArgs([]string{"mcp", "install", "unknown"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
-	if !strings.Contains(out, "Auto-install is currently supported for 'claude', 'codex', 'agy'") {
+	if !strings.Contains(out, "Auto-install is currently supported for 'claude', 'codex', 'agy', 'cursor'") {
 		t.Errorf("expected guidance for non-supported agent, got: %s", out)
+	}
+}
+
+func TestMCPInstallCmd_Cursor(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"mcp", "install", "cursor", "--profile", "work"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Installed aim MCP server") {
+		t.Errorf("expected confirmation in output: %s", out)
+	}
+
+	cursorPath := filepath.Join(pm.ProfileDir("work"), ".cursor", "mcp.json")
+	data, err := os.ReadFile(cursorPath)
+	if err != nil {
+		t.Fatalf("failed to read profile cursor json at %s: %v", cursorPath, err)
+	}
+
+	var parsed struct {
+		MCPServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal profile cursor json: %v", err)
+	}
+
+	if _, ok := parsed.MCPServers["aim"]; !ok {
+		t.Errorf("expected 'aim' entry in mcpServers: %s", string(data))
 	}
 }
 

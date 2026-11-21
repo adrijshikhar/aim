@@ -9,22 +9,25 @@ import (
 
 func TestClientDrivers_Registry(t *testing.T) {
 	drivers := AllDrivers()
-	if len(drivers) != 1 {
-		t.Fatalf("expected 1 driver (claude), got %d", len(drivers))
+	if len(drivers) != 2 {
+		t.Fatalf("expected 2 drivers (claude, cursor), got %d", len(drivers))
 	}
 
-	d, ok := GetDriver(ClientClaudeCode)
-	if !ok || d == nil {
-		t.Errorf("expected driver for %q to exist", ClientClaudeCode)
-	}
-	if d.ID() != ClientClaudeCode {
-		t.Errorf("expected driver ID %q, got %q", ClientClaudeCode, d.ID())
-	}
-	if d.Name() == "" {
-		t.Errorf("expected non-empty Name for driver %q", ClientClaudeCode)
+	for _, id := range []ClientID{ClientClaudeCode, ClientCursor} {
+		d, ok := GetDriver(id)
+		if !ok || d == nil {
+			t.Errorf("expected driver for %q to exist", id)
+			continue
+		}
+		if d.ID() != id {
+			t.Errorf("expected driver ID %q, got %q", id, d.ID())
+		}
+		if d.Name() == "" {
+			t.Errorf("expected non-empty Name for driver %q", id)
+		}
 	}
 
-	_, ok = GetDriver(ClientID("unknown-client"))
+	_, ok := GetDriver(ClientID("unknown-client"))
 	if ok {
 		t.Errorf("expected unknown client to return false")
 	}
@@ -49,6 +52,23 @@ func TestClientDrivers_ConfigPaths(t *testing.T) {
 	}
 	if pProf != filepath.Join(fakeProfile, ".claude", ".claude.json") {
 		t.Errorf("unexpected profile claude path: %s", pProf)
+	}
+
+	cursor, _ := GetDriver(ClientCursor)
+	pCur, err := cursor.ConfigPath(fakeHome, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pCur != filepath.Join(fakeHome, ".cursor", "mcp.json") {
+		t.Errorf("unexpected global cursor path: %s", pCur)
+	}
+
+	pCurProf, err := cursor.ConfigPath(fakeHome, fakeProfile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pCurProf != filepath.Join(fakeProfile, ".cursor", "mcp.json") {
+		t.Errorf("unexpected profile cursor path: %s", pCurProf)
 	}
 }
 
@@ -158,8 +178,16 @@ func TestClientDrivers_WriteAndReadServer(t *testing.T) {
 
 func TestClientDrivers_Detect(t *testing.T) {
 	tempDir := t.TempDir()
+	// Isolate PATH so host executables do not trigger detection
+	t.Setenv("PATH", tempDir)
 
 	claude, _ := GetDriver(ClientClaudeCode)
+	cursor, _ := GetDriver(ClientCursor)
+
+	// Initially none detected in empty dir
+	if claude.Detect(tempDir) {
+		t.Errorf("claude should not be detected in empty temp dir")
+	}
 
 	// Create fake claude file
 	claudeFile := filepath.Join(tempDir, ".claude.json")
@@ -174,5 +202,20 @@ func TestClientDrivers_Detect(t *testing.T) {
 	detected := DetectInstalledClients(tempDir)
 	if len(detected) != 1 {
 		t.Errorf("expected 1 detected client, got %d", len(detected))
+	}
+
+	// Create fake cursor directory
+	cursorDir := filepath.Join(tempDir, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0700); err != nil {
+		t.Fatalf("failed to create cursor dir: %v", err)
+	}
+
+	if !cursor.Detect(tempDir) {
+		t.Errorf("expected cursor to be detected when ~/.cursor exists")
+	}
+
+	detectedAfter := DetectInstalledClients(tempDir)
+	if len(detectedAfter) != 2 {
+		t.Errorf("expected 2 detected clients, got %d", len(detectedAfter))
 	}
 }

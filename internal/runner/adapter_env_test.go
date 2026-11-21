@@ -12,6 +12,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/agents/claude"
 	"github.com/aim-cli/aim/internal/agents/codex"
+	"github.com/aim-cli/aim/internal/agents/cursor"
 	"github.com/aim-cli/aim/internal/agents/gemini"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/runner"
@@ -39,7 +40,7 @@ func TestAdapterEnvironmentIsolation(t *testing.T) {
 	for _, key := range managed {
 		t.Setenv(key, "host-value")
 	}
-	for _, adapter := range []agents.AgentAdapter{agy.NewAdapter(), codex.NewAdapter(), claude.NewAdapter(), gemini.NewAdapter()} {
+	for _, adapter := range []agents.AgentAdapter{agy.NewAdapter(), codex.NewAdapter(), claude.NewAdapter(), gemini.NewAdapter(), cursor.NewAdapter()} {
 		t.Run(adapter.Name(), func(t *testing.T) {
 			profileDir := filepath.Join(root, "profiles", adapter.Name())
 			if err := os.MkdirAll(profileDir, 0700); err != nil {

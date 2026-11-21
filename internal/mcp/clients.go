@@ -14,6 +14,7 @@ type ClientID string
 
 const (
 	ClientClaudeCode ClientID = "claude"
+	ClientCursor     ClientID = "cursor"
 )
 
 // RawMCPEntry represents an MCP server entry in client configuration files.
@@ -42,6 +43,12 @@ var allDrivers = []ClientConfigDriver{
 		baseJSONDriver: baseJSONDriver{
 			id:   ClientClaudeCode,
 			name: "Claude Code",
+		},
+	},
+	&cursorDriver{
+		baseJSONDriver: baseJSONDriver{
+			id:   ClientCursor,
+			name: "Cursor",
 		},
 	},
 }
@@ -254,4 +261,37 @@ func (d *claudeCodeDriver) ConfigPath(homeDir string, profileDir string) (string
 		return filepath.Join(profileDir, ".claude", ".claude.json"), nil
 	}
 	return filepath.Join(homeDir, ".claude.json"), nil
+}
+
+// Cursor Driver
+type cursorDriver struct {
+	baseJSONDriver
+}
+
+func (d *cursorDriver) Detect(homeDir string) bool {
+	if _, err := os.Stat(filepath.Join(homeDir, ".cursor")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, "Library", "Application Support", "Cursor")); err == nil {
+		return true
+	}
+	if _, err := exec.LookPath("cursor"); err == nil {
+		return true
+	}
+	return false
+}
+
+func (d *cursorDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
+	if profileDir != "" {
+		return filepath.Join(profileDir, ".cursor", "mcp.json"), nil
+	}
+	primary := filepath.Join(homeDir, ".cursor", "mcp.json")
+	if _, err := os.Stat(primary); err == nil {
+		return primary, nil
+	}
+	storagePath := filepath.Join(homeDir, "Library", "Application Support", "Cursor", "User", "globalStorage", "cursor.mcp", "mcp.json")
+	if _, err := os.Stat(storagePath); err == nil {
+		return storagePath, nil
+	}
+	return primary, nil
 }
