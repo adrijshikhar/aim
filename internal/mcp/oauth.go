@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -19,11 +20,12 @@ import (
 
 // OAuthDiscovery describes discovered authentication capabilities for an MCP endpoint.
 type OAuthDiscovery struct {
-	AuthURL  string   `json:"authorization_endpoint,omitempty"`
-	TokenURL string   `json:"token_endpoint,omitempty"`
-	ClientID string   `json:"client_id,omitempty"`
-	Scopes   []string `json:"scopes,omitempty"`
-	AuthType string   `json:"auth_type"` // "oauth" | "bearer" | "none"
+	AuthURL         string   `json:"authorization_endpoint,omitempty"`
+	TokenURL        string   `json:"token_endpoint,omitempty"`
+	RegistrationURL string   `json:"registration_endpoint,omitempty"`
+	ClientID        string   `json:"client_id,omitempty"`
+	Scopes          []string `json:"scopes,omitempty"`
+	AuthType        string   `json:"auth_type"` // "oauth" | "bearer" | "none"
 }
 
 var reAuthParam = regexp.MustCompile(`([a-zA-Z0-9_-]+)="?([^",]+)"?`)
@@ -138,6 +140,9 @@ func probeMetadataURL(ctx context.Context, client *http.Client, metaURL string) 
 	if tok, ok := data["token_endpoint"].(string); ok {
 		disc.TokenURL = tok
 	}
+	if reg, ok := data["registration_endpoint"].(string); ok {
+		disc.RegistrationURL = reg
+	}
 	if clientID, ok := data["client_id"].(string); ok {
 		disc.ClientID = clientID
 	}
@@ -208,7 +213,15 @@ func AuthorizeMCPOAuth(ctx context.Context, disc *OAuthDiscovery, promptFn func(
 	q.Set("response_type", "code")
 	clientID := disc.ClientID
 	if clientID == "" {
-		clientID = "aim"
+		if disc.RegistrationURL != "" {
+			regID, regErr := registerDynamicClient(handshakeCtx, disc.RegistrationURL, redirectURI)
+			if regErr == nil && regID != "" {
+				clientID = regID
+			}
+		}
+		if clientID == "" {
+			clientID = "aim"
+		}
 	}
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
@@ -360,4 +373,43 @@ func AuthorizeMCPOAuth(ctx context.Context, disc *OAuthDiscovery, promptFn func(
 	}
 
 	return tokenMap, nil
+}
+
+func registerDynamicClient(ctx context.Context, registrationURL, redirectURI string) (string, error) {
+	payload := map[string]any{
+		"client_name":                "AIM",
+		"redirect_uris":              []string{redirectURI},
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"response_types":             []string{"code"},
+		"token_endpoint_auth_method": "none",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, registrationURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("dynamic registration failed with status %d", resp.StatusCode)
+	}
+
+	var res struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", err
+	}
+	return res.ClientID, nil
 }
