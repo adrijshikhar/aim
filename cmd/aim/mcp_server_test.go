@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -31,7 +33,7 @@ func TestMCPCmd_Help(t *testing.T) {
 		}
 	})
 
-	for _, sub := range []string{"serve", "doctor", "install", "uninstall", "list", "add", "remove"} {
+	for _, sub := range []string{"serve", "doctor", "install", "uninstall", "list", "add", "remove", "enable", "disable", "login"} {
 		if !strings.Contains(out, sub) {
 			t.Errorf("expected %q subcommand in help output: %s", sub, out)
 		}
@@ -991,5 +993,285 @@ func TestMCPCommands_ProfilePathTraversalProhibited(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestResolveTargetScope(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("dev")
+	_, _ = pm.EnsureProfile("prod")
+
+	oldInteractive := mcpIsInteractive
+	defer func() { mcpIsInteractive = oldInteractive }()
+
+	t.Run("explicit host flag", func(t *testing.T) {
+		t.Setenv("AIM_PROFILE", "dev")
+		targets, err := ResolveTargetScope(pm, "", true, false, strings.NewReader(""), &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if targets != nil {
+			t.Fatalf("expected nil targets for host, got %v", targets)
+		}
+	})
+
+	t.Run("explicit profile flag", func(t *testing.T) {
+		t.Setenv("AIM_PROFILE", "dev")
+		targets, err := ResolveTargetScope(pm, "prod", false, false, strings.NewReader(""), &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(targets) != 1 || targets[0].Name != "prod" {
+			t.Fatalf("expected target prod, got %v", targets)
+		}
+	})
+
+	t.Run("explicit all flag", func(t *testing.T) {
+		targets, err := ResolveTargetScope(pm, "", false, true, strings.NewReader(""), &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(targets) != 2 {
+			t.Fatalf("expected 2 targets, got %d", len(targets))
+		}
+	})
+
+	t.Run("outside session without flags", func(t *testing.T) {
+		t.Setenv("AIM_PROFILE", "")
+		targets, err := ResolveTargetScope(pm, "", false, false, strings.NewReader(""), &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if targets != nil {
+			t.Fatalf("expected nil targets for host outside session, got %v", targets)
+		}
+	})
+
+	t.Run("inside session non-interactive", func(t *testing.T) {
+		t.Setenv("AIM_PROFILE", "dev")
+		mcpIsInteractive = func(io.Reader) bool { return false }
+		targets, err := ResolveTargetScope(pm, "", false, false, strings.NewReader(""), &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(targets) != 1 || targets[0].Name != "dev" {
+			t.Fatalf("expected dev profile target, got %v", targets)
+		}
+	})
+
+	t.Run("inside session interactive responses", func(t *testing.T) {
+		t.Setenv("AIM_PROFILE", "dev")
+		mcpIsInteractive = func(io.Reader) bool { return true }
+
+		// Affirmative responses
+		for _, input := range []string{"\n", "y\n", "yes\n", "Y\n"} {
+			var out bytes.Buffer
+			targets, err := ResolveTargetScope(pm, "", false, false, strings.NewReader(input), &out)
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", input, err)
+			}
+			if len(targets) != 1 || targets[0].Name != "dev" {
+				t.Fatalf("expected dev profile target for %q, got %v", input, targets)
+			}
+		}
+
+		// Host responses
+		for _, input := range []string{"host\n", "h\n", "HOST\n"} {
+			var out bytes.Buffer
+			targets, err := ResolveTargetScope(pm, "", false, false, strings.NewReader(input), &out)
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", input, err)
+			}
+			if targets != nil {
+				t.Fatalf("expected nil targets for %q, got %v", input, targets)
+			}
+		}
+
+		// Cancellation responses
+		for _, input := range []string{"n\n", "no\n"} {
+			var out bytes.Buffer
+			_, err := ResolveTargetScope(pm, "", false, false, strings.NewReader(input), &out)
+			if err == nil || !strings.Contains(err.Error(), "operation cancelled") {
+				t.Fatalf("expected cancellation error for %q, got %v", input, err)
+			}
+		}
+
+		// Invalid responses
+		var out bytes.Buffer
+		_, err := ResolveTargetScope(pm, "", false, false, strings.NewReader("invalid\n"), &out)
+		if err == nil || !strings.Contains(err.Error(), "invalid response") {
+			t.Fatalf("expected invalid response error, got %v", err)
+		}
+	})
+}
+
+func TestMCPAddCmd_HeaderAndEnvFlags(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	out, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{
+			"mcp", "add", "posthog", "https://mcp.posthog.com/mcp",
+			"--clients", "codex",
+			"--header", "Authorization: Bearer my-secret-token",
+			"-H", "X-Custom: test-val",
+			"--env", "API_KEY=xyz",
+			"-e", "DEBUG=true",
+		})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Added MCP server 'posthog' to Codex CLI") {
+		t.Fatalf("expected success message, got: %s", out)
+	}
+
+	codexCfg := filepath.Join(tempDir, ".codex", "config.toml")
+	data, err := os.ReadFile(codexCfg)
+	if err != nil {
+		t.Fatalf("failed to read codex config: %v", err)
+	}
+	cfgStr := string(data)
+	if !strings.Contains(cfgStr, "Bearer my-secret-token") {
+		t.Errorf("expected Authorization header in codex config: %s", cfgStr)
+	}
+	if !strings.Contains(cfgStr, "test-val") {
+		t.Errorf("expected X-Custom header in codex config: %s", cfgStr)
+	}
+	if !strings.Contains(cfgStr, "API_KEY") || !strings.Contains(cfgStr, "DEBUG") {
+		t.Errorf("expected env vars in codex config: %s", cfgStr)
+	}
+}
+
+func TestMCPEnableAndDisableCmd(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+
+	// Add server to codex and claude
+	addOut, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{
+			"mcp", "add", "toggle-srv", "https://example.com/mcp",
+			"--clients", "codex,claude",
+		})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add failed: %v", err)
+		}
+	})
+	if !strings.Contains(addOut, "Added MCP server 'toggle-srv'") {
+		t.Fatalf("expected add confirmation, got: %s", addOut)
+	}
+
+	// Disable server
+	disOut, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{
+			"mcp", "disable", "toggle-srv",
+			"--clients", "codex,claude",
+		})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp disable failed: %v", err)
+		}
+	})
+	if !strings.Contains(disOut, "Disabled MCP server 'toggle-srv'") {
+		t.Fatalf("expected disable confirmation, got: %s", disOut)
+	}
+
+	// Verify codex config has enabled = false
+	codexCfg := filepath.Join(tempDir, ".codex", "config.toml")
+	cData, _ := os.ReadFile(codexCfg)
+	if !strings.Contains(string(cData), "enabled = false") {
+		t.Errorf("expected enabled = false in codex config: %s", string(cData))
+	}
+
+	// Verify claude config has disabled: true
+	claudeCfg := filepath.Join(tempDir, ".claude.json")
+	clData, _ := os.ReadFile(claudeCfg)
+	var clMap map[string]any
+	_ = json.Unmarshal(clData, &clMap)
+	mcpServers, _ := clMap["mcpServers"].(map[string]any)
+	srv, _ := mcpServers["toggle-srv"].(map[string]any)
+	if disabled, ok := srv["disabled"].(bool); !ok || !disabled {
+		t.Errorf("expected disabled=true in claude config: %s", string(clData))
+	}
+
+	// Enable server
+	enOut, _ := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{
+			"mcp", "enable", "toggle-srv",
+			"--clients", "codex,claude",
+		})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp enable failed: %v", err)
+		}
+	})
+	if !strings.Contains(enOut, "Enabled MCP server 'toggle-srv'") {
+		t.Fatalf("expected enable confirmation, got: %s", enOut)
+	}
+
+	// Verify codex config has enabled = true
+	cData2, _ := os.ReadFile(codexCfg)
+	if strings.Contains(string(cData2), "enabled = false") {
+		t.Errorf("expected enabled = true in codex config: %s", string(cData2))
+	}
+}
+
+func TestMCPCmd_ActiveSessionNotice(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
+	t.Setenv("AIM_PROFILE", "")
+	t.Setenv("AIM_AGENT", "")
+
+	reg := defaultRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+
+	// Create an active session lock on profile "work" for agent "codex"
+	store := pm.MergeStateStore()
+	_ = os.MkdirAll(store.Dir, 0700)
+	lock, err := merge.LockShared(store.SessionsLockPath("work", "codex"))
+	if err != nil {
+		t.Fatalf("failed to take shared lock: %v", err)
+	}
+	defer lock.Unlock()
+
+	_, stderr := captureOutput(t, func() {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{
+			"mcp", "add", "session-test", "https://example.com/mcp",
+			"--profile", "work",
+			"--clients", "codex",
+		})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("mcp add failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(stderr, "Notice: Active session detected for profile \"work\"") {
+		t.Errorf("expected active session warning in stderr, got: %q", stderr)
 	}
 }
