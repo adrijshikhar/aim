@@ -143,6 +143,8 @@ func setupTestEnv(t *testing.T) (string, *profile.ProfileManager, *agents.Regist
 	t.Setenv("AIM_HOME", tempDir)
 	t.Setenv("AIM_CONFIG_DIR", tempDir)
 	t.Setenv("AIM_DATA_DIR", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
 
 	pm := profile.NewProfileManager(tempDir)
 	reg := agents.NewRegistry()
@@ -650,6 +652,8 @@ func TestSessionService_GetSessionTranscript(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
 	_ = os.MkdirAll(filepath.Join(tempDir, "profiles", "work"), 0755)
 
 	mgr := session.NewManager()
@@ -1032,6 +1036,8 @@ func TestProfileService_RefreshUsage(t *testing.T) {
 func TestProfileService_IdleProfileQuotaSummary(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", tempDir)
+	t.Setenv("HOME", tempDir)
 
 	pm := profile.NewProfileManager(tempDir)
 	_, _ = pm.EnsureProfile("idle-prof")
