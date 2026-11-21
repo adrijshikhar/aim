@@ -14,7 +14,21 @@ import (
 	"github.com/aim-cli/aim/internal/merge"
 )
 
-var _ agents.MCPConfigManager = (*Adapter)(nil)
+var (
+	_ agents.MCPConfigManager = (*Adapter)(nil)
+	_ agents.MCPProvider      = (*Adapter)(nil)
+)
+
+// IsBackground reports whether the native args start a background session.
+// Cursor CLI opens windows directly or via IPC and does not have a background daemon mode.
+func (a *Adapter) IsBackground(profileArgs, args []string) bool {
+	return false
+}
+
+// IsSession returns true if the invocation starts a Cursor editing session rather than printing help or version.
+func (a *Adapter) IsSession(profileArgs, args []string) bool {
+	return !agents.ArgsMatch(profileArgs, args, []string{"-v", "--version", "-h", "--help"}, nil)
+}
 
 // MCPCollections specifies how Cursor MCP config merges between host and profile.
 func (a *Adapter) MCPCollections(profileDir, realHome string) []merge.Collection {

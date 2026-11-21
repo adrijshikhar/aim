@@ -16,6 +16,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/agents/claude"
 	"github.com/aim-cli/aim/internal/agents/codex"
+	"github.com/aim-cli/aim/internal/agents/cursor"
 	"github.com/aim-cli/aim/internal/agents/gemini"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/merge"
@@ -49,6 +50,7 @@ var allAdapters = []adapterTestCase{
 	{agent: "codex", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"app-server"}, versionArgs: []string{"-V"}, hasPlugins: true, pluginsCol: "plugins"},
 	{agent: "claude", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"--bg"}, versionArgs: []string{"-v"}, hasPlugins: true, pluginsCol: "enabledPlugins"},
 	{agent: "gemini", hasSessions: false, supportsFork: false, hasMCP: false},
+	{agent: "cursor", hasSessions: false, supportsFork: false, hasMCP: true, versionArgs: []string{"--version"}},
 }
 
 // collectionNamed returns the collection in group with the given name, or
@@ -70,6 +72,7 @@ func setupParameterizedRegistry() *agents.Registry {
 	reg.Register(codex.NewAdapter())
 	reg.Register(claude.NewAdapter())
 	reg.Register(gemini.NewAdapter())
+	reg.Register(cursor.NewAdapter())
 	return reg
 }
 
@@ -401,34 +404,36 @@ func runCollectionMerge(t *testing.T, launch func([]string, func() int) int, cfg
 	delete(cfg.Profiles, "work")
 
 	// 3. background: merged with no exit step; the next launch recovers and strips
-	launch(bgArgs, func() int { return 0 })
-	expect("after background launch", c.ProfilePath, "host@m,new@m,own@m")
-	launch(nil, func() int { during = names(c.ProfilePath); return 0 })
-	if during != "host@m,new@m,own@m" {
-		t.Errorf("recovered session: %s = %q, want %q", c.Name, during, "host@m,new@m,own@m")
-	}
-	expect("at rest after recovery", c.ProfilePath, "new@m,own@m")
-	expect("host after recovery", c.HostPath, "host@m")
+	if len(bgArgs) > 0 {
+		launch(bgArgs, func() int { return 0 })
+		expect("after background launch", c.ProfilePath, "host@m,new@m,own@m")
+		launch(nil, func() int { during = names(c.ProfilePath); return 0 })
+		if during != "host@m,new@m,own@m" {
+			t.Errorf("recovered session: %s = %q, want %q", c.Name, during, "host@m,new@m,own@m")
+		}
+		expect("at rest after recovery", c.ProfilePath, "new@m,own@m")
+		expect("host after recovery", c.HostPath, "host@m")
 
-	// 4. background via profiles.work.args, no CLI args: still no exit step
-	cfg.Profiles["work"] = config.ProfileConfig{Args: bgArgs}
-	launch(nil, func() int { return 0 })
-	expect("after background launch from profile args", c.ProfilePath, "host@m,new@m,own@m")
-	delete(cfg.Profiles, "work")
-	launch(nil, func() int { during = names(c.ProfilePath); return 0 })
-	if during != "host@m,new@m,own@m" {
-		t.Errorf("recovered session (profile args): %s = %q, want %q", c.Name, during, "host@m,new@m,own@m")
-	}
-	expect("at rest after profile-args recovery", c.ProfilePath, "new@m,own@m")
+		// 4. background via profiles.work.args, no CLI args: still no exit step
+		cfg.Profiles["work"] = config.ProfileConfig{Args: bgArgs}
+		launch(nil, func() int { return 0 })
+		expect("after background launch from profile args", c.ProfilePath, "host@m,new@m,own@m")
+		delete(cfg.Profiles, "work")
+		launch(nil, func() int { during = names(c.ProfilePath); return 0 })
+		if during != "host@m,new@m,own@m" {
+			t.Errorf("recovered session (profile args): %s = %q, want %q", c.Name, during, "host@m,new@m,own@m")
+		}
+		expect("at rest after profile-args recovery", c.ProfilePath, "new@m,own@m")
 
-	// 5. background, then the group switched off: the next launch still
-	// recovers, so nothing merged is left behind (G6)
-	launch(bgArgs, func() int { return 0 })
-	expect("after background launch", c.ProfilePath, "host@m,new@m,own@m")
-	switchOff()
-	launch(nil, func() int { during = names(c.ProfilePath); return 0 })
-	if during != "new@m,own@m" {
-		t.Errorf("switched off after background: %s = %q, want %q", c.Name, during, "new@m,own@m")
+		// 5. background, then the group switched off: the next launch still
+		// recovers, so nothing merged is left behind (G6)
+		launch(bgArgs, func() int { return 0 })
+		expect("after background launch", c.ProfilePath, "host@m,new@m,own@m")
+		switchOff()
+		launch(nil, func() int { during = names(c.ProfilePath); return 0 })
+		if during != "new@m,own@m" {
+			t.Errorf("switched off after background: %s = %q, want %q", c.Name, during, "new@m,own@m")
+		}
 	}
 	expect("at rest after switched-off recovery", c.ProfilePath, "new@m,own@m")
 	delete(cfg.Profiles, "work")

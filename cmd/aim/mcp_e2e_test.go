@@ -39,7 +39,7 @@ func TestMCP_EndToEnd_CLI_Lifecycle(t *testing.T) {
 		cmd.SetArgs([]string{
 			"mcp", "add", "posthog", "https://mcp.posthog.com/mcp",
 			"--profile", profName,
-			"--clients", "claude,codex,agy",
+			"--clients", "claude,codex,agy,cursor",
 			"--header", "Authorization: Bearer phx_secret_token",
 			"-H", "X-Custom: test-val",
 			"--env", "ENV_VAR=1",
@@ -81,6 +81,16 @@ func TestMCP_EndToEnd_CLI_Lifecycle(t *testing.T) {
 	}
 	if !strings.Contains(string(aData), "Bearer phx_secret_token") {
 		t.Errorf("agy config missing Bearer token: %s", string(aData))
+	}
+
+	// Verify Cursor profile config
+	cursorPath := filepath.Join(pDir, ".cursor", "mcp.json")
+	curData, err := os.ReadFile(cursorPath)
+	if err != nil {
+		t.Fatalf("failed to read cursor profile config: %v", err)
+	}
+	if !strings.Contains(string(curData), "Bearer phx_secret_token") || !strings.Contains(string(curData), "test-val") {
+		t.Errorf("cursor config missing headers: %s", string(curData))
 	}
 
 	// 2. Run mcp list for profile "work"
@@ -193,7 +203,7 @@ func TestMCP_EndToEnd_WebAPI_Lifecycle(t *testing.T) {
 		URL:     "https://mcp.example.com/sse",
 		Headers: map[string]string{"Authorization": "Bearer secret-token"},
 		Profile: "dev",
-		Clients: []string{"claude", "codex"},
+		Clients: []string{"claude", "codex", "cursor"},
 	}
 	body, _ := json.Marshal(addPayload)
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", ts.URL+"/api/mcp", bytes.NewReader(body))
@@ -241,7 +251,7 @@ func TestMCP_EndToEnd_WebAPI_Lifecycle(t *testing.T) {
 	patchPayload := service.SetMCPServerStateRequest{
 		Enabled: false,
 		Profile: "dev",
-		Clients: []string{"claude", "codex"},
+		Clients: []string{"claude", "codex", "cursor"},
 	}
 	patchBody, _ := json.Marshal(patchPayload)
 	patchReq, _ := http.NewRequestWithContext(context.Background(), "PATCH", ts.URL+"/api/mcp/api-tool/state", bytes.NewReader(patchBody))
@@ -271,7 +281,7 @@ func TestMCP_EndToEnd_WebAPI_Lifecycle(t *testing.T) {
 	}
 
 	// 4. DELETE /api/mcp/api-tool?profile=dev
-	delReq, _ := http.NewRequestWithContext(context.Background(), "DELETE", ts.URL+"/api/mcp/api-tool?profile=dev&clients=claude,codex", nil)
+	delReq, _ := http.NewRequestWithContext(context.Background(), "DELETE", ts.URL+"/api/mcp/api-tool?profile=dev&clients=claude,codex,cursor", nil)
 	delResp, err := client.Do(delReq)
 	if err != nil {
 		t.Fatalf("DELETE failed: %v", err)
