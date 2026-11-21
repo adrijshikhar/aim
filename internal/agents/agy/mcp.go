@@ -101,6 +101,9 @@ func agyConfigToMap(cfg agents.MCPServerConfig) map[string]any {
 	if cfg.URL != "" {
 		m["serverUrl"] = cfg.URL
 	}
+	if len(cfg.Headers) > 0 {
+		m["headers"] = cfg.Headers
+	}
 	if cfg.Disabled {
 		m["disabled"] = true
 	}
@@ -117,6 +120,13 @@ func (a *Adapter) AddHostMCPServer(ctx context.Context, name string, cfg agents.
 	}
 	entries.Set(name, agyConfigToMap(cfg), nil)
 	return merge.WriteJSONKey(path, "mcpServers", entries, 0o600)
+}
+
+// SetHostMCPServerState toggles an MCP server between enabled and disabled in mcp_config.json.
+func (a *Adapter) SetHostMCPServerState(ctx context.Context, name string, enabled bool) error {
+	realHome := config.RealHomeDir()
+	path := filepath.Join(sharedConfigDir(realHome), "mcp_config.json")
+	return setAgyMCPServerState(path, name, enabled)
 }
 
 // RemoveHostMCPServer unregisters an MCP server from mcp_config.json.
@@ -145,6 +155,37 @@ func (a *Adapter) AddProfileMCPServer(ctx context.Context, profileName, profileD
 		entries = merge.NewEntries()
 	}
 	entries.Set(name, agyConfigToMap(cfg), nil)
+	return merge.WriteJSONKey(path, "mcpServers", entries, 0o600)
+}
+
+// SetProfileMCPServerState toggles an MCP server between enabled and disabled in <profileDir>/.gemini/config/mcp_config.json.
+func (a *Adapter) SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error {
+	if profileDir == "" {
+		return fmt.Errorf("profileDir is required")
+	}
+	path := filepath.Join(profileDir, ".gemini", "config", "mcp_config.json")
+	return setAgyMCPServerState(path, name, enabled)
+}
+
+func setAgyMCPServerState(path, name string, enabled bool) error {
+	entries, ok, err := merge.ReadJSONKey(path, "mcpServers")
+	if err != nil {
+		return err
+	}
+	if !ok || !entries.Has(name) {
+		return os.ErrNotExist
+	}
+	entryMap := entries.Values[name]
+	updated := make(map[string]any, len(entryMap))
+	for k, v := range entryMap {
+		updated[k] = v
+	}
+	if enabled {
+		delete(updated, "disabled")
+	} else {
+		updated["disabled"] = true
+	}
+	entries.Set(name, agyNormalise(updated), nil)
 	return merge.WriteJSONKey(path, "mcpServers", entries, 0o600)
 }
 

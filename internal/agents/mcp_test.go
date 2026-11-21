@@ -2,7 +2,11 @@ package agents
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 type mockMCPManager struct{}
@@ -27,12 +31,42 @@ func (m *mockMCPManager) RemoveProfileMCPServer(ctx context.Context, profileName
 	return nil
 }
 
+func (m *mockMCPManager) SetHostMCPServerState(ctx context.Context, name string, enabled bool) error {
+	return nil
+}
+
+func (m *mockMCPManager) SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error {
+	return nil
+}
+
 func (m *mockMCPManager) DetectInstalled(realHome string) bool {
 	return true
 }
 
 func TestMCPConfigManager_InterfaceAssertion(t *testing.T) {
 	var _ MCPConfigManager = (*mockMCPManager)(nil)
+}
+
+func TestMCPServerConfig_Headers(t *testing.T) {
+	cfg := MCPServerConfig{
+		URL: "https://mcp.posthog.com/mcp",
+		Headers: map[string]string{
+			"Authorization": "Bearer test-token",
+		},
+	}
+	if cfg.Headers["Authorization"] != "Bearer test-token" {
+		t.Errorf("expected header set, got %v", cfg.Headers)
+	}
+}
+
+func TestMCPConfigManager_StateToggles(t *testing.T) {
+	var mgr MCPConfigManager
+	// Compile-time check for method existence on the interface
+	type stateToggler interface {
+		SetHostMCPServerState(ctx context.Context, name string, enabled bool) error
+		SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error
+	}
+	var _ stateToggler = mgr
 }
 
 func TestArgsMatch(t *testing.T) {
@@ -141,5 +175,67 @@ func TestCollapseCommand(t *testing.T) {
 		if got != c.want {
 			t.Errorf("CollapseCommand(%q, %v) = %q, want %q", c.cmd, c.args, got, c.want)
 		}
+	}
+}
+
+func TestInspectRemoteOAuthStatus(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("AIM_REAL_HOME", tempHome)
+
+	profDir := filepath.Join(tempHome, "profiles", "dev")
+	_ = os.MkdirAll(profDir, 0700)
+
+	// 1. None when files don't exist
+	if status := InspectRemoteOAuthStatus("https://mcp.posthog.com/mcp", profDir); status != "none" {
+		t.Errorf("expected 'none', got %q", status)
+	}
+
+	// 2. Connected when valid unexpired token exists in .mcp-auth/tokens.json
+	mcpAuthDir := filepath.Join(profDir, ".mcp-auth")
+	_ = os.MkdirAll(mcpAuthDir, 0700)
+	futureExpiry := time.Now().Add(24 * time.Hour).Unix()
+	tokensJSON := fmt.Sprintf(`{
+		"https://mcp.posthog.com/mcp": {
+			"access_token": "valid-token",
+			"expires_at": %d
+		}
+	}`, futureExpiry)
+	_ = os.WriteFile(filepath.Join(mcpAuthDir, "tokens.json"), []byte(tokensJSON), 0600)
+
+	if status := InspectRemoteOAuthStatus("https://mcp.posthog.com/mcp", profDir); status != "connected" {
+		t.Errorf("expected 'connected', got %q", status)
+	}
+
+	// 3. Auth required when expired
+	pastExpiry := time.Now().Add(-1 * time.Hour).Unix()
+	tokensExpiredJSON := fmt.Sprintf(`{
+		"https://mcp.posthog.com/mcp": {
+			"access_token": "expired-token",
+			"expires_at": %d
+		}
+	}`, pastExpiry)
+	_ = os.WriteFile(filepath.Join(mcpAuthDir, "tokens.json"), []byte(tokensExpiredJSON), 0600)
+
+	if status := InspectRemoteOAuthStatus("https://mcp.posthog.com/mcp", profDir); status != "auth_required" {
+		t.Errorf("expected 'auth_required', got %q", status)
+	}
+
+	// 4. Antigravity nested format test
+	agyTokenDir := filepath.Join(profDir, ".gemini", "antigravity-cli")
+	_ = os.MkdirAll(agyTokenDir, 0700)
+	agyTokensJSON := `{
+		"https://mcp.cloudflare.com/mcp": {
+			"client_id": "cf_id",
+			"token": {
+				"access_token": "cf_tok",
+				"expiry": "2099-01-01T00:00:00Z"
+			}
+		}
+	}`
+	_ = os.WriteFile(filepath.Join(agyTokenDir, "mcp_oauth_tokens.json"), []byte(agyTokensJSON), 0600)
+
+	if status := InspectRemoteOAuthStatus("https://mcp.cloudflare.com/mcp", profDir); status != "connected" {
+		t.Errorf("expected 'connected' for cloudflare agy token, got %q", status)
 	}
 }

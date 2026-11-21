@@ -2,12 +2,17 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/merge"
 )
 
@@ -33,6 +38,7 @@ type MCPServerConfig struct {
 	Args     []string          `json:"args,omitempty"`
 	Env      map[string]string `json:"env,omitempty"`
 	URL      string            `json:"url,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 	Disabled bool              `json:"disabled,omitempty"`
 }
 
@@ -47,11 +53,17 @@ type MCPConfigManager interface {
 	// RemoveHostMCPServer removes an MCP server definition from the host configuration.
 	RemoveHostMCPServer(ctx context.Context, name string) error
 
+	// SetHostMCPServerState toggles an MCP server between enabled and disabled in host configuration.
+	SetHostMCPServerState(ctx context.Context, name string, enabled bool) error
+
 	// AddProfileMCPServer registers or updates an MCP server definition in an isolated profile directory.
 	AddProfileMCPServer(ctx context.Context, profileName, profileDir, name string, cfg MCPServerConfig) error
 
 	// RemoveProfileMCPServer removes an MCP server definition from an isolated profile directory.
 	RemoveProfileMCPServer(ctx context.Context, profileName, profileDir, name string) error
+
+	// SetProfileMCPServerState toggles an MCP server between enabled and disabled in a profile directory.
+	SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error
 
 	// DetectInstalled reports whether the agent is installed or configured on the host machine.
 	DetectInstalled(realHome string) bool
@@ -258,4 +270,110 @@ func hasFlag(args, flags []string) bool {
 
 func firstWord(args, words []string) bool {
 	return len(args) > 0 && !strings.HasPrefix(args[0], "-") && slices.Contains(words, args[0])
+}
+
+// InspectRemoteOAuthStatus checks cached OAuth tokens for a given serverURL across
+// profile and shared credential stores, returning "connected", "auth_required", or "none".
+func InspectRemoteOAuthStatus(serverURL, profileDir string) string {
+	if serverURL == "" {
+		return "none"
+	}
+
+	parsed, err := url.Parse(serverURL)
+	var host string
+	if err == nil && parsed.Host != "" {
+		host = parsed.Host
+	}
+
+	normURL := strings.TrimRight(serverURL, "/")
+
+	var candidatePaths []string
+	if profileDir != "" {
+		candidatePaths = append(candidatePaths,
+			filepath.Join(profileDir, ".gemini", "antigravity-cli", "mcp_oauth_tokens.json"),
+			filepath.Join(profileDir, ".mcp-auth", "tokens.json"),
+		)
+	}
+
+	realHome := config.RealHomeDir()
+	if realHome != "" {
+		candidatePaths = append(candidatePaths,
+			filepath.Join(realHome, ".gemini", "antigravity-cli", "mcp_oauth_tokens.json"),
+			filepath.Join(realHome, ".mcp-auth", "tokens.json"),
+		)
+	}
+
+	baseDir := config.BaseDir()
+	if baseDir != "" {
+		candidatePaths = append(candidatePaths,
+			filepath.Join(baseDir, "shared", "gemini-tokens", "mcp_oauth_tokens.json"),
+			filepath.Join(baseDir, "shared", "mcp-auth", "tokens.json"),
+		)
+	}
+
+	for _, p := range candidatePaths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+
+		var rawMap map[string]any
+		if err := json.Unmarshal(data, &rawMap); err != nil {
+			continue
+		}
+
+		for k, v := range rawMap {
+			kNorm := strings.TrimRight(k, "/")
+			match := (kNorm == normURL) || (host != "" && (kNorm == host || strings.Contains(kNorm, host)))
+			if !match {
+				continue
+			}
+
+			entryMap, _ := v.(map[string]any)
+			if entryMap == nil {
+				continue
+			}
+
+			if tokVal, ok := entryMap["token"].(map[string]any); ok {
+				return evaluateTokenExpiry(tokVal)
+			}
+
+			return evaluateTokenExpiry(entryMap)
+		}
+	}
+
+	return "none"
+}
+
+func evaluateTokenExpiry(m map[string]any) string {
+	hasToken := false
+	if tok, ok := m["access_token"].(string); ok && tok != "" {
+		hasToken = true
+	} else if tok, ok := m["token"].(string); ok && tok != "" {
+		hasToken = true
+	}
+
+	if !hasToken {
+		return "none"
+	}
+
+	now := time.Now()
+	if expStr, ok := m["expiry"].(string); ok && expStr != "" {
+		if t, err := time.Parse(time.RFC3339, expStr); err == nil {
+			if now.After(t) {
+				return "auth_required"
+			}
+			return "connected"
+		}
+	}
+
+	if expFloat, ok := m["expires_at"].(float64); ok && expFloat > 0 {
+		expTime := time.Unix(int64(expFloat), 0)
+		if now.After(expTime) {
+			return "auth_required"
+		}
+		return "connected"
+	}
+
+	return "connected"
 }

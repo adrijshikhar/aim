@@ -808,7 +808,10 @@ func TestNilServicesHandling(t *testing.T) {
 }
 
 type mockMCPService struct {
-	listServersFn func(ctx context.Context, profileName string) ([]service.MCPServerDTO, error)
+	listServersFn    func(ctx context.Context, profileName string) ([]service.MCPServerDTO, error)
+	addServerFn      func(ctx context.Context, req service.AddMCPServerRequest) error
+	setServerStateFn func(ctx context.Context, name string, req service.SetMCPServerStateRequest) error
+	removeServerFn   func(ctx context.Context, name string, profileName string, clients []string) error
 }
 
 func (m *mockMCPService) ListServers(ctx context.Context, profileName string) ([]service.MCPServerDTO, error) {
@@ -816,6 +819,27 @@ func (m *mockMCPService) ListServers(ctx context.Context, profileName string) ([
 		return m.listServersFn(ctx, profileName)
 	}
 	return nil, nil
+}
+
+func (m *mockMCPService) AddServer(ctx context.Context, req service.AddMCPServerRequest) error {
+	if m.addServerFn != nil {
+		return m.addServerFn(ctx, req)
+	}
+	return nil
+}
+
+func (m *mockMCPService) SetServerState(ctx context.Context, name string, req service.SetMCPServerStateRequest) error {
+	if m.setServerStateFn != nil {
+		return m.setServerStateFn(ctx, name, req)
+	}
+	return nil
+}
+
+func (m *mockMCPService) RemoveServer(ctx context.Context, name string, profileName string, clients []string) error {
+	if m.removeServerFn != nil {
+		return m.removeServerFn(ctx, name, profileName, clients)
+	}
+	return nil
 }
 
 func TestGetMcpServers(t *testing.T) {
@@ -869,6 +893,133 @@ func TestGetMcpServers(t *testing.T) {
 	}
 	if len(isoServers) != 1 || isoServers[0].Name != "local-tool" {
 		t.Fatalf("expected 1 local-tool server, got %v", isoServers)
+	}
+}
+
+func TestAddMcpServer(t *testing.T) {
+	var capturedReq service.AddMCPServerRequest
+	mcp := &mockMCPService{
+		addServerFn: func(ctx context.Context, req service.AddMCPServerRequest) error {
+			capturedReq = req
+			if req.Name == "error-srv" {
+				return errors.New("cannot add server")
+			}
+			return nil
+		},
+	}
+
+	srv := web.NewServer(nil, nil, nil, 0, false, mcp)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// Valid POST
+	body := `{"name":"test-tool","command":"npx","args":["-y","test-pkg"],"profile":"dev"}`
+	req, _ := http.NewRequest("POST", ts.URL+"/api/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/mcp failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("expected 201 Created, got %d", resp.StatusCode)
+	}
+	if capturedReq.Name != "test-tool" || capturedReq.Profile != "dev" {
+		t.Errorf("unexpected captured request: %+v", capturedReq)
+	}
+
+	// Error response
+	errBody := `{"name":"error-srv","command":"npx"}`
+	errReq, _ := http.NewRequest("POST", ts.URL+"/api/mcp", strings.NewReader(errBody))
+	errReq.Header.Set("Content-Type", "application/json")
+	errResp, err := http.DefaultClient.Do(errReq)
+	if err != nil {
+		t.Fatalf("POST error server failed: %v", err)
+	}
+	defer errResp.Body.Close()
+
+	if errResp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request, got %d", errResp.StatusCode)
+	}
+}
+
+func TestSetMcpServerState(t *testing.T) {
+	var capturedName string
+	var capturedState service.SetMCPServerStateRequest
+	mcp := &mockMCPService{
+		setServerStateFn: func(ctx context.Context, name string, req service.SetMCPServerStateRequest) error {
+			capturedName = name
+			capturedState = req
+			if name == "missing-srv" {
+				return errors.New("server not found")
+			}
+			return nil
+		},
+	}
+
+	srv := web.NewServer(nil, nil, nil, 0, false, mcp)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// Valid PATCH
+	body := `{"enabled":false,"profile":"work"}`
+	req, _ := http.NewRequest("PATCH", ts.URL+"/api/mcp/my-srv/state", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /api/mcp/my-srv/state failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", resp.StatusCode)
+	}
+	if capturedName != "my-srv" || capturedState.Enabled || capturedState.Profile != "work" {
+		t.Errorf("unexpected captured state: name=%s, req=%+v", capturedName, capturedState)
+	}
+
+	// Missing server
+	errReq, _ := http.NewRequest("PATCH", ts.URL+"/api/mcp/missing-srv/state", strings.NewReader(body))
+	errReq.Header.Set("Content-Type", "application/json")
+	errResp, err := http.DefaultClient.Do(errReq)
+	if err != nil {
+		t.Fatalf("PATCH missing-srv failed: %v", err)
+	}
+	defer errResp.Body.Close()
+
+	if errResp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request on missing server, got %d", errResp.StatusCode)
+	}
+}
+
+func TestDeleteMcpServer(t *testing.T) {
+	var capturedName string
+	var capturedProfile string
+	mcp := &mockMCPService{
+		removeServerFn: func(ctx context.Context, name string, profileName string, clients []string) error {
+			capturedName = name
+			capturedProfile = profileName
+			return nil
+		},
+	}
+
+	srv := web.NewServer(nil, nil, nil, 0, false, mcp)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/mcp/del-srv?profile=prod&clients=claude", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /api/mcp/del-srv failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", resp.StatusCode)
+	}
+	if capturedName != "del-srv" || capturedProfile != "prod" {
+		t.Errorf("unexpected captured delete: name=%s, profile=%s", capturedName, capturedProfile)
 	}
 }
 

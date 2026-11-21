@@ -263,3 +263,65 @@ func TestAgy_DetectInstalled(t *testing.T) {
 		t.Errorf("expected installed when ~/.gemini directory exists")
 	}
 }
+
+func TestAgy_HeadersAndToggleState(t *testing.T) {
+	home := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(home, ".gemini", "config"), 0o755)
+	t.Setenv("HOME", home)
+	t.Setenv("AIM_REAL_HOME", home)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		URL: "https://mcp.posthog.com/mcp",
+		Headers: map[string]string{
+			"Authorization": "Bearer test-key",
+		},
+	}
+
+	// 1. Host add with headers
+	if err := a.AddHostMCPServer(ctx, "posthog", cfg); err != nil {
+		t.Fatalf("AddHostMCPServer failed: %v", err)
+	}
+
+	agyPath := filepath.Join(home, ".gemini", "config", "mcp_config.json")
+	data, err := os.ReadFile(agyPath)
+	if err != nil {
+		t.Fatalf("read mcp_config.json failed: %v", err)
+	}
+	if !strings.Contains(string(data), "Bearer test-key") {
+		t.Fatalf("expected headers in agy config, got:\n%s", string(data))
+	}
+
+	// 2. Disable on Host
+	if err := a.SetHostMCPServerState(ctx, "posthog", false); err != nil {
+		t.Fatalf("SetHostMCPServerState disable failed: %v", err)
+	}
+	data, _ = os.ReadFile(agyPath)
+	if !strings.Contains(string(data), `"disabled": true`) && !strings.Contains(string(data), `"disabled":true`) {
+		t.Fatalf("expected disabled:true in agy config, got:\n%s", string(data))
+	}
+
+	// 3. Enable on Host
+	if err := a.SetHostMCPServerState(ctx, "posthog", true); err != nil {
+		t.Fatalf("SetHostMCPServerState enable failed: %v", err)
+	}
+	data, _ = os.ReadFile(agyPath)
+	if strings.Contains(string(data), `"disabled": true`) || strings.Contains(string(data), `"disabled":true`) {
+		t.Fatalf("expected disabled removed from agy config, got:\n%s", string(data))
+	}
+
+	// 4. Profile toggle
+	profDir := filepath.Join(home, "profiles", "dev")
+	if err := a.AddProfileMCPServer(ctx, "dev", profDir, "posthog", cfg); err != nil {
+		t.Fatalf("AddProfileMCPServer failed: %v", err)
+	}
+	if err := a.SetProfileMCPServerState(ctx, "dev", profDir, "posthog", false); err != nil {
+		t.Fatalf("SetProfileMCPServerState disable failed: %v", err)
+	}
+	profData, _ := os.ReadFile(filepath.Join(profDir, ".gemini", "config", "mcp_config.json"))
+	if !strings.Contains(string(profData), `"disabled": true`) && !strings.Contains(string(profData), `"disabled":true`) {
+		t.Fatalf("expected disabled:true in profile config, got:\n%s", string(profData))
+	}
+}

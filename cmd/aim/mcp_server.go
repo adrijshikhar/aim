@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -40,6 +42,9 @@ Provides a read-only stdio MCP server for agent self-inspection (whoami, quota, 
 		newMCPListCmd(reg, pm),
 		newMCPAddCmd(reg, pm),
 		newMCPRemoveCmd(reg, pm),
+		newMCPEnableCmd(reg, pm),
+		newMCPDisableCmd(reg, pm),
+		newMCPLoginCmd(reg, pm),
 	)
 
 	return mcpCmd
@@ -50,7 +55,10 @@ type ProfileTarget struct {
 	Dir  string
 }
 
-func resolveProfileTargets(pm *profile.ProfileManager, profileFlag string, allFlag bool) ([]ProfileTarget, error) {
+var mcpIsInteractive = defaultIsInteractive
+
+// ResolveTargetScope determines whether an MCP command targets the host system or specific profile(s).
+func ResolveTargetScope(pm *profile.ProfileManager, profileFlag string, hostFlag, allFlag bool, in io.Reader, out io.Writer) ([]ProfileTarget, error) {
 	if allFlag {
 		if pm == nil {
 			return nil, fmt.Errorf("profile manager not initialized")
@@ -65,6 +73,11 @@ func resolveProfileTargets(pm *profile.ProfileManager, profileFlag string, allFl
 		}
 		return targets, nil
 	}
+
+	if hostFlag {
+		return nil, nil // Explicit host target
+	}
+
 	if profileFlag != "" {
 		if pm == nil {
 			return nil, fmt.Errorf("profile manager not initialized")
@@ -89,7 +102,67 @@ func resolveProfileTargets(pm *profile.ProfileManager, profileFlag string, allFl
 		}
 		return targets, nil
 	}
-	return nil, nil // Nil slice explicitly signifies Host target
+
+	// Automatic active profile detection
+	if envProfile := strings.TrimSpace(os.Getenv("AIM_PROFILE")); envProfile != "" {
+		if pm != nil && pm.ProfileExists(envProfile) {
+			pDir := pm.ProfileDir(envProfile)
+
+			// Check interactive stdin
+			isInteractive := mcpIsInteractive(in)
+
+			if isInteractive {
+				fmt.Fprintf(out, "Detected active profile %q. Apply to profile %q? [Y/n/host]: ", envProfile, envProfile)
+				scanner := bufio.NewScanner(in)
+				var resp string
+				if scanner.Scan() {
+					resp = strings.TrimSpace(strings.ToLower(scanner.Text()))
+				}
+				switch resp {
+				case "", "y", "yes":
+					return []ProfileTarget{{Name: envProfile, Dir: pDir}}, nil
+				case "host", "h":
+					return nil, nil
+				case "n", "no":
+					return nil, fmt.Errorf("operation cancelled by user")
+				default:
+					return nil, fmt.Errorf("invalid response %q", resp)
+				}
+			}
+
+			// Non-interactive fallback: target active profile
+			return []ProfileTarget{{Name: envProfile, Dir: pDir}}, nil
+		}
+	}
+
+	return nil, nil // Host target
+}
+
+func resolveProfileTargets(pm *profile.ProfileManager, profileFlag string, allFlag bool) ([]ProfileTarget, error) {
+	return ResolveTargetScope(pm, profileFlag, false, allFlag, os.Stdin, os.Stdout)
+}
+
+func notifyIfActiveSessions(cmd *cobra.Command, pm *profile.ProfileManager, targets []ProfileTarget) {
+	if pm == nil {
+		return
+	}
+	store := pm.MergeStateStore()
+	errOut := cmd.ErrOrStderr()
+
+	if len(targets) == 0 {
+		if envProfile := os.Getenv("AIM_PROFILE"); envProfile != "" {
+			if running, err := store.ActiveSessions(envProfile); err == nil && len(running) > 0 {
+				fmt.Fprintf(errOut, "Notice: Active session detected for profile %q. Restart the session to load updated MCP servers.\n", envProfile)
+			}
+		}
+		return
+	}
+
+	for _, target := range targets {
+		if running, err := store.ActiveSessions(target.Name); err == nil && len(running) > 0 {
+			fmt.Fprintf(errOut, "Notice: Active session detected for profile %q (%s). Restart the session to load updated MCP servers.\n", target.Name, strings.Join(running, ", "))
+		}
+	}
 }
 
 func resolveTargetAdapters(reg *agents.Registry, clientsFlag string, realHome string) ([]agents.MCPConfigManager, error) {
@@ -430,6 +503,7 @@ Supports 'claude', 'codex', 'agy', or 'all'.`,
 
 func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var profileFlag string
+	var hostFlag bool
 	var clientFlag string
 	var clientsFlag string
 	var jsonFlag bool
@@ -441,7 +515,7 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			profileDir, err := resolveProfileDir(pm, profileFlag)
+			profileTargets, err := ResolveTargetScope(pm, profileFlag, hostFlag, false, cmd.InOrStdin(), cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -450,8 +524,8 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 				Name    string `json:"name"`
 				Client  string `json:"client"`
 				Command string `json:"command"`
-				Args    string `json:"args,omitempty"`
 				Status  string `json:"status"`
+				Auth    string `json:"auth"`
 			}
 
 			var rows []serverRow
@@ -481,32 +555,83 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 				}
 			}
 
-			for _, adapter := range targets {
-				adName := "Agent"
-				if a, ok := adapter.(agents.AgentAdapter); ok {
-					adName = a.DisplayName()
-				}
-				scopeLabel := adName
-				if profileFlag != "" {
-					scopeLabel += " (" + profileFlag + ")"
-				}
-
-				servers, err := adapter.ListMCPServers(ctx, profileFlag, profileDir)
-				if err != nil || len(servers) == 0 {
-					continue
-				}
-
-				for _, s := range servers {
-					status := s.Status
-					if status == "" {
-						status = "enabled"
+			// If no profile targets returned from scope resolution, list host servers
+			if len(profileTargets) == 0 {
+				for _, adapter := range targets {
+					adName := "Agent"
+					if a, ok := adapter.(agents.AgentAdapter); ok {
+						adName = a.DisplayName()
 					}
-					rows = append(rows, serverRow{
-						Name:    s.Name,
-						Client:  scopeLabel,
-						Command: s.Target,
-						Status:  status,
-					})
+					scopeLabel := adName
+
+					servers, err := adapter.ListMCPServers(ctx, "", "")
+					if err != nil || len(servers) == 0 {
+						continue
+					}
+
+					for _, s := range servers {
+						status := s.Status
+						if status == "" {
+							status = "enabled"
+						}
+						auth := s.Auth
+						if strings.HasPrefix(s.Target, "http://") || strings.HasPrefix(s.Target, "https://") {
+							cached := agents.InspectRemoteOAuthStatus(s.Target, "")
+							if cached != "none" {
+								auth = cached
+							}
+						}
+						if auth == "" {
+							auth = "none"
+						}
+						rows = append(rows, serverRow{
+							Name:    s.Name,
+							Client:  scopeLabel,
+							Command: s.Target,
+							Status:  status,
+							Auth:    auth,
+						})
+					}
+				}
+			} else {
+				// List profile-scoped servers
+				for _, p := range profileTargets {
+					for _, adapter := range targets {
+						adName := "Agent"
+						if a, ok := adapter.(agents.AgentAdapter); ok {
+							adName = a.DisplayName()
+						}
+						scopeLabel := fmt.Sprintf("%s (%s)", adName, p.Name)
+
+						servers, err := adapter.ListMCPServers(ctx, p.Name, p.Dir)
+						if err != nil || len(servers) == 0 {
+							continue
+						}
+
+						for _, s := range servers {
+							status := s.Status
+							if status == "" {
+								status = "enabled"
+							}
+							auth := s.Auth
+							if strings.HasPrefix(s.Target, "http://") || strings.HasPrefix(s.Target, "https://") {
+								cached := agents.InspectRemoteOAuthStatus(s.Target, p.Dir)
+								if cached != "none" {
+									auth = cached
+								}
+							}
+							if auth == "" {
+								auth = "none"
+							}
+							rows = append(rows, serverRow{
+								Name:    s.Name,
+								Client:  scopeLabel,
+								Command: s.Target,
+								Status:  status,
+								Auth:    auth,
+							})
+						}
+					}
 				}
 			}
 
@@ -539,13 +664,14 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 					r.Client,
 					r.Command,
 					r.Status,
+					r.Auth,
 				})
 			}
 
 			t := presenter.NewTable(out).
 				Border(lipgloss.RoundedBorder()).
 				BorderStyle(lipgloss.NewStyle().Foreground(tui.TextDim)).
-				Headers("SERVER", "CLIENT / SCOPE", "COMMAND / TARGET", "STATUS").
+				Headers("SERVER", "CLIENT / SCOPE", "COMMAND / TARGET", "STATUS", "AUTH").
 				Rows(tableRows...)
 
 			t.StyleFunc(func(row, col int) lipgloss.Style {
@@ -564,6 +690,16 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 						return lipgloss.NewStyle().Foreground(tui.StatusGreen)
 					}
 					return lipgloss.NewStyle().Foreground(tui.TextMuted)
+				case 4:
+					if row >= 0 && row < len(rows) {
+						switch rows[row].Auth {
+						case "connected", "OAuth":
+							return lipgloss.NewStyle().Foreground(tui.StatusGreen)
+						case "auth required", "required":
+							return lipgloss.NewStyle().Foreground(tui.StatusYellow)
+						}
+					}
+					return lipgloss.NewStyle().Foreground(tui.TextDim)
 				default:
 					return lipgloss.NewStyle().Foreground(tui.TextSecondary)
 				}
@@ -574,7 +710,8 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 		},
 	}
 
-	listCmd.Flags().StringVar(&profileFlag, "profile", "", "Filter or inspect specific profile")
+	listCmd.Flags().StringVar(&profileFlag, "profile", "", "Filter or inspect specific profile(s)")
+	listCmd.Flags().BoolVar(&hostFlag, "host", false, "Inspect host configuration explicitly")
 	listCmd.Flags().StringVar(&clientFlag, "client", "", "Filter by client (e.g. 'claude', 'codex')")
 	listCmd.Flags().StringVar(&clientsFlag, "clients", "", "Filter by clients (e.g. 'claude', 'codex')")
 	listCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results in JSON format")
@@ -585,20 +722,27 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 func newMCPAddCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var clientsFlag string
 	var profileFlag string
+	var hostFlag bool
 	var allFlag bool
+	var headersFlag []string
+	var bearerFlag string
+	var envFlag []string
+	var loginFlag bool
 
 	addCmd := &cobra.Command{
-		Use:   "add <name> <command> [args...]",
+		Use:   "add <name> <command-or-url> [args...]",
 		Short: "Register an MCP server across agent configurations",
 		Long: `Registers a new MCP server definition across selected or detected agent configurations.
-Example:
+Supports stdio commands and remote HTTP/SSE endpoints with custom headers and environment variables.
+
+Examples:
   aim mcp add fetch uvx mcp-server-fetch --clients codex,claude
-  aim mcp add fetch uvx mcp-server-fetch --profile work,staging
-  aim mcp add fetch uvx mcp-server-fetch --all`,
+  aim mcp add posthog https://mcp.posthog.com/mcp --header "Authorization: Bearer my-key"
+  aim mcp add cloudflare https://mcp.cloudflare.com/mcp --login`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			profileTargets, err := resolveProfileTargets(pm, profileFlag, allFlag)
+			profileTargets, err := ResolveTargetScope(pm, profileFlag, hostFlag, allFlag, cmd.InOrStdin(), cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -618,16 +762,77 @@ Example:
 				return fmt.Errorf("no target agent clients found to register server into")
 			}
 
+			// Parse headers
+			headers := make(map[string]string)
+			for _, h := range headersFlag {
+				h = strings.TrimSpace(h)
+				if h == "" {
+					continue
+				}
+				idx := strings.IndexByte(h, ':')
+				if idx <= 0 {
+					return fmt.Errorf("invalid header format %q, expected 'Header-Name: value'", h)
+				}
+				headers[strings.TrimSpace(h[:idx])] = strings.TrimSpace(h[idx+1:])
+			}
+			if bearerFlag != "" {
+				headers["Authorization"] = "Bearer " + strings.TrimSpace(bearerFlag)
+			}
+
+			// Parse environment variables
+			envMap := make(map[string]string)
+			for _, e := range envFlag {
+				e = strings.TrimSpace(e)
+				if e == "" {
+					continue
+				}
+				idx := strings.IndexByte(e, '=')
+				if idx <= 0 {
+					return fmt.Errorf("invalid env format %q, expected 'KEY=value'", e)
+				}
+				envMap[strings.TrimSpace(e[:idx])] = strings.TrimSpace(e[idx+1:])
+			}
+
 			cfg := agents.MCPServerConfig{}
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+
 			if strings.HasPrefix(serverCommand, "http://") || strings.HasPrefix(serverCommand, "https://") {
 				cfg.URL = serverCommand
+				cfg.Headers = headers
+				cfg.Env = envMap
+
+				if loginFlag {
+					fmt.Fprintf(out, "Probing authentication for %s...\n", cfg.URL)
+					disc, err := mcp.DiscoverEndpointAuth(ctx, cfg.URL)
+					if err == nil && disc.AuthType == "oauth" {
+						fmt.Fprintln(out, "Initiating OAuth authorization flow...")
+						tokens, authErr := mcp.AuthorizeMCPOAuth(ctx, disc, func(authURL string) {
+							fmt.Fprintf(out, "\nPlease visit the following URL to authenticate:\n  %s\n\nWaiting for authentication callback...\n", authURL)
+						})
+						if authErr == nil {
+							sharedTokensPath := filepath.Join(config.BaseDir(), "shared", "mcp-auth", "tokens.json")
+							_ = os.MkdirAll(filepath.Dir(sharedTokensPath), 0700)
+							existing := make(map[string]any)
+							if data, err := os.ReadFile(sharedTokensPath); err == nil {
+								_ = json.Unmarshal(data, &existing)
+							}
+							existing[cfg.URL] = tokens
+							encoded, err := json.MarshalIndent(existing, "", "  ")
+							if err == nil {
+								_ = os.WriteFile(sharedTokensPath, encoded, 0600)
+							}
+							fmt.Fprintln(out, "OAuth authentication succeeded and tokens saved.")
+						} else {
+							fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OAuth handshake failed: %v\n", authErr)
+						}
+					}
+				}
 			} else {
 				cfg.Command = serverCommand
 				cfg.Args = serverArgs
+				cfg.Env = envMap
 			}
-
-			ctx := cmd.Context()
-			out := cmd.OutOrStdout()
 
 			if allFlag && len(profileTargets) == 0 {
 				fmt.Fprintln(out, "No profiles configured.")
@@ -640,7 +845,7 @@ Example:
 					adName = a.DisplayName()
 				}
 
-				if !allFlag && profileFlag == "" {
+				if len(profileTargets) == 0 {
 					if err := adapter.AddHostMCPServer(ctx, serverName, cfg); err != nil {
 						return fmt.Errorf("failed to add server to %s (host): %w", adName, err)
 					}
@@ -654,13 +859,20 @@ Example:
 					}
 				}
 			}
+
+			notifyIfActiveSessions(cmd, pm, profileTargets)
 			return nil
 		},
 	}
 
 	addCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Comma-separated list of target clients (e.g. 'claude,codex') or 'all'")
 	addCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles (e.g. 'work,dev')")
+	addCmd.Flags().BoolVar(&hostFlag, "host", false, "Target global host configuration explicitly")
 	addCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
+	addCmd.Flags().StringArrayVarP(&headersFlag, "header", "H", nil, "Custom HTTP header in 'Name: value' format (can be specified multiple times)")
+	addCmd.Flags().StringVar(&bearerFlag, "bearer", "", "Shorthand for 'Authorization: Bearer <token>' header")
+	addCmd.Flags().StringArrayVarP(&envFlag, "env", "e", nil, "Environment variable in 'KEY=value' format (can be specified multiple times)")
+	addCmd.Flags().BoolVar(&loginFlag, "login", false, "Initiate OAuth login flow for remote endpoints requiring authentication")
 
 	return addCmd
 }
@@ -668,6 +880,7 @@ Example:
 func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var clientsFlag string
 	var profileFlag string
+	var hostFlag bool
 	var allFlag bool
 
 	removeCmd := &cobra.Command{
@@ -676,7 +889,7 @@ func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()
-			profileTargets, err := resolveProfileTargets(pm, profileFlag, allFlag)
+			profileTargets, err := ResolveTargetScope(pm, profileFlag, hostFlag, allFlag, cmd.InOrStdin(), cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -706,7 +919,7 @@ func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 					adName = a.DisplayName()
 				}
 
-				if !allFlag && profileFlag == "" {
+				if len(profileTargets) == 0 {
 					if err := adapter.RemoveHostMCPServer(ctx, serverName); err == nil {
 						fmt.Fprintf(out, "Removed MCP server '%s' from %s at %s\n", serverName, adName, homeDir)
 						removedCount++
@@ -727,6 +940,8 @@ func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 
 			if removedCount == 0 {
 				fmt.Fprintf(out, "Server '%s' was not found in selected agent configs.\n", serverName)
+			} else {
+				notifyIfActiveSessions(cmd, pm, profileTargets)
 			}
 			return nil
 		},
@@ -734,7 +949,250 @@ func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 
 	removeCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Comma-separated list of target clients or 'all'")
 	removeCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles")
+	removeCmd.Flags().BoolVar(&hostFlag, "host", false, "Target global host configuration explicitly")
 	removeCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
 
 	return removeCmd
+}
+
+func newMCPEnableCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
+	var clientsFlag string
+	var profileFlag string
+	var hostFlag bool
+	var allFlag bool
+
+	enableCmd := &cobra.Command{
+		Use:   "enable <name>",
+		Short: "Enable a disabled MCP server definition",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			homeDir := config.RealHomeDir()
+			profileTargets, err := ResolveTargetScope(pm, profileFlag, hostFlag, allFlag, cmd.InOrStdin(), cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+
+			serverName := args[0]
+			targets, err := resolveTargetAdapters(reg, clientsFlag, homeDir)
+			if err != nil {
+				return err
+			}
+			if len(targets) == 0 {
+				return fmt.Errorf("no target agent clients found")
+			}
+
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+			enabledCount := 0
+
+			for _, adapter := range targets {
+				adName := "agent"
+				if a, ok := adapter.(agents.AgentAdapter); ok {
+					adName = a.DisplayName()
+				}
+
+				if len(profileTargets) == 0 {
+					if err := adapter.SetHostMCPServerState(ctx, serverName, true); err == nil {
+						fmt.Fprintf(out, "Enabled MCP server '%s' on %s (host)\n", serverName, adName)
+						enabledCount++
+					} else if !errors.Is(err, os.ErrNotExist) {
+						return fmt.Errorf("failed to enable %s in %s: %w", serverName, adName, err)
+					}
+				} else {
+					for _, p := range profileTargets {
+						if err := adapter.SetProfileMCPServerState(ctx, p.Name, p.Dir, serverName, true); err == nil {
+							fmt.Fprintf(out, "Enabled MCP server '%s' on %s (profile %s)\n", serverName, adName, p.Name)
+							enabledCount++
+						} else if !errors.Is(err, os.ErrNotExist) {
+							return fmt.Errorf("failed to enable %s in %s (profile %s): %w", serverName, adName, p.Name, err)
+						}
+					}
+				}
+			}
+
+			if enabledCount == 0 {
+				fmt.Fprintf(out, "Server '%s' was not found in selected agent configs.\n", serverName)
+			} else {
+				notifyIfActiveSessions(cmd, pm, profileTargets)
+			}
+			return nil
+		},
+	}
+
+	enableCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Comma-separated list of target clients or 'all'")
+	enableCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles")
+	enableCmd.Flags().BoolVar(&hostFlag, "host", false, "Target global host configuration explicitly")
+	enableCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
+
+	return enableCmd
+}
+
+func newMCPDisableCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
+	var clientsFlag string
+	var profileFlag string
+	var hostFlag bool
+	var allFlag bool
+
+	disableCmd := &cobra.Command{
+		Use:   "disable <name>",
+		Short: "Disable an MCP server definition without removing it",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			homeDir := config.RealHomeDir()
+			profileTargets, err := ResolveTargetScope(pm, profileFlag, hostFlag, allFlag, cmd.InOrStdin(), cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+
+			serverName := args[0]
+			targets, err := resolveTargetAdapters(reg, clientsFlag, homeDir)
+			if err != nil {
+				return err
+			}
+			if len(targets) == 0 {
+				return fmt.Errorf("no target agent clients found")
+			}
+
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+			disabledCount := 0
+
+			for _, adapter := range targets {
+				adName := "agent"
+				if a, ok := adapter.(agents.AgentAdapter); ok {
+					adName = a.DisplayName()
+				}
+
+				if len(profileTargets) == 0 {
+					if err := adapter.SetHostMCPServerState(ctx, serverName, false); err == nil {
+						fmt.Fprintf(out, "Disabled MCP server '%s' on %s (host)\n", serverName, adName)
+						disabledCount++
+					} else if !errors.Is(err, os.ErrNotExist) {
+						return fmt.Errorf("failed to disable %s in %s: %w", serverName, adName, err)
+					}
+				} else {
+					for _, p := range profileTargets {
+						if err := adapter.SetProfileMCPServerState(ctx, p.Name, p.Dir, serverName, false); err == nil {
+							fmt.Fprintf(out, "Disabled MCP server '%s' on %s (profile %s)\n", serverName, adName, p.Name)
+							disabledCount++
+						} else if !errors.Is(err, os.ErrNotExist) {
+							return fmt.Errorf("failed to disable %s in %s (profile %s): %w", serverName, adName, p.Name, err)
+						}
+					}
+				}
+			}
+
+			if disabledCount == 0 {
+				fmt.Fprintf(out, "Server '%s' was not found in selected agent configs.\n", serverName)
+			} else {
+				notifyIfActiveSessions(cmd, pm, profileTargets)
+			}
+			return nil
+		},
+	}
+
+	disableCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Comma-separated list of target clients or 'all'")
+	disableCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles")
+	disableCmd.Flags().BoolVar(&hostFlag, "host", false, "Target global host configuration explicitly")
+	disableCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
+
+	return disableCmd
+}
+
+func newMCPLoginCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
+	var clientsFlag string
+	var profileFlag string
+	var hostFlag bool
+
+	loginCmd := &cobra.Command{
+		Use:   "login <server-name-or-url>",
+		Short: "Authenticate with a remote OAuth-protected MCP server",
+		Long: `Discovers authentication requirements and executes the loopback PKCE OAuth handshake for an MCP endpoint.
+Stores tokens in the unified shared credentials store.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			homeDir := config.RealHomeDir()
+			profileTargets, err := ResolveTargetScope(pm, profileFlag, hostFlag, false, cmd.InOrStdin(), cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+
+			arg := args[0]
+			var serverURL string
+			if strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://") {
+				serverURL = arg
+			} else {
+				// Search configured servers by name
+				ctx := cmd.Context()
+				var pDir string
+				var pName string
+				if len(profileTargets) > 0 {
+					pDir = profileTargets[0].Dir
+					pName = profileTargets[0].Name
+				}
+				targets, _ := resolveTargetAdapters(reg, clientsFlag, homeDir)
+				for _, adapter := range targets {
+					servers, err := adapter.ListMCPServers(ctx, pName, pDir)
+					if err == nil {
+						for _, s := range servers {
+							if s.Name == arg && (strings.HasPrefix(s.Target, "http://") || strings.HasPrefix(s.Target, "https://")) {
+								serverURL = s.Target
+								break
+							}
+						}
+					}
+					if serverURL != "" {
+						break
+					}
+				}
+				if serverURL == "" {
+					return fmt.Errorf("could not find remote URL for MCP server %q", arg)
+				}
+			}
+
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+
+			fmt.Fprintf(out, "Discovering authentication requirements for %s...\n", serverURL)
+			disc, err := mcp.DiscoverEndpointAuth(ctx, serverURL)
+			if err != nil {
+				return fmt.Errorf("discovery failed: %w", err)
+			}
+
+			if disc.AuthType != "oauth" {
+				fmt.Fprintf(out, "Server does not require OAuth authentication (auth type: %s).\n", disc.AuthType)
+				return nil
+			}
+
+			fmt.Fprintln(out, "Initiating OAuth authorization flow...")
+			tokens, err := mcp.AuthorizeMCPOAuth(ctx, disc, func(authURL string) {
+				fmt.Fprintf(out, "\nPlease visit the following URL to authorize AIM:\n  %s\n\nWaiting for authentication callback...\n", authURL)
+			})
+			if err != nil {
+				return fmt.Errorf("authorization failed: %w", err)
+			}
+
+			// Store in shared mcp-auth tokens.json
+			sharedTokensPath := filepath.Join(config.BaseDir(), "shared", "mcp-auth", "tokens.json")
+			_ = os.MkdirAll(filepath.Dir(sharedTokensPath), 0700)
+			existing := make(map[string]any)
+			if data, err := os.ReadFile(sharedTokensPath); err == nil {
+				_ = json.Unmarshal(data, &existing)
+			}
+			existing[serverURL] = tokens
+			encoded, err := json.MarshalIndent(existing, "", "  ")
+			if err == nil {
+				_ = os.WriteFile(sharedTokensPath, encoded, 0600)
+			}
+
+			fmt.Fprintf(out, "Successfully authenticated with %s!\nTokens saved to shared credentials store.\n", serverURL)
+			return nil
+		},
+	}
+
+	loginCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Filter target clients or 'all'")
+	loginCmd.Flags().StringVar(&profileFlag, "profile", "", "Target profile")
+	loginCmd.Flags().BoolVar(&hostFlag, "host", false, "Target host explicitly")
+
+	return loginCmd
 }

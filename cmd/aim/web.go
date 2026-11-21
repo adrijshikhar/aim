@@ -319,7 +319,7 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 	launcherSvc := service.NewLauncherService()
 	profileSvc := service.NewProfileService(pm, reg)
 	sessionSvc := service.NewSessionService(sm, launcherSvc)
-	mcpSvc := service.NewMCPService(pm)
+	mcpSvc := service.NewMCPService(pm, reg)
 	daemonSvc := service.NewDaemonService(reg, pm, config.BaseDir())
 
 	srv := web.NewServer(profileSvc, sessionSvc, launcherSvc, port, devMode, mcpSvc)

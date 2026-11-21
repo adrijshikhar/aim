@@ -363,3 +363,67 @@ func TestCodex_DetectInstalled(t *testing.T) {
 		t.Errorf("expected installed when ~/.codex/config.toml exists")
 	}
 }
+
+func TestCodex_HeadersAndToggleState(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("AIM_REAL_HOME", tempHome)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		URL: "https://mcp.posthog.com/mcp",
+		Headers: map[string]string{
+			"Authorization": "Bearer test-key",
+		},
+	}
+
+	// 1. Host add with http_headers
+	if err := a.AddHostMCPServer(ctx, "posthog", cfg); err != nil {
+		t.Fatalf("AddHostMCPServer failed: %v", err)
+	}
+
+	codexPath := filepath.Join(tempHome, ".codex", "config.toml")
+	data, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("read config.toml failed: %v", err)
+	}
+	str := string(data)
+	if !strings.Contains(str, "http_headers") || !strings.Contains(str, "Bearer test-key") {
+		t.Fatalf("expected http_headers with Bearer test-key, got:\n%s", str)
+	}
+
+	// 2. Disable on Host
+	if err := a.SetHostMCPServerState(ctx, "posthog", false); err != nil {
+		t.Fatalf("SetHostMCPServerState disable failed: %v", err)
+	}
+	data, _ = os.ReadFile(codexPath)
+	str = string(data)
+	if !strings.Contains(str, "enabled = false") {
+		t.Fatalf("expected enabled = false in config, got:\n%s", str)
+	}
+
+	// 3. Enable on Host
+	if err := a.SetHostMCPServerState(ctx, "posthog", true); err != nil {
+		t.Fatalf("SetHostMCPServerState enable failed: %v", err)
+	}
+	data, _ = os.ReadFile(codexPath)
+	str = string(data)
+	if !strings.Contains(str, "enabled = true") {
+		t.Fatalf("expected enabled = true in config, got:\n%s", str)
+	}
+
+	// 4. Profile toggle
+	profDir := filepath.Join(tempHome, "profiles", "dev")
+	if err := a.AddProfileMCPServer(ctx, "dev", profDir, "posthog", cfg); err != nil {
+		t.Fatalf("AddProfileMCPServer failed: %v", err)
+	}
+	if err := a.SetProfileMCPServerState(ctx, "dev", profDir, "posthog", false); err != nil {
+		t.Fatalf("SetProfileMCPServerState disable failed: %v", err)
+	}
+	profData, _ := os.ReadFile(filepath.Join(profDir, ".codex", "config.toml"))
+	if !strings.Contains(string(profData), "enabled = false") {
+		t.Fatalf("expected enabled = false in profile config, got:\n%s", string(profData))
+	}
+}

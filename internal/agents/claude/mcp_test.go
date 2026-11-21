@@ -251,3 +251,64 @@ func TestClaude_ListMCPServers(t *testing.T) {
 		t.Errorf("shared-api mismatch: %+v", servers[2])
 	}
 }
+
+func TestClaude_HeadersAndToggleState(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("AIM_REAL_HOME", tempHome)
+
+	a := &Adapter{}
+	ctx := context.Background()
+
+	cfg := agents.MCPServerConfig{
+		URL: "https://mcp.posthog.com/mcp",
+		Headers: map[string]string{
+			"Authorization": "Bearer test-key",
+		},
+	}
+
+	// 1. Host add with headers
+	if err := a.AddHostMCPServer(ctx, "posthog", cfg); err != nil {
+		t.Fatalf("AddHostMCPServer failed: %v", err)
+	}
+
+	claudePath := filepath.Join(tempHome, ".claude.json")
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read claude.json failed: %v", err)
+	}
+	if !strings.Contains(string(data), "Bearer test-key") {
+		t.Fatalf("expected headers in claude config, got: %s", string(data))
+	}
+
+	// 2. Disable on Host
+	if err := a.SetHostMCPServerState(ctx, "posthog", false); err != nil {
+		t.Fatalf("SetHostMCPServerState disable failed: %v", err)
+	}
+	data, _ = os.ReadFile(claudePath)
+	if !strings.Contains(string(data), `"disabled": true`) && !strings.Contains(string(data), `"disabled":true`) {
+		t.Fatalf("expected disabled:true in claude config, got: %s", string(data))
+	}
+
+	// 3. Enable on Host
+	if err := a.SetHostMCPServerState(ctx, "posthog", true); err != nil {
+		t.Fatalf("SetHostMCPServerState enable failed: %v", err)
+	}
+	data, _ = os.ReadFile(claudePath)
+	if strings.Contains(string(data), `"disabled": true`) || strings.Contains(string(data), `"disabled":true`) {
+		t.Fatalf("expected disabled removed from claude config, got: %s", string(data))
+	}
+
+	// 4. Profile toggle
+	profDir := filepath.Join(tempHome, "profiles", "work")
+	if err := a.AddProfileMCPServer(ctx, "work", profDir, "posthog", cfg); err != nil {
+		t.Fatalf("AddProfileMCPServer failed: %v", err)
+	}
+	if err := a.SetProfileMCPServerState(ctx, "work", profDir, "posthog", false); err != nil {
+		t.Fatalf("SetProfileMCPServerState disable failed: %v", err)
+	}
+	profData, _ := os.ReadFile(filepath.Join(profDir, ".claude", ".claude.json"))
+	if !strings.Contains(string(profData), `"disabled": true`) && !strings.Contains(string(profData), `"disabled":true`) {
+		t.Fatalf("expected disabled:true in profile config, got: %s", string(profData))
+	}
+}

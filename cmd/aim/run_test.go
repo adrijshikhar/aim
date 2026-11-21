@@ -792,9 +792,19 @@ func (m *mockMCPConfigManagerAdapter) ListMCPServers(ctx context.Context, profil
 	return nil, nil
 }
 
+func (m *mockMCPConfigManagerAdapter) SetHostMCPServerState(ctx context.Context, name string, enabled bool) error {
+	return nil
+}
+
+func (m *mockMCPConfigManagerAdapter) SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error {
+	return nil
+}
+
 func (m *mockMCPConfigManagerAdapter) DetectInstalled(realHome string) bool {
 	return true
 }
+
+var _ agents.MCPConfigManager = (*mockMCPConfigManagerAdapter)(nil)
 
 func TestRunCmd_RegistersAimShareMCP_OnLeasedProfile(t *testing.T) {
 	tempDir := t.TempDir()
