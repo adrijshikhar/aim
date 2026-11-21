@@ -27,12 +27,42 @@ func (m *mockMCPManager) RemoveProfileMCPServer(ctx context.Context, profileName
 	return nil
 }
 
+func (m *mockMCPManager) SetHostMCPServerState(ctx context.Context, name string, enabled bool) error {
+	return nil
+}
+
+func (m *mockMCPManager) SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error {
+	return nil
+}
+
 func (m *mockMCPManager) DetectInstalled(realHome string) bool {
 	return true
 }
 
 func TestMCPConfigManager_InterfaceAssertion(t *testing.T) {
 	var _ MCPConfigManager = (*mockMCPManager)(nil)
+}
+
+func TestMCPServerConfig_Headers(t *testing.T) {
+	cfg := MCPServerConfig{
+		URL: "https://mcp.posthog.com/mcp",
+		Headers: map[string]string{
+			"Authorization": "Bearer test-token",
+		},
+	}
+	if cfg.Headers["Authorization"] != "Bearer test-token" {
+		t.Errorf("expected header set, got %v", cfg.Headers)
+	}
+}
+
+func TestMCPConfigManager_StateToggles(t *testing.T) {
+	var mgr MCPConfigManager
+	// Compile-time check for method existence on the interface
+	type stateToggler interface {
+		SetHostMCPServerState(ctx context.Context, name string, enabled bool) error
+		SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error
+	}
+	var _ stateToggler = mgr
 }
 
 func TestArgsMatch(t *testing.T) {

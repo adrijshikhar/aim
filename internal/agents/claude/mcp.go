@@ -111,6 +111,9 @@ func configToMap(cfg agents.MCPServerConfig) map[string]any {
 	if cfg.URL != "" {
 		m["url"] = cfg.URL
 	}
+	if len(cfg.Headers) > 0 {
+		m["headers"] = cfg.Headers
+	}
 	if cfg.Disabled {
 		m["disabled"] = true
 	}
@@ -127,6 +130,13 @@ func (a *Adapter) AddHostMCPServer(ctx context.Context, name string, cfg agents.
 	}
 	entries.Set(name, configToMap(cfg), nil)
 	return merge.WriteJSONKey(path, "mcpServers", entries, 0o600)
+}
+
+// SetHostMCPServerState toggles an MCP server between enabled and disabled in ~/.claude.json.
+func (a *Adapter) SetHostMCPServerState(ctx context.Context, name string, enabled bool) error {
+	realHome := config.RealHomeDir()
+	path := filepath.Join(realHome, ".claude.json")
+	return setClaudeMCPServerState(path, name, enabled)
 }
 
 // RemoveHostMCPServer unregisters an MCP server from ~/.claude.json.
@@ -155,6 +165,37 @@ func (a *Adapter) AddProfileMCPServer(ctx context.Context, profileName, profileD
 		entries = merge.NewEntries()
 	}
 	entries.Set(name, configToMap(cfg), nil)
+	return merge.WriteJSONKey(path, "mcpServers", entries, 0o600)
+}
+
+// SetProfileMCPServerState toggles an MCP server between enabled and disabled in <profileDir>/.claude/.claude.json.
+func (a *Adapter) SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error {
+	if profileDir == "" {
+		return fmt.Errorf("profileDir is required")
+	}
+	path := filepath.Join(profileDir, ".claude", ".claude.json")
+	return setClaudeMCPServerState(path, name, enabled)
+}
+
+func setClaudeMCPServerState(path, name string, enabled bool) error {
+	entries, ok, err := merge.ReadJSONKey(path, "mcpServers")
+	if err != nil {
+		return err
+	}
+	if !ok || !entries.Has(name) {
+		return os.ErrNotExist
+	}
+	entryMap := entries.Values[name]
+	updated := make(map[string]any, len(entryMap))
+	for k, v := range entryMap {
+		updated[k] = v
+	}
+	if enabled {
+		delete(updated, "disabled")
+	} else {
+		updated["disabled"] = true
+	}
+	entries.Set(name, updated, nil)
 	return merge.WriteJSONKey(path, "mcpServers", entries, 0o600)
 }
 

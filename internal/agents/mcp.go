@@ -33,6 +33,7 @@ type MCPServerConfig struct {
 	Args     []string          `json:"args,omitempty"`
 	Env      map[string]string `json:"env,omitempty"`
 	URL      string            `json:"url,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 	Disabled bool              `json:"disabled,omitempty"`
 }
 
@@ -47,11 +48,17 @@ type MCPConfigManager interface {
 	// RemoveHostMCPServer removes an MCP server definition from the host configuration.
 	RemoveHostMCPServer(ctx context.Context, name string) error
 
+	// SetHostMCPServerState toggles an MCP server between enabled and disabled in host configuration.
+	SetHostMCPServerState(ctx context.Context, name string, enabled bool) error
+
 	// AddProfileMCPServer registers or updates an MCP server definition in an isolated profile directory.
 	AddProfileMCPServer(ctx context.Context, profileName, profileDir, name string, cfg MCPServerConfig) error
 
 	// RemoveProfileMCPServer removes an MCP server definition from an isolated profile directory.
 	RemoveProfileMCPServer(ctx context.Context, profileName, profileDir, name string) error
+
+	// SetProfileMCPServerState toggles an MCP server between enabled and disabled in a profile directory.
+	SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error
 
 	// DetectInstalled reports whether the agent is installed or configured on the host machine.
 	DetectInstalled(realHome string) bool

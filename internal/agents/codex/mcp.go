@@ -122,6 +122,13 @@ func codexConfigToMap(cfg agents.MCPServerConfig) map[string]any {
 	if cfg.URL != "" {
 		m["url"] = cfg.URL
 	}
+	if len(cfg.Headers) > 0 {
+		headers := make(map[string]any, len(cfg.Headers))
+		for k, v := range cfg.Headers {
+			headers[k] = v
+		}
+		m["http_headers"] = headers
+	}
 	if cfg.Disabled {
 		m["enabled"] = false
 	}
@@ -139,6 +146,13 @@ func (a *Adapter) AddHostMCPServer(ctx context.Context, name string, cfg agents.
 	entries.Set(name, codexConfigToMap(cfg), nil)
 	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)
 	return err
+}
+
+// SetHostMCPServerState toggles an MCP server between enabled and disabled in ~/.codex/config.toml.
+func (a *Adapter) SetHostMCPServerState(ctx context.Context, name string, enabled bool) error {
+	realHome := config.RealHomeDir()
+	path := filepath.Join(realHome, ".codex", "config.toml")
+	return setCodexMCPServerState(path, name, enabled)
 }
 
 // RemoveHostMCPServer unregisters an MCP server from ~/.codex/config.toml.
@@ -168,6 +182,34 @@ func (a *Adapter) AddProfileMCPServer(ctx context.Context, profileName, profileD
 		entries = merge.NewEntries()
 	}
 	entries.Set(name, codexConfigToMap(cfg), nil)
+	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)
+	return err
+}
+
+// SetProfileMCPServerState toggles an MCP server between enabled and disabled in <profileDir>/.codex/config.toml.
+func (a *Adapter) SetProfileMCPServerState(ctx context.Context, profileName, profileDir, name string, enabled bool) error {
+	if profileDir == "" {
+		return fmt.Errorf("profileDir is required")
+	}
+	path := filepath.Join(profileDir, ".codex", "config.toml")
+	return setCodexMCPServerState(path, name, enabled)
+}
+
+func setCodexMCPServerState(path, name string, enabled bool) error {
+	entries, ok, err := merge.ReadTOMLKey(path, "mcp_servers")
+	if err != nil {
+		return err
+	}
+	if !ok || !entries.Has(name) {
+		return os.ErrNotExist
+	}
+	entryMap := entries.Values[name]
+	updated := make(map[string]any, len(entryMap))
+	for k, v := range entryMap {
+		updated[k] = v
+	}
+	updated["enabled"] = enabled
+	entries.Set(name, updated, nil)
 	_, err = merge.WriteTOMLKey(path, "mcp_servers", entries, 0o600)
 	return err
 }
