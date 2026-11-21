@@ -372,9 +372,9 @@ func newMCPInstallCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.C
 
 	installCmd := &cobra.Command{
 		Use:   "install [client]",
-		Short: "Register aim MCP server into agent configuration (e.g. claude, codex, agy)",
+		Short: "Register aim MCP server into agent configuration (e.g. claude, codex, agy, cursor)",
 		Long: `Registers 'aim mcp serve' as an MCP server in target agent configuration files.
-Supports 'claude' (Claude Code), 'codex', 'agy', or 'all'.
+Supports 'claude' (Claude Code), 'codex', 'agy', 'cursor', or 'all'.
 When run without arguments, scans and auto-detects installed agents.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -392,7 +392,7 @@ When run without arguments, scans and auto-detects installed agents.`,
 			targets, err := resolveTargetAdapters(reg, targetClient, homeDir)
 			if err != nil {
 				if targetClient != "all" {
-					fmt.Fprintf(cmd.OutOrStdout(), "Auto-install is currently supported for 'claude', 'codex', 'agy'.\nFor %s, register:\n  Command: aim\n  Args: [\"mcp\", \"serve\"]\n", targetClient)
+					fmt.Fprintf(cmd.OutOrStdout(), "Auto-install is currently supported for 'claude', 'codex', 'agy', 'cursor'.\nFor %s, register:\n  Command: aim\n  Args: [\"mcp\", \"serve\"]\n", targetClient)
 					return nil
 				}
 				return err
@@ -442,9 +442,9 @@ func newMCPUninstallCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra
 
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall [client]",
-		Short: "Remove aim MCP server from agent configuration (e.g. claude, codex, agy)",
+		Short: "Remove aim MCP server from agent configuration (e.g. claude, codex, agy, cursor)",
 		Long: `Removes the 'aim' MCP server definition from agent configuration files without disturbing other servers.
-Supports 'claude', 'codex', 'agy', or 'all'.`,
+Supports 'claude', 'codex', 'agy', 'cursor', or 'all'.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir := config.RealHomeDir()

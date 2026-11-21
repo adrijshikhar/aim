@@ -182,6 +182,7 @@ func TestInspectRemoteOAuthStatus(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 	t.Setenv("AIM_REAL_HOME", tempHome)
+	t.Setenv("AIM_HOME", tempHome)
 
 	profDir := filepath.Join(tempHome, "profiles", "dev")
 	_ = os.MkdirAll(profDir, 0700)

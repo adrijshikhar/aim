@@ -8,6 +8,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/agents/claude"
 	"github.com/aim-cli/aim/internal/agents/codex"
+	"github.com/aim-cli/aim/internal/agents/cursor"
 	"github.com/aim-cli/aim/internal/agents/gemini"
 )
 
@@ -86,5 +87,34 @@ func TestInterfaceSegregation_StandardAdaptersImplementFullAdapter(t *testing.T)
 				t.Errorf("expected empty account info for empty dir, got %s, %s, %s", email, authMethod, projectID)
 			}
 		})
+	}
+}
+
+func TestInterfaceSegregation_CursorAdapter(t *testing.T) {
+	cur := cursor.NewAdapter()
+
+	// Cursor implements core AgentAdapter
+	var _ agents.AgentAdapter = cur
+
+	// Cursor implements segregated interfaces
+	if _, ok := any(cur).(agents.Diagnostician); !ok {
+		t.Error("cursor adapter should implement Diagnostician")
+	}
+	if _, ok := any(cur).(agents.AccountInfoProvider); !ok {
+		t.Error("cursor adapter should implement AccountInfoProvider")
+	}
+	if _, ok := any(cur).(agents.RunnableFlagsProvider); !ok {
+		t.Error("cursor adapter should implement RunnableFlagsProvider")
+	}
+	if _, ok := any(cur).(agents.MCPConfigManager); !ok {
+		t.Error("cursor adapter should implement MCPConfigManager")
+	}
+
+	// Cursor is an IDE agent and intentionally does not implement CLI-specific Authenticator or UsageProvider
+	if _, ok := any(cur).(agents.Authenticator); ok {
+		t.Error("cursor adapter should not implement Authenticator")
+	}
+	if _, ok := any(cur).(agents.UsageProvider); ok {
+		t.Error("cursor adapter should not implement UsageProvider")
 	}
 }
