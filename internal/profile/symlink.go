@@ -25,6 +25,7 @@ var isolatedDotfiles = map[string]bool{
 	".claude":      true,
 	".claude.json": true,
 	".codex":       true,
+	".cursor":      true,
 	".gemini":      true,
 }
 

@@ -80,7 +80,7 @@ func TestEnsureDotfiles_NeverLinksIsolatedAgentState(t *testing.T) {
 	host := t.TempDir()
 	prof := t.TempDir()
 
-	for _, dir := range []string{".aim", ".claude", ".codex", ".gemini"} {
+	for _, dir := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini"} {
 		mustWriteFile(t, filepath.Join(host, dir, "state"), "host")
 	}
 	for _, f := range []string{".claude.json", ".claude.json.backup", ".claude.json.tmp.123"} {
@@ -91,12 +91,12 @@ func TestEnsureDotfiles_NeverLinksIsolatedAgentState(t *testing.T) {
 		t.Fatalf("EnsureDotfiles: %v", err)
 	}
 
-	for _, name := range []string{".aim", ".claude", ".codex", ".gemini", ".claude.json", ".claude.json.backup", ".claude.json.tmp.123"} {
+	for _, name := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini", ".claude.json", ".claude.json.backup", ".claude.json.tmp.123"} {
 		if _, err := os.Lstat(filepath.Join(prof, name)); err == nil {
 			t.Errorf("ISOLATION VIOLATION: %s was bridged into the profile", name)
 		}
 	}
-	for _, name := range []string{".aim", ".claude", ".codex", ".gemini", ".claude.json", ".claude.json.backup"} {
+	for _, name := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini", ".claude.json", ".claude.json.backup"} {
 		if slices.Contains(GetBridgedPaths(host), name) {
 			t.Errorf("GetBridgedPaths must not list %s", name)
 		}

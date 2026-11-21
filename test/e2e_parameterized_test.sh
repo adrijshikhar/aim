@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ==============================================================================
 # Parameterized E2E Integration Test Suite for AIM
-# Tests all registered agent adapters (agy, codex, claude, gemini, and future additions)
+# Tests all registered agent adapters (agy, codex, claude, gemini, cursor, and future additions)
 #
 # Coverage:
 # 1. Environment Isolation (HOME, AIM_AGENT, AIM_PROFILE, storage dirs)
@@ -65,7 +65,7 @@ chmod +x "$MOCK_BIN/security"
 # To onboard a new adapter (e.g. 'opencode', 'copilot'), simply append to ALL_ADAPTERS
 # and define its mock binary and session hooks below.
 # ==============================================================================
-ALL_ADAPTERS=("agy" "codex" "claude" "gemini")
+ALL_ADAPTERS=("agy" "codex" "claude" "gemini" "cursor")
 
 # Mock Agent Binaries
 for AGENT in "${ALL_ADAPTERS[@]}"; do
@@ -316,15 +316,16 @@ verify_hydration() {
 echo ""
 echo "========================================================================"
 echo "  PHASE 1: Core Launch, Environment Isolation, Flags & Typo Safety      "
-echo "  Parameterizing across ALL 4 adapters: agy, codex, claude, gemini       "
+echo "  Parameterizing across ALL 5 adapters: agy, codex, claude, gemini, cursor"
 echo "========================================================================"
 
 # Host state for the bridging checks: an arbitrary dotdir aim has never heard
 # of must be shared, and per-profile agent state must never be. The agent state
 # is removed after this phase so later phases see the host they expect.
-mkdir -p "$AIM_REAL_HOME/.newtool" "$AIM_REAL_HOME/.codex"
+mkdir -p "$AIM_REAL_HOME/.newtool" "$AIM_REAL_HOME/.codex" "$AIM_REAL_HOME/.cursor"
 echo "cfg" > "$AIM_REAL_HOME/.newtool/cfg"
 echo "host" > "$AIM_REAL_HOME/.codex/aim-e2e-host-marker"
+echo "host" > "$AIM_REAL_HOME/.cursor/aim-e2e-host-marker"
 echo "{}" > "$AIM_REAL_HOME/.claude.json"
 
 for AGENT in "${ALL_ADAPTERS[@]}"; do
@@ -387,7 +388,7 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
     echo "FAIL [$AGENT]: arbitrary host dotdir .newtool was not bridged into the profile"
     exit 1
   fi
-  for isolated in .codex .claude.json; do
+  for isolated in .codex .claude.json .cursor; do
     if [ -L "$EXPECTED_HOME/$isolated" ]; then
       echo "FAIL [$AGENT]: per-profile $isolated was linked to the host"
       exit 1
@@ -461,7 +462,7 @@ print(out.decode("utf-8", errors="replace"))
   fi
   echo "  ✔ Doctor diagnostics passed for $AGENT"
 done
-rm -rf "$AIM_REAL_HOME/.codex" "$AIM_REAL_HOME/.claude.json"
+rm -rf "$AIM_REAL_HOME/.codex" "$AIM_REAL_HOME/.claude.json" "$AIM_REAL_HOME/.cursor"
 
 echo ""
 echo "========================================================================"
@@ -571,10 +572,10 @@ done
 echo ""
 echo "========================================================================"
 echo "  PHASE 3: Non-Session Adapter Rejection Handling                        "
-echo "  Verifying graceful error when resuming non-session agents (gemini)     "
+echo "  Verifying graceful error when resuming non-session agents (gemini, cursor)"
 echo "========================================================================"
 
-NON_SESSION_ADAPTERS=("gemini")
+NON_SESSION_ADAPTERS=("gemini" "cursor")
 
 for AGENT in "${NON_SESSION_ADAPTERS[@]}"; do
   echo "--- Testing Non-Session Rejection: [$AGENT] ---"
@@ -597,7 +598,7 @@ echo "========================================================================"
 # Helper: Check if adapter merges host MCP servers per session (agents.MCPProvider)
 adapter_has_mcp() {
   case "$1" in
-    claude|codex|agy) return 0 ;;
+    claude|codex|agy|cursor) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -621,6 +622,7 @@ coll_host_file() {
     claude/*)          echo "$AIM_REAL_HOME/.claude/settings.json" ;;
     codex/*)           echo "$AIM_REAL_HOME/.codex/config.toml" ;;
     agy/*)             echo "$AIM_REAL_HOME/.gemini/config/mcp_config.json" ;;
+    cursor/*)          echo "$AIM_REAL_HOME/.cursor/mcp.json" ;;
   esac
 }
 
@@ -631,6 +633,7 @@ coll_profile_rel() {
     claude/*)          echo ".claude/settings.json" ;;
     codex/*)           echo ".codex/config.toml" ;;
     agy/*)             echo ".gemini/config/mcp_config.json" ;;
+    cursor/*)          echo ".cursor/mcp.json" ;;
   esac
 }
 
@@ -643,6 +646,7 @@ mcp_bg_args() {
     claude) echo "--bg" ;;
     codex)  echo "app-server" ;;
     agy)    echo "remote-control" ;;
+    cursor) echo "" ;;
   esac
 }
 
@@ -898,28 +902,34 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   set_mcp_global "$PROF" unset
   echo "  ✔ Host servers not merged when mcp_global is false"
 
-  # 4. Background launch: merge, run, no exit step — host items stay until the next launch
-  echo "  [4/7] Testing background launch ('aim run $AGENT $PROF $(mcp_bg_args "$AGENT")')..."
-  export E2E_MCP_ADD=bgsrv
-  "$AIM_BIN" run "$AGENT" "$PROF" $(mcp_bg_args "$AGENT") < /dev/null
-  unset E2E_MCP_ADD
-  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config after background launch" own newsrv bgsrv hostsrv shared promoted
-  echo "  ✔ Background launch left the merged config in place"
+  BG_ARGS=$(mcp_bg_args "$AGENT")
+  if [ -n "$BG_ARGS" ]; then
+    # 4. Background launch: merge, run, no exit step — host items stay until the next launch
+    echo "  [4/7] Testing background launch ('aim run $AGENT $PROF $BG_ARGS')..."
+    export E2E_MCP_ADD=bgsrv
+    "$AIM_BIN" run "$AGENT" "$PROF" $BG_ARGS < /dev/null
+    unset E2E_MCP_ADD
+    assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config after background launch" own newsrv bgsrv hostsrv shared promoted
+    echo "  ✔ Background launch left the merged config in place"
 
-  # 5. Background via profiles.<p>.args with no CLI args: recovers step 4, merges, no exit step
-  echo "  [5/7] Testing background launch from profiles.$PROF.args = [$(mcp_bg_args "$AGENT")]..."
-  set_profile_args "$PROF" $(mcp_bg_args "$AGENT")
-  export E2E_MCP_ADD=profbgsrv
-  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
-  unset E2E_MCP_ADD
-  set_profile_args "$PROF" unset
-  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
-    echo "FAIL [$AGENT]: launch from profile args did not recover the previous background session"
-    echo "$RUN_OUT"
-    exit 1
+    # 5. Background via profiles.<p>.args with no CLI args: recovers step 4, merges, no exit step
+    echo "  [5/7] Testing background launch from profiles.$PROF.args = [$BG_ARGS]..."
+    set_profile_args "$PROF" $BG_ARGS
+    export E2E_MCP_ADD=profbgsrv
+    RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+    unset E2E_MCP_ADD
+    set_profile_args "$PROF" unset
+    if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
+      echo "FAIL [$AGENT]: launch from profile args did not recover the previous background session"
+      echo "$RUN_OUT"
+      exit 1
+    fi
+    assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config after background launch from profile args" own newsrv bgsrv profbgsrv hostsrv shared promoted
+    echo "  ✔ Profile args made the launch a background one: host items left in place"
+  else
+    echo "  [4/7] Background launch not applicable for $AGENT (skipping)"
+    echo "  [5/7] Background launch via profile args not applicable for $AGENT (skipping)"
   fi
-  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config after background launch from profile args" own newsrv bgsrv profbgsrv hostsrv shared promoted
-  echo "  ✔ Profile args made the launch a background one: host items left in place"
 
   # 6. Non-session (--version): no merge, no strip, no recovery — the profile file is untouched
   echo "  [6/7] Testing non-session launch ('aim run $AGENT $PROF --version')..."
@@ -932,18 +942,22 @@ for AGENT in "${ALL_ADAPTERS[@]}"; do
   fi
   echo "  ✔ --version left the profile file byte-identical (recovery waits for a real session)"
 
-  # 7. The next foreground launch recovers: keeps the background session's change, strips host items
-  echo "  [7/7] Testing recovery on the next launch..."
-  RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
-  if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
-    echo "FAIL [$AGENT]: recovery did not report the background session's change"
-    echo "$RUN_OUT"
-    exit 1
+  if [ -n "$BG_ARGS" ]; then
+    # 7. The next foreground launch recovers: keeps the background session's change, strips host items
+    echo "  [7/7] Testing recovery on the next launch..."
+    RUN_OUT=$("$AIM_BIN" run "$AGENT" "$PROF" < /dev/null 2>&1)
+    if ! echo "$RUN_OUT" | grep -q "1 change(s) kept in $PROF ($AGENT) from a session that did not exit through aim"; then
+      echo "FAIL [$AGENT]: recovery did not report the background session's change"
+      echo "$RUN_OUT"
+      exit 1
+    fi
+    assert_coll_names "$AGENT" "$COLL" "$SNAP" "profile config during recovered session" own newsrv bgsrv profbgsrv hostsrv shared promoted
+    assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config at rest after recovery" own newsrv bgsrv profbgsrv
+    assert_coll_names "$AGENT" "$COLL" "$HOST_FILE" "host config after recovery" hostsrv shared promoted
+    echo "  ✔ Recovered: 'bgsrv' and 'profbgsrv' kept, host items stripped, host untouched"
+  else
+    echo "  [7/7] Background recovery not applicable for $AGENT (skipping)"
   fi
-  assert_coll_names "$AGENT" "$COLL" "$SNAP" "profile config during recovered session" own newsrv bgsrv profbgsrv hostsrv shared promoted
-  assert_coll_names "$AGENT" "$COLL" "$PROF_FILE" "profile config at rest after recovery" own newsrv bgsrv profbgsrv
-  assert_coll_names "$AGENT" "$COLL" "$HOST_FILE" "host config after recovery" hostsrv shared promoted
-  echo "  ✔ Recovered: 'bgsrv' and 'profbgsrv' kept, host items stripped, host untouched"
 done
 
 unset E2E_MCP_ADD E2E_MCP_REL E2E_MCP_KEY E2E_MCP_FORMAT E2E_SNAP
@@ -1226,7 +1240,19 @@ cat << 'AGYCFG' > "$AIM_HOME/profiles/$MCP_TEST_PROF/.gemini/config/mcp_config.j
 }
 AGYCFG
 
-echo "  [1/4] Testing transparent interception of 'aim run codex $MCP_TEST_PROF mcp list'..."
+mkdir -p "$AIM_HOME/profiles/$MCP_TEST_PROF/.cursor"
+cat << 'CURSORCFG' > "$AIM_HOME/profiles/$MCP_TEST_PROF/.cursor/mcp.json"
+{
+  "mcpServers": {
+    "cursor-tool": {
+      "command": "cursor-bin",
+      "args": []
+    }
+  }
+}
+CURSORCFG
+
+echo "  [1/5] Testing transparent interception of 'aim run codex $MCP_TEST_PROF mcp list'..."
 RUN_CODEX=$("$AIM_BIN" run codex "$MCP_TEST_PROF" mcp list)
 if ! echo "$RUN_CODEX" | grep -q "=== Configured MCP Servers (codex: $MCP_TEST_PROF) ==="; then
   echo "FAIL: aim run codex mcp list was NOT intercepted into formatted table!"
@@ -1244,7 +1270,7 @@ if echo "$RUN_CODEX" | grep -q "MOCK_NATIVE_MCP_LIST_RAN"; then
 fi
 echo "  ✔ Codex MCP list formatted table rendered cleanly"
 
-echo "  [2/4] Testing transparent interception of 'aim run claude $MCP_TEST_PROF mcp list'..."
+echo "  [2/5] Testing transparent interception of 'aim run claude $MCP_TEST_PROF mcp list'..."
 RUN_CLAUDE=$("$AIM_BIN" run claude "$MCP_TEST_PROF" mcp list)
 if ! echo "$RUN_CLAUDE" | grep -q "claude-tool"; then
   echo "FAIL: Missing claude-tool in claude table output"
@@ -1253,7 +1279,7 @@ if ! echo "$RUN_CLAUDE" | grep -q "claude-tool"; then
 fi
 echo "  ✔ Claude MCP list rendered cleanly without hanging"
 
-echo "  [3/4] Testing transparent interception of 'aim run agy $MCP_TEST_PROF mcp list'..."
+echo "  [3/5] Testing transparent interception of 'aim run agy $MCP_TEST_PROF mcp list'..."
 RUN_AGY=$("$AIM_BIN" run agy "$MCP_TEST_PROF" mcp list)
 if ! echo "$RUN_AGY" | grep -q "agy-tool"; then
   echo "FAIL: Missing agy-tool in agy table output"
@@ -1262,7 +1288,16 @@ if ! echo "$RUN_AGY" | grep -q "agy-tool"; then
 fi
 echo "  ✔ Agy MCP list rendered cleanly"
 
-echo "  [4/4] Testing passthrough on 'aim run codex $MCP_TEST_PROF mcp list --json'..."
+echo "  [4/5] Testing transparent interception of 'aim run cursor $MCP_TEST_PROF mcp list'..."
+RUN_CURSOR=$("$AIM_BIN" run cursor "$MCP_TEST_PROF" mcp list)
+if ! echo "$RUN_CURSOR" | grep -q "cursor-tool"; then
+  echo "FAIL: Missing cursor-tool in cursor table output"
+  echo "$RUN_CURSOR"
+  exit 1
+fi
+echo "  ✔ Cursor MCP list rendered cleanly"
+
+echo "  [5/5] Testing passthrough on 'aim run codex $MCP_TEST_PROF mcp list --json'..."
 PASSTHROUGH_OUT=$("$AIM_BIN" run codex "$MCP_TEST_PROF" mcp list --json 2>&1 || true)
 if echo "$PASSTHROUGH_OUT" | grep -q "=== Configured MCP Servers"; then
   echo "FAIL: passthrough flag --json was intercepted into formatted table"
@@ -1273,6 +1308,6 @@ echo "  ✔ Passthrough on --json succeeded"
 
 echo ""
 echo "========================================================================"
-echo "  ALL PARAMETERIZED E2E TESTS PASSED ACROSS ALL 4 ADAPTERS!              "
+echo "  ALL PARAMETERIZED E2E TESTS PASSED ACROSS ALL 5 ADAPTERS!              "
 echo "========================================================================"
 
