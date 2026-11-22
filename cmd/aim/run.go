@@ -343,9 +343,13 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		binNames := append([]string{adapter.BinaryName(), desktopApp.AppBundleName()}, adapter.Aliases()...)
 
 		force := hasForceFlag(opts.ExtraArgs)
-		if err := sup.EnsureSingleInstance(runCtx, os.Stdin, os.Stdout, desktopApp.AppBundleName(), opts.ProfileName, targetUserDataDir, binNames, force); err != nil {
+		alreadyRunning, err := sup.EnsureSingleInstance(runCtx, os.Stdin, os.Stdout, desktopApp.AppBundleName(), opts.ProfileName, targetUserDataDir, binNames, force)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return 1
+		}
+		if alreadyRunning {
+			return 0
 		}
 
 		cmd := exec.Command(launchEnv.BinaryPath, append(launchEnv.Args, opts.ExtraArgs...)...)

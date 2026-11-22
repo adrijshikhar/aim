@@ -45,8 +45,8 @@ func (m *mockSupervisor) EnsureSingleInstance(
 	targetProfile, targetUserDataDir string,
 	binaries []string,
 	force bool,
-) error {
-	return nil
+) (bool, error) {
+	return false, nil
 }
 
 func TestDesktopService_ListStatus_RunningAndStopped(t *testing.T) {

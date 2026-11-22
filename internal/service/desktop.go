@@ -90,8 +90,12 @@ func (s *defaultDesktopService) Launch(ctx context.Context, req DesktopLaunchReq
 	binNames := append([]string{adapter.BinaryName(), da.AppBundleName()}, adapter.Aliases()...)
 	var in strings.Reader
 	var out strings.Builder
-	if err := s.sup.EnsureSingleInstance(ctx, &in, &out, da.AppBundleName(), req.Profile, da.UserDataDir(pDir), binNames, req.Force); err != nil {
+	alreadyRunning, err := s.sup.EnsureSingleInstance(ctx, &in, &out, da.AppBundleName(), req.Profile, da.UserDataDir(pDir), binNames, req.Force)
+	if err != nil {
 		return err
+	}
+	if alreadyRunning {
+		return nil
 	}
 
 	cmd := exec.Command(launchEnv.BinaryPath, launchEnv.Args...)

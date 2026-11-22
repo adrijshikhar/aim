@@ -27,7 +27,7 @@ type Supervisor interface {
 	FindInstance(ctx context.Context, appName string, binaryNames []string) (*ProcessInfo, error)
 	FocusInstance(ctx context.Context, proc *ProcessInfo) error
 	GracefulQuit(ctx context.Context, proc *ProcessInfo) error
-	EnsureSingleInstance(ctx context.Context, in io.Reader, out io.Writer, appName string, targetProfile, targetUserDataDir string, binaries []string, force bool) error
+	EnsureSingleInstance(ctx context.Context, in io.Reader, out io.Writer, appName string, targetProfile, targetUserDataDir string, binaries []string, force bool) (alreadyRunning bool, err error)
 }
 
 type rawProcess struct {

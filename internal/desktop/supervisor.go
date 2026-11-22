@@ -29,18 +29,18 @@ func (s *defaultSupervisor) FindInstance(ctx context.Context, appName string, bi
 	}
 
 	cleanAppName := strings.TrimSuffix(strings.ToLower(appName), ".app")
-	appBundleMatch := "/" + cleanAppName + ".app/"
+	macOSAppBundleSubpath := "/" + cleanAppName + ".app/contents/macos/"
 
 	exactNames := make(map[string]bool)
-	if cleanAppName != "" {
-		exactNames[cleanAppName] = true
-	}
 	for _, b := range binaryNames {
 		bClean := strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(b), ".app"), ".exe")
-		// Only consider binary names of length > 2 to ignore 1-2 char CLI aliases like "cd"
-		if len(bClean) > 2 {
+		// Only consider desktop binary names of length > 2; exclude CLI agent names "claude" and "codex"
+		if len(bClean) > 2 && bClean != "claude" && bClean != "codex" {
 			exactNames[bClean] = true
 		}
+	}
+	if cleanAppName != "" && cleanAppName != "claude" && cleanAppName != "codex" {
+		exactNames[cleanAppName] = true
 	}
 
 	for _, p := range procs {
@@ -55,11 +55,8 @@ func (s *defaultSupervisor) FindInstance(ctx context.Context, appName string, bi
 		}
 
 		matched := exactNames[base]
-		if !matched && cleanAppName != "" && strings.Contains(pBinLower, appBundleMatch) {
-			// Inside the app bundle, only accept main binaries located under Contents/MacOS
-			if strings.Contains(pBinLower, "/contents/macos/") {
-				matched = true
-			}
+		if !matched && cleanAppName != "" && strings.Contains(pBinLower, macOSAppBundleSubpath) {
+			matched = true
 		}
 		if !matched {
 			continue
@@ -164,19 +161,19 @@ func (s *defaultSupervisor) EnsureSingleInstance(
 	targetProfile, targetUserDataDir string,
 	binaries []string,
 	force bool,
-) error {
+) (bool, error) {
 	proc, err := s.FindInstance(ctx, appName, binaries)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if proc == nil {
-		return nil
+		return false, nil
 	}
 
 	if proc.ProfileName == targetProfile || (proc.UserDataDir != "" && proc.UserDataDir == targetUserDataDir) {
 		fmt.Fprintf(out, "[aim] Desktop app %s is already running for profile '%s' (PID %d). Focusing window.\n", appName, targetProfile, proc.PID)
 		_ = s.FocusInstance(ctx, proc)
-		return nil
+		return true, nil
 	}
 
 	activeDesc := proc.ProfileName
@@ -193,15 +190,15 @@ func (s *defaultSupervisor) EnsureSingleInstance(
 		line, _ := reader.ReadString('\n')
 		line = strings.TrimSpace(line)
 		if strings.ToLower(line) != "y" && strings.ToLower(line) != "yes" {
-			return fmt.Errorf("%w: active under '%s' (PID %d)", ErrInstanceRunning, activeDesc, proc.PID)
+			return false, fmt.Errorf("%w: active under '%s' (PID %d)", ErrInstanceRunning, activeDesc, proc.PID)
 		}
 	}
 
 	fmt.Fprintf(out, "[aim] Gracefully closing running instance (PID %d)...\n", proc.PID)
 	if err := s.GracefulQuit(ctx, proc); err != nil {
-		return fmt.Errorf("closing active instance: %w", err)
+		return false, fmt.Errorf("closing active instance: %w", err)
 	}
 
 	fmt.Fprintf(out, "[aim] Previous instance terminated. Launching profile '%s'...\n", targetProfile)
-	return nil
+	return false, nil
 }

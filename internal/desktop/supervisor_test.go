@@ -151,9 +151,12 @@ func TestSupervisor_EnsureSingleInstance_SameProfile(t *testing.T) {
 	var in bytes.Buffer
 	var out bytes.Buffer
 
-	err := sup.EnsureSingleInstance(ctx, &in, &out, "Claude", "work", "/Users/test/.aim/profiles/work/.claude-desktop/user-data", []string{"claude"}, false)
+	alreadyRunning, err := sup.EnsureSingleInstance(ctx, &in, &out, "Claude", "work", "/Users/test/.aim/profiles/work/.claude-desktop/user-data", []string{"claude"}, false)
 	if err != nil {
 		t.Fatalf("expected nil error on same-profile activation, got: %v", err)
+	}
+	if !alreadyRunning {
+		t.Error("expected alreadyRunning=true for same profile")
 	}
 	if !strings.Contains(out.String(), "already running") {
 		t.Errorf("expected output to mention already running, got: %s", out.String())
@@ -178,7 +181,7 @@ func TestSupervisor_EnsureSingleInstance_DifferentProfile_Refusal(t *testing.T) 
 	in := bytes.NewBufferString("n\n")
 	var out bytes.Buffer
 
-	err := sup.EnsureSingleInstance(ctx, in, &out, "Claude", "work", "/Users/test/.aim/profiles/work/.claude-desktop/user-data", []string{"claude"}, false)
+	_, err := sup.EnsureSingleInstance(ctx, in, &out, "Claude", "work", "/Users/test/.aim/profiles/work/.claude-desktop/user-data", []string{"claude"}, false)
 	if !errors.Is(err, ErrInstanceRunning) {
 		t.Fatalf("expected ErrInstanceRunning on user refusal, got: %v", err)
 	}
@@ -202,9 +205,12 @@ func TestSupervisor_EnsureSingleInstance_DifferentProfile_Force(t *testing.T) {
 	var in bytes.Buffer
 	var out bytes.Buffer
 
-	err := sup.EnsureSingleInstance(ctx, &in, &out, "Claude", "work", "/Users/test/.aim/profiles/work/.claude-desktop/user-data", []string{"claude"}, true)
+	alreadyRunning, err := sup.EnsureSingleInstance(ctx, &in, &out, "Claude", "work", "/Users/test/.aim/profiles/work/.claude-desktop/user-data", []string{"claude"}, true)
 	if err != nil {
 		t.Fatalf("expected successful switch with force=true, got: %v", err)
+	}
+	if alreadyRunning {
+		t.Error("expected alreadyRunning=false after terminating previous instance")
 	}
 	if scanner.alivePIDs[1234] {
 		t.Errorf("expected PID 1234 to be terminated")
