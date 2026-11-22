@@ -10,7 +10,9 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/agents/claude"
+	"github.com/aim-cli/aim/internal/agents/claudedesktop"
 	"github.com/aim-cli/aim/internal/agents/codex"
+	"github.com/aim-cli/aim/internal/agents/codexdesktop"
 	"github.com/aim-cli/aim/internal/agents/cursor"
 	"github.com/aim-cli/aim/internal/agents/gemini"
 	"github.com/aim-cli/aim/internal/logger"
@@ -122,6 +124,8 @@ func defaultRegistry() *agents.Registry {
 	reg.Register(codex.NewAdapter())
 	reg.Register(claude.NewAdapter())
 	reg.Register(cursor.NewAdapter())
+	reg.Register(claudedesktop.NewAdapter())
+	reg.Register(codexdesktop.NewAdapter())
 	return reg
 }
 

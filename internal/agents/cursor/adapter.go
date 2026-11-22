@@ -19,6 +19,7 @@ var (
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
 	_ agents.MCPConfigManager      = (*Adapter)(nil)
+	_ agents.DesktopApp            = (*Adapter)(nil)
 )
 
 type Adapter struct {
@@ -26,15 +27,27 @@ type Adapter struct {
 }
 
 func NewAdapter() *Adapter {
+	extraPaths := []string{
+		"/Applications/Cursor.app/Contents/MacOS/Cursor",
+		"/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+		filepath.Join(config.RealHomeDir(), "Applications", "Cursor.app", "Contents", "MacOS", "Cursor"),
+	}
 	return &Adapter{
 		BaseAdapter: agents.NewBaseAdapter(
 			"cursor",
 			"Cursor",
 			"cursor",
 			[]string{"cur"},
-			"/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+			extraPaths...,
 		),
 	}
+}
+
+func (a *Adapter) IsDesktop() bool       { return true }
+func (a *Adapter) AppBundleName() string { return "Cursor" }
+
+func (a *Adapter) UserDataDir(profileDir string) string {
+	return filepath.Join(profileDir, ".cursor", "user-data")
 }
 
 func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectID string) {
