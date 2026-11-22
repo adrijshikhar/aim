@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -13,8 +14,10 @@ import (
 type ClientID string
 
 const (
-	ClientClaudeCode ClientID = "claude"
-	ClientCursor     ClientID = "cursor"
+	ClientClaudeCode    ClientID = "claude"
+	ClientCursor        ClientID = "cursor"
+	ClientClaudeDesktop ClientID = "claude-desktop"
+	ClientCodexDesktop  ClientID = "codex-desktop"
 )
 
 // RawMCPEntry represents an MCP server entry in client configuration files.
@@ -49,6 +52,18 @@ var allDrivers = []ClientConfigDriver{
 		baseJSONDriver: baseJSONDriver{
 			id:   ClientCursor,
 			name: "Cursor",
+		},
+	},
+	&claudeDesktopDriver{
+		baseJSONDriver: baseJSONDriver{
+			id:   ClientClaudeDesktop,
+			name: "Claude Desktop",
+		},
+	},
+	&codexDesktopDriver{
+		baseJSONDriver: baseJSONDriver{
+			id:   ClientCodexDesktop,
+			name: "Codex Desktop",
 		},
 	},
 }
@@ -294,4 +309,78 @@ func (d *cursorDriver) ConfigPath(homeDir string, profileDir string) (string, er
 		return storagePath, nil
 	}
 	return primary, nil
+}
+
+// Claude Desktop Driver
+type claudeDesktopDriver struct {
+	baseJSONDriver
+}
+
+func (d *claudeDesktopDriver) Detect(homeDir string) bool {
+	if _, err := os.Stat(filepath.Join(homeDir, ".claude-desktop")); err == nil {
+		return true
+	}
+	if runtime.GOOS == "darwin" {
+		if _, err := os.Stat(filepath.Join(homeDir, "Library", "Application Support", "Claude")); err == nil {
+			return true
+		}
+		if _, err := os.Stat(filepath.Join(homeDir, "Applications", "Claude.app")); err == nil {
+			return true
+		}
+	} else if runtime.GOOS == "linux" {
+		if _, err := os.Stat(filepath.Join(homeDir, ".config", "Claude")); err == nil {
+			return true
+		}
+	}
+	if _, err := exec.LookPath("claude-desktop"); err == nil {
+		return true
+	}
+	return false
+}
+
+func (d *claudeDesktopDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
+	if profileDir != "" {
+		return filepath.Join(profileDir, ".claude-desktop", "claude_desktop_config.json"), nil
+	}
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"), nil
+	}
+	return filepath.Join(homeDir, ".config", "Claude", "claude_desktop_config.json"), nil
+}
+
+// Codex Desktop Driver
+type codexDesktopDriver struct {
+	baseJSONDriver
+}
+
+func (d *codexDesktopDriver) Detect(homeDir string) bool {
+	if _, err := os.Stat(filepath.Join(homeDir, ".codex-desktop")); err == nil {
+		return true
+	}
+	if runtime.GOOS == "darwin" {
+		if _, err := os.Stat(filepath.Join(homeDir, "Library", "Application Support", "Codex")); err == nil {
+			return true
+		}
+		if _, err := os.Stat(filepath.Join(homeDir, "Applications", "Codex.app")); err == nil {
+			return true
+		}
+	} else if runtime.GOOS == "linux" {
+		if _, err := os.Stat(filepath.Join(homeDir, ".config", "Codex")); err == nil {
+			return true
+		}
+	}
+	if _, err := exec.LookPath("codex-desktop"); err == nil {
+		return true
+	}
+	return false
+}
+
+func (d *codexDesktopDriver) ConfigPath(homeDir string, profileDir string) (string, error) {
+	if profileDir != "" {
+		return filepath.Join(profileDir, ".codex-desktop", "config.json"), nil
+	}
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(homeDir, "Library", "Application Support", "Codex", "config.json"), nil
+	}
+	return filepath.Join(homeDir, ".config", "Codex", "config.json"), nil
 }

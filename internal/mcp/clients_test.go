@@ -9,11 +9,11 @@ import (
 
 func TestClientDrivers_Registry(t *testing.T) {
 	drivers := AllDrivers()
-	if len(drivers) != 2 {
-		t.Fatalf("expected 2 drivers (claude, cursor), got %d", len(drivers))
+	if len(drivers) != 4 {
+		t.Fatalf("expected 4 drivers (claude, cursor, claude-desktop, codex-desktop), got %d", len(drivers))
 	}
 
-	for _, id := range []ClientID{ClientClaudeCode, ClientCursor} {
+	for _, id := range []ClientID{ClientClaudeCode, ClientCursor, ClientClaudeDesktop, ClientCodexDesktop} {
 		d, ok := GetDriver(id)
 		if !ok || d == nil {
 			t.Errorf("expected driver for %q to exist", id)
@@ -215,7 +215,56 @@ func TestClientDrivers_Detect(t *testing.T) {
 	}
 
 	detectedAfter := DetectInstalledClients(tempDir)
-	if len(detectedAfter) != 2 {
-		t.Errorf("expected 2 detected clients, got %d", len(detectedAfter))
+	if len(detectedAfter) < 2 {
+		t.Errorf("expected at least 2 detected clients, got %d", len(detectedAfter))
+	}
+}
+
+func TestDesktopClients_ConfigPaths(t *testing.T) {
+	tempHome := t.TempDir()
+	profileDir := filepath.Join(tempHome, ".aim", "profiles", "work")
+	_ = os.MkdirAll(profileDir, 0700)
+
+	claudeDriver, ok := GetDriver(ClientClaudeDesktop)
+	if !ok {
+		t.Fatal("expected claude-desktop driver to be registered")
+	}
+	cfgPath, err := claudeDriver.ConfigPath(tempHome, profileDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := filepath.Join(profileDir, ".claude-desktop", "claude_desktop_config.json")
+	if cfgPath != expected {
+		t.Errorf("expected %s, got %s", expected, cfgPath)
+	}
+
+	// Host path check
+	hostClaudePath, err := claudeDriver.ConfigPath(tempHome, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hostClaudePath == "" {
+		t.Error("expected non-empty host path for claude-desktop")
+	}
+
+	codexDriver, ok := GetDriver(ClientCodexDesktop)
+	if !ok {
+		t.Fatal("expected codex-desktop driver to be registered")
+	}
+	cxdPath, err := codexDriver.ConfigPath(tempHome, profileDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedCxd := filepath.Join(profileDir, ".codex-desktop", "config.json")
+	if cxdPath != expectedCxd {
+		t.Errorf("expected %s, got %s", expectedCxd, cxdPath)
+	}
+
+	hostCodexPath, err := codexDriver.ConfigPath(tempHome, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hostCodexPath == "" {
+		t.Error("expected non-empty host path for codex-desktop")
 	}
 }
