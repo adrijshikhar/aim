@@ -941,10 +941,13 @@ export function McpView({
                   onChange={(val) => setFormClients(String(val))}
                   size="sm"
                   options={[
-                    { value: 'all', label: 'All Installed Clients' },
-                    { value: 'claude', label: 'Claude Code Only' },
-                    { value: 'codex', label: 'OpenAI Codex Only' },
-                    { value: 'agy', label: 'Antigravity Only' },
+                    { value: 'all', label: 'All Installed Clients', description: 'Configure across all detected agents & apps' },
+                    { value: 'claude', label: 'Claude Code', description: 'CLI Terminal Agent' },
+                    { value: 'codex', label: 'OpenAI Codex', description: 'CLI Terminal Agent' },
+                    { value: 'agy', label: 'Antigravity', description: 'CLI Terminal Agent' },
+                    { value: 'claude-desktop', label: 'Claude Desktop', description: 'Desktop GUI Application' },
+                    { value: 'codex-desktop', label: 'Codex Desktop', description: 'Desktop GUI Application' },
+                    { value: 'cursor', label: 'Cursor', description: 'Desktop IDE / Editor' },
                   ]}
                 />
               </div>

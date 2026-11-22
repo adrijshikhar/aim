@@ -4,6 +4,7 @@ import {
   SessionDTO,
   MCPServerDTO,
   ResumeRequest,
+  DesktopStatusDTO,
   getProfiles,
   deleteProfile,
   updateProfileConfig,
@@ -12,6 +13,8 @@ import {
   resumeSession,
   getShareStatus,
   toggleShareProfile,
+  getDesktopStatus,
+  launchDesktopApp,
 } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -49,10 +52,13 @@ import {
   List,
   Clock,
   Radio,
+  AppWindow,
 } from 'lucide-react';
 import { DeleteProfileModal } from '@/components/DeleteProfileModal';
 import { AddProfileModal } from '@/components/AddProfileModal';
 import { ResumeModal } from '@/components/ResumeModal';
+import { DesktopAppCard } from '@/components/DesktopAppCard';
+import { DesktopSwitchModal } from '@/components/DesktopSwitchModal';
 import { AgentBadge } from '@/components/AgentBadge';
 import { QuotaBreakdown, cleanAuthMethod } from '@/components/QuotaBreakdown';
 import { ProfileDetailSkeleton, ProfilesOverviewSkeleton } from '@/components/Skeletons';
@@ -189,7 +195,52 @@ export function ProfilesView({
   // Updating profile config in-flight
   const [updatingConfig, setUpdatingConfig] = React.useState(false);
 
+  // Desktop Application State
+  const [desktopApps, setDesktopApps] = React.useState<DesktopStatusDTO[]>([]);
+  const [desktopLoading, setDesktopLoading] = React.useState(false);
+  const [switchModalTarget, setSwitchModalTarget] = React.useState<{
+    agent: string;
+    targetProfile: string;
+    currentProfile: string;
+  } | null>(null);
+
   const { toast } = useToast();
+
+  const fetchDesktopStatus = React.useCallback(async () => {
+    try {
+      setDesktopLoading(true);
+      const data = await getDesktopStatus();
+      setDesktopApps(data || []);
+    } catch {
+      // Desktop apps status is non-fatal
+    } finally {
+      setDesktopLoading(false);
+    }
+  }, []);
+
+  const handleConfirmSwitch = React.useCallback(async () => {
+    if (!switchModalTarget) return;
+    try {
+      await launchDesktopApp({
+        agent: switchModalTarget.agent,
+        profile: switchModalTarget.targetProfile,
+        force: true,
+      });
+      toast({
+        title: 'Profile Switched',
+        description: `Relaunched ${switchModalTarget.agent} with profile "${switchModalTarget.targetProfile}".`,
+        variant: 'success',
+      });
+      fetchDesktopStatus();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast({
+        title: 'Switch Failed',
+        description: msg,
+        variant: 'destructive',
+      });
+    }
+  }, [switchModalTarget, toast, fetchDesktopStatus]);
 
   const fetchProfiles = React.useCallback(async (forceRefresh = false) => {
     if (forceRefresh) {
@@ -308,7 +359,8 @@ export function ProfilesView({
 
   React.useEffect(() => {
     fetchProfiles();
-  }, [fetchProfiles]);
+    fetchDesktopStatus();
+  }, [fetchProfiles, fetchDesktopStatus]);
 
   // Fetch count of sessions & MCP servers for the selected profile
   React.useEffect(() => {
@@ -972,6 +1024,51 @@ export function ProfilesView({
             </div>
           </div>
         </div>
+
+        {/* Desktop Application Section for Current Profile */}
+        {desktopApps.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AppWindow className="h-3.5 w-3.5 text-accent-cyan" />
+                <h3 className="text-xs font-semibold text-foreground uppercase tracking-wider font-mono">
+                  Desktop Applications
+                </h3>
+                <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
+                  Profile: {currentProfile.name}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={fetchDesktopStatus}
+                disabled={desktopLoading}
+                className="h-6 text-[11px] font-mono text-muted-foreground hover:text-foreground px-2"
+              >
+                <RefreshCw className={cn("h-3 w-3 mr-1", desktopLoading && "animate-spin")} />
+                Check Status
+              </Button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {desktopApps.map((app) => (
+                <DesktopAppCard
+                  key={app.agent}
+                  status={app}
+                  profiles={profiles.map((p) => p.name)}
+                  activeProfile={currentProfile.name}
+                  onRefresh={fetchDesktopStatus}
+                  onRequestSwitch={(agent, targetProfile, currentRunningProfile) => {
+                    setSwitchModalTarget({
+                      agent,
+                      targetProfile,
+                      currentProfile: currentRunningProfile,
+                    });
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Multi-Tab Workspace Organization */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-6">
@@ -1664,6 +1761,15 @@ export function ProfilesView({
           onLaunch={handleModalLaunch}
           isResuming={resumingId === flagModalSession?.id}
         />
+
+        <DesktopSwitchModal
+          open={!!switchModalTarget}
+          onOpenChange={(open) => !open && setSwitchModalTarget(null)}
+          agent={switchModalTarget?.agent || ''}
+          targetProfile={switchModalTarget?.targetProfile || ''}
+          currentProfile={switchModalTarget?.currentProfile || ''}
+          onConfirmSwitch={handleConfirmSwitch}
+        />
       </div>
     );
   }
@@ -1772,6 +1878,51 @@ export function ProfilesView({
           />
         </div>
       </div>
+
+      {/* Desktop Applications Section */}
+      {desktopApps.length > 0 && (
+        <div className="space-y-3 pb-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AppWindow className="h-4 w-4 text-accent-cyan" />
+              <h2 className="text-xs font-semibold text-foreground uppercase tracking-wider font-mono">
+                Desktop Applications
+              </h2>
+              <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
+                Sandboxed GUI
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchDesktopStatus}
+              disabled={desktopLoading}
+              className="h-6 text-[11px] font-mono text-muted-foreground hover:text-foreground px-2"
+            >
+              <RefreshCw className={cn("h-3 w-3 mr-1", desktopLoading && "animate-spin")} />
+              Check Status
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {desktopApps.map((app) => (
+              <DesktopAppCard
+                key={app.agent}
+                status={app}
+                profiles={profiles.map((p) => p.name)}
+                onRefresh={fetchDesktopStatus}
+                onRequestSwitch={(agent, targetProfile, currentRunningProfile) => {
+                  setSwitchModalTarget({
+                    agent,
+                    targetProfile,
+                    currentProfile: currentRunningProfile,
+                  });
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Profiles Directory Content */}
       {loading && profiles.length === 0 ? (
@@ -2153,6 +2304,15 @@ export function ProfilesView({
         session={flagModalSession}
         onLaunch={handleModalLaunch}
         isResuming={resumingId === flagModalSession?.id}
+      />
+
+      <DesktopSwitchModal
+        open={!!switchModalTarget}
+        onOpenChange={(open) => !open && setSwitchModalTarget(null)}
+        agent={switchModalTarget?.agent || ''}
+        targetProfile={switchModalTarget?.targetProfile || ''}
+        currentProfile={switchModalTarget?.currentProfile || ''}
+        onConfirmSwitch={handleConfirmSwitch}
       />
     </div>
   );

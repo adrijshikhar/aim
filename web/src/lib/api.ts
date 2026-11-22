@@ -709,3 +709,66 @@ export async function deleteSchedule(id: string): Promise<{ ok: boolean }> {
   });
   return handleResponse<{ ok: boolean }>(res);
 }
+
+export interface DesktopStatusDTO {
+  agent: string;
+  display_name: string;
+  pid: number;
+  profile: string;
+  running: boolean;
+}
+
+export interface DesktopLaunchRequest {
+  agent: string;
+  profile: string;
+  force?: boolean;
+}
+
+export async function getDesktopStatus(): Promise<DesktopStatusDTO[]> {
+  const res = await fetch(`${BASE_URL}/desktop/status`);
+  return handleResponse<DesktopStatusDTO[]>(res);
+}
+
+export async function launchDesktopApp(
+  req: DesktopLaunchRequest
+): Promise<{ ok: boolean; status?: string; conflict?: boolean; current_profile?: string }> {
+  const res = await fetch(`${BASE_URL}/desktop/launch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+
+  if (res.status === 409) {
+    const data = await res.json().catch(() => ({}));
+    return {
+      ok: false,
+      conflict: true,
+      current_profile: data.profile || '',
+      status: data.error || 'Desktop application is already running in another profile',
+    };
+  }
+
+  const data = await handleResponse<{ status: string }>(res);
+  return { ok: true, status: data.status };
+}
+
+export async function quitDesktopApp(agent: string): Promise<{ ok: boolean; status?: string }> {
+  const res = await fetch(`${BASE_URL}/desktop/quit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent }),
+  });
+  const data = await handleResponse<{ status: string }>(res);
+  return { ok: true, status: data.status };
+}
+
+export async function focusDesktopApp(agent: string): Promise<{ ok: boolean; status?: string }> {
+  const res = await fetch(`${BASE_URL}/desktop/focus`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent }),
+  });
+  const data = await handleResponse<{ status: string }>(res);
+  return { ok: true, status: data.status };
+}
+
