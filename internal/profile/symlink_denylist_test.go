@@ -715,3 +715,17 @@ func TestEnsureDotfiles_DenyListIgnoresCase(t *testing.T) {
 		}
 	}
 }
+
+func TestIsolatedDotfiles_DesktopAppsDenylist(t *testing.T) {
+	requiredDenied := []string{
+		".cursor",
+		".claude-desktop",
+		".codex-desktop",
+	}
+
+	for _, name := range requiredDenied {
+		if !isDeniedHostDotfile(name) {
+			t.Errorf("expected %q to be denied by isDeniedHostDotfile", name)
+		}
+	}
+}
