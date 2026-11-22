@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 type darwinScanner struct{}
@@ -57,12 +58,16 @@ func (d *darwinScanner) sendSignal(pid int, sig syscall.Signal) error {
 }
 
 func (d *darwinScanner) activateApp(ctx context.Context, appName string) error {
-	cmd := exec.CommandContext(ctx, "osascript", "-e", "on run argv", "-e", "tell application (item 1 of argv) to activate", "-e", "end run", appName)
+	actCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(actCtx, "osascript", "-e", "on run argv", "-e", "tell application (item 1 of argv) to activate", "-e", "end run", appName)
 	return cmd.Run()
 }
 
 func (d *darwinScanner) quitApp(ctx context.Context, appName string) error {
-	cmd := exec.CommandContext(ctx, "osascript", "-e", "on run argv", "-e", "tell application (item 1 of argv) to quit", "-e", "end run", appName)
+	quitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(quitCtx, "osascript", "-e", "on run argv", "-e", "tell application (item 1 of argv) to quit", "-e", "end run", appName)
 	return cmd.Run()
 }
 

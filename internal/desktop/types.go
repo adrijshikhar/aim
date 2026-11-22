@@ -20,6 +20,7 @@ type ProcessInfo struct {
 	BinaryPath  string `json:"binary_path"`
 	UserDataDir string `json:"user_data_dir"`
 	ProfileName string `json:"profile_name"`
+	AppName     string `json:"app_name,omitempty"`
 }
 
 type Supervisor interface {

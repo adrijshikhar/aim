@@ -32,6 +32,7 @@ type Server struct {
 	launcher   service.LauncherService
 	mcp        service.MCPService
 	daemon     service.DaemonService
+	desktop    service.DesktopService
 	shareStore *share.ShareStore
 	port       int
 	devMode    bool
@@ -119,6 +120,20 @@ func (s *Server) DaemonService() service.DaemonService {
 	return s.daemon
 }
 
+// SetDesktopService sets or updates the DesktopService instance on Server.
+func (s *Server) SetDesktopService(d service.DesktopService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.desktop = d
+}
+
+// DesktopService returns the configured DesktopService instance safely under mutex lock.
+func (s *Server) DesktopService() service.DesktopService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.desktop
+}
+
 // SetVersion sets the AIM version string reported by /api/status.
 func (s *Server) SetVersion(v string) {
 	if v != "" {
@@ -154,6 +169,12 @@ func (s *Server) setupRoutes() {
 	mux.HandleFunc("POST /api/daemon/install", s.handleDaemonInstall)
 	mux.HandleFunc("POST /api/daemon/uninstall", s.handleDaemonUninstall)
 	mux.HandleFunc("POST /api/daemon/run", s.handleDaemonRun)
+
+	// Desktop Application Endpoints
+	mux.HandleFunc("GET /api/desktop/status", s.handleDesktopStatus)
+	mux.HandleFunc("POST /api/desktop/launch", s.handleDesktopLaunch)
+	mux.HandleFunc("POST /api/desktop/quit", s.handleDesktopQuit)
+	mux.HandleFunc("POST /api/desktop/focus", s.handleDesktopFocus)
 
 	// P2P Sharing & VPN Endpoints
 	mux.HandleFunc("GET /api/share/status", s.handleGetShareStatus)

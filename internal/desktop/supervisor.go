@@ -28,21 +28,37 @@ func (s *defaultSupervisor) FindInstance(ctx context.Context, appName string, bi
 		return nil, fmt.Errorf("listing processes: %w", err)
 	}
 
-	binMap := make(map[string]bool)
-	for _, b := range binaryNames {
-		binMap[strings.ToLower(b)] = true
+	cleanAppName := strings.TrimSuffix(strings.ToLower(appName), ".app")
+	appBundleMatch := "/" + cleanAppName + ".app/"
+
+	exactNames := make(map[string]bool)
+	if cleanAppName != "" {
+		exactNames[cleanAppName] = true
 	}
-	binMap[strings.ToLower(appName)] = true
+	for _, b := range binaryNames {
+		bClean := strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(b), ".app"), ".exe")
+		// Only consider binary names of length > 2 to ignore 1-2 char CLI aliases like "cd"
+		if len(bClean) > 2 {
+			exactNames[bClean] = true
+		}
+	}
 
 	for _, p := range procs {
-		base := strings.ToLower(filepath.Base(p.binPath))
-		matched := binMap[base]
-		if !matched {
-			for b := range binMap {
-				if strings.Contains(strings.ToLower(p.binPath), b) {
-					matched = true
-					break
-				}
+		pBinLower := strings.ToLower(filepath.ToSlash(p.binPath))
+		base := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(pBinLower), ".app"), ".exe")
+
+		// Ignore helper / auxiliary daemons located inside .app bundles
+		if strings.Contains(pBinLower, "/contents/helpers/") ||
+			strings.Contains(pBinLower, "/contents/frameworks/") ||
+			strings.Contains(pBinLower, "/contents/resources/") {
+			continue
+		}
+
+		matched := exactNames[base]
+		if !matched && cleanAppName != "" && strings.Contains(pBinLower, appBundleMatch) {
+			// Inside the app bundle, only accept main binaries located under Contents/MacOS
+			if strings.Contains(pBinLower, "/contents/macos/") {
+				matched = true
 			}
 		}
 		if !matched {
@@ -70,6 +86,7 @@ func (s *defaultSupervisor) FindInstance(ctx context.Context, appName string, bi
 			BinaryPath:  p.binPath,
 			UserDataDir: userDataDir,
 			ProfileName: profileName,
+			AppName:     appName,
 		}, nil
 	}
 
@@ -80,7 +97,10 @@ func (s *defaultSupervisor) FocusInstance(ctx context.Context, proc *ProcessInfo
 	if proc == nil || proc.PID <= 0 {
 		return ErrProcessNotFound
 	}
-	appName := filepath.Base(proc.BinaryPath)
+	appName := proc.AppName
+	if appName == "" {
+		appName = strings.TrimSuffix(filepath.Base(proc.BinaryPath), ".app")
+	}
 	return s.scanner.activateApp(ctx, appName)
 }
 
@@ -89,7 +109,10 @@ func (s *defaultSupervisor) GracefulQuit(ctx context.Context, proc *ProcessInfo)
 		return ErrProcessNotFound
 	}
 
-	appName := filepath.Base(proc.BinaryPath)
+	appName := proc.AppName
+	if appName == "" {
+		appName = strings.TrimSuffix(filepath.Base(proc.BinaryPath), ".app")
+	}
 	_ = s.scanner.quitApp(ctx, appName)
 
 	ticker := time.NewTicker(100 * time.Millisecond)
