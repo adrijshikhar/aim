@@ -16,6 +16,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/desktop"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/service"
@@ -321,9 +322,11 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 	sessionSvc := service.NewSessionService(sm, launcherSvc)
 	mcpSvc := service.NewMCPService(pm, reg)
 	daemonSvc := service.NewDaemonService(reg, pm, config.BaseDir())
+	desktopSvc := service.NewDesktopService(reg, desktop.NewSupervisor(), pm)
 
 	srv := web.NewServer(profileSvc, sessionSvc, launcherSvc, port, devMode, mcpSvc)
 	srv.SetDaemonService(daemonSvc)
+	srv.SetDesktopService(desktopSvc)
 	srv.SetVersion(Version)
 
 	if err := srv.Listen(); err != nil {

@@ -65,7 +65,7 @@ chmod +x "$MOCK_BIN/security"
 # To onboard a new adapter (e.g. 'opencode', 'copilot'), simply append to ALL_ADAPTERS
 # and define its mock binary and session hooks below.
 # ==============================================================================
-ALL_ADAPTERS=("agy" "codex" "claude" "gemini" "cursor")
+ALL_ADAPTERS=("agy" "codex" "claude" "gemini" "cursor" "claude-desktop" "codex-desktop")
 
 # Mock Agent Binaries
 for AGENT in "${ALL_ADAPTERS[@]}"; do
@@ -623,6 +623,8 @@ coll_host_file() {
     codex/*)           echo "$AIM_REAL_HOME/.codex/config.toml" ;;
     agy/*)             echo "$AIM_REAL_HOME/.gemini/config/mcp_config.json" ;;
     cursor/*)          echo "$AIM_REAL_HOME/.cursor/mcp.json" ;;
+    claude-desktop/*)  echo "$AIM_REAL_HOME/Library/Application Support/Claude/claude_desktop_config.json" ;;
+    codex-desktop/*)   echo "$AIM_REAL_HOME/Library/Application Support/Codex/config.json" ;;
   esac
 }
 
@@ -634,6 +636,8 @@ coll_profile_rel() {
     codex/*)           echo ".codex/config.toml" ;;
     agy/*)             echo ".gemini/config/mcp_config.json" ;;
     cursor/*)          echo ".cursor/mcp.json" ;;
+    claude-desktop/*)  echo ".claude-desktop/claude_desktop_config.json" ;;
+    codex-desktop/*)   echo ".codex-desktop/config.json" ;;
   esac
 }
 
@@ -643,10 +647,12 @@ coll_format() { case "$1" in codex) echo toml ;; *) echo json ;; esac; }
 # Helper: Native args that start a background session (merge, run, no exit step)
 mcp_bg_args() {
   case "$1" in
-    claude) echo "--bg" ;;
-    codex)  echo "app-server" ;;
-    agy)    echo "remote-control" ;;
-    cursor) echo "" ;;
+    claude)         echo "--bg" ;;
+    codex)          echo "app-server" ;;
+    agy)            echo "remote-control" ;;
+    cursor)         echo "" ;;
+    claude-desktop) echo "" ;;
+    codex-desktop)  echo "" ;;
   esac
 }
 

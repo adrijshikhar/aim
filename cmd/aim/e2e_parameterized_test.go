@@ -15,7 +15,9 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/agents/claude"
+	"github.com/aim-cli/aim/internal/agents/claudedesktop"
 	"github.com/aim-cli/aim/internal/agents/codex"
+	"github.com/aim-cli/aim/internal/agents/codexdesktop"
 	"github.com/aim-cli/aim/internal/agents/cursor"
 	"github.com/aim-cli/aim/internal/agents/gemini"
 	"github.com/aim-cli/aim/internal/config"
@@ -51,6 +53,8 @@ var allAdapters = []adapterTestCase{
 	{agent: "claude", hasSessions: true, supportsFork: true, hasMCP: true, bgArgs: []string{"--bg"}, versionArgs: []string{"-v"}, hasPlugins: true, pluginsCol: "enabledPlugins"},
 	{agent: "gemini", hasSessions: false, supportsFork: false, hasMCP: false},
 	{agent: "cursor", hasSessions: false, supportsFork: false, hasMCP: true, versionArgs: []string{"--version"}},
+	{agent: "claude-desktop", hasSessions: false, supportsFork: false, hasMCP: false, versionArgs: []string{"--version"}},
+	{agent: "codex-desktop", hasSessions: false, supportsFork: false, hasMCP: false, versionArgs: []string{"--version"}},
 }
 
 // collectionNamed returns the collection in group with the given name, or
@@ -73,6 +77,8 @@ func setupParameterizedRegistry() *agents.Registry {
 	reg.Register(claude.NewAdapter())
 	reg.Register(gemini.NewAdapter())
 	reg.Register(cursor.NewAdapter())
+	reg.Register(claudedesktop.NewAdapter())
+	reg.Register(codexdesktop.NewAdapter())
 	return reg
 }
 

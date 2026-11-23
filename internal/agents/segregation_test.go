@@ -7,7 +7,9 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/agy"
 	"github.com/aim-cli/aim/internal/agents/claude"
+	"github.com/aim-cli/aim/internal/agents/claudedesktop"
 	"github.com/aim-cli/aim/internal/agents/codex"
+	"github.com/aim-cli/aim/internal/agents/codexdesktop"
 	"github.com/aim-cli/aim/internal/agents/cursor"
 	"github.com/aim-cli/aim/internal/agents/gemini"
 )
@@ -116,5 +118,43 @@ func TestInterfaceSegregation_CursorAdapter(t *testing.T) {
 	}
 	if _, ok := any(cur).(agents.UsageProvider); ok {
 		t.Error("cursor adapter should not implement UsageProvider")
+	}
+}
+
+func TestInterfaceSegregation_DesktopAdapters(t *testing.T) {
+	desktopAdapters := []struct {
+		name    string
+		adapter agents.AgentAdapter
+	}{
+		{"cursor", cursor.NewAdapter()},
+		{"claude-desktop", claudedesktop.NewAdapter()},
+		{"codex-desktop", codexdesktop.NewAdapter()},
+	}
+
+	for _, tc := range desktopAdapters {
+		t.Run(tc.name, func(t *testing.T) {
+			da, ok := tc.adapter.(agents.DesktopApp)
+			if !ok {
+				t.Fatalf("%s must implement DesktopApp", tc.name)
+			}
+			if !da.IsDesktop() {
+				t.Errorf("%s IsDesktop() must return true", tc.name)
+			}
+
+			if _, ok := tc.adapter.(agents.Authenticator); ok {
+				t.Errorf("%s must not implement Authenticator", tc.name)
+			}
+
+			if _, ok := tc.adapter.(agents.UsageProvider); ok {
+				t.Errorf("%s must not implement UsageProvider", tc.name)
+			}
+
+			if _, ok := tc.adapter.(agents.Diagnostician); !ok {
+				t.Errorf("%s must implement Diagnostician", tc.name)
+			}
+			if _, ok := tc.adapter.(agents.MCPConfigManager); !ok {
+				t.Errorf("%s must implement MCPConfigManager", tc.name)
+			}
+		})
 	}
 }

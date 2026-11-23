@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/desktop"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
@@ -332,6 +335,45 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 
 	if profile.IsLeased(opts.ProfileName) || (pm != nil && pm.IsLeased(opts.ProfileName)) {
 		startLeaseSupervisor(runCtx, pDir, opts.ProfileName, cancel)
+	}
+
+	if desktopApp, ok := adapter.(agents.DesktopApp); ok && desktopApp.IsDesktop() {
+		sup := desktop.NewSupervisor()
+		targetUserDataDir := desktopApp.UserDataDir(pDir)
+		binNames := append([]string{adapter.BinaryName(), desktopApp.AppBundleName()}, adapter.Aliases()...)
+
+		force := hasForceFlag(opts.ExtraArgs)
+		alreadyRunning, err := sup.EnsureSingleInstance(runCtx, os.Stdin, os.Stdout, desktopApp.AppBundleName(), opts.ProfileName, targetUserDataDir, binNames, force)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+		if alreadyRunning {
+			return 0
+		}
+
+		cmd := exec.Command(launchEnv.BinaryPath, append(launchEnv.Args, opts.ExtraArgs...)...)
+		cmd.Dir = launchEnv.WorkingDir
+		cmd.Env = runner.BuildEnv(os.Environ(), launchEnv.Env)
+		cmd.Stdin = nil
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Setpgid: true,
+		}
+
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error starting %s: %v\n", adapter.DisplayName(), err)
+			return 1
+		}
+
+		fmt.Printf("%s Launched %s (PID %d) in profile '%s'\n",
+			lipgloss.NewStyle().Foreground(tui.StatusGreen).Render("✔"),
+			adapter.DisplayName(),
+			cmd.Process.Pid,
+			opts.ProfileName,
+		)
+		return 0
 	}
 
 	r := runner.NewRunner(adapter)
@@ -695,4 +737,13 @@ func performLeaseHeartbeat(ctx context.Context, profDir, profileName string) {
 			}
 		}
 	}
+}
+
+func hasForceFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--force" || a == "-f" {
+			return true
+		}
+	}
+	return false
 }

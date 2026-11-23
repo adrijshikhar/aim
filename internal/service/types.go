@@ -229,3 +229,28 @@ type DaemonService interface {
 	Uninstall(ctx context.Context) error
 	RunOnce(ctx context.Context) error
 }
+
+// DesktopStatusDTO represents the process and profile state of a graphical desktop application.
+type DesktopStatusDTO struct {
+	Agent       string `json:"agent"`
+	DisplayName string `json:"display_name"`
+	Installed   bool   `json:"installed"`
+	PID         int    `json:"pid"`
+	Profile     string `json:"profile"`
+	Running     bool   `json:"running"`
+}
+
+// DesktopLaunchRequest defines parameters to launch a sandboxed desktop application instance.
+type DesktopLaunchRequest struct {
+	Agent   string `json:"agent"`
+	Profile string `json:"profile"`
+	Force   bool   `json:"force"`
+}
+
+// DesktopService provides management and status inspection of desktop applications.
+type DesktopService interface {
+	ListStatus(ctx context.Context) ([]DesktopStatusDTO, error)
+	Launch(ctx context.Context, req DesktopLaunchRequest) error
+	Quit(ctx context.Context, agent string) error
+	Focus(ctx context.Context, agent string) error
+}

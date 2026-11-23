@@ -21,12 +21,14 @@ import (
 //   - host-only noise: Finder and shell bookkeeping that is either meaningless
 //     inside a profile or written on every prompt.
 var isolatedDotfiles = map[string]bool{
-	".aim":         true,
-	".claude":      true,
-	".claude.json": true,
-	".codex":       true,
-	".cursor":      true,
-	".gemini":      true,
+	".aim":            true,
+	".claude":         true,
+	".claude.json":    true,
+	".claude-desktop": true,
+	".codex":          true,
+	".codex-desktop":  true,
+	".cursor":         true,
+	".gemini":         true,
 }
 
 var hostOnlyDotfiles = map[string]bool{
