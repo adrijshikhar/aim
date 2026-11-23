@@ -1025,51 +1025,6 @@ export function ProfilesView({
           </div>
         </div>
 
-        {/* Desktop Application Section for Current Profile */}
-        {desktopApps.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AppWindow className="h-3.5 w-3.5 text-accent-cyan" />
-                <h3 className="text-xs font-semibold text-foreground uppercase tracking-wider font-mono">
-                  Desktop Applications
-                </h3>
-                <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
-                  Profile: {currentProfile.name}
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={fetchDesktopStatus}
-                disabled={desktopLoading}
-                className="h-6 text-[11px] font-mono text-muted-foreground hover:text-foreground px-2"
-              >
-                <RefreshCw className={cn("h-3 w-3 mr-1", desktopLoading && "animate-spin")} />
-                Check Status
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {desktopApps.map((app) => (
-                <DesktopAppCard
-                  key={app.agent}
-                  status={app}
-                  profiles={profiles.map((p) => p.name)}
-                  activeProfile={currentProfile.name}
-                  onRefresh={fetchDesktopStatus}
-                  onRequestSwitch={(agent, targetProfile, currentRunningProfile) => {
-                    setSwitchModalTarget({
-                      agent,
-                      targetProfile,
-                      currentProfile: currentRunningProfile,
-                    });
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Multi-Tab Workspace Organization */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-6">
           <div className="flex items-center justify-between">
@@ -1194,6 +1149,53 @@ export function ProfilesView({
                 );
               })}
             </div>
+
+            {/* Desktop Applications for Current Profile */}
+            {desktopApps.filter((app) => app.installed || app.running).length > 0 && (
+              <div className="space-y-3 pt-6 border-t border-border/40">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AppWindow className="h-3.5 w-3.5 text-accent-cyan" />
+                    <h3 className="text-xs font-semibold text-foreground uppercase tracking-wider font-mono">
+                      Desktop Applications
+                    </h3>
+                    <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
+                      Profile: {currentProfile.name}
+                    </span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={fetchDesktopStatus}
+                    disabled={desktopLoading}
+                    className="h-6 text-[11px] font-mono text-muted-foreground hover:text-foreground px-2"
+                  >
+                    <RefreshCw className={cn("h-3 w-3 mr-1", desktopLoading && "animate-spin")} />
+                    Check Status
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {desktopApps
+                    .filter((app) => (app.installed || app.running) && (selectedEngineTab === 'all' || selectedEngineTab === app.agent))
+                    .map((app) => (
+                      <DesktopAppCard
+                        key={app.agent}
+                        status={app}
+                        targetProfile={currentProfile.name}
+                        onRefresh={fetchDesktopStatus}
+                        onRequestSwitch={(agent, targetProfile, currentRunningProfile) => {
+                          setSwitchModalTarget({
+                            agent,
+                            targetProfile,
+                            currentProfile: currentRunningProfile,
+                          });
+                        }}
+                      />
+                    ))}
+                </div>
+              </div>
+            )}
           </TabsContent>
 
           {/* TAB 2: SESSIONS */}
@@ -1878,51 +1880,6 @@ export function ProfilesView({
           />
         </div>
       </div>
-
-      {/* Desktop Applications Section */}
-      {desktopApps.length > 0 && (
-        <div className="space-y-3 pb-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AppWindow className="h-4 w-4 text-accent-cyan" />
-              <h2 className="text-xs font-semibold text-foreground uppercase tracking-wider font-mono">
-                Desktop Applications
-              </h2>
-              <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
-                Sandboxed GUI
-              </span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={fetchDesktopStatus}
-              disabled={desktopLoading}
-              className="h-6 text-[11px] font-mono text-muted-foreground hover:text-foreground px-2"
-            >
-              <RefreshCw className={cn("h-3 w-3 mr-1", desktopLoading && "animate-spin")} />
-              Check Status
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {desktopApps.map((app) => (
-              <DesktopAppCard
-                key={app.agent}
-                status={app}
-                profiles={profiles.map((p) => p.name)}
-                onRefresh={fetchDesktopStatus}
-                onRequestSwitch={(agent, targetProfile, currentRunningProfile) => {
-                  setSwitchModalTarget({
-                    agent,
-                    targetProfile,
-                    currentProfile: currentRunningProfile,
-                  });
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Profiles Directory Content */}
       {loading && profiles.length === 0 ? (

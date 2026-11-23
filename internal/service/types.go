@@ -234,6 +234,7 @@ type DaemonService interface {
 type DesktopStatusDTO struct {
 	Agent       string `json:"agent"`
 	DisplayName string `json:"display_name"`
+	Installed   bool   `json:"installed"`
 	PID         int    `json:"pid"`
 	Profile     string `json:"profile"`
 	Running     bool   `json:"running"`

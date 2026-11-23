@@ -713,6 +713,7 @@ export async function deleteSchedule(id: string): Promise<{ ok: boolean }> {
 export interface DesktopStatusDTO {
   agent: string;
   display_name: string;
+  installed?: boolean;
   pid: number;
   profile: string;
   running: boolean;

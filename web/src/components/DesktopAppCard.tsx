@@ -10,33 +10,22 @@ import { useToast } from '@/components/ui/use-toast';
 
 interface DesktopAppCardProps {
   status: DesktopStatusDTO;
-  profiles: string[];
-  activeProfile?: string;
+  targetProfile: string;
   onRefresh: () => void;
   onRequestSwitch: (agent: string, targetProfile: string, currentRunningProfile: string) => void;
 }
 
 export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
   status,
-  profiles,
-  activeProfile,
+  targetProfile,
   onRefresh,
   onRequestSwitch,
 }) => {
   const { toast } = useToast();
-  const [selectedProfile, setSelectedProfile] = React.useState(activeProfile || profiles[0] || 'default');
-  const [prevActiveProfile, setPrevActiveProfile] = React.useState(activeProfile);
   const [loading, setLoading] = React.useState(false);
 
-  if (activeProfile !== prevActiveProfile) {
-    setPrevActiveProfile(activeProfile);
-    if (activeProfile && profiles.includes(activeProfile)) {
-      setSelectedProfile(activeProfile);
-    }
-  }
-
   const isRunning = status.running && status.pid > 0;
-  const isRunningThisProfile = isRunning && status.profile === selectedProfile;
+  const isRunningThisProfile = isRunning && status.profile === targetProfile;
 
   const handleLaunchOrFocus = async () => {
     if (isRunningThisProfile) {
@@ -60,28 +49,28 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
       return;
     }
 
-    if (isRunning && status.profile !== selectedProfile) {
+    if (isRunning && status.profile !== targetProfile) {
       // Instance collision -> trigger switch modal
-      onRequestSwitch(status.agent, selectedProfile, status.profile);
+      onRequestSwitch(status.agent, targetProfile, status.profile);
       return;
     }
 
-    // Launch application
+    // Launch application directly into this profile
     try {
       setLoading(true);
       const res = await launchDesktopApp({
         agent: status.agent,
-        profile: selectedProfile,
+        profile: targetProfile,
       });
 
       if (res.conflict) {
-        onRequestSwitch(status.agent, selectedProfile, res.current_profile || status.profile);
+        onRequestSwitch(status.agent, targetProfile, res.current_profile || status.profile);
         return;
       }
 
       toast({
         title: `${status.display_name} Launched`,
-        description: `Running isolated with profile "${selectedProfile}".`,
+        description: `Running isolated with profile "${targetProfile}".`,
       });
       onRefresh();
     } catch (err: any) {
@@ -123,7 +112,7 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
   };
 
   return (
-    <Card className="bg-card/70 border-border/70 hover:border-border transition-colors duration-150">
+    <Card className="bg-card/70 border border-border/70 hover:border-border transition-colors duration-150">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -142,13 +131,21 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
-            {isRunning ? (
+            {isRunningThisProfile ? (
               <Badge
                 variant="outline"
                 className="bg-[#183925] text-status-success border-[#235836] font-mono text-[10px] flex items-center gap-1.5"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-status-success animate-pulse" />
-                <span>RUNNING (PID {status.pid})</span>
+                <span>ACTIVE (PID {status.pid})</span>
+              </Badge>
+            ) : isRunning ? (
+              <Badge
+                variant="outline"
+                className="bg-[#3a2e16] text-[#e5c07b] border-[#55431d] font-mono text-[10px] flex items-center gap-1.5"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-[#e5c07b]" />
+                <span>RUNNING IN '{status.profile}'</span>
               </Badge>
             ) : (
               <Badge
@@ -156,7 +153,7 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
                 className="bg-secondary/40 text-muted-foreground border-border font-mono text-[10px] flex items-center gap-1.5"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
-                <span>STOPPED</span>
+                <span>STANDBY</span>
               </Badge>
             )}
           </div>
@@ -164,33 +161,11 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
       </CardHeader>
 
       <CardContent className="space-y-3 pt-0">
-        <div className="rounded border border-border/60 bg-secondary/30 p-2.5 text-xs font-mono space-y-1.5">
-          <div className="flex justify-between items-center text-muted-foreground">
-            <span>Isolated Profile:</span>
-            {isRunning ? (
-              <span className="text-foreground font-medium bg-secondary px-1.5 py-0.5 rounded border border-border/80">
-                {status.profile}
-              </span>
-            ) : (
-              <span className="text-muted-foreground italic">None (Standby)</span>
-            )}
-          </div>
-
-          <div className="flex justify-between items-center text-muted-foreground">
-            <span>Target Launch Profile:</span>
-            <select
-              value={selectedProfile}
-              onChange={(e) => setSelectedProfile(e.target.value)}
-              disabled={loading}
-              className="bg-card text-foreground border border-border/80 rounded px-2 py-0.5 text-xs font-mono focus:outline-none focus:border-[#61afef] transition-colors"
-            >
-              {profiles.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="rounded border border-border/60 bg-secondary/30 p-2.5 text-xs font-mono flex items-center justify-between">
+          <span className="text-muted-foreground">Execution Scope:</span>
+          <span className="text-foreground font-medium bg-secondary px-2 py-0.5 rounded border border-border/80">
+            Profile: {targetProfile}
+          </span>
         </div>
 
         <div className="flex items-center justify-between gap-2 pt-1">
@@ -201,8 +176,9 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
               disabled={loading}
               onClick={handleLaunchOrFocus}
               className={cn(
-                'text-xs h-8 px-3 transition-colors duration-150',
-                !isRunningThisProfile && 'bg-[#61afef] text-[#1e1e1e] hover:bg-[#4d9bdf]'
+                'text-xs h-8 px-3 transition-colors duration-150 cursor-pointer',
+                !isRunningThisProfile && !isRunning && 'bg-[#61afef] text-[#1e1e1e] hover:bg-[#4d9bdf]',
+                !isRunningThisProfile && isRunning && 'bg-[#e5c07b] text-[#1e1e1e] hover:bg-[#d8b066]'
               )}
             >
               {loading ? (
@@ -215,10 +191,10 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
                 <Play className="h-3.5 w-3.5 mr-1.5" />
               )}
               {isRunningThisProfile
-                ? 'Bring to Front'
+                ? 'Focus Window'
                 : isRunning
-                ? 'Switch to Profile'
-                : 'Launch App'}
+                ? `Switch to ${targetProfile}`
+                : `Launch in ${targetProfile}`}
             </Button>
 
             {isRunning && (
@@ -227,7 +203,7 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
                 variant="outline"
                 disabled={loading}
                 onClick={handleQuit}
-                className="text-xs h-8 px-2.5 text-status-danger border-border hover:bg-destructive/10 transition-colors duration-150"
+                className="text-xs h-8 px-2.5 text-status-danger border-border hover:bg-destructive/10 transition-colors duration-150 cursor-pointer"
               >
                 <Square className="h-3 w-3 mr-1" />
                 Quit
@@ -236,7 +212,11 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
           </div>
 
           <span className="text-[11px] text-muted-foreground font-mono">
-            {isRunning ? `Attached to ${status.profile}` : 'Sandboxed GUI'}
+            {isRunningThisProfile
+              ? `Attached (PID ${status.pid})`
+              : isRunning
+              ? `Active in '${status.profile}'`
+              : 'Isolated GUI'}
           </span>
         </div>
       </CardContent>

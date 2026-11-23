@@ -44,9 +44,18 @@ func (s *defaultDesktopService) ListStatus(ctx context.Context) ([]DesktopStatus
 		binNames := append([]string{a.BinaryName(), da.AppBundleName()}, a.Aliases()...)
 		proc, _ := s.sup.FindInstance(ctx, da.AppBundleName(), binNames)
 
+		isInstalled := false
+		if mcpMgr, ok := a.(agents.MCPConfigManager); ok {
+			isInstalled = mcpMgr.DetectInstalled(config.RealHomeDir())
+		} else {
+			_, err := exec.LookPath(a.BinaryName())
+			isInstalled = err == nil
+		}
+
 		dto := DesktopStatusDTO{
 			Agent:       a.Name(),
 			DisplayName: a.DisplayName(),
+			Installed:   isInstalled,
 		}
 		if proc != nil && proc.PID > 0 {
 			dto.PID = proc.PID
