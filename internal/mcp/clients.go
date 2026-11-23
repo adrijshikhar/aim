@@ -320,14 +320,15 @@ func (d *claudeDesktopDriver) Detect(homeDir string) bool {
 	if _, err := os.Stat(filepath.Join(homeDir, ".claude-desktop")); err == nil {
 		return true
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		if _, err := os.Stat(filepath.Join(homeDir, "Library", "Application Support", "Claude")); err == nil {
 			return true
 		}
 		if _, err := os.Stat(filepath.Join(homeDir, "Applications", "Claude.app")); err == nil {
 			return true
 		}
-	} else if runtime.GOOS == "linux" {
+	case "linux":
 		if _, err := os.Stat(filepath.Join(homeDir, ".config", "Claude")); err == nil {
 			return true
 		}
@@ -357,14 +358,15 @@ func (d *codexDesktopDriver) Detect(homeDir string) bool {
 	if _, err := os.Stat(filepath.Join(homeDir, ".codex-desktop")); err == nil {
 		return true
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		if _, err := os.Stat(filepath.Join(homeDir, "Library", "Application Support", "Codex")); err == nil {
 			return true
 		}
 		if _, err := os.Stat(filepath.Join(homeDir, "Applications", "Codex.app")); err == nil {
 			return true
 		}
-	} else if runtime.GOOS == "linux" {
+	case "linux":
 		if _, err := os.Stat(filepath.Join(homeDir, ".config", "Codex")); err == nil {
 			return true
 		}

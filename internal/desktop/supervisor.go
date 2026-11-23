@@ -171,7 +171,7 @@ func (s *defaultSupervisor) EnsureSingleInstance(
 	}
 
 	if proc.ProfileName == targetProfile || (proc.UserDataDir != "" && proc.UserDataDir == targetUserDataDir) {
-		fmt.Fprintf(out, "[aim] Desktop app %s is already running for profile '%s' (PID %d). Focusing window.\n", appName, targetProfile, proc.PID)
+		_, _ = fmt.Fprintf(out, "[aim] Desktop app %s is already running for profile '%s' (PID %d). Focusing window.\n", appName, targetProfile, proc.PID)
 		_ = s.FocusInstance(ctx, proc)
 		return true, nil
 	}
@@ -182,9 +182,9 @@ func (s *defaultSupervisor) EnsureSingleInstance(
 	}
 
 	if !force {
-		fmt.Fprintf(out, "[aim] Desktop app %s is currently running under '%s' (PID %d).\n", appName, activeDesc, proc.PID)
-		fmt.Fprintf(out, "Only one profile instance may run at a time to prevent session and keychain conflicts.\n")
-		fmt.Fprintf(out, "Switch to profile '%s' by closing the existing instance? [y/N]: ", targetProfile)
+		_, _ = fmt.Fprintf(out, "[aim] Desktop app %s is currently running under '%s' (PID %d).\n", appName, activeDesc, proc.PID)
+		_, _ = fmt.Fprintf(out, "Only one profile instance may run at a time to prevent session and keychain conflicts.\n")
+		_, _ = fmt.Fprintf(out, "Switch to profile '%s' by closing the existing instance? [y/N]: ", targetProfile)
 
 		reader := bufio.NewReader(in)
 		line, _ := reader.ReadString('\n')
@@ -194,11 +194,11 @@ func (s *defaultSupervisor) EnsureSingleInstance(
 		}
 	}
 
-	fmt.Fprintf(out, "[aim] Gracefully closing running instance (PID %d)...\n", proc.PID)
+	_, _ = fmt.Fprintf(out, "[aim] Gracefully closing running instance (PID %d)...\n", proc.PID)
 	if err := s.GracefulQuit(ctx, proc); err != nil {
 		return false, fmt.Errorf("closing active instance: %w", err)
 	}
 
-	fmt.Fprintf(out, "[aim] Previous instance terminated. Launching profile '%s'...\n", targetProfile)
+	_, _ = fmt.Fprintf(out, "[aim] Previous instance terminated. Launching profile '%s'...\n", targetProfile)
 	return false, nil
 }

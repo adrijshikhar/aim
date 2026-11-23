@@ -25,13 +25,15 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 }) => {
   const { toast } = useToast();
   const [selectedProfile, setSelectedProfile] = React.useState(activeProfile || profiles[0] || 'default');
+  const [prevActiveProfile, setPrevActiveProfile] = React.useState(activeProfile);
   const [loading, setLoading] = React.useState(false);
 
-  React.useEffect(() => {
+  if (activeProfile !== prevActiveProfile) {
+    setPrevActiveProfile(activeProfile);
     if (activeProfile && profiles.includes(activeProfile)) {
       setSelectedProfile(activeProfile);
     }
-  }, [activeProfile, profiles]);
+  }
 
   const isRunning = status.running && status.pid > 0;
   const isRunningThisProfile = isRunning && status.profile === selectedProfile;
