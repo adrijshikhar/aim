@@ -135,7 +135,10 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Profile:"), valStyle.Render(profileName)))
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Agent:"), valStyle.Render(agentName)))
 
-	accInfo := profile.GetProfileAccountInfo(profileDir)
+	accInfo := profile.GetProfileAccountInfoForAgent(profileDir, agentName)
+	if accInfo.Email == "" && accInfo.AuthMethod == "" {
+		accInfo = profile.GetProfileAccountInfo(profileDir)
+	}
 	if accInfo.Email != "" {
 		accStr := accInfo.Email
 		if accInfo.Name != "" {

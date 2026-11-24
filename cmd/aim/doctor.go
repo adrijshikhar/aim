@@ -28,6 +28,7 @@ import (
 func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var check bool
 	var report bool
+	var purgeKeychain bool
 	cmd := &cobra.Command{
 		Use:   "doctor [agent]",
 		Short: "Diagnose environment, tokens, and binaries",
@@ -36,6 +37,17 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 			agent := ""
 			if len(args) > 0 {
 				agent = args[0]
+			}
+			if purgeKeychain {
+				var customServices []string
+				if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
+					customServices = cfg.CustomIgnoredKeychains
+				}
+				if err := profile.PurgeIgnoredKeychains(agent, customServices...); err != nil {
+					return fmt.Errorf("failed to purge macOS Keychain tokens: %w", err)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Successfully purged agent tokens from macOS Keychain.")
+				return nil
 			}
 			if report {
 				fmt.Fprint(cmd.OutOrStdout(), generateDiagnosticReport(reg, pm, agent))
@@ -59,6 +71,7 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 	}
 	cmd.Flags().BoolVar(&check, "check", false, "Exit with non-zero status if any diagnostic check fails")
 	cmd.Flags().BoolVar(&report, "report", false, "Generate an anonymized Markdown diagnostic report for issue submission")
+	cmd.Flags().BoolVar(&purgeKeychain, "purge-keychain", false, "Purge agent tokens from macOS Keychain to prevent cross-profile leakage")
 	return cmd
 }
 

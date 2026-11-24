@@ -188,7 +188,7 @@ func deleteGenericPasswordReal(service, account string) error {
 	if os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	args := []string{"delete-generic-password", "-s", service}
@@ -196,27 +196,27 @@ func deleteGenericPasswordReal(service, account string) error {
 		args = append(args, "-a", account)
 	}
 
-	cmd := exec.CommandContext(ctx, "security", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			// Exit code 44 means item not found in keychain, which is completely expected
-			if exitErr.ExitCode() == 44 {
-				return nil
+	for {
+		cmd := exec.CommandContext(ctx, "security", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				// Exit code 44 means item not found in keychain, which is completely expected
+				if exitErr.ExitCode() == 44 {
+					return nil
+				}
 			}
+			logger.Debug("[keychain] security delete-generic-password error: %v (output: %s)", err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("security delete-generic-password: %w", err)
 		}
-		logger.Debug("[keychain] security delete-generic-password error: %v (output: %s)", err, strings.TrimSpace(string(out)))
-		return fmt.Errorf("security delete-generic-password: %w", err)
 	}
-	logger.Debug("[keychain] Successfully purged generic password from macOS Keychain: service=%q, account=%q", service, account)
-	return nil
 }
 
 func deleteInternetPasswordReal(service, account string) error {
 	if os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	args := []string{"delete-internet-password", "-s", service}
@@ -224,18 +224,18 @@ func deleteInternetPasswordReal(service, account string) error {
 		args = append(args, "-a", account)
 	}
 
-	cmd := exec.CommandContext(ctx, "security", args...)
-	_, err := cmd.CombinedOutput()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 44 {
-				return nil
+	for {
+		cmd := exec.CommandContext(ctx, "security", args...)
+		_, err := cmd.CombinedOutput()
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				if exitErr.ExitCode() == 44 {
+					return nil
+				}
 			}
+			return nil
 		}
-		return nil
 	}
-	logger.Debug("[keychain] Successfully purged internet password from macOS Keychain: service=%q, account=%q", service, account)
-	return nil
 }
 
 // FindIgnoredKeychains returns any ignored keychain entries that currently exist in the macOS Keychain.
@@ -486,13 +486,15 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 	switch agent {
 	case "agy":
 		destTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-		tokData, err := GetAgentKeychainToken(agent)
-		if err == nil && len(tokData) > 0 {
-			if writeProfileCredentials(destTokenPath, tokData) {
-				logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
-				return true
+		if ShouldSeedCredentials(filepath.Base(profileDir)) {
+			tokData, err := GetAgentKeychainToken(agent)
+			if err == nil && len(tokData) > 0 {
+				if writeProfileCredentials(destTokenPath, tokData) {
+					logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
+					return true
+				}
+				return false
 			}
-			return false
 		}
 		if fi, err := os.Stat(destTokenPath); err == nil && fi.Size() > 0 {
 			return true
