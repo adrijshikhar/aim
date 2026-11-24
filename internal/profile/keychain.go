@@ -486,13 +486,15 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 	switch agent {
 	case "agy":
 		destTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-		tokData, err := GetAgentKeychainToken(agent)
-		if err == nil && len(tokData) > 0 {
-			if writeProfileCredentials(destTokenPath, tokData) {
-				logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
-				return true
+		if ShouldSeedCredentials(filepath.Base(profileDir)) {
+			tokData, err := GetAgentKeychainToken(agent)
+			if err == nil && len(tokData) > 0 {
+				if writeProfileCredentials(destTokenPath, tokData) {
+					logger.Debug("[keychain] Successfully harvested keychain token for %s into %s", agent, destTokenPath)
+					return true
+				}
+				return false
 			}
-			return false
 		}
 		if fi, err := os.Stat(destTokenPath); err == nil && fi.Size() > 0 {
 			return true

@@ -429,3 +429,22 @@ func TestDoctorCmd_CachedUsageProvider(t *testing.T) {
 		t.Errorf("expected doctor output to contain 'AIM Doctor Diagnostics', got:\n%s", outStr)
 	}
 }
+
+func TestDoctor_PurgeKeychain(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(t.TempDir())
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"doctor", "--purge-keychain"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected doctor --purge-keychain to succeed, got: %v", err)
+	}
+
+	outStr := buf.String()
+	if !strings.Contains(outStr, "Successfully purged agent tokens from macOS Keychain") {
+		t.Errorf("expected success message in doctor --purge-keychain, got:\n%s", outStr)
+	}
+}

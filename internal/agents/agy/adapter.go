@@ -27,11 +27,14 @@ import (
 	"github.com/otiai10/copy"
 )
 
+// OfficialAntigravityClientID is Google's public OAuth 2.0 PKCE Client ID for Antigravity CLI.
+const OfficialAntigravityClientID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+
 var (
 	// DefaultClientID and DefaultClientSecret can be injected at build time via -ldflags:
 	// -X github.com/aim-cli/aim/internal/agents/agy.DefaultClientID=...
 	// -X github.com/aim-cli/aim/internal/agents/agy.DefaultClientSecret=...
-	DefaultClientID     = os.Getenv("AIM_AGY_CLIENT_ID")
+	DefaultClientID     = OfficialAntigravityClientID
 	DefaultClientSecret = os.Getenv("AIM_AGY_CLIENT_SECRET")
 
 	// ClientID and ClientSecret provide backward-compatible access to default OAuth credentials.
@@ -341,6 +344,12 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 // and writes them atomically into the profile's token path.
 func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDir string) error {
 	destTokenPath := a.TokenPath(profileDir)
+	if !profile.ShouldSeedCredentials(profileName) {
+		if fi, statErr := os.Stat(destTokenPath); statErr == nil && fi.Size() > 0 {
+			return nil
+		}
+		return fmt.Errorf("credential harvesting skipped for non-primary profile %q", profileName)
+	}
 	tokData, err := profile.GetAgentKeychainToken(a.Name())
 	if err == nil && len(tokData) > 0 {
 		if err := merge.AtomicWrite(destTokenPath, tokData, 0600); err != nil {
@@ -416,7 +425,7 @@ func (a *Adapter) OAuthConfig(clientID, clientSecret string) oauth.ProviderConfi
 
 func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) error {
 	clientID, clientSecret := getOAuthCredentials()
-	if clientID == "" || clientSecret == "" {
+	if clientID == "" {
 		bin := a.ResolveBinary()
 		if _, err := exec.LookPath(bin); err != nil {
 			return fmt.Errorf("OAuth client credentials not configured and '%s' binary not found in PATH", a.BinaryName())
@@ -487,6 +496,12 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		},
 		"auth_method": "consumer",
 	}
+	if tok.UserEmail != "" {
+		payload["id_token_email"] = tok.UserEmail
+	}
+	if tok.IDToken != "" {
+		payload["id_token"] = tok.IDToken
+	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return err
@@ -556,7 +571,7 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 // PostLaunch monitors and harvests OAuth tokens from macOS Keychain for unauthenticated profiles.
 // Authenticated profiles run with SSH_CONNECTION (keyring bypass mode) and never touch the Keychain.
 func (a *Adapter) PostLaunch(ctx context.Context, profileName, profileDir string) {
-	if profileDir == "" {
+	if profileDir == "" || !profile.ShouldSeedCredentials(profileName) {
 		return
 	}
 

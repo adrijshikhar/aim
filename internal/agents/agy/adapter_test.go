@@ -717,6 +717,10 @@ exit 0
 	t.Setenv("SSH_CONNECTION", "192.168.1.100 54321 192.168.1.50 22")
 	t.Setenv("SSH_CLIENT", "192.168.1.100 54321 22")
 	t.Setenv("SSH_TTY", "/dev/ttys002")
+	t.Setenv("AIM_AGY_CLIENT_ID", "")
+	origClientID := DefaultClientID
+	DefaultClientID = ""
+	defer func() { DefaultClientID = origClientID }()
 
 	adapter := NewAdapter()
 
@@ -1023,9 +1027,7 @@ func TestAgyGetUsage_AuthErrorCategorizationAndSecretRedaction(t *testing.T) {
 
 func TestAdapter_HarvestCredentials(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
-	profileName := "testprof"
 	tempDir := t.TempDir()
-	profileDir := filepath.Join(tempDir, profileName)
 
 	mockTokenJSON := `{"token":{"access_token":"mock_agy_token"}}`
 	restore := profile.SetKeychainPasswordGetterForTest(func(service, account string) (string, error) {
@@ -1037,11 +1039,23 @@ func TestAdapter_HarvestCredentials(t *testing.T) {
 	defer restore()
 
 	a := NewAdapter()
-	if err := a.HarvestCredentials(context.Background(), profileName, profileDir); err != nil {
+
+	// 1. Non-seed profile ("bby") should NOT harvest from Keychain
+	bbyDir := filepath.Join(tempDir, "bby")
+	if err := a.HarvestCredentials(context.Background(), "bby", bbyDir); err == nil {
+		t.Fatalf("expected HarvestCredentials to fail/skip for non-seed profile 'bby'")
+	}
+	if _, err := os.Stat(a.TokenPath(bbyDir)); err == nil {
+		t.Fatalf("expected token file not to exist for non-seed profile 'bby'")
+	}
+
+	// 2. Primary seed profile ("personal") should harvest from Keychain
+	personalDir := filepath.Join(tempDir, "personal")
+	if err := a.HarvestCredentials(context.Background(), "personal", personalDir); err != nil {
 		t.Fatalf("HarvestCredentials failed: %v", err)
 	}
 
-	destFile := a.TokenPath(profileDir)
+	destFile := a.TokenPath(personalDir)
 	data, err := os.ReadFile(destFile)
 	if err != nil {
 		t.Fatalf("failed to read harvested token file: %v", err)
@@ -1627,5 +1641,16 @@ func TestBridgeMCPTokens_SkippedForLeasedProfile(t *testing.T) {
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
 		t.Errorf("leased profile mcp_oauth_tokens.json must NOT be symlinked to shared state")
+	}
+}
+
+func TestDefaultClientID_Official(t *testing.T) {
+	t.Setenv("AIM_AGY_CLIENT_ID", "")
+	clientID, clientSecret := getOAuthCredentials()
+	if clientID != OfficialAntigravityClientID {
+		t.Errorf("expected clientID %q, got %q", OfficialAntigravityClientID, clientID)
+	}
+	if clientSecret != "" {
+		t.Errorf("expected empty clientSecret for public PKCE client, got %q", clientSecret)
 	}
 }

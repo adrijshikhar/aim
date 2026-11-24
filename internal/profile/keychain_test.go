@@ -137,9 +137,20 @@ func TestHarvestKeychainTokenToProfile(t *testing.T) {
 		return "", fmt.Errorf("not found")
 	}
 
-	targetProfile := t.TempDir()
+	// 1. Non-seed profile (e.g. "bby") should NOT harvest from macOS Keychain
+	nonSeedProfile := filepath.Join(t.TempDir(), "bby")
+	if HarvestKeychainTokenToProfile("agy", nonSeedProfile) {
+		t.Fatalf("expected HarvestKeychainTokenToProfile to return false for non-seed profile")
+	}
+	destFileNonSeed := filepath.Join(nonSeedProfile, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	if _, err := os.Stat(destFileNonSeed); err == nil {
+		t.Fatalf("expected token file not to exist for non-seed profile")
+	}
+
+	// 2. Primary seed profile (e.g. "personal") should harvest from macOS Keychain
+	targetProfile := filepath.Join(t.TempDir(), "personal")
 	if !HarvestKeychainTokenToProfile("agy", targetProfile) {
-		t.Fatalf("expected HarvestKeychainTokenToProfile to return true")
+		t.Fatalf("expected HarvestKeychainTokenToProfile to return true for personal profile")
 	}
 
 	destFile := filepath.Join(targetProfile, ".gemini", "antigravity-cli", "antigravity-oauth-token")
