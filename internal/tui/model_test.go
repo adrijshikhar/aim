@@ -313,6 +313,9 @@ func TestTUIModelActions(t *testing.T) {
 	if m.Outcome() != ActionLogin {
 		t.Errorf("expected ActionLogin, got %v", m.Outcome())
 	}
+	if m.SelectedProfile() != "alpha" {
+		t.Errorf("expected SelectedProfile 'alpha', got %q", m.SelectedProfile())
+	}
 	if cmd == nil {
 		t.Errorf("expected non-nil tea.Quit cmd")
 	}

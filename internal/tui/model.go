@@ -713,6 +713,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Sessions):
 			return m.openSessionsDrawer()
 		case key.Matches(msg, keys.Login):
+			filtered := m.filteredProfiles()
+			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
+				m.selected = filtered[m.cursor]
+			}
 			m.outcome = ActionLogin
 			m.cancelStream()
 			return m, tea.Quit
