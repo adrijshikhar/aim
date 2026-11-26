@@ -101,6 +101,7 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 	extraPaths := ProfileExtraPaths(cfg, targetProfile)
 	_ = EnsureDotfiles(realHome, dstDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(dstDir, targetProfile, cfg)
+	m.ensureMCPAuthIsolation(dstDir, targetProfile)
 
 	// Update config
 	srcEmail := cfg.GetProfileEmail(sourceProfile)

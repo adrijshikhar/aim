@@ -27,6 +27,7 @@ var isolatedDotfiles = map[string]bool{
 	".codex":       true,
 	".cursor":      true,
 	".gemini":      true,
+	".mcp-auth":    true,
 }
 
 var hostOnlyDotfiles = map[string]bool{
@@ -177,6 +178,12 @@ func isAllowedBridgedPath(clean string) bool {
 		}
 	}
 	if clean == ".codex" || strings.HasPrefix(clean, ".codex"+string(filepath.Separator)) {
+		return false
+	}
+	if clean == ".cursor" || strings.HasPrefix(clean, ".cursor"+string(filepath.Separator)) {
+		return false
+	}
+	if clean == ".mcp-auth" || strings.HasPrefix(clean, ".mcp-auth"+string(filepath.Separator)) {
 		return false
 	}
 	return true

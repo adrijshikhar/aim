@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/aim-cli/aim/internal/config"
 )
 
 // Every test here passes an explicit t.TempDir() host home to EnsureDotfiles,
@@ -56,7 +58,6 @@ func TestEnsureDotfiles_BridgesEveryHostDotfile(t *testing.T) {
 
 	mustWriteFile(t, filepath.Join(host, ".gitconfig"), "[user]")
 	mustWriteFile(t, filepath.Join(host, ".newtool", "cfg"), "x")
-	mustWriteFile(t, filepath.Join(host, ".mcp-auth", "token"), "x")
 	mustWriteFile(t, filepath.Join(host, ".config", "gh", "hosts.yml"), "x")
 	mustWriteFile(t, filepath.Join(host, "Documents", "notes"), "x")
 
@@ -64,7 +65,7 @@ func TestEnsureDotfiles_BridgesEveryHostDotfile(t *testing.T) {
 		t.Fatalf("EnsureDotfiles: %v", err)
 	}
 
-	for _, rel := range []string{".gitconfig", ".newtool", ".mcp-auth", ".config"} {
+	for _, rel := range []string{".gitconfig", ".newtool", ".config"} {
 		if !isSymlink(filepath.Join(prof, rel)) {
 			t.Errorf("expected %s to be linked to the host", rel)
 		}
@@ -80,23 +81,24 @@ func TestEnsureDotfiles_NeverLinksIsolatedAgentState(t *testing.T) {
 	host := t.TempDir()
 	prof := t.TempDir()
 
-	for _, dir := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini"} {
+	for _, dir := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini", ".mcp-auth"} {
 		mustWriteFile(t, filepath.Join(host, dir, "state"), "host")
 	}
 	for _, f := range []string{".claude.json", ".claude.json.backup", ".claude.json.tmp.123"} {
 		mustWriteFile(t, filepath.Join(host, f), "{}")
 	}
 
-	if err := EnsureDotfiles(host, prof); err != nil {
+	// Passing sensitive paths via custom_bridged_paths extraPaths must also be denied.
+	if err := EnsureDotfiles(host, prof, ".mcp-auth", ".cursor", filepath.Join(".cursor", "user-data")); err != nil {
 		t.Fatalf("EnsureDotfiles: %v", err)
 	}
 
-	for _, name := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini", ".claude.json", ".claude.json.backup", ".claude.json.tmp.123"} {
+	for _, name := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini", ".mcp-auth", ".claude.json", ".claude.json.backup", ".claude.json.tmp.123"} {
 		if _, err := os.Lstat(filepath.Join(prof, name)); err == nil {
 			t.Errorf("ISOLATION VIOLATION: %s was bridged into the profile", name)
 		}
 	}
-	for _, name := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini", ".claude.json", ".claude.json.backup"} {
+	for _, name := range []string{".aim", ".claude", ".codex", ".cursor", ".gemini", ".mcp-auth", ".claude.json", ".claude.json.backup"} {
 		if slices.Contains(GetBridgedPaths(host), name) {
 			t.Errorf("GetBridgedPaths must not list %s", name)
 		}
@@ -200,6 +202,66 @@ func TestEnsureMCPAuth_SelfHealsBrokenOrForeignSymlink(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(otherDir, ".mcp-auth", "tokens.json")); !os.IsNotExist(err) {
 		t.Errorf("LEAK: work mcp-auth token leaked into personal profile, err=%v", err)
+	}
+}
+
+func assertIsolatedMCPAuthDir(t *testing.T, pDir string) {
+	t.Helper()
+	profAuth := filepath.Join(pDir, ".mcp-auth")
+	fi, err := os.Lstat(profAuth)
+	if err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		t.Fatalf(".mcp-auth in %s must be an isolated dir, fi=%v err=%v", pDir, fi, err)
+	}
+	if _, err := os.Stat(filepath.Join(profAuth, "tokens.json")); !os.IsNotExist(err) {
+		t.Fatalf("LEAK: host tokens.json exposed in %s", profAuth)
+	}
+}
+
+func TestProfileManager_MoveCloneRename_IsolateMCPAuth(t *testing.T) {
+	tempBase := t.TempDir()
+	host := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+	t.Setenv("HOME", host)
+	t.Setenv("AIM_REAL_HOME", host)
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+
+	mustWriteFile(t, filepath.Join(host, ".mcp-auth", "tokens.json"), `{"host":{"access_token":"host-secret"}}`)
+
+	pm := NewProfileManager(tempBase)
+	srcDir, err := pm.EnsureProfile("src")
+	if err != nil {
+		t.Fatalf("EnsureProfile src: %v", err)
+	}
+	mustWriteFile(t, filepath.Join(srcDir, ".codex", "config.toml"), "model = \"gpt-5\"\n")
+	cfg := config.NewDefaultConfig()
+	cfg.Profiles["src"] = config.ProfileConfig{Agents: []string{"codex"}}
+
+	if err := pm.CloneProfile("src", "cloned", "", cfg); err != nil {
+		t.Fatalf("CloneProfile: %v", err)
+	}
+	assertIsolatedMCPAuthDir(t, pm.ProfileDir("cloned"))
+
+	if err := pm.RenameProfile("cloned", "renamed", cfg); err != nil {
+		t.Fatalf("RenameProfile: %v", err)
+	}
+	assertIsolatedMCPAuthDir(t, pm.ProfileDir("renamed"))
+
+	if err := pm.MoveAgent("codex", "src", "moved", false, cfg, nil); err != nil {
+		t.Fatalf("MoveAgent: %v", err)
+	}
+	assertIsolatedMCPAuthDir(t, pm.ProfileDir("moved"))
+
+	leasedDir := pm.ProfileDir("peer:leased")
+	if err := os.MkdirAll(leasedDir, 0o700); err != nil {
+		t.Fatalf("mkdir leasedDir: %v", err)
+	}
+	mustWriteFile(t, filepath.Join(leasedDir, ".aim-lease.json"), `{"lease_id":"l1"}`)
+	mustWriteFile(t, filepath.Join(pm.ProfileDir("moved"), ".codex", "config.toml"), "model = \"gpt-5\"\n")
+	if err := pm.MoveAgent("codex", "moved", "peer:leased", false, cfg, nil); err != nil {
+		t.Fatalf("MoveAgent into leased profile: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(leasedDir, ".mcp-auth")); !os.IsNotExist(err) {
+		t.Fatalf("LEAK: leased profile .mcp-auth exists after MoveAgent (err=%v)", err)
 	}
 }
 

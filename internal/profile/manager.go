@@ -204,11 +204,7 @@ func (m *ProfileManager) EnsureProfile(name string) (string, error) {
 	extraPaths := ProfileExtraPaths(cfg, name)
 	_ = EnsureDotfiles(realHome, pDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(pDir, name, cfg)
-	if m.IsLeased(name) {
-		_ = os.Remove(filepath.Join(pDir, ".mcp-auth"))
-	} else {
-		_ = m.EnsureMCPAuth(name)
-	}
+	m.ensureMCPAuthIsolation(pDir, name)
 	return pDir, nil
 }
 
@@ -229,13 +225,24 @@ func (m *ProfileManager) EnsureAllProfilesDotfiles() error {
 			errs = append(errs, err)
 		}
 		cleanStatuslineSymlinksIfDisabled(pDir, p, cfg)
-		if m.IsLeased(p) {
-			_ = os.Remove(filepath.Join(pDir, ".mcp-auth"))
-		} else {
-			_ = m.EnsureMCPAuth(p)
-		}
+		m.ensureMCPAuthIsolation(pDir, p)
 	}
 	return errors.Join(errs...)
+}
+
+func (m *ProfileManager) ensureMCPAuthIsolation(pDir, profileName string) {
+	if m != nil && m.IsLeased(profileName) {
+		profAuth := filepath.Join(pDir, ".mcp-auth")
+		if fi, err := os.Lstat(profAuth); err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				_ = os.Remove(profAuth)
+			} else {
+				_ = os.RemoveAll(profAuth)
+			}
+		}
+		return
+	}
+	_ = m.EnsureMCPAuth(profileName)
 }
 
 // EnsureMCPAuth provisions a profile-isolated 0700 ~/.mcp-auth directory for non-leased profiles,
@@ -695,6 +702,7 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 	extraPaths := ProfileExtraPaths(cfg, newProfile)
 	_ = EnsureDotfiles(realHome, dstDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(dstDir, newProfile, cfg)
+	m.ensureMCPAuthIsolation(dstDir, newProfile)
 
 	return config.SaveConfig(cfg)
 }
@@ -771,6 +779,7 @@ func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Conf
 	extraPaths := ProfileExtraPaths(cfg, newName)
 	_ = EnsureDotfiles(realHome, newDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(newDir, newName, cfg)
+	m.ensureMCPAuthIsolation(newDir, newName)
 
 	return nil
 }

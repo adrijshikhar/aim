@@ -1547,88 +1547,88 @@ func TestAgyOAuth_RequiresAccountSelection(t *testing.T) {
 	}
 }
 
-func TestBridgeMCPTokens_MergesAndSymlinks(t *testing.T) {
+func readTokenFileInDir(t *testing.T, dir, rel string) string {
+	t.Helper()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatalf("open root %s: %v", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile(rel)
+	if err != nil {
+		t.Fatalf("read %s/%s: %v", dir, rel, err)
+	}
+	return string(data)
+}
+
+func TestIsolateMCPTokens_PreservesAndTightensPerms(t *testing.T) {
 	fakeRealHome := t.TempDir()
 	sharedAgyDir := filepath.Join(fakeRealHome, ".gemini", "antigravity-cli")
-	_ = os.MkdirAll(sharedAgyDir, 0755)
+	if err := os.MkdirAll(sharedAgyDir, 0o700); err != nil {
+		t.Fatalf("mkdir sharedAgyDir: %v", err)
+	}
+	sharedFile := filepath.Join(sharedAgyDir, "mcp_oauth_tokens.json")
+	if err := os.WriteFile(sharedFile, []byte(`{"https://mcp.host.example":{"token":{"access_token":"host_secret"}}}`), 0o600); err != nil {
+		t.Fatalf("write sharedFile: %v", err)
+	}
 
-	// Profile 1 with Cloudflare token in real nested format with +05:30 timezone (11:30 UTC)
 	prof1Dir := t.TempDir()
 	prof1TokenDir := filepath.Join(prof1Dir, ".gemini", "antigravity-cli")
-	_ = os.MkdirAll(prof1TokenDir, 0755)
+	if err := os.MkdirAll(prof1TokenDir, 0o700); err != nil {
+		t.Fatalf("mkdir prof1TokenDir: %v", err)
+	}
 	prof1File := filepath.Join(prof1TokenDir, "mcp_oauth_tokens.json")
-	_ = os.WriteFile(prof1File, []byte(`{
-		"https://mcp.cloudflare.com/mcp": {
-			"client_id": "cf_id",
-			"token": {
-				"access_token": "cf_old",
-				"expiry": "2026-11-17T17:00:00+05:30"
-			}
-		}
-	}`), 0600)
-
-	// Profile 2 with Supabase token and newer Cloudflare token at 13:00 UTC (1.5h later than 11:30 UTC)
-	// Lexicographically "17:00:00+05:30" > "13:00:00Z", but chronologically "13:00:00Z" is newer!
-	prof2Dir := t.TempDir()
-	prof2TokenDir := filepath.Join(prof2Dir, ".gemini", "antigravity-cli")
-	_ = os.MkdirAll(prof2TokenDir, 0755)
-	prof2File := filepath.Join(prof2TokenDir, "mcp_oauth_tokens.json")
-	_ = os.WriteFile(prof2File, []byte(`{
-		"https://mcp.supabase.com/mcp": {
-			"client_id": "sb_id",
-			"token": {
-				"access_token": "sb_tok"
-			}
-		},
-		"https://mcp.cloudflare.com/mcp": {
-			"client_id": "cf_id",
-			"token": {
-				"access_token": "cf_newer",
-				"expiry": "2026-11-17T13:00:00Z"
-			}
-		}
-	}`), 0600)
-
-	// Bridge Profile 1
+	prof1Payload := `{"https://mcp.cloudflare.com/mcp":{"token":{"access_token":"cf_prof1"}}}`
+	if err := os.WriteFile(prof1File, []byte(prof1Payload), 0o600); err != nil {
+		t.Fatalf("write prof1File: %v", err)
+	}
+	//nolint:gosec // G302: intentionally seed permissive mode to verify tightening to 0600.
+	if err := os.Chmod(prof1File, 0o644); err != nil {
+		t.Fatalf("chmod prof1File: %v", err)
+	}
 	if err := bridgeSharedState(fakeRealHome, prof1Dir, "prof1"); err != nil {
 		t.Fatalf("bridgeSharedState prof1 failed: %v", err)
 	}
+	fi1, err := os.Lstat(prof1File)
+	if err != nil {
+		t.Fatalf("lstat prof1File: %v", err)
+	}
+	if fi1.Mode()&os.ModeSymlink != 0 || fi1.Mode().Perm() != 0o600 {
+		t.Fatalf("prof1File mode = %v, want regular 0600", fi1.Mode())
+	}
+	if got1 := readTokenFileInDir(t, prof1TokenDir, "mcp_oauth_tokens.json"); got1 != prof1Payload {
+		t.Fatalf("prof1File content modified: got %q", got1)
+	}
+	if gotShared := readTokenFileInDir(t, sharedAgyDir, "mcp_oauth_tokens.json"); strings.Contains(gotShared, "cf_prof1") {
+		t.Fatalf("shared/host mcp_oauth_tokens.json absorbed prof1 token: %q", gotShared)
+	}
+}
 
-	// Bridge Profile 2
+func TestIsolateMCPTokens_RemovesLegacySharedSymlink(t *testing.T) {
+	fakeRealHome := t.TempDir()
+	sharedAgyDir := filepath.Join(fakeRealHome, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(sharedAgyDir, 0o700); err != nil {
+		t.Fatalf("mkdir sharedAgyDir: %v", err)
+	}
+	sharedFile := filepath.Join(sharedAgyDir, "mcp_oauth_tokens.json")
+	if err := os.WriteFile(sharedFile, []byte(`{"https://mcp.host.example":{"token":{"access_token":"host_secret"}}}`), 0o600); err != nil {
+		t.Fatalf("write sharedFile: %v", err)
+	}
+
+	prof2Dir := t.TempDir()
+	prof2TokenDir := filepath.Join(prof2Dir, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(prof2TokenDir, 0o700); err != nil {
+		t.Fatalf("mkdir prof2TokenDir: %v", err)
+	}
+	prof2File := filepath.Join(prof2TokenDir, "mcp_oauth_tokens.json")
+	if err := os.Symlink(sharedFile, prof2File); err != nil {
+		t.Fatalf("symlink prof2File: %v", err)
+	}
 	if err := bridgeSharedState(fakeRealHome, prof2Dir, "prof2"); err != nil {
 		t.Fatalf("bridgeSharedState prof2 failed: %v", err)
 	}
-
-	// Verify shared file has BOTH tokens, with newer Cloudflare token
-	sharedFile := filepath.Join(sharedAgyDir, "mcp_oauth_tokens.json")
-	sharedBytes, err := os.ReadFile(sharedFile)
-	if err != nil {
-		t.Fatalf("failed to read shared mcp_oauth_tokens.json: %v", err)
-	}
-	var sharedMap map[string]map[string]any
-	if err := json.Unmarshal(sharedBytes, &sharedMap); err != nil {
-		t.Fatalf("failed to unmarshal sharedMap: %v", err)
-	}
-	if sharedMap["https://mcp.supabase.com/mcp"] == nil {
-		t.Errorf("expected Supabase token in shared file")
-	}
-	cfEntry := sharedMap["https://mcp.cloudflare.com/mcp"]
-	if cfEntry == nil {
-		t.Fatalf("expected Cloudflare entry in shared file")
-	}
-	tokMap, ok := cfEntry["token"].(map[string]any)
-	if !ok || tokMap["access_token"] != "cf_newer" {
-		t.Errorf("expected newer Cloudflare token 'cf_newer', got %v", cfEntry)
-	}
-
-	// Verify prof1File and prof2File are symlinks to sharedFile
-	fi1, err := os.Lstat(prof1File)
-	if err != nil || fi1.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected prof1File to be a symlink")
-	}
-	fi2, err := os.Lstat(prof2File)
-	if err != nil || fi2.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected prof2File to be a symlink")
+	if _, err := os.Lstat(prof2File); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy shared symlink at prof2File removed, got err=%v", err)
 	}
 }
 

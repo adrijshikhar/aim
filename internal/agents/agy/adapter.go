@@ -645,21 +645,19 @@ func bridgeSharedState(realHome, profileDir string, optProfileName ...string) er
 	if !isLeased {
 		pPluginData := filepath.Join(tokenDir, "plugin_data")
 		sPluginData := filepath.Join(sharedDir, "plugin_data")
-		_ = os.MkdirAll(sPluginData, 0755)
+		_ = os.MkdirAll(sPluginData, 0o700)
 		bridgeDir(pPluginData, sPluginData)
-
-		// 5b. mcp_oauth_tokens.json (strictly not bridged for leased profiles)
-		pMcpTokens := filepath.Join(tokenDir, "mcp_oauth_tokens.json")
-		sMcpTokens := filepath.Join(sharedDir, "mcp_oauth_tokens.json")
-		bridgeMCPTokens(pMcpTokens, sMcpTokens)
 	}
+
+	// 5b. Isolate mcp_oauth_tokens.json per profile (never symlink to host/shared).
+	isolateMCPTokens(filepath.Join(tokenDir, "mcp_oauth_tokens.json"))
 
 	// 6. Gemini config directory (plugins, import_manifest.json, hooks, settings)
 	sharedDirCfg := sharedConfigDir(realHome)
-	_ = os.MkdirAll(sharedDirCfg, 0755)
+	_ = os.MkdirAll(sharedDirCfg, 0o700)
 
 	profileConfigDir := filepath.Join(profileDir, ".gemini", "config")
-	_ = os.MkdirAll(profileConfigDir, 0755)
+	_ = os.MkdirAll(profileConfigDir, 0o700)
 
 	if isLeased {
 		// Strictly do NOT bridge host plugins or host hooks.
@@ -785,37 +783,20 @@ func bridgeDir(profilePath, sharedPath string) {
 	}
 }
 
-func extractMCPExpiry(entry map[string]any) string {
-	if exp, ok := entry["expiry"].(string); ok && exp != "" {
-		return exp
+// isolateMCPTokens ensures profileFile is never a shared/host symlink and has 0600 mode.
+// Legacy symlinks are unlinked without copying shared tokens across profiles.
+func isolateMCPTokens(profileFile string) {
+	fi, err := os.Lstat(profileFile)
+	if err != nil {
+		return
 	}
-	if tok, ok := entry["token"].(map[string]any); ok {
-		if exp, ok := tok["expiry"].(string); ok && exp != "" {
-			return exp
-		}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		_ = os.Remove(profileFile)
+		return
 	}
-	return ""
-}
-
-func isNewerExpiry(pExp, sExp string) bool {
-	if pExp == "" {
-		return false
+	if fi.Mode().IsRegular() && fi.Mode().Perm()&0o077 != 0 {
+		_ = os.Chmod(profileFile, 0o600)
 	}
-	if sExp == "" {
-		return true
-	}
-	pTime, errP := time.Parse(time.RFC3339Nano, pExp)
-	if errP != nil {
-		pTime, errP = time.Parse(time.RFC3339, pExp)
-	}
-	sTime, errS := time.Parse(time.RFC3339Nano, sExp)
-	if errS != nil {
-		sTime, errS = time.Parse(time.RFC3339, sExp)
-	}
-	if errP == nil && errS == nil {
-		return pTime.After(sTime)
-	}
-	return pExp > sExp
 }
 
 func replaceWithSymlink(linkPath, target string) {
@@ -831,85 +812,6 @@ func replaceWithSymlink(linkPath, target string) {
 	} else {
 		_ = os.Remove(linkPath)
 		_ = os.Symlink(target, linkPath)
-	}
-}
-
-func bridgeMCPTokens(profileFile, sharedFile string) {
-	if profileFile == sharedFile {
-		return
-	}
-
-	fi, err := os.Lstat(profileFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if _, sErr := os.Stat(sharedFile); sErr == nil {
-				replaceWithSymlink(profileFile, sharedFile)
-			}
-		}
-		return
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		target, rErr := os.Readlink(profileFile)
-		if rErr == nil && target == sharedFile {
-			return
-		}
-		if _, sErr := os.Stat(sharedFile); sErr == nil {
-			replaceWithSymlink(profileFile, sharedFile)
-		}
-		return
-	}
-
-	// File lock shared state to prevent race conditions during concurrent merges
-	lock, lockErr := merge.LockExclusive(sharedFile+".lock", 5*time.Second)
-	if lockErr == nil {
-		defer lock.Unlock()
-	}
-
-	// Parse profile tokens
-	profMap := make(map[string]map[string]any)
-	if pData, err := os.ReadFile(profileFile); err == nil && len(pData) > 0 {
-		if uErr := json.Unmarshal(pData, &profMap); uErr != nil {
-			logger.Debug("[agy] bridgeMCPTokens: unmarshal profile tokens failed: %v", uErr)
-		}
-	}
-
-	// Parse existing shared tokens
-	sharedMap := make(map[string]map[string]any)
-	if sData, err := os.ReadFile(sharedFile); err == nil && len(sData) > 0 {
-		if uErr := json.Unmarshal(sData, &sharedMap); uErr != nil {
-			logger.Debug("[agy] bridgeMCPTokens: unmarshal shared tokens failed: %v", uErr)
-		}
-	}
-
-	// Merge: add new keys, update if profile entry has newer expiry
-	for k, pEntry := range profMap {
-		sEntry, exists := sharedMap[k]
-		if !exists {
-			sharedMap[k] = pEntry
-			continue
-		}
-		pExp := extractMCPExpiry(pEntry)
-		sExp := extractMCPExpiry(sEntry)
-		if isNewerExpiry(pExp, sExp) {
-			sharedMap[k] = pEntry
-		}
-	}
-
-	// Write merged JSON atomically to sharedFile
-	if len(sharedMap) > 0 {
-		out, err := json.MarshalIndent(sharedMap, "", "  ")
-		if err != nil {
-			return
-		}
-		if err := merge.AtomicWrite(sharedFile, out, 0600); err != nil {
-			logger.Debug("[agy] bridgeMCPTokens: AtomicWrite shared tokens failed: %v", err)
-			return
-		}
-	}
-
-	// Replace profile file with atomic symlink only after successful write
-	if _, sErr := os.Stat(sharedFile); sErr == nil {
-		replaceWithSymlink(profileFile, sharedFile)
 	}
 }
 
