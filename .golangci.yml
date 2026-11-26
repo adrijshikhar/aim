@@ -85,7 +85,7 @@ formatters:
     - goimports
   settings:
     gofumpt:
-      extra-rules: true
+      extra-rules: false
   exclusions:
     generated: lax
     paths:

@@ -33,6 +33,10 @@ func (m *fullMockAdapter) PurgeCredentials(ctx context.Context, profileName, pro
 	return nil
 }
 
+func (m *fullMockAdapter) SeedCredentials(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (m *fullMockAdapter) ResumeArgs(sessionID string, extraArgs []string) []string {
 	return append([]string{"--resume", sessionID}, extraArgs...)
 }
@@ -89,6 +93,14 @@ func TestSegregatedInterfaces_Assertions(t *testing.T) {
 		t.Fatalf("unexpected PurgeCredentials error: %v", err)
 	}
 
+	seeder, ok := any(full).(agents.CredentialSeeder)
+	if !ok {
+		t.Fatal("expected full mock to implement CredentialSeeder")
+	}
+	if err := seeder.SeedCredentials(context.Background(), "test", "/tmp"); err != nil {
+		t.Fatalf("unexpected SeedCredentials error: %v", err)
+	}
+
 	resumer, ok := any(full).(agents.SessionResumer)
 	if !ok {
 		t.Fatal("expected full mock to implement SessionResumer")
@@ -113,6 +125,9 @@ func TestSegregatedInterfaces_Assertions(t *testing.T) {
 	}
 	if _, ok := any(unextended).(agents.CredentialPurger); ok {
 		t.Error("unextended mock should not implement CredentialPurger")
+	}
+	if _, ok := any(unextended).(agents.CredentialSeeder); ok {
+		t.Error("unextended mock should not implement CredentialSeeder")
 	}
 	if _, ok := any(unextended).(agents.SessionResumer); ok {
 		t.Error("unextended mock should not implement SessionResumer")
