@@ -472,19 +472,18 @@ func TestEnsureDotfiles_LibraryCachesAndKeychainsOnly(t *testing.T) {
 	if isSymlink(lib) {
 		t.Fatalf("Library itself must stay a real dir in the profile")
 	}
-	for _, rel := range []string{"Application Support", "Preferences"} {
-		if _, err := os.Lstat(filepath.Join(lib, rel)); err == nil {
-			t.Errorf("Library/%s holds per-app state and must not be bridged", rel)
+	for _, rel := range []string{"Application Support", "Preferences", "Keychains"} {
+		fi, err := os.Lstat(filepath.Join(lib, rel))
+		if err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("Library/%s holds per-app or credential state and must not be symlinked", rel)
 		}
 	}
-	for _, rel := range []string{"Caches", "Keychains"} {
-		linked := isSymlink(filepath.Join(lib, rel))
-		if runtime.GOOS == "darwin" && !linked {
-			t.Errorf("expected Library/%s to be linked on darwin", rel)
-		}
-		if runtime.GOOS != "darwin" && linked {
-			t.Errorf("Library/%s must not be linked off darwin", rel)
-		}
+	linked := isSymlink(filepath.Join(lib, "Caches"))
+	if runtime.GOOS == "darwin" && !linked {
+		t.Errorf("expected Library/Caches to be linked on darwin")
+	}
+	if runtime.GOOS != "darwin" && linked {
+		t.Errorf("Library/Caches must not be linked off darwin")
 	}
 }
 

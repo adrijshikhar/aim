@@ -139,6 +139,7 @@ Usage:
 Primary Commands:
   run <agent> <profile>      Execute agent under isolated profile
   login <agent> <profile>    Authenticate new account via OAuth PKCE
+  logout <agent> <profile>   Clear profile credentials without affecting other profiles
   list [agent]               List all profiles and status
   sessions [agent]           List active and past conversation sessions
   resume <agent> <profile>   Resume an existing session under a profile
@@ -186,6 +187,7 @@ Flags:
 	rootCmd.AddCommand(
 		newRunCmd(reg, pm),
 		newLoginCmd(reg, pm),
+		newLogoutCmd(reg, pm),
 		newListCmd(reg, pm),
 		newSessionsCmd(reg, pm),
 		newResumeCmd(reg, pm),

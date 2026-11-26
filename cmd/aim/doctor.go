@@ -29,6 +29,7 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 	var check bool
 	var report bool
 	var purgeKeychain bool
+	var fix bool
 	cmd := &cobra.Command{
 		Use:   "doctor [agent]",
 		Short: "Diagnose environment, tokens, and binaries",
@@ -56,7 +57,7 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 				_ = telClient.Close()
 				return nil
 			}
-			ok := runDoctorTo(cmd.OutOrStdout(), reg, pm, agent)
+			ok := runDoctorWithFixTo(cmd.OutOrStdout(), reg, pm, agent, fix)
 			if check && !ok {
 				return fmt.Errorf("doctor diagnostics reported failures")
 			}
@@ -72,20 +73,25 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 	cmd.Flags().BoolVar(&check, "check", false, "Exit with non-zero status if any diagnostic check fails")
 	cmd.Flags().BoolVar(&report, "report", false, "Generate an anonymized Markdown diagnostic report for issue submission")
 	cmd.Flags().BoolVar(&purgeKeychain, "purge-keychain", false, "Purge agent tokens from macOS Keychain to prevent cross-profile leakage")
+	cmd.Flags().BoolVar(&fix, "fix", false, "Prune expired unclaimed tokens/refusals and repair bridged dotfiles")
 	return cmd
 }
 
 func runDoctor(reg *agents.Registry, pm *profile.ProfileManager, agentName string) bool {
-	return runDoctorTo(os.Stdout, reg, pm, agentName)
+	return runDoctorWithFixTo(os.Stdout, reg, pm, agentName, false)
 }
 
 func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName string) bool {
-	logger.Debug("[doctor] Running diagnostics (agent=%q)", agentName)
-	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Doctor Diagnostics ==="))
+	return runDoctorWithFixTo(out, reg, pm, agentName, false)
+}
+
+func runDoctorWithFixTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName string, fix bool) bool {
+	logger.Debug("[doctor] Running diagnostics (agent=%q, fix=%t)", agentName, fix)
+	_, _ = fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Doctor Diagnostics ==="))
 	if reg == nil {
 		return true
 	}
-	if pm != nil {
+	if fix && pm != nil {
 		if err := pm.EnsureAllProfilesDotfiles(); err != nil {
 			logger.Debug("[doctor] Failed to ensure dotfiles across profiles: %v", err)
 		}
@@ -96,21 +102,23 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 	if pm != nil && pm.BaseDir != "" {
 		baseDir = pm.BaseDir
 	}
-	refStore := oauth.NewRefusalStore(baseDir)
-	_ = refStore.Prune()
+	if fix {
+		refStore := oauth.NewRefusalStore(baseDir)
+		_ = refStore.Prune()
+	}
 
 	if agentName != "" {
 		adapter, err := reg.Get(agentName)
 		if err != nil {
 			failBadge := tui.GaugeRedStyle.Width(8).Render("[FAIL]")
-			fmt.Fprintf(out, "%s Unknown agent: %s\n", failBadge, agentName)
+			_, _ = fmt.Fprintf(out, "%s Unknown agent: %s\n", failBadge, agentName)
 			return false
 		}
 		ok := diagnoseAdapterTo(out, adapter, pm, cfg, reg, map[string]bool{})
 		diagnosePlatformTo(out, agentName, cfg)
 		diagnoseDaemonTo(out)
 		diagnoseVPNTo(out)
-		diagnoseUnclaimedTokensTo(out, baseDir, agentName)
+		diagnoseUnclaimedTokensWithFixTo(out, baseDir, agentName, fix)
 		diagnoseBindingTo(out)
 		return ok
 	}
@@ -125,7 +133,7 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 	diagnosePlatformTo(out, "", cfg)
 	diagnoseDaemonTo(out)
 	diagnoseVPNTo(out)
-	diagnoseUnclaimedTokensTo(out, baseDir, "")
+	diagnoseUnclaimedTokensWithFixTo(out, baseDir, "", fix)
 	diagnoseBindingTo(out)
 	return allOK
 }
@@ -198,15 +206,15 @@ func diagnosePlatformTo(out io.Writer, agentName string, cfg *config.Config) {
 
 	lingering := profile.FindIgnoredKeychains(agentName, customServices...)
 	if len(lingering) > 0 {
-		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
+		warnBadge := tui.GaugeYellowStyle.Width(8).Render("[WARN]")
 		keychainCat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain:")
-		fmt.Fprintf(out, "  %s %s %d host agent token(s) detected in macOS Keychain (AIM uses file-based profile isolation):\n",
-			okBadge,
+		_, _ = fmt.Fprintf(out, "  %s %s %d host agent token(s) detected in macOS Keychain (run 'aim doctor --purge-keychain' if switching accounts):\n",
+			warnBadge,
 			keychainCat,
 			len(lingering),
 		)
 		for _, entry := range lingering {
-			fmt.Fprintf(out, "         - %s %s\n",
+			_, _ = fmt.Fprintf(out, "         - %s %s\n",
 				lipgloss.NewStyle().Foreground(tui.TextPrimary).Render(entry.Description),
 				lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("(service: %q)", entry.Service)),
 			)
@@ -214,16 +222,19 @@ func diagnosePlatformTo(out io.Writer, agentName string, cfg *config.Config) {
 	} else {
 		okBadge := tui.GaugeGreenStyle.Width(8).Render("[OK]")
 		keychainCat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Keychain:")
-		fmt.Fprintf(out, "  %s %s No host agent tokens in macOS Keychain.\n",
+		_, _ = fmt.Fprintf(out, "  %s %s No host agent tokens in macOS Keychain.\n",
 			okBadge,
 			keychainCat,
 		)
 	}
 }
 
-func diagnoseUnclaimedTokensTo(out io.Writer, baseDir string, agentName string) {
+func diagnoseUnclaimedTokensWithFixTo(out io.Writer, baseDir, agentName string, fix bool) {
 	store := oauth.NewStashStore(baseDir)
-	pruned, _ := store.Prune(7 * 24 * time.Hour)
+	pruned := 0
+	if fix {
+		pruned, _ = store.Prune(7 * 24 * time.Hour)
+	}
 
 	creds, err := store.List()
 	if err != nil {

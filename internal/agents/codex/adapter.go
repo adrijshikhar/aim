@@ -22,6 +22,7 @@ import (
 	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Compile-time assertions that Adapter implements the segregated agent interfaces.
@@ -34,6 +35,8 @@ var (
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
 	_ agents.SessionResumer        = (*Adapter)(nil)
+	_ agents.CredentialSeeder      = (*Adapter)(nil)
+	_ agents.CredentialPurger      = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
@@ -68,23 +71,38 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 		logger.Debug("[codex] HasCredentials: true (auth.json at %s)", p)
 		return true
 	}
-
-	// Auto-seed credentials if eligible profile doesn't have credentials yet
-	profileName := filepath.Base(profileDir)
-	if a.SeedDefaultCredentials(profileName, profileDir) {
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
-			logger.Debug("[codex] HasCredentials: true (auto-seeded auth.json at %s)", p)
-			return true
-		}
-	}
-
 	logger.Debug("[codex] HasCredentials: false (no auth.json at %s)", p)
 	return false
 }
 
+// SeedCredentials implements agents.CredentialSeeder for explicit one-time host credential import.
+func (a *Adapter) SeedCredentials(_ context.Context, profileName, profileDir string) error {
+	if profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		return fmt.Errorf("profile %q is explicitly logged out", profileName)
+	}
+	if a.SeedDefaultCredentials(profileName, profileDir) {
+		return nil
+	}
+	return fmt.Errorf("no host credentials seeded for %q", profileName)
+}
+
+// PurgeCredentials implements agents.CredentialPurger scoped to external OS credential stores.
+// Isolated Codex profiles store auth in $CODEX_HOME/auth.json via cli_auth_credentials_store="file".
+func (a *Adapter) PurgeCredentials(_ context.Context, _, _ string) error {
+	return nil
+}
+
 // SeedDefaultCredentials seeds host ~/.codex/auth.json into profile directory for eligible primary profiles.
+// It never overwrites existing profile credentials and never re-seeds an explicitly logged-out profile.
 func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	if !profile.ShouldSeedCredentials(profileName) {
+		return false
+	}
+	if profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		return false
+	}
+	destPath := a.TokenPath(profileDir)
+	if existingFi, err := os.Stat(destPath); err == nil && !existingFi.IsDir() && existingFi.Size() > 0 {
 		return false
 	}
 	realHome := config.RealHomeDir()
@@ -98,7 +116,6 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	if err := os.MkdirAll(profileAuthDir, 0700); err != nil {
 		return false
 	}
-	destPath := a.TokenPath(profileDir)
 	data, err := os.ReadFile(hostAuthPath)
 	if err != nil || len(data) == 0 {
 		return false
@@ -115,35 +132,16 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		return err
 	}
+	if err := ensureCodexFileStore(codexDir); err != nil {
+		return fmt.Errorf("configure codex file credential store: %w", err)
+	}
 
 	bin := a.ResolveBinary()
 	cmd := exec.CommandContext(ctx, bin, "login")
 	cmd.Dir = profileDir
-
-	storageEnv := config.StorageEnv()
-	cleanEnv := make([]string, 0, len(os.Environ())+4)
-	for _, env := range os.Environ() {
-		idx := strings.IndexByte(env, '=')
-		if idx == -1 {
-			continue
-		}
-		key := env[:idx]
-		_, storageKey := storageEnv[key]
-		if storageKey || key == "HOME" || key == "CODEX_HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" {
-			continue
-		}
-		cleanEnv = append(cleanEnv, env)
-	}
-
-	cmd.Env = append(cleanEnv,
-		"HOME="+profileDir,
-		"CODEX_HOME="+codexDir,
-		"AIM_AGENT="+a.Name(),
-		"AIM_PROFILE="+profileName,
-	)
-	for key, value := range storageEnv {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
+	cmd.Env = a.BuildCleanEnv(profileName, profileDir, map[string]string{
+		"CODEX_HOME": codexDir,
+	})
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -151,7 +149,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("codex login failed: %w", err)
 	}
-
+	_ = profile.ClearAgentLoggedOut(profileDir, a.Name())
 	return nil
 }
 
@@ -161,12 +159,18 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 		return agents.LaunchEnv{}, err
 	}
 
-	// Auto-seed credentials for eligible profile if missing in profileDir but available on host
-	_ = a.SeedDefaultCredentials(profileName, profileDir)
+	// Only seed eligible primary profiles when missing local auth and not explicitly logged out.
+	if profile.ShouldSeedCredentials(profileName) && !profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		_ = a.SeedDefaultCredentials(profileName, profileDir)
+	}
 
-	// Copy host config.toml to profile if not present (with hook trust path rewriting)
+	// Copy host config.toml to profile if not present (with hook trust path rewriting),
+	// and enforce cli_auth_credentials_store = "file" so Codex never writes host Keychain.
 	realHome := config.RealHomeDir()
 	copyHostConfig(realHome, codexDir)
+	if err := ensureCodexFileStore(codexDir); err != nil {
+		logger.Debug("[codex] Failed to enforce file credential store: %v", err)
+	}
 
 	// Probe and auto-start local sidecar proxy daemons (e.g. Caveman) if configured
 	ensureSidecarDaemons(ctx, realHome, codexDir)
@@ -278,6 +282,88 @@ func copyHostConfig(realHome, profileCodexDir string) {
 			}
 		}
 	}
+}
+
+//nolint:gosec // G101: TOML config setting name, not a credential value.
+const codexCredStoreKey = "cli_auth_credentials_store"
+
+// ensureCodexFileStore guarantees cli_auth_credentials_store = "file" in
+// <codexDir>/config.toml so Codex CLI isolates auth in $CODEX_HOME/auth.json
+// instead of mutating the shared macOS host Keychain.
+func ensureCodexFileStore(codexDir string) error {
+	var data []byte
+	if root, err := os.OpenRoot(codexDir); err == nil {
+		defer func() { _ = root.Close() }()
+		b, readErr := root.ReadFile("config.toml")
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return readErr
+		}
+		data = b
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	updated, changed, err := setTopLevelTOMLString(data, codexCredStoreKey, "file")
+	if err != nil {
+		return err
+	}
+	if !changed && len(data) > 0 {
+		return nil
+	}
+	return merge.AtomicWrite(filepath.Join(codexDir, "config.toml"), updated, 0o600)
+}
+
+func setTopLevelTOMLString(data []byte, key, value string) ([]byte, bool, error) {
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return fmt.Appendf(nil, "%s = %q\n", key, value), true, nil
+	}
+
+	var parsed map[string]any
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		return nil, false, fmt.Errorf("parse config.toml: %w", err)
+	}
+	if existing, ok := parsed[key].(string); ok && existing == value {
+		return data, false, nil
+	}
+
+	out := spliceTopLevelTOMLKey(string(data), key, value)
+	var verify map[string]any
+	if err := toml.Unmarshal([]byte(out), &verify); err != nil {
+		return nil, false, fmt.Errorf("verify updated config.toml: %w", err)
+	}
+	return []byte(out), true, nil
+}
+
+func spliceTopLevelTOMLKey(text, key, value string) string {
+	lines := strings.Split(text, "\n")
+	replacement := fmt.Sprintf("%s = %q", key, value)
+	firstTableIdx := len(lines)
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			firstTableIdx = i
+			break
+		}
+		if name, _, ok := strings.Cut(trimmed, "="); ok && strings.TrimSpace(name) == key {
+			lines[i] = replacement
+			return strings.Join(lines, "\n")
+		}
+	}
+
+	if firstTableIdx < len(lines) {
+		prefix := append([]string(nil), lines[:firstTableIdx]...)
+		if len(prefix) == 0 || strings.TrimSpace(prefix[len(prefix)-1]) != "" {
+			prefix = append(prefix, replacement, "")
+		} else {
+			prefix[len(prefix)-1] = replacement
+			prefix = append(prefix, "")
+		}
+		prefix = append(prefix, lines[firstTableIdx:]...)
+		return strings.Join(prefix, "\n")
+	}
+
+	return strings.TrimRight(text, "\n") + "\n" + replacement + "\n"
 }
 
 // stripTables removes whole top-level tables from TOML text with the merge

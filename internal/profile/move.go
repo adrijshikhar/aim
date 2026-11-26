@@ -83,10 +83,16 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 		return fmt.Errorf("target profile %q already has credentials for agent %q (use --force to overwrite)", targetProfile, canonicalAgent)
 	}
 
-	// Move agent files on disk
+	// Move agent files on disk before migrating scoped Keychain credentials so
+	// moveAgentData's destination directory replacement cannot wipe .credentials.json.
 	if srcDirExists {
 		if err := moveAgentData(canonicalAgent, srcDir, dstDir, force, adapter); err != nil {
 			return fmt.Errorf("failed to move agent data: %w", err)
+		}
+		if canonicalAgent == agentClaude {
+			if err := MigrateClaudeScopedKeychain(filepath.Join(srcDir, ".claude"), filepath.Join(dstDir, ".claude")); err != nil {
+				return fmt.Errorf("failed to migrate claude keychain: %w", err)
+			}
 		}
 	}
 

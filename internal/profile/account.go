@@ -40,7 +40,7 @@ func GetProfileAccountInfoForAgent(profileDir, agentName string) AccountInfo {
 	case "gemini", "gemini-cli":
 		geminiTokenPath := filepath.Join(profileDir, ".gemini", "gemini-oauth-token")
 		return extractFromTokenFile(geminiTokenPath)
-	case "agy", "antigravity":
+	case agentAgy, agentAliasAntigravity:
 		agyTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
 		return extractFromTokenFile(agyTokenPath)
 	}

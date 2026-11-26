@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -631,4 +632,133 @@ func TestCodexAdapter_LeasedProfileHookIsolation(t *testing.T) {
 	if !strings.Contains(string(content), "aim hook guard") {
 		t.Errorf("expected hooks.json to contain 'aim hook guard'")
 	}
+}
+
+func assertCodexFileStore(t *testing.T, root *os.Root) {
+	t.Helper()
+	got, err := root.ReadFile("config.toml")
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	s := string(got)
+	if !strings.Contains(s, `cli_auth_credentials_store = "file"`) &&
+		!strings.Contains(s, `cli_auth_credentials_store = 'file'`) {
+		t.Fatalf("expected file credential store in config.toml, got:\n%s", s)
+	}
+}
+
+func TestCodexAdapter_PrepareEnv_EnforcesFileStore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	a := NewAdapter()
+
+	profileDir := t.TempDir()
+	codexDir := filepath.Join(profileDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatalf("mkdir codexDir: %v", err)
+	}
+	cfgPath := filepath.Join(codexDir, "config.toml")
+	initial := "cli_auth_credentials_store = \"keychain\"\n\n[features]\nshell_snapshot = true\n"
+	if err := os.WriteFile(cfgPath, []byte(initial), 0o600); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	if _, err := a.PrepareEnv(context.Background(), "work", profileDir); err != nil {
+		t.Fatalf("PrepareEnv failed: %v", err)
+	}
+
+	root, err := os.OpenRoot(codexDir)
+	if err != nil {
+		t.Fatalf("open codexDir root: %v", err)
+	}
+	defer func() { _ = root.Close() }()
+	assertCodexFileStore(t, root)
+}
+
+func TestCodexAdapter_Login_EnforcesFileStore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	a := NewAdapter()
+
+	profileDir := t.TempDir()
+	codexDir := filepath.Join(profileDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatalf("mkdir codexDir: %v", err)
+	}
+	cfgPath := filepath.Join(codexDir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("cli_auth_credentials_store = \"keychain\"\n"), 0o600); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	fakeBin := t.TempDir()
+	script := filepath.Join(fakeBin, "codex")
+	//nolint:gosec // G306: fake executable test binary placed on temporary PATH.
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho '{}' > \"$CODEX_HOME/auth.json\"\n"), 0o700); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := a.Login(context.Background(), "work", profileDir); err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	root, err := os.OpenRoot(codexDir)
+	if err != nil {
+		t.Fatalf("open codexDir root: %v", err)
+	}
+	defer func() { _ = root.Close() }()
+	assertCodexFileStore(t, root)
+}
+
+func TestCodexAdapter_SeedDefaultCredentials_NeverOverwritesOrLoggedOut(t *testing.T) {
+	hostHome := t.TempDir()
+	t.Setenv("HOME", hostHome)
+	hostCodex := filepath.Join(hostHome, ".codex")
+	if err := os.MkdirAll(hostCodex, 0o700); err != nil {
+		t.Fatalf("mkdir hostCodex: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hostCodex, "auth.json"), []byte(`{"tokens":{"access_token":"host_tok"}}`), 0o600); err != nil {
+		t.Fatalf("write host auth.json: %v", err)
+	}
+
+	a := NewAdapter()
+
+	t.Run("preserves_existing_auth", func(t *testing.T) {
+		profileDir := t.TempDir()
+		codexDir := filepath.Join(profileDir, ".codex")
+		if err := os.MkdirAll(codexDir, 0o700); err != nil {
+			t.Fatalf("mkdir codexDir: %v", err)
+		}
+		profileAuth := filepath.Join(codexDir, "auth.json")
+		want := `{"tokens":{"access_token":"profile_tok"}}`
+		if err := os.WriteFile(profileAuth, []byte(want), 0o600); err != nil {
+			t.Fatalf("write profile auth.json: %v", err)
+		}
+		if a.SeedDefaultCredentials("work", profileDir) {
+			t.Fatal("expected SeedDefaultCredentials to return false when auth.json exists")
+		}
+		root, err := os.OpenRoot(codexDir)
+		if err != nil {
+			t.Fatalf("open codexDir root: %v", err)
+		}
+		defer func() { _ = root.Close() }()
+		got, err := root.ReadFile("auth.json")
+		if err != nil {
+			t.Fatalf("read profile auth.json: %v", err)
+		}
+		if string(got) != want {
+			t.Fatalf("existing auth.json overwritten: got %s, want %s", string(got), want)
+		}
+	})
+
+	t.Run("respects_logged_out_marker", func(t *testing.T) {
+		profileDir := t.TempDir()
+		if err := profile.MarkAgentLoggedOut(profileDir, "codex"); err != nil {
+			t.Fatalf("MarkAgentLoggedOut: %v", err)
+		}
+		if a.SeedDefaultCredentials("work", profileDir) {
+			t.Fatal("expected SeedDefaultCredentials to return false for logged-out profile")
+		}
+		if _, err := os.Stat(filepath.Join(profileDir, ".codex", "auth.json")); !os.IsNotExist(err) {
+			t.Fatalf("expected no auth.json created for logged-out profile, got err=%v", err)
+		}
+	})
 }

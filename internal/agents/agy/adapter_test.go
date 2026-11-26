@@ -247,17 +247,17 @@ func TestAntigravityAdapter_HasCredentials(t *testing.T) {
 		t.Errorf("expected HasCredentials to be false when token path is a directory")
 	}
 
-	// 5. Corrupt token file with trailing extra brace (auto-repaired)
+	// 5. Corrupt token file with trailing extra brace (read-only recognition, no disk write)
 	corruptProfile := t.TempDir()
 	corruptTokenPath := adapter.TokenPath(corruptProfile)
 	_ = os.MkdirAll(filepath.Dir(corruptTokenPath), 0755)
 	_ = os.WriteFile(corruptTokenPath, []byte("{\"access_token\":\"valid\"}}\n"), 0600)
 	if !adapter.HasCredentials(corruptProfile) {
-		t.Errorf("expected HasCredentials to repair and return true for token file with trailing brace")
+		t.Errorf("expected HasCredentials to return true for repairable token JSON")
 	}
 	repairedContent, _ := os.ReadFile(corruptTokenPath)
-	if string(repairedContent) != "{\"access_token\":\"valid\"}\n" {
-		t.Errorf("expected file to be repaired on disk, got %q", string(repairedContent))
+	if string(repairedContent) != "{\"access_token\":\"valid\"}}\n" {
+		t.Errorf("expected HasCredentials to remain read-only on disk, got %q", string(repairedContent))
 	}
 
 	// 6. Google Application Default Credentials (ADC)
@@ -289,15 +289,26 @@ func TestAntigravityAdapter_HasCredentials(t *testing.T) {
 		t.Errorf("expected token to be seeded into personal profile, got err: %v, content: %s", sErr, string(seededToken))
 	}
 
-	// 8. Auto-seed shorthand "p" profile via direct HasCredentials call
+	// 8. HasCredentials remains read-only for unseeded "p" profile; explicit SeedDefaultCredentials seeds it.
 	pProfileDir := filepath.Join(t.TempDir(), "p")
 	_ = os.MkdirAll(pProfileDir, 0755)
-	if !adapter.HasCredentials(pProfileDir) {
-		t.Errorf("expected HasCredentials to auto-seed and return true for 'p' profile")
+	if adapter.HasCredentials(pProfileDir) {
+		t.Errorf("expected HasCredentials to stay read-only and return false before explicit seeding")
+	}
+	if !adapter.SeedDefaultCredentials("p", pProfileDir) {
+		t.Errorf("expected SeedDefaultCredentials to seed 'p' profile cleanly")
 	}
 	pToken, pErr := os.ReadFile(adapter.TokenPath(pProfileDir))
 	if pErr != nil || !strings.Contains(string(pToken), "seeded_tok") {
 		t.Errorf("expected token to be seeded into 'p' profile, got err: %v, content: %s", pErr, string(pToken))
+	}
+	// Logged-out "p" profile must not be re-seeded.
+	if err := profile.MarkAgentLoggedOut(pProfileDir, "agy"); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(adapter.TokenPath(pProfileDir))
+	if adapter.SeedDefaultCredentials("p", pProfileDir) {
+		t.Errorf("expected SeedDefaultCredentials NOT to re-seed an explicitly logged-out profile")
 	}
 
 	// 9. Profile not eligible for auto-seeding when multiple profiles exist
@@ -1652,5 +1663,51 @@ func TestDefaultClientID_Official(t *testing.T) {
 	}
 	if clientSecret != "" {
 		t.Errorf("expected empty clientSecret for public PKCE client, got %q", clientSecret)
+	}
+}
+
+func TestAgyAdapter_HarvestCredentials_PreservesExistingLocalToken(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	defer profile.SetKeychainPasswordGetterForTest(func(_, _ string) (string, error) {
+		return `{"access_token":"host_should_not_overwrite"}`, nil
+	})()
+
+	profileDir := t.TempDir()
+	tokenDir := filepath.Join(profileDir, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(tokenDir, 0o700); err != nil {
+		t.Fatalf("mkdir tokenDir: %v", err)
+	}
+	tokenPath := filepath.Join(tokenDir, "antigravity-oauth-token")
+	original := `{"token":{"access_token":"local_pkce_token","email":"local@example.com"}}`
+	if err := os.WriteFile(tokenPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("write local token: %v", err)
+	}
+
+	a := NewAdapter()
+	if err := a.HarvestCredentials(context.Background(), "work", profileDir); err != nil {
+		t.Fatalf("HarvestCredentials unexpected error: %v", err)
+	}
+	root, err := os.OpenRoot(tokenDir)
+	if err != nil {
+		t.Fatalf("open tokenDir root: %v", err)
+	}
+	defer func() { _ = root.Close() }()
+	got, err := root.ReadFile("antigravity-oauth-token")
+	if err != nil {
+		t.Fatalf("read tokenPath: %v", err)
+	}
+	if string(got) != original {
+		t.Fatalf("local PKCE token overwritten: got %s, want %s", string(got), original)
+	}
+
+	if err := profile.MarkAgentLoggedOut(profileDir, "agy"); err != nil {
+		t.Fatalf("MarkAgentLoggedOut: %v", err)
+	}
+	if err := os.Remove(tokenPath); err != nil {
+		t.Fatalf("remove tokenPath: %v", err)
+	}
+	if err := a.HarvestCredentials(context.Background(), "work", profileDir); err == nil {
+		t.Fatal("expected HarvestCredentials to reject logged-out profile")
 	}
 }

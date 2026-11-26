@@ -479,17 +479,23 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 		return fmt.Errorf("profile '%s' does not exist", profileName)
 	}
 
+	var cleanupErrs []error
 	if dirExists {
-		_ = PurgeProfileKeychain("claude", pDir)
+		if err := PurgeProfileKeychain("claude", pDir); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
 		if err := m.RemoveProfile(profileName); err != nil {
-			return err
+			cleanupErrs = append(cleanupErrs, err)
 		}
 	}
 	cfg.DeleteProfile(profileName)
 	if err := m.MergeStateStore().Remove(profileName); err != nil {
-		return err
+		cleanupErrs = append(cleanupErrs, err)
 	}
-	return config.SaveConfig(cfg)
+	if err := config.SaveConfig(cfg); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	return errors.Join(cleanupErrs...)
 }
 
 // RemoveAgent unlinks an agent from a profile in config.
@@ -529,19 +535,38 @@ func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.
 	cfg.RemoveProfileAgent(profileName, agentName)
 	remaining := cfg.GetProfileAgents(profileName)
 	if len(remaining) > 0 {
-		return false, config.SaveConfig(cfg)
+		var cleanupErrs []error
+		if dirExists {
+			if err := PurgeProfileKeychain(agentName, pDir); err != nil {
+				cleanupErrs = append(cleanupErrs, err)
+			}
+			if err := PurgeLocalAgentCredentials(pDir, agentName); err != nil {
+				cleanupErrs = append(cleanupErrs, err)
+			}
+		}
+		if err := config.SaveConfig(cfg); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
+		return false, errors.Join(cleanupErrs...)
 	}
 
+	var cleanupErrs []error
 	if dirExists {
+		if err := PurgeProfileKeychain(agentName, pDir); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
 		if err := m.RemoveProfile(profileName); err != nil {
-			return false, err
+			cleanupErrs = append(cleanupErrs, err)
 		}
 	}
 	cfg.DeleteProfile(profileName)
 	if err := m.MergeStateStore().Remove(profileName); err != nil {
-		return false, err
+		cleanupErrs = append(cleanupErrs, err)
 	}
-	return true, config.SaveConfig(cfg)
+	if err := config.SaveConfig(cfg); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	return true, errors.Join(cleanupErrs...)
 }
 
 // ListProfilesForAgent returns profile names associated with the given agent.
@@ -750,6 +775,11 @@ func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Conf
 	}
 	if err := m.MergeStateStore().Rename(oldName, newName); err != nil {
 		return fmt.Errorf("failed to rename merge state: %w", err)
+	}
+	if oldDirExists {
+		if err := MigrateClaudeScopedKeychain(filepath.Join(oldDir, ".claude"), filepath.Join(newDir, ".claude")); err != nil {
+			logger.Warn("[profile] Failed to migrate scoped keychain during rename %s -> %s: %v", oldName, newName, err)
+		}
 	}
 
 	// Ensure dotfile symlinks in new location are intact

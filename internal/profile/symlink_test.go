@@ -249,10 +249,29 @@ func TestEnsureDotfiles_DarwinKeychains(t *testing.T) {
 	fi, err := os.Lstat(targetKeychains)
 	if runtime.GOOS == "darwin" {
 		if err != nil {
-			t.Fatalf("expected Library/Keychains to exist on darwin: %v", err)
+			t.Fatalf("expected isolated Library/Keychains dir on darwin: %v", err)
 		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("expected Library/Keychains to be a symlink")
+		if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+			t.Errorf("expected Library/Keychains to be an isolated directory, not a symlink")
+		}
+		if fi.Mode().Perm() != 0o700 {
+			t.Errorf("expected Library/Keychains mode 0700, got %#o", fi.Mode().Perm())
+		}
+		// Ensure legacy symlink to host Keychains is migrated safely without deleting host files.
+		if err := os.RemoveAll(targetKeychains); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(keychainsDir, targetKeychains); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureDotfiles(fakeHome, profileDir); err != nil {
+			t.Fatalf("EnsureDotfiles migration failed: %v", err)
+		}
+		if migratedFi, err := os.Lstat(targetKeychains); err != nil || migratedFi.Mode()&os.ModeSymlink != 0 || !migratedFi.IsDir() {
+			t.Errorf("expected legacy Library/Keychains symlink to be replaced with isolated dir")
+		}
+		if _, err := os.Stat(filepath.Join(keychainsDir, "login.keychain-db")); err != nil {
+			t.Errorf("host keychain file must remain untouched: %v", err)
 		}
 	} else {
 		// On non-darwin, Library/Keychains should not be linked by default

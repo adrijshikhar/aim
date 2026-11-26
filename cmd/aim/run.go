@@ -334,6 +334,7 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		startLeaseSupervisor(runCtx, pDir, opts.ProfileName, cancel)
 	}
 
+	hadCredsPre := adapter.HasCredentials(pDir)
 	r := runner.NewRunner(adapter)
 	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", opts.ExtraArgs)
 	code := withSessionMerge(adapter, pm.MergeStateStore(), opts.ProfileName, pDir, cfg, opts.ExtraArgs, func() int {
@@ -356,6 +357,7 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		return 1
 	}
 	logger.Debug("[run] Process finished with exit code %d", code)
+	reconcilePostRunAuthState(ctx, adapter, pDir, hadCredsPre)
 	telemetry.CaptureAccountEvent(adapter.Name(), profile.GetProfileAccountInfoForAgent(pDir, adapter.Name()), "agent_run_completed", map[string]any{
 		"exit_code":        code,
 		"session_attached": sessionID != "",
@@ -365,6 +367,26 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 	triggerPrewarmAsync(config.BaseDir(), adapter.Name())
 
 	return code
+}
+
+// reconcilePostRunAuthState records explicit in-session logins and logouts so an
+// agent that logged out interactively cannot be silently re-seeded on the next run.
+func reconcilePostRunAuthState(ctx context.Context, adapter agents.AgentAdapter, pDir string, hadCredsPre bool) {
+	if adapter == nil || pDir == "" {
+		return
+	}
+	hasCredsPost := adapter.HasCredentials(pDir)
+	switch {
+	case hadCredsPre && !hasCredsPost:
+		if purger, ok := adapter.(agents.CredentialPurger); ok {
+			_ = profile.PurgeProfileKeychainWithContext(ctx, adapter.Name(), pDir, purger)
+		} else {
+			_ = profile.PurgeProfileKeychainWithContext(ctx, adapter.Name(), pDir)
+		}
+		_ = profile.MarkAgentLoggedOut(pDir, adapter.Name())
+	case !hadCredsPre && hasCredsPost:
+		_ = profile.ClearAgentLoggedOut(pDir, adapter.Name())
+	}
 }
 
 func applyProfileOverrides(launch *agents.LaunchEnv, cfg *config.Config, profileName string, includeArgs bool) {

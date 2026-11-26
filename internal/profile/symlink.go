@@ -52,15 +52,15 @@ func isDeniedHostDotfile(name string) bool {
 }
 
 // defaultNonDotPaths are host paths outside the dot scan that are shared too:
-// GOPATH's default module and build cache, and on macOS the keychains (so gh
-// and git-credential-osxkeychain work) and the per-user cache dir, which would
-// otherwise be duplicated per profile. Library itself stays a real dir in the
-// profile; Application Support and Preferences hold per-app state and are not
-// shared.
+// GOPATH's default module and build cache, and on macOS the user cache dir.
+// Library/Keychains is intentionally NOT shared: symlinking host keychains
+// allows any profile login/logout to mutate global host credentials. Library
+// itself stays a real dir in the profile; Application Support and Preferences
+// hold per-app state and are not shared.
 var defaultNonDotPaths = func() []string {
 	paths := []string{"go"}
 	if runtime.GOOS == "darwin" {
-		paths = append(paths, filepath.Join("Library", "Keychains"), filepath.Join("Library", "Caches"))
+		paths = append(paths, filepath.Join("Library", "Caches"))
 	}
 	return paths
 }()
@@ -344,6 +344,12 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 	logger.Debug("[symlink] Ensuring dotfiles for profile at %s (host: %s)", profileDir, realHome)
 	var errs []error
 
+	if runtime.GOOS == "darwin" {
+		if err := ensureIsolatedDarwinKeychainsDir(profileDir); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	forEachBridgeCandidate(realHome, profileDir, GetBridgedPaths(realHome, extraPaths...), func(cleanName, src, dest string) {
 		if fi, err := os.Lstat(dest); err == nil {
 			if fi.Mode()&os.ModeSymlink != 0 {
@@ -371,6 +377,19 @@ func EnsureDotfiles(realHome, profileDir string, extraPaths ...string) error {
 	})
 
 	return errors.Join(errs...)
+}
+
+// ensureIsolatedDarwinKeychainsDir guarantees that a profile's Library/Keychains
+// never symlinks back to the host's ~/Library/Keychains, migrating any legacy
+// host symlink to an isolated 0700 directory without modifying host Keychains.
+func ensureIsolatedDarwinKeychainsDir(profileDir string) error {
+	keychainsPath := filepath.Join(profileDir, "Library", "Keychains")
+	if fi, err := os.Lstat(keychainsPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(keychainsPath); err != nil {
+			return fmt.Errorf("remove host keychain symlink: %w", err)
+		}
+	}
+	return os.MkdirAll(keychainsPath, 0o700)
 }
 
 // isStubOrEmptyDir reports whether the profile dir at path carries nothing of

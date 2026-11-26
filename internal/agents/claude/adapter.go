@@ -38,6 +38,7 @@ var (
 	_ agents.SessionResumer        = (*Adapter)(nil)
 	_ agents.CredentialHarvester   = (*Adapter)(nil)
 	_ agents.CredentialPurger      = (*Adapter)(nil)
+	_ agents.CredentialSeeder      = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
@@ -66,10 +67,10 @@ func NewAdapter() *Adapter {
 // - auth.json file exists and is non-empty
 // - .credentials.json exists and contains valid claudeAiOauth tokens
 // - Scoped Keychain service contains valid claudeAiOauth tokens
+// HasCredentials checks if profile-scoped Claude credentials exist.
+// Contract: strictly read-only — checks only profile-local files and this profile's
+// scoped Keychain item without writing files, falling back to host Keychains, or checking global env vars.
 func (a *Adapter) HasCredentials(profileDir string) bool {
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		return true
-	}
 	claudeDir := filepath.Join(profileDir, ".claude")
 	authPath := filepath.Join(claudeDir, "auth.json")
 	if fi, err := os.Stat(authPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
@@ -81,32 +82,68 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 			return true
 		}
 	}
-	profileName := filepath.Base(profileDir)
-	return a.HarvestCredentials(context.Background(), profileName, profileDir) == nil
+	return len(profile.ReadScopedClaudeKeychainCredentials(claudeDir)) > 0
 }
 
-// HarvestCredentials discovers, extracts, and synchronizes Claude Code credentials
-// from the macOS Keychain into the profile's .credentials.json file.
-func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDir string) error {
+// SeedCredentials imports host Keychain Claude credentials into an empty, non-logged-out
+// primary profile when explicitly requested.
+func (a *Adapter) SeedCredentials(ctx context.Context, profileName, profileDir string) error {
+	if profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		return fmt.Errorf("profile %q is explicitly logged out", profileName)
+	}
+	if !profile.ShouldSeedCredentials(profileName) {
+		return fmt.Errorf("credential seeding skipped for non-primary profile %q", profileName)
+	}
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
+		return errors.New("keychain seeding is only supported on darwin")
+	}
 	claudeDir := filepath.Join(profileDir, ".claude")
 	destTokenPath := filepath.Join(claudeDir, ".credentials.json")
-
-	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
-		if data, err := os.ReadFile(destTokenPath); err == nil && len(data) > 0 {
+	if existing, err := readClaudeFileInDir(claudeDir, ".credentials.json"); err == nil && profile.HasClaudeCredentials(existing) {
+		return nil
+	}
+	for _, svc := range []string{"Claude Code-credentials", "Claude Safe Storage"} {
+		if raw, err := profile.GetGenericPasswordWithContext(ctx, svc, ""); err == nil && raw != "" {
+			data := profile.DecodeKeychainPassword(raw)
 			if profile.HasClaudeCredentials(data) {
+				if err := merge.AtomicWrite(destTokenPath, data, 0o600); err != nil {
+					return fmt.Errorf("save seeded credentials: %w", err)
+				}
+				logger.Debug("[claude] Seeded host token from %s into %s", svc, destTokenPath)
 				return nil
 			}
 		}
+	}
+	return fmt.Errorf("no host claude credentials found to seed %q", profileName)
+}
+
+// HarvestCredentials synchronizes this profile's scoped macOS Keychain token into .credentials.json.
+// It checks local .credentials.json first and never falls back to host Keychain items.
+func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDir string) error {
+	if profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		return fmt.Errorf("profile %q is explicitly logged out", profileName)
+	}
+
+	claudeDir := filepath.Join(profileDir, ".claude")
+	destTokenPath := filepath.Join(claudeDir, ".credentials.json")
+
+	// 1. Keep valid existing profile-local credentials intact.
+	if data, err := readClaudeFileInDir(claudeDir, ".credentials.json"); err == nil && len(data) > 0 {
+		if profile.HasClaudeCredentials(data) {
+			return nil
+		}
+	}
+
+	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
 		return errors.New("keychain is only supported on darwin")
 	}
 
+	// 2. Check profile-scoped Keychain item only (never host Keychain services).
 	scopedService := profile.ClaudeScopedKeychainService(claudeDir)
-
-	// 1. Check scoped service in macOS Keychain first (Claude Code's primary store on macOS)
 	if raw, err := profile.GetGenericPasswordWithContext(ctx, scopedService, ""); err == nil && raw != "" {
 		data := profile.DecodeKeychainPassword(raw)
 		if profile.HasClaudeCredentials(data) {
-			if err := merge.AtomicWrite(destTokenPath, data, 0600); err != nil {
+			if err := merge.AtomicWrite(destTokenPath, data, 0o600); err != nil {
 				return fmt.Errorf("failed to save harvested credentials: %w", err)
 			}
 			logger.Debug("[claude] Successfully harvested scoped token from %s into %s", scopedService, destTokenPath)
@@ -114,30 +151,16 @@ func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDi
 		}
 	}
 
-	// 2. Check unhashed host service in macOS Keychain if eligible primary profile
-	if profile.ShouldSeedCredentials(profileName) {
-		for _, svc := range []string{"Claude Code-credentials", "Claude Safe Storage"} {
-			if raw, err := profile.GetGenericPasswordWithContext(ctx, svc, ""); err == nil && raw != "" {
-				data := profile.DecodeKeychainPassword(raw)
-				if profile.HasClaudeCredentials(data) {
-					if err := merge.AtomicWrite(destTokenPath, data, 0600); err != nil {
-						return fmt.Errorf("failed to save harvested credentials: %w", err)
-					}
-					logger.Debug("[claude] Successfully harvested host token from %s into %s", svc, destTokenPath)
-					return nil
-				}
-			}
-		}
-	}
-
-	// 3. If file already exists on disk, verify it contains valid credentials
-	if data, err := os.ReadFile(destTokenPath); err == nil && len(data) > 0 {
-		if profile.HasClaudeCredentials(data) {
-			return nil
-		}
-	}
-
 	return fmt.Errorf("no claude credentials found for profile %q", profileName)
+}
+
+func readClaudeFileInDir(dir, name string) ([]byte, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return root.ReadFile(name)
 }
 
 // PurgeCredentials deletes scoped Keychain items associated with this profile.
@@ -165,36 +188,14 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
-	storageEnv := config.StorageEnv()
-	cleanEnv := make([]string, 0, len(os.Environ())+5)
-	for _, env := range os.Environ() {
-		idx := strings.IndexByte(env, '=')
-		if idx == -1 {
-			continue
-		}
-		key := env[:idx]
-		_, storageKey := storageEnv[key]
-		if storageKey || key == "HOME" || key == "CLAUDE_CONFIG_DIR" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_SESSION_ID" ||
-			key == "CLAUDE_CODE_OAUTH_TOKEN" || key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
-			continue
-		}
-		cleanEnv = append(cleanEnv, env)
-	}
-
-	cmd.Env = append(cleanEnv,
-		"HOME="+profileDir,
-		"CLAUDE_CONFIG_DIR="+claudeDir,
-		"AIM_AGENT="+a.Name(),
-		"AIM_PROFILE="+profileName,
-	)
-	for key, value := range storageEnv {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
+	cmd.Env = a.BuildCleanEnv(profileName, profileDir, map[string]string{
+		"CLAUDE_CONFIG_DIR": claudeDir,
+	})
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("claude login failed: %w", err)
 	}
+	_ = profile.ClearAgentLoggedOut(profileDir, a.Name())
 	return nil
 }
 
@@ -214,7 +215,9 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	} else {
 		rewriteSettingsHooks(config.RealHomeDir(), profileDir)
 	}
-	_ = a.HarvestCredentials(ctx, profileName, profileDir)
+	if !profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		_ = a.HarvestCredentials(ctx, profileName, profileDir)
+	}
 
 	bin := a.ResolveBinary()
 	envMap := a.BaseLaunchEnv(profileName, profileDir, map[string]string{

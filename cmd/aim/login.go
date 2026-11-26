@@ -60,36 +60,6 @@ func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *prof
 		cfg = config.NewDefaultConfig()
 	}
 
-	loginSucceeded := false
-	// Harvest any agent credentials into the profile directory after login completes.
-	// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
-	defer func() {
-		if harvester, ok := adapter.(agents.CredentialHarvester); ok {
-			_ = harvester.HarvestCredentials(ctx, profileName, pDir)
-		} else {
-			_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
-		}
-		if loginSucceeded {
-			acc := profile.GetProfileAccountInfoForAgent(pDir, adapter.Name())
-			telemetry.IdentifyAccount(adapter.Name(), acc)
-			if acc.Email != "" && pm != nil {
-				if existingProfiles, err := pm.ListConfiguredProfiles(); err == nil {
-					for _, otherProf := range existingProfiles {
-						if otherProf == profileName {
-							continue
-						}
-						otherDir := pm.ProfileDir(otherProf)
-						otherAcc := profile.GetProfileAccountInfoForAgent(otherDir, adapter.Name())
-						if otherAcc.Email != "" && strings.EqualFold(otherAcc.Email, acc.Email) {
-							fmt.Fprintf(os.Stderr, "\nNotice: Profile %q authenticated with %s (already used by profile %q)\n", profileName, acc.Email, otherProf)
-							break
-						}
-					}
-				}
-			}
-		}
-	}()
-
 	auth, ok := adapter.(agents.Authenticator)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Agent %s does not support login\n", adapter.Name())
@@ -99,7 +69,20 @@ func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *prof
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		return 1
 	}
-	loginSucceeded = true
+
+	// Only clear logout state and finalize credentials once Login succeeds cleanly.
+	_ = profile.ClearAgentLoggedOut(pDir, adapter.Name())
+	if !adapter.HasCredentials(pDir) {
+		if harvester, ok := adapter.(agents.CredentialHarvester); ok {
+			_ = harvester.HarvestCredentials(ctx, profileName, pDir)
+		} else {
+			_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
+		}
+	}
+
+	acc := profile.GetProfileAccountInfoForAgent(pDir, adapter.Name())
+	telemetry.IdentifyAccount(adapter.Name(), acc)
+	warnDuplicateAccountEmail(pm, adapter.Name(), acc.Email, profileName)
 
 	baseDir := config.BaseDir()
 	if pm != nil && pm.BaseDir != "" {
@@ -121,4 +104,25 @@ func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *prof
 	cfg.AddProfileAgent(profileName, adapter.Name())
 	_ = config.SaveConfig(cfg)
 	return 0
+}
+
+func warnDuplicateAccountEmail(pm *profile.ProfileManager, agentName, email, profileName string) {
+	if email == "" || pm == nil {
+		return
+	}
+	existingProfiles, err := pm.ListConfiguredProfiles()
+	if err != nil {
+		return
+	}
+	for _, otherProf := range existingProfiles {
+		if otherProf == profileName {
+			continue
+		}
+		otherDir := pm.ProfileDir(otherProf)
+		otherAcc := profile.GetProfileAccountInfoForAgent(otherDir, agentName)
+		if otherAcc.Email != "" && strings.EqualFold(otherAcc.Email, email) {
+			fmt.Fprintf(os.Stderr, "\nNotice: Profile %q authenticated with %s (already used by profile %q)\n", profileName, email, otherProf)
+			return
+		}
+	}
 }
