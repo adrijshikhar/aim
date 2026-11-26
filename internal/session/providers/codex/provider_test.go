@@ -42,7 +42,8 @@ VALUES
 ('01a09eb7-2f6c-7c52-895f-218f9ac9eecd', '/tmp/rollout1.jsonl', 1726300000, 1726300000, 'Refactor router middleware', 'Clean up routes'),
 ('01a04baf-4b95-7681-82bd-81df4f995452', '/tmp/rollout2.jsonl', 1726200000, 1726200000, 'Update docs', 'Fix outdated markdown');
 `
-	if err := exec.Command(sqliteBin, dbPath, schema).Run(); err != nil {
+	//nolint:gosec // G204: invoking resolved test sqlite3 binary on isolated TempDir fixture.
+	if err := exec.CommandContext(context.Background(), sqliteBin, dbPath, schema).Run(); err != nil {
 		t.Fatalf("failed to seed mock sqlite DB: %v", err)
 	}
 
@@ -499,7 +500,8 @@ VALUES
 ('01a0sub1-1111-2222-3333-444444444444', NULL, 'Subagent Maxwell', 'Subagent prompt', '', '/workspace/repo', 'subagent', 0, 1726100000, '/tmp/rollout2.jsonl'),
 ('01a0arch-5555-6666-7777-888888888888', 'archived-sess', 'Old Session', 'Old prompt', '', '/workspace/repo', 'user', 1, 1726050000, '/tmp/rollout3.jsonl');
 `
-	if err := exec.Command(sqliteBin, dbPath, schema).Run(); err != nil {
+	//nolint:gosec // G204: invoking resolved test sqlite3 binary on isolated TempDir fixture.
+	if err := exec.CommandContext(context.Background(), sqliteBin, dbPath, schema).Run(); err != nil {
 		t.Fatalf("failed to seed mock sqlite DB: %v", err)
 	}
 
@@ -578,7 +580,8 @@ INSERT INTO threads (id, name, title, first_user_message, preview, cwd, thread_s
 VALUES 
 ('01a0b8b4-3942-7912-a78e-a1cd76748eb7', 'dsl-delete', 'Review a three-repo change that adds DSL connector deletion to Hevo.\nIt replaces an earlier soft-delete design.\n\n## Read in this order\n1. Design + plan', 'First prompt\nwith multiple lines\nand markdown', 'Preview line 1\nPreview line 2', '/Users/nemesis/Projects/hevo-data/dsl-connector', 'user', 0, 1726744883, '/tmp/rollout-dsl.jsonl');
 `
-	if err := exec.Command(sqliteBin, dbPath, schema).Run(); err != nil {
+	//nolint:gosec // G204: invoking resolved test sqlite3 binary on isolated TempDir fixture.
+	if err := exec.CommandContext(context.Background(), sqliteBin, dbPath, schema).Run(); err != nil {
 		t.Fatalf("failed to seed mock sqlite DB: %v", err)
 	}
 
@@ -921,5 +924,52 @@ VALUES ('%s', 'turn-2', 'item-1', 5, 'userMessage', '{"content":[{"type":"text",
 	}
 	if sum.RecentActivity != "Run JWT refresh integration tests" {
 		t.Errorf("expected summary RecentActivity 'Run JWT refresh integration tests', got %q", sum.RecentActivity)
+	}
+}
+
+func TestGetSession_SQLLikeEscapesWildcards(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 binary not available in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	codexDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatalf("mkdir codexDir: %v", err)
+	}
+
+	dbPath := filepath.Join(codexDir, "state_5.sqlite")
+	schema := `
+CREATE TABLE threads (
+	id TEXT PRIMARY KEY,
+	rollout_path TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	title TEXT NOT NULL,
+	preview TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO threads (id, rollout_path, created_at, updated_at, title, preview)
+VALUES
+('1000-aaaa-bbbb-cccc-000000000001', '/tmp/r1.jsonl', 1726300000, 1726300000, 'Decoy 1000', ''),
+('100x-aaaa-bbbb-cccc-000000000002', '/tmp/r2.jsonl', 1726300001, 1726300001, 'Decoy 100x', '');
+`
+	//nolint:gosec // G204: invoking resolved test sqlite3 binary on isolated TempDir fixture.
+	if err := exec.CommandContext(context.Background(), sqliteBin, dbPath, schema).Run(); err != nil {
+		t.Fatalf("seed sqlite: %v", err)
+	}
+
+	p := codex.NewProvider()
+	ctx := context.Background()
+
+	// Literal "%" or "_" must NOT act as SQLite LIKE wildcards matching "1000-..." or "100x-...".
+	for _, wildPrefix := range []string{"100%", "100_"} {
+		sess, getErr := p.GetSession(ctx, wildPrefix, tmpDir, false)
+		if getErr != nil {
+			t.Fatalf("GetSession(%q) unexpected error: %v", wildPrefix, getErr)
+		}
+		if sess != nil {
+			t.Fatalf("SQL LIKE injection/wildcard leak: %q matched session %q", wildPrefix, sess.ID)
+		}
 	}
 }

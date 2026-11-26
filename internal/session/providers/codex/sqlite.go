@@ -155,10 +155,10 @@ func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profil
 
 	var matchClauses []string
 	matchClauses = append(matchClauses, fmt.Sprintf("id = '%s'", escapeSQL(idOrPrefix)))
-	matchClauses = append(matchClauses, fmt.Sprintf("id LIKE '%s%%'", escapeSQL(idOrPrefix)))
+	matchClauses = append(matchClauses, fmt.Sprintf("id LIKE '%s%%' ESCAPE '\\'", escapeSQLLike(idOrPrefix)))
 	if colSet["name"] {
 		matchClauses = append(matchClauses, fmt.Sprintf("name = '%s'", escapeSQL(idOrPrefix)))
-		matchClauses = append(matchClauses, fmt.Sprintf("name LIKE '%s%%'", escapeSQL(idOrPrefix)))
+		matchClauses = append(matchClauses, fmt.Sprintf("name LIKE '%s%%' ESCAPE '\\'", escapeSQLLike(idOrPrefix)))
 	}
 	if colSet["title"] {
 		matchClauses = append(matchClauses, fmt.Sprintf("title = '%s'", escapeSQL(idOrPrefix)))
@@ -197,6 +197,11 @@ func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profil
 	}
 
 	return nil, nil
+}
+
+func escapeSQLLike(s string) string {
+	s = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+	return escapeSQL(s)
 }
 
 func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profileName string, isHost bool) ([]*session.Session, error) {

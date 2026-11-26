@@ -236,26 +236,34 @@ func AuthorizeMCPOAuth(ctx context.Context, disc *OAuthDiscovery, promptFn func(
 	codeChan := make(chan string, 1)
 	errChan := make(chan error, 1)
 
+	sendErr := func(cbErr error) {
+		select {
+		case errChan <- cbErr:
+		case <-handshakeCtx.Done():
+		default:
+		}
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		reqState := r.URL.Query().Get("state")
 		if reqState != state {
 			http.Error(w, "Invalid state parameter", http.StatusBadRequest)
-			errChan <- errors.New("state parameter mismatch during OAuth callback")
+			sendErr(errors.New("state parameter mismatch during OAuth callback"))
 			return
 		}
 
 		if errParam := r.URL.Query().Get("error"); errParam != "" {
 			errDesc := r.URL.Query().Get("error_description")
 			http.Error(w, fmt.Sprintf("Authentication error: %s (%s)", errParam, errDesc), http.StatusBadRequest)
-			errChan <- fmt.Errorf("oauth provider returned error: %s (%s)", errParam, errDesc)
+			sendErr(fmt.Errorf("oauth provider returned error: %s (%s)", errParam, errDesc))
 			return
 		}
 
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			http.Error(w, "Missing authorization code", http.StatusBadRequest)
-			errChan <- errors.New("missing authorization code in callback")
+			sendErr(errors.New("missing authorization code in callback"))
 			return
 		}
 
@@ -309,18 +317,30 @@ func AuthorizeMCPOAuth(ctx context.Context, disc *OAuthDiscovery, promptFn func(
 </body>
 </html>`))
 
-		codeChan <- code
+		select {
+		case codeChan <- code:
+		case <-handshakeCtx.Done():
+		default:
+		}
 	})
 
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	serveDone := make(chan struct{})
 	go func() {
+		defer close(serveDone)
 		_ = srv.Serve(listener)
 	}()
 
 	defer func() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer shutdownCancel()
-		_ = srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			_ = srv.Close()
+		}
+		<-serveDone
 	}()
 
 	// 5. Notify caller with Auth URL

@@ -12,6 +12,8 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	aimmcp "github.com/aim-cli/aim/internal/mcp"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/session"
+	"github.com/aim-cli/aim/internal/session/providers/claude"
 	"github.com/aim-cli/aim/internal/usage"
 )
 
@@ -814,5 +816,72 @@ func TestMCPServer_ToolCall_NewTools(t *testing.T) {
 	}
 	if !detailResp.Result.IsError {
 		t.Errorf("expected isError true for nonexistent session, got false")
+	}
+}
+
+func TestMCPServer_DaemonStatusUsesBaseDirAndFullResumeCmd(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	t.Setenv("AIM_REAL_HOME", filepath.Join(tempDir, "host-home"))
+	t.Setenv("HOME", filepath.Join(tempDir, "host-home"))
+
+	// Write daemon.log inside baseDir (tempDir); if daemon.Status receives homeDir
+	// instead of baseDir (old bug), LastRunMessage will be empty.
+	const markerLog = "[2026-11-26 10:00:00 UTC] synced 3 profiles\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "daemon.log"), []byte(markerLog), 0o600); err != nil {
+		t.Fatalf("write daemon.log: %v", err)
+	}
+
+	reg := agents.NewRegistry()
+	pm := profile.NewProfileManager(tempDir)
+	profDir, err := pm.EnsureProfile("work")
+	if err != nil {
+		t.Fatalf("EnsureProfile work: %v", err)
+	}
+	sessUUID := "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	claudeProj := filepath.Join(profDir, ".claude", "projects", "demo")
+	if err := os.MkdirAll(claudeProj, 0o700); err != nil {
+		t.Fatalf("mkdir claudeProj: %v", err)
+	}
+	jsonl := `{"type":"user","timestamp":"2026-11-26T10:00:00Z","message":{"role":"user","content":"Check resume command"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(claudeProj, sessUUID+".jsonl"), []byte(jsonl), 0o600); err != nil {
+		t.Fatalf("write claude session: %v", err)
+	}
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"aim_daemon_status","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"aim_get_session_details","arguments":{"agent":"claude","session_id":"aaaaaaaa"}}}`,
+	}, "\n") + "\n"
+
+	sm := session.NewManager()
+	sm.RegisterProvider(claude.NewProvider())
+
+	var out bytes.Buffer
+	srv := aimmcp.NewServer(reg, pm, tempDir)
+	srv.SetSessionManager(sm)
+	if err := srv.Serve(strings.NewReader(input), &out); err != nil {
+		t.Fatalf("srv.Serve: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected 2 JSON-RPC responses, got %d: %s", len(lines), out.String())
+	}
+
+	if !strings.Contains(lines[0], "synced 3 profiles") {
+		t.Fatalf("expected daemon status to read daemon.log from baseDir, got: %s", lines[0])
+	}
+	var detailResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &detailResp); err != nil || len(detailResp.Result.Content) == 0 {
+		t.Fatalf("decode detailResp: err=%v raw=%s", err, lines[1])
+	}
+	if !strings.Contains(detailResp.Result.Content[0].Text, `"aim resume claude work aaaaaaaa"`) {
+		t.Fatalf("expected full resume_cmd with agent and profile, got: %s", detailResp.Result.Content[0].Text)
 	}
 }

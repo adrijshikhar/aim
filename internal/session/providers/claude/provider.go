@@ -506,7 +506,7 @@ func (p *Provider) ResolveSummary(ctx context.Context, s *session.Session) (sess
 	}
 	if s.StoragePath != "" {
 		slug := filepath.Base(filepath.Dir(s.StoragePath))
-		if parsed, err := parseClaudeSessionFile(s.StoragePath, s.ID, slug, s.Profile, s.IsHost); err == nil && parsed != nil {
+		if parsed, err := parseClaudeSessionFile(s.StoragePath, s.ID, slug, resolveSessionProfileDir(s), s.IsHost); err == nil && parsed != nil {
 			return session.SessionSummary{
 				Goal:           parsed.Goal,
 				Progress:       parsed.Progress,
@@ -547,6 +547,25 @@ func isUserOrAssistantMessage(rawMsg json.RawMessage) bool {
 		return msg.Role == "user" || msg.Role == "assistant"
 	}
 	return false
+}
+
+func resolveSessionProfileDir(s *session.Session) string {
+	if s == nil {
+		return ""
+	}
+	if s.IsHost {
+		return config.RealHomeDir()
+	}
+	if s.StoragePath != "" {
+		marker := string(filepath.Separator) + ".claude" + string(filepath.Separator)
+		if idx := strings.Index(s.StoragePath, marker); idx > 0 {
+			return s.StoragePath[:idx]
+		}
+	}
+	if s.Profile != "" {
+		return filepath.Join(config.BaseDir(), "profiles", s.Profile)
+	}
+	return ""
 }
 
 func extractPromptText(ev claudeLineEvent) string {

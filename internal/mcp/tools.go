@@ -389,9 +389,16 @@ func (s *Server) callGetActiveBinding(id any, args json.RawMessage) JSONRPCRespo
 	}
 }
 
+func (s *Server) effectiveBaseDir() string {
+	if s.baseDir != "" {
+		return s.baseDir
+	}
+	return config.BaseDir()
+}
+
 func (s *Server) callDaemonStatus(id any) JSONRPCResponse {
 	homeDir := config.RealHomeDir()
-	info, _ := daemon.Status(homeDir, daemon.DefaultServiceLabel)
+	info, _ := daemon.Status(s.effectiveBaseDir(), homeDir)
 
 	payload := map[string]any{
 		"installed":        info.Installed,
@@ -454,7 +461,7 @@ func (s *Server) callDiagnostics(id any) JSONRPCResponse {
 
 	// Check Daemon
 	homeDir := config.RealHomeDir()
-	dInfo, _ := daemon.Status(homeDir, daemon.DefaultServiceLabel)
+	dInfo, _ := daemon.Status(baseDir, homeDir)
 	if dInfo.Installed {
 		results = append(results, agents.DiagnosticResult{
 			Category: "Daemon",
@@ -652,7 +659,7 @@ func (s *Server) callGetSessionDetails(id any, args json.RawMessage) JSONRPCResp
 		"message_count": sess.MessageCount,
 		"status":        string(sess.Status),
 		"storage_path":  sess.StoragePath,
-		"resume_cmd":    fmt.Sprintf("aim resume %s", sess.ShortID),
+		"resume_cmd":    formatSessionResumeCmd(sess),
 		"created_at":    sess.CreatedAt.Format(time.RFC3339),
 		"updated_at":    sess.LastActiveAt.Format(time.RFC3339),
 	}
@@ -667,4 +674,18 @@ func (s *Server) callGetSessionDetails(id any, args json.RawMessage) JSONRPCResp
 			},
 		},
 	}
+}
+
+func formatSessionResumeCmd(sess *session.Session) string {
+	if sess == nil {
+		return ""
+	}
+	id := sess.ShortID
+	if id == "" {
+		id = sess.ID
+	}
+	if sess.Profile != "" && sess.Profile != "<host>" {
+		return fmt.Sprintf("aim resume %s %s %s", sess.Agent, sess.Profile, id)
+	}
+	return fmt.Sprintf("aim resume %s %s", sess.Agent, id)
 }

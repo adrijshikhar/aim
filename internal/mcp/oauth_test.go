@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 func TestDiscoverEndpointAuth_Unprotected(t *testing.T) {
@@ -264,5 +266,53 @@ func TestAuthorizeMCPOAuth_DynamicClientRegistration(t *testing.T) {
 	}
 	if tokens["access_token"] != "token-from-dynamic" {
 		t.Errorf("expected access_token 'token-from-dynamic', got %v", tokens["access_token"])
+	}
+}
+
+func TestAuthorizeMCPOAuth_CancelAndDuplicateCallback_NoLeak(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	//nolint:gosec // G101: synthetic test endpoint URL, not a credential.
+	disc := &OAuthDiscovery{
+		AuthURL:  "https://auth.example.com/oauth/authorize",
+		TokenURL: "https://auth.example.com/oauth/token",
+		AuthType: "oauth",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := &http.Client{
+		Transport: &http.Transport{DisableKeepAlives: true},
+		Timeout:   time.Second,
+	}
+
+	doneHit := make(chan struct{})
+	_, err := AuthorizeMCPOAuth(ctx, disc, func(authURL string) {
+		u, parseErr := url.Parse(authURL)
+		if parseErr != nil {
+			t.Errorf("parse authURL: %v", parseErr)
+			close(doneHit)
+			return
+		}
+		redirectURI := u.Query().Get("redirect_uri")
+		go func() {
+			defer close(doneHit)
+			// Fire multiple bad/duplicate callbacks concurrently, then cancel.
+			for range 3 {
+				req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, redirectURI+"?state=wrong", nil)
+				if reqErr == nil {
+					if resp, doErr := client.Do(req); doErr == nil {
+						_ = resp.Body.Close()
+					}
+				}
+			}
+			cancel()
+		}()
+	})
+	<-doneHit
+
+	if err == nil {
+		t.Fatal("expected AuthorizeMCPOAuth to fail on wrong state / cancellation")
 	}
 }

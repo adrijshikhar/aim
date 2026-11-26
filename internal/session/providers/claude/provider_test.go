@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aim-cli/aim/internal/session"
 )
 
 var uuidV4Regex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
@@ -549,5 +551,22 @@ func TestProvider_ResolveCwdAndSummary(t *testing.T) {
 	}
 	if sum.RecentActivity != "Now run the verification tests" {
 		t.Errorf("expected summary RecentActivity 'Now run the verification tests', got %q", sum.RecentActivity)
+	}
+}
+
+func TestResolveSessionProfileDir_ResolvesProfileDir(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("AIM_HOME", base)
+
+	customStorage := filepath.Join(base, "custom-profiles", "work", ".claude", "projects", "slug", "abc.jsonl")
+	got := resolveSessionProfileDir(&session.Session{
+		ID:          "abc",
+		Profile:     "work",
+		IsHost:      false,
+		StoragePath: customStorage,
+	})
+	want := filepath.Join(base, "custom-profiles", "work")
+	if got != want {
+		t.Fatalf("resolveSessionProfileDir got %q, want %q", got, want)
 	}
 }
