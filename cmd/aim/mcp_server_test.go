@@ -1391,3 +1391,43 @@ func TestMCPLoginCmd_Execution(t *testing.T) {
 		}
 	})
 }
+
+func TestSaveScopedMCPOAuthTokens_IsolatedPerProfile(t *testing.T) {
+	base := t.TempDir()
+	homeDir := filepath.Join(base, "home")
+	workDir := filepath.Join(base, "profiles", "work")
+	personalDir := filepath.Join(base, "profiles", "personal")
+
+	tok := map[string]any{"access_token": "work-secret-token"}
+	targets := []ProfileTarget{{Name: "work", Dir: workDir}}
+	if err := saveScopedMCPOAuthTokens(homeDir, targets, "https://mcp.example.com/mcp", tok); err != nil {
+		t.Fatalf("saveScopedMCPOAuthTokens failed: %v", err)
+	}
+
+	workRoot, err := os.OpenRoot(filepath.Join(workDir, ".mcp-auth"))
+	if err != nil {
+		t.Fatalf("open work .mcp-auth root: %v", err)
+	}
+	defer func() { _ = workRoot.Close() }()
+	data, err := workRoot.ReadFile("tokens.json")
+	if err != nil {
+		t.Fatalf("read work tokens.json: %v", err)
+	}
+	if !strings.Contains(string(data), "work-secret-token") {
+		t.Fatalf("expected token persisted in work profile, got: %s", string(data))
+	}
+	fi, err := workRoot.Stat("tokens.json")
+	if err != nil {
+		t.Fatalf("stat work tokens.json: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("expected 0600 permissions on tokens.json, got %v", fi.Mode().Perm())
+	}
+
+	if _, err := os.Stat(filepath.Join(personalDir, ".mcp-auth", "tokens.json")); !os.IsNotExist(err) {
+		t.Fatalf("LEAK: personal profile received work MCP token, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, ".mcp-auth", "tokens.json")); !os.IsNotExist(err) {
+		t.Fatalf("LEAK: host home received work MCP token, err=%v", err)
+	}
+}

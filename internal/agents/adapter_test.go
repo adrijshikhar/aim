@@ -2,6 +2,7 @@ package agents_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -131,5 +132,62 @@ func TestSegregatedInterfaces_Assertions(t *testing.T) {
 	}
 	if _, ok := any(unextended).(agents.SessionResumer); ok {
 		t.Error("unextended mock should not implement SessionResumer")
+	}
+}
+
+func TestBuildEnv_StripsAmbientProviderKeys(t *testing.T) {
+	ambient := []string{
+		"PATH=/usr/bin",
+		"KEEP_ME=ok",
+		"HOME=/host/home",
+		"SSH_CONNECTION=1.2.3.4 22",
+		"ANTHROPIC_API_KEY=host-ant",
+		"CLAUDE_CODE_OAUTH_TOKEN=host-oauth",
+		"CLAUDE_CODE_OAUTH_REFRESH_TOKEN=host-refresh",
+		"OPENAI_API_KEY=host-openai",
+		"CODEX_API_KEY=host-codex",
+		"GEMINI_API_KEY=host-gemini",
+		"GOOGLE_API_KEY=host-google",
+		"CURSOR_API_KEY=host-cursor",
+		"CURSOR_AUTH_TOKEN=host-cursor-auth",
+		"CODEX_HOME=/host/.codex",
+		"CLAUDE_CONFIG_DIR=/host/.claude",
+		"GEMINI_CLI_HOME=/host/.gemini",
+	}
+
+	got := agents.BuildEnv(ambient, map[string]string{
+		"HOME":           "/profiles/work",
+		"AIM_PROFILE":    "work",
+		"OPENAI_API_KEY": "profile-explicit-key",
+	})
+
+	envMap := make(map[string]string, len(got))
+	for _, kv := range got {
+		k, v, ok := strings.Cut(kv, "=")
+		if ok {
+			envMap[k] = v
+		}
+	}
+
+	if envMap["KEEP_ME"] != "ok" || envMap["PATH"] != "/usr/bin" {
+		t.Fatalf("expected non-sensitive vars kept, got %v", envMap)
+	}
+	if envMap["HOME"] != "/profiles/work" || envMap["AIM_PROFILE"] != "work" {
+		t.Fatalf("expected profile overrides applied, got %v", envMap)
+	}
+	if envMap["OPENAI_API_KEY"] != "profile-explicit-key" {
+		t.Fatalf("expected explicit profile override for OPENAI_API_KEY, got %q", envMap["OPENAI_API_KEY"])
+	}
+
+	stripped := []string{
+		"SSH_CONNECTION", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
+		"CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "CODEX_API_KEY", "GEMINI_API_KEY",
+		"GOOGLE_API_KEY", "CURSOR_API_KEY", "CURSOR_AUTH_TOKEN",
+		"CODEX_HOME", "CLAUDE_CONFIG_DIR", "GEMINI_CLI_HOME",
+	}
+	for _, k := range stripped {
+		if _, exists := envMap[k]; exists {
+			t.Errorf("expected ambient key %s to be stripped", k)
+		}
 	}
 }

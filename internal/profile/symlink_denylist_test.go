@@ -117,7 +117,7 @@ func TestProfileManager_MCPAuthBridging(t *testing.T) {
 
 	pm := NewProfileManager(tempBase)
 
-	// 1. Ensure normal profile bridges .mcp-auth
+	// 1. Ensure normal profile provisions an isolated .mcp-auth directory (not a symlink to host/shared)
 	pDir, err := pm.EnsureProfile("work")
 	if err != nil {
 		t.Fatalf("EnsureProfile work failed: %v", err)
@@ -128,25 +128,24 @@ func TestProfileManager_MCPAuthBridging(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected .mcp-auth in profile, got error: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected .mcp-auth to be a symlink")
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		t.Errorf("expected .mcp-auth to be an isolated directory, mode=%v", fi.Mode())
 	}
 
-	// Verify token content preserved in shared directory
+	// Verify host tokens did NOT leak into profile directory
 	tokensPath := filepath.Join(profAuth, "tokens.json")
-	data, err := os.ReadFile(tokensPath)
-	if err != nil || !strings.Contains(string(data), "val") {
-		t.Errorf("expected token content preserved, got %s (err: %v)", string(data), err)
+	if _, statErr := os.Stat(tokensPath); !os.IsNotExist(statErr) {
+		t.Errorf("LEAK: host mcp-auth tokens.json leaked into isolated profile: err=%v", statErr)
 	}
 
-	// 2. Leased profile strictly does NOT bridge .mcp-auth
+	// 2. Leased profile strictly does NOT provision .mcp-auth
 	leasedDir, err := pm.EnsureProfile("p2p-client")
 	if err != nil {
 		t.Fatalf("EnsureProfile leased failed: %v", err)
 	}
 	leasedAuth := filepath.Join(leasedDir, ".mcp-auth")
 	if _, err := os.Lstat(leasedAuth); err == nil {
-		t.Errorf("LEAK: leased profile has .mcp-auth bridged!")
+		t.Errorf("LEAK: leased profile has .mcp-auth provisioned!")
 	}
 }
 
@@ -159,43 +158,48 @@ func TestEnsureMCPAuth_SelfHealsBrokenOrForeignSymlink(t *testing.T) {
 	t.Setenv("AIM_REAL_HOME", host)
 	t.Setenv("AIM_CONFIG_DIR", tempBase)
 
-	// Create dangling host .mcp-auth symlink pointing to a non-existent path
-	hostAuth := filepath.Join(host, ".mcp-auth")
-	danglingTarget := filepath.Join(tempBase, "non-existent-auth-dir")
-	if err := os.Symlink(danglingTarget, hostAuth); err != nil {
-		t.Fatalf("Symlink host dangling: %v", err)
+	pm := NewProfileManager(tempBase)
+	profDir := pm.ProfileDir("work")
+	if err := os.MkdirAll(profDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll profDir: %v", err)
 	}
 
-	pm := NewProfileManager(tempBase)
+	// Seed a legacy dangling or shared symlink inside the profile's .mcp-auth
+	profAuth := filepath.Join(profDir, ".mcp-auth")
+	danglingTarget := filepath.Join(tempBase, "non-existent-auth-dir")
+	if err := os.Symlink(danglingTarget, profAuth); err != nil {
+		t.Fatalf("Symlink dangling .mcp-auth: %v", err)
+	}
+
 	pDir, err := pm.EnsureProfile("work")
 	if err != nil {
 		t.Fatalf("EnsureProfile failed: %v", err)
 	}
 
-	// Verify hostAuth was repaired and is no longer dangling
-	fiHost, err := os.Stat(hostAuth)
+	// Verify profileAuth was replaced with a private isolated 0700 directory (no longer a symlink)
+	profAuth = filepath.Join(pDir, ".mcp-auth")
+	fiProf, err := os.Lstat(profAuth)
 	if err != nil {
-		t.Fatalf("expected hostAuth to be self-healed, stat failed: %v", err)
+		t.Fatalf("expected profAuth to exist, lstat failed: %v", err)
 	}
-	if !fiHost.IsDir() {
-		t.Errorf("expected hostAuth to point to a valid directory")
+	if fiProf.Mode()&os.ModeSymlink != 0 || !fiProf.IsDir() {
+		t.Errorf("expected profAuth to be an isolated directory after healing, got mode=%v", fiProf.Mode())
 	}
 
-	// Verify profileAuth is valid symlink pointing to shared directory
-	profAuth := filepath.Join(pDir, ".mcp-auth")
-	fiProf, err := os.Stat(profAuth)
-	if err != nil {
-		t.Fatalf("expected profAuth to be valid, stat failed: %v", err)
-	}
-	if !fiProf.IsDir() {
-		t.Errorf("expected profAuth to point to a valid directory")
+	// Host .mcp-auth must remain untouched / unlinked
+	hostAuth := filepath.Join(host, ".mcp-auth")
+	if _, err := os.Lstat(hostAuth); !os.IsNotExist(err) {
+		t.Errorf("expected EnsureProfile not to create or touch host .mcp-auth, err=%v", err)
 	}
 
-	// Write token from profile and verify visible on host
-	mustWriteFile(t, filepath.Join(profAuth, "token.txt"), "healed")
-	data, err := os.ReadFile(filepath.Join(hostAuth, "token.txt"))
-	if err != nil || string(data) != "healed" {
-		t.Errorf("expected token visible from hostAuth, got %q, err: %v", string(data), err)
+	// Token written into work profile stays isolated from another profile and host
+	mustWriteFile(t, filepath.Join(profAuth, "tokens.json"), `{"https://example.com":{"access_token":"work-only"}}`)
+	otherDir, err := pm.EnsureProfile("personal")
+	if err != nil {
+		t.Fatalf("EnsureProfile personal failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(otherDir, ".mcp-auth", "tokens.json")); !os.IsNotExist(err) {
+		t.Errorf("LEAK: work mcp-auth token leaked into personal profile, err=%v", err)
 	}
 }
 

@@ -512,10 +512,15 @@ func TestAdapter_DoctorHooksCheckIgnoresOtherMembers(t *testing.T) {
 	}
 	_ = os.WriteFile(dest, []byte(`{"hooks": {"Stop": "`+h+`/hooks/stop.sh"}}`), 0o644)
 	if !hooksReported() {
-		t.Fatal("a host path in hooks must be migrated and reported")
+		t.Fatal("a host path in hooks must be reported as WARN during Doctor")
 	}
-	if data, _ := os.ReadFile(dest); strings.Contains(string(data), h) {
-		t.Fatalf("hooks not rewritten:\n%s", data)
+	claudeRoot, err := os.OpenRoot(filepath.Join(profileDir, ".claude"))
+	if err != nil {
+		t.Fatalf("open claude root: %v", err)
+	}
+	defer func() { _ = claudeRoot.Close() }()
+	if data, _ := claudeRoot.ReadFile("settings.json"); !strings.Contains(string(data), h) {
+		t.Fatalf("Doctor must stay read-only and preserve settings.json on disk:\n%s", data)
 	}
 }
 

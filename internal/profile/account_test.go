@@ -277,3 +277,12 @@ func TestGetProfileAccountInfo_Agy_RealWorldToken(t *testing.T) {
 		t.Errorf("expected auth method 'Google OAuth (consumer)', got %q", info.AuthMethod)
 	}
 }
+
+func TestGetProfileAccountInfo_IgnoresAmbientAnthropicAPIKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-ambient-host-key")
+	tmpDir := t.TempDir()
+	info := GetProfileAccountInfoForAgent(tmpDir, "claude")
+	if info.AuthMethod != "" || info.Email != "" {
+		t.Fatalf("LEAK: unauthenticated profile inherited host ANTHROPIC_API_KEY: %+v", info)
+	}
+}

@@ -238,61 +238,45 @@ func (m *ProfileManager) EnsureAllProfilesDotfiles() error {
 	return errors.Join(errs...)
 }
 
-// EnsureMCPAuth bridges ~/.mcp-auth to the shared mcp-auth directory for non-leased profiles.
+// EnsureMCPAuth provisions a profile-isolated 0700 ~/.mcp-auth directory for non-leased profiles,
+// migrating away from any legacy shared or dangling symlink without touching symlink targets.
 func (m *ProfileManager) EnsureMCPAuth(profileName string) error {
 	if m == nil || m.IsLeased(profileName) {
 		return nil
 	}
-	realHome := config.RealHomeDir()
 	pDir := m.ProfileDir(profileName)
-	return BridgeMCPAuthDirectory(realHome, pDir)
+	return BridgeMCPAuthDirectory("", pDir)
 }
 
-// BridgeMCPAuthDirectory links ~/.mcp-auth in profileDir to a shared storage directory.
-func BridgeMCPAuthDirectory(realHome, profileDir string) error {
-	sharedDir := filepath.Join(config.BaseDir(), "shared", "mcp-auth")
-	if err := os.MkdirAll(sharedDir, 0700); err != nil {
+// BridgeMCPAuthDirectory ensures ~/.mcp-auth in profileDir is an isolated 0700 directory
+// (unlinking any legacy shared symlink instead of cross-contaminating profiles or host).
+func BridgeMCPAuthDirectory(_, profileDir string) error {
+	if strings.TrimSpace(profileDir) == "" {
+		return nil
+	}
+	profAuth := filepath.Join(profileDir, ".mcp-auth")
+	fi, err := os.Lstat(profAuth)
+	if os.IsNotExist(err) {
+		return os.MkdirAll(profAuth, 0o700)
+	}
+	if err != nil {
 		return err
 	}
-
-	if realHome != "" {
-		hostAuth := filepath.Join(realHome, ".mcp-auth")
-		bridgeOrMigrateToShared(hostAuth, sharedDir)
-	}
-
-	if profileDir != "" {
-		profAuth := filepath.Join(profileDir, ".mcp-auth")
-		bridgeOrMigrateToShared(profAuth, sharedDir)
-	}
-
-	return nil
-}
-
-func bridgeOrMigrateToShared(targetPath, sharedDir string) {
-	fi, err := os.Lstat(targetPath)
-	if err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			target, readErr := os.Readlink(targetPath)
-			if readErr == nil && (target == sharedDir || sameFile(targetPath, sharedDir)) {
-				return
-			}
-			_ = os.Remove(targetPath)
-		} else if fi.IsDir() {
-			entries, _ := os.ReadDir(targetPath)
-			for _, e := range entries {
-				srcFile := filepath.Join(targetPath, e.Name())
-				dstFile := filepath.Join(sharedDir, e.Name())
-				if _, statErr := os.Stat(dstFile); os.IsNotExist(statErr) {
-					data, err := os.ReadFile(srcFile)
-					if err == nil {
-						_ = os.WriteFile(dstFile, data, 0600)
-					}
-				}
-			}
-			_ = os.RemoveAll(targetPath)
+	if fi.Mode()&os.ModeSymlink != 0 {
+		// Remove only the symlink entry so host/shared files are never disturbed.
+		if rmErr := os.Remove(profAuth); rmErr != nil {
+			return fmt.Errorf("remove legacy mcp-auth symlink: %w", rmErr)
 		}
+		return os.MkdirAll(profAuth, 0o700)
 	}
-	_ = os.Symlink(sharedDir, targetPath)
+	if !fi.IsDir() {
+		return fmt.Errorf("unexpected file at %s", profAuth)
+	}
+	if fi.Mode().Perm() != 0o700 {
+		//nolint:gosec // G302: profAuth is verified fi.IsDir(); private directory requires 0700 traverse bit.
+		_ = os.Chmod(profAuth, 0o700)
+	}
+	return nil
 }
 
 func cleanStatuslineSymlinksIfDisabled(pDir, profileName string, cfg *config.Config) {

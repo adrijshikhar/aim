@@ -36,10 +36,10 @@ func TestCursorAdapter_HasCredentials(t *testing.T) {
 		t.Errorf("expected HasCredentials false for empty directory")
 	}
 
-	// 2. With CURSOR_API_KEY env
+	// 2. Ambient CURSOR_API_KEY env does NOT establish profile-scoped credentials
 	t.Setenv("CURSOR_API_KEY", "test-key-123")
-	if !a.HasCredentials(tempDir) {
-		t.Errorf("expected HasCredentials true with CURSOR_API_KEY")
+	if a.HasCredentials(tempDir) {
+		t.Errorf("expected HasCredentials false when only ambient CURSOR_API_KEY is set")
 	}
 	t.Setenv("CURSOR_API_KEY", "")
 

@@ -386,15 +386,16 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 		})
 	}
 
-	// Hooks Check
-	profileSettings := filepath.Join(claudeDir, "settings.json")
+	// Hooks Check (strictly read-only inspection)
 	hostClaude := filepath.Join(config.RealHomeDir(), ".claude")
-	if changed, err := merge.ReplaceInJSONMember(profileSettings, "hooks", hostClaude, claudeDir, 0o600); err == nil && changed {
-		results = append(results, agents.DiagnosticResult{
-			Category: "Hooks",
-			Status:   "OK",
-			Message:  "Auto-migrated host hook paths in settings.json to profile",
-		})
+	if data, readErr := readClaudeFileInDir(claudeDir, "settings.json"); readErr == nil {
+		if _, changed, err := merge.ReplaceInJSONMemberBytes(data, "hooks", hostClaude, claudeDir); err == nil && changed {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Hooks",
+				Status:   "WARN",
+				Message:  "Host hook paths detected in settings.json; run aim sync to migrate",
+			})
+		}
 	}
 
 	return results
@@ -787,31 +788,9 @@ func (a *Adapter) GetLiveUsage(ctx context.Context, profileName, profileDir stri
 	cmd := exec.CommandContext(ctx, bin, "-p", "/usage")
 	cmd.Dir = profileDir
 
-	storageEnv := config.StorageEnv()
-	cleanEnv := make([]string, 0, len(os.Environ())+5)
-	for _, env := range os.Environ() {
-		idx := strings.IndexByte(env, '=')
-		if idx == -1 {
-			continue
-		}
-		key := env[:idx]
-		_, storageKey := storageEnv[key]
-		if storageKey || key == "HOME" || key == "CLAUDE_CONFIG_DIR" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_SESSION_ID" ||
-			key == "CLAUDE_CODE_OAUTH_TOKEN" || key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
-			continue
-		}
-		cleanEnv = append(cleanEnv, env)
-	}
-
-	cmd.Env = append(cleanEnv,
-		"HOME="+profileDir,
-		"CLAUDE_CONFIG_DIR="+claudeDir,
-		"AIM_AGENT="+a.Name(),
-		"AIM_PROFILE="+profileName,
-	)
-	for key, value := range storageEnv {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
+	cmd.Env = a.BuildCleanEnv(profileName, profileDir, map[string]string{
+		"CLAUDE_CONFIG_DIR": claudeDir,
+	})
 
 	out, err := cmd.Output()
 	if err != nil {

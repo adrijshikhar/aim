@@ -617,15 +617,10 @@ func LoadConfig() (*Config, error) {
 	if cfg.Profiles == nil {
 		cfg.Profiles = make(map[string]ProfileConfig)
 	}
-	hasLeased := false
 	for k := range cfg.Profiles {
 		if strings.Contains(k, ":") {
 			delete(cfg.Profiles, k)
-			hasLeased = true
 		}
-	}
-	if hasLeased {
-		_ = SaveConfig(cfg)
 	}
 	if len(cfg.Profiles) == 0 && cfg.DefaultProfile == "default" {
 		cfg.DefaultProfile = ""

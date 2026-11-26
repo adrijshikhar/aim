@@ -293,22 +293,22 @@ func InspectRemoteOAuthStatus(serverURL, profileDir string) string {
 			filepath.Join(profileDir, ".gemini", "antigravity-cli", "mcp_oauth_tokens.json"),
 			filepath.Join(profileDir, ".mcp-auth", "tokens.json"),
 		)
-	}
+	} else {
+		realHome := config.RealHomeDir()
+		if realHome != "" {
+			candidatePaths = append(candidatePaths,
+				filepath.Join(realHome, ".gemini", "antigravity-cli", "mcp_oauth_tokens.json"),
+				filepath.Join(realHome, ".mcp-auth", "tokens.json"),
+			)
+		}
 
-	realHome := config.RealHomeDir()
-	if realHome != "" {
-		candidatePaths = append(candidatePaths,
-			filepath.Join(realHome, ".gemini", "antigravity-cli", "mcp_oauth_tokens.json"),
-			filepath.Join(realHome, ".mcp-auth", "tokens.json"),
-		)
-	}
-
-	baseDir := config.BaseDir()
-	if baseDir != "" {
-		candidatePaths = append(candidatePaths,
-			filepath.Join(baseDir, "shared", "gemini-tokens", "mcp_oauth_tokens.json"),
-			filepath.Join(baseDir, "shared", "mcp-auth", "tokens.json"),
-		)
+		baseDir := config.BaseDir()
+		if baseDir != "" {
+			candidatePaths = append(candidatePaths,
+				filepath.Join(baseDir, "shared", "gemini-tokens", "mcp_oauth_tokens.json"),
+				filepath.Join(baseDir, "shared", "mcp-auth", "tokens.json"),
+			)
+		}
 	}
 
 	for _, p := range candidatePaths {

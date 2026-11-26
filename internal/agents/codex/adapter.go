@@ -627,25 +627,23 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 			}
 		}
 
-		// 5. Hooks Trust Check
+		// 5. Hooks Trust Check (strictly read-only inspection)
 		realHome := config.RealHomeDir()
 		hostHooksJSON := filepath.Join(realHome, ".codex", "hooks.json")
 		if strings.Contains(cfgStr, hostHooksJSON) {
-			copyHostConfig(realHome, codexDir)
 			results = append(results, agents.DiagnosticResult{
 				Category: "Hooks",
-				Status:   "OK",
-				Message:  "Auto-migrated host hook trust paths in config.toml to profile",
+				Status:   "WARN",
+				Message:  "Host hook trust paths detected in config.toml; run aim sync to isolate",
 			})
 		}
 
-		// 6. TOML Integrity Check (Deduplication)
+		// 6. TOML Integrity Check (Deduplication, strictly read-only inspection)
 		if _, dupes := deduplicateTomlTables(cfgStr); dupes > 0 {
-			copyHostConfig(realHome, codexDir)
 			results = append(results, agents.DiagnosticResult{
 				Category: "Config",
-				Status:   "OK",
-				Message:  fmt.Sprintf("Auto-repaired %d duplicate table key(s) in config.toml", dupes),
+				Status:   "WARN",
+				Message:  fmt.Sprintf("Found %d duplicate table key(s) in config.toml; run aim sync to repair", dupes),
 			})
 		}
 	}

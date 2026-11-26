@@ -255,17 +255,17 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 	}
 	logger.Debug("[run] Profile %q directory: %s", profileName, pDir)
 
-	cfg, _ := config.LoadConfig()
-	if cfg != nil {
-		cfg.AddProfileAgent(opts.ProfileName, adapter.Name())
-		_ = config.SaveConfig(cfg)
-	}
-
 	launchEnv, err := adapter.PrepareEnv(ctx, opts.ProfileName, pDir)
 	if err != nil {
 		logger.Debug("[run] PrepareEnv failed for %q: %v", opts.ProfileName, err)
 		fmt.Fprintf(os.Stderr, "Error preparing launch environment: %v\n", err)
 		return 1
+	}
+
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && !strings.Contains(opts.ProfileName, ":") {
+		cfg.AddProfileAgent(opts.ProfileName, adapter.Name())
+		_ = config.SaveConfig(cfg)
 	}
 
 	if profile.IsLeased(opts.ProfileName) {

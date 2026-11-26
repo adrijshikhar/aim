@@ -142,11 +142,6 @@ func extractFromClaudeAuth(profileDir string) AccountInfo {
 		}
 	}
 
-	// 3. Check for API key in env
-	if authMethod == "" && os.Getenv("ANTHROPIC_API_KEY") != "" {
-		authMethod = "Anthropic API Key"
-	}
-
 	return AccountInfo{
 		Email:      email,
 		Name:       name,

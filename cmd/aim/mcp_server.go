@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/mcp"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
@@ -811,18 +813,11 @@ Examples:
 							fmt.Fprintf(out, "\nPlease visit the following URL to authenticate:\n  %s\n\nWaiting for authentication callback...\n", authURL)
 						})
 						if authErr == nil {
-							sharedTokensPath := filepath.Join(config.BaseDir(), "shared", "mcp-auth", "tokens.json")
-							_ = os.MkdirAll(filepath.Dir(sharedTokensPath), 0700)
-							existing := make(map[string]any)
-							if data, err := os.ReadFile(sharedTokensPath); err == nil {
-								_ = json.Unmarshal(data, &existing)
+							if saveErr := saveScopedMCPOAuthTokens(homeDir, profileTargets, cfg.URL, tokens); saveErr != nil {
+								_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to persist OAuth tokens: %v\n", saveErr)
+							} else {
+								_, _ = fmt.Fprintln(out, "OAuth authentication succeeded and tokens saved.")
 							}
-							existing[cfg.URL] = tokens
-							encoded, err := json.MarshalIndent(existing, "", "  ")
-							if err == nil {
-								_ = os.WriteFile(sharedTokensPath, encoded, 0600)
-							}
-							fmt.Fprintln(out, "OAuth authentication succeeded and tokens saved.")
 						} else {
 							fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OAuth handshake failed: %v\n", authErr)
 						}
@@ -1172,20 +1167,15 @@ Stores tokens in the unified shared credentials store.`,
 				return fmt.Errorf("authorization failed: %w", err)
 			}
 
-			// Store in shared mcp-auth tokens.json
-			sharedTokensPath := filepath.Join(config.BaseDir(), "shared", "mcp-auth", "tokens.json")
-			_ = os.MkdirAll(filepath.Dir(sharedTokensPath), 0700)
-			existing := make(map[string]any)
-			if data, err := os.ReadFile(sharedTokensPath); err == nil {
-				_ = json.Unmarshal(data, &existing)
-			}
-			existing[serverURL] = tokens
-			encoded, err := json.MarshalIndent(existing, "", "  ")
-			if err == nil {
-				_ = os.WriteFile(sharedTokensPath, encoded, 0600)
+			if err := saveScopedMCPOAuthTokens(homeDir, profileTargets, serverURL, tokens); err != nil {
+				return fmt.Errorf("save oauth tokens: %w", err)
 			}
 
-			fmt.Fprintf(out, "Successfully authenticated with %s!\nTokens saved to shared credentials store.\n", serverURL)
+			if len(profileTargets) == 0 {
+				_, _ = fmt.Fprintf(out, "Successfully authenticated with %s!\nTokens saved to host credentials store.\n", serverURL)
+			} else {
+				_, _ = fmt.Fprintf(out, "Successfully authenticated with %s!\nTokens saved to profile-scoped store.\n", serverURL)
+			}
 			return nil
 		},
 	}
@@ -1195,4 +1185,55 @@ Stores tokens in the unified shared credentials store.`,
 	loginCmd.Flags().BoolVar(&hostFlag, "host", false, "Target host explicitly")
 
 	return loginCmd
+}
+
+var mcpTokenFileMu sync.Mutex
+
+func saveScopedMCPOAuthTokens(homeDir string, targets []ProfileTarget, serverURL string, tokens any) error {
+	var paths []string
+	if len(targets) == 0 {
+		paths = []string{filepath.Join(homeDir, ".mcp-auth", "tokens.json")}
+	} else {
+		for _, pt := range targets {
+			if strings.TrimSpace(pt.Dir) == "" {
+				continue
+			}
+			paths = append(paths, filepath.Join(pt.Dir, ".mcp-auth", "tokens.json"))
+		}
+	}
+	if len(paths) == 0 {
+		return errors.New("no valid target directory for MCP OAuth tokens")
+	}
+
+	var errs []error
+	for _, p := range paths {
+		if err := writeMCPOAuthTokenFile(p, serverURL, tokens); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func writeMCPOAuthTokenFile(tokensPath, serverURL string, tokens any) error {
+	mcpTokenFileMu.Lock()
+	defer mcpTokenFileMu.Unlock()
+
+	dir := filepath.Dir(tokensPath)
+	base := filepath.Base(tokensPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create mcp-auth directory: %w", err)
+	}
+	existing := make(map[string]any)
+	if root, err := os.OpenRoot(dir); err == nil {
+		defer func() { _ = root.Close() }()
+		if data, readErr := root.ReadFile(base); readErr == nil {
+			_ = json.Unmarshal(data, &existing)
+		}
+	}
+	existing[serverURL] = tokens
+	encoded, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode mcp oauth tokens: %w", err)
+	}
+	return merge.AtomicWrite(tokensPath, encoded, 0o600)
 }

@@ -446,28 +446,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		_ = bridgeSharedState(realHome, profileDir, profileName)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
-		storageEnv := config.StorageEnv()
-		cleanEnv := make([]string, 0, len(os.Environ())+4)
-		for _, env := range os.Environ() {
-			idx := strings.IndexByte(env, '=')
-			if idx == -1 {
-				continue
-			}
-			key := env[:idx]
-			_, storageKey := storageEnv[key]
-			if storageKey || key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" {
-				continue
-			}
-			cleanEnv = append(cleanEnv, env)
-		}
-		cmd.Env = append(cleanEnv,
-			"HOME="+profileDir,
-			"AIM_AGENT="+a.Name(),
-			"AIM_PROFILE="+profileName,
-		)
-		for key, value := range storageEnv {
-			cmd.Env = append(cmd.Env, key+"="+value)
-		}
+		cmd.Env = a.BuildCleanEnv(profileName, profileDir, nil)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -1196,12 +1175,9 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		}, nil
 	}
 
-	env := append(os.Environ(),
-		"HOME="+profileDir,
-		"SSH_CONNECTION=127.0.0.1 50000 127.0.0.1 22",
-		"AIM_AGENT="+a.Name(),
-		"AIM_PROFILE="+profileName,
-	)
+	env := a.BuildCleanEnv(profileName, profileDir, map[string]string{
+		"SSH_CONNECTION": "127.0.0.1 50000 127.0.0.1 22",
+	})
 
 	var (
 		usageOut   []byte

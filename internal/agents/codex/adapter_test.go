@@ -578,26 +578,31 @@ trusted_hash = "sha256:222"
 
 	results := adapter.Doctor(context.Background(), "testprof", profileDir)
 
-	hasConfigRepair := false
+	hasConfigWarn := false
 	for _, r := range results {
 		if r.Category == "Config" && strings.Contains(r.Message, "duplicate table key") {
-			hasConfigRepair = true
-			if r.Status != "OK" {
-				t.Errorf("expected Config repair status OK, got %s", r.Status)
+			hasConfigWarn = true
+			if r.Status != "WARN" {
+				t.Errorf("expected Config duplicate status WARN, got %s", r.Status)
 			}
 		}
 	}
-	if !hasConfigRepair {
-		t.Errorf("expected Config duplicate repair in Doctor results")
+	if !hasConfigWarn {
+		t.Errorf("expected Config duplicate warning in Doctor results")
 	}
 
-	// Verify file was repaired
-	repairedData, err := os.ReadFile(cfgPath)
+	// Verify Doctor stays strictly read-only and leaves config.toml untouched on disk.
+	codexRoot, err := os.OpenRoot(profileCodexDir)
 	if err != nil {
-		t.Fatalf("failed to read repaired config: %v", err)
+		t.Fatalf("open codex root: %v", err)
 	}
-	if strings.Count(string(repairedData), `[hooks.state."/path/to/hooks.json:pre_tool_use:0:0"]`) != 1 {
-		t.Errorf("expected file to be deduplicated on disk, got:\n%s", string(repairedData))
+	defer func() { _ = codexRoot.Close() }()
+	afterData, err := codexRoot.ReadFile("config.toml")
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+	if string(afterData) != cfgContent {
+		t.Errorf("Doctor mutated config.toml on disk:\ngot:\n%s\nwant:\n%s", string(afterData), cfgContent)
 	}
 }
 
