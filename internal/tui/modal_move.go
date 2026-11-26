@@ -139,6 +139,7 @@ func (m Model) executeMove() (Model, tea.Cmd) {
 			rep.Profile = dstProfile
 			_ = m.cache.Put(rep)
 		}
+		m.cache.Delete(agent, srcProfile)
 	}
 	if m.reports != nil {
 		srcKey := fmt.Sprintf("%s:%s", agent, srcProfile)

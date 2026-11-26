@@ -31,10 +31,10 @@ func (m Model) DeleteModalFocusedIndex() int {
 }
 
 func (m Model) openDeleteModal() (Model, tea.Cmd) {
-	if len(m.profiles) == 0 || m.cursor < 0 || m.cursor >= len(m.profiles) {
+	target, ok := m.selectedFilteredProfile()
+	if !ok {
 		return m, nil
 	}
-	target := m.profiles[m.cursor]
 	var agentsList []string
 	if m.cfg != nil {
 		agentsList = m.cfg.GetProfileAgents(target)
@@ -132,7 +132,17 @@ func (m Model) executeDeleteChoice(idx int) (Model, tea.Cmd) {
 	}
 
 	if m.cache != nil {
+		if !isShared || idx == 1 {
+			for _, ag := range open.agents {
+				m.cache.Delete(ag, target)
+			}
+		}
 		m.cache.Delete(m.agent, target)
+	}
+	if !isShared || idx == 1 {
+		for _, ag := range open.agents {
+			delete(m.reports, fmt.Sprintf("%s:%s", ag, target))
+		}
 	}
 	delete(m.reports, fmt.Sprintf("%s:%s", m.agent, target))
 	delete(m.reports, target)

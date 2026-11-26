@@ -92,8 +92,8 @@ func formatProfileUsageBadge(cache *usage.CacheStore, reg *agents.Registry, agen
 		}
 		if rep.Error != "" {
 			cleanErr := strings.TrimSpace(strings.ReplaceAll(rep.Error, "\n", " "))
-			if len(cleanErr) > 20 {
-				cleanErr = cleanErr[:20] + "..."
+			if runes := []rune(cleanErr); len(runes) > 20 {
+				cleanErr = string(runes[:20]) + "..."
 			}
 			return fmt.Sprintf("[%s]", strings.ToLower(cleanErr))
 		}

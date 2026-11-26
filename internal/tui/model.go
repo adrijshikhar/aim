@@ -360,13 +360,7 @@ func (m Model) refreshTargets() []usage.TargetProfile {
 	if reg != nil {
 		if ad, err := reg.Get(m.agent); err == nil && ad != nil {
 			orderedProfiles := m.profiles
-			filtered := m.filteredProfiles()
-			var selectedProfile string
-			if len(filtered) > 0 && m.cursor >= 0 && m.cursor < len(filtered) {
-				selectedProfile = filtered[m.cursor]
-			} else if len(m.profiles) > 0 && m.cursor >= 0 && m.cursor < len(m.profiles) {
-				selectedProfile = m.profiles[m.cursor]
-			}
+			selectedProfile, _ := m.selectedFilteredProfile()
 
 			if selectedProfile != "" {
 				orderedProfiles = make([]string, 0, len(m.profiles))

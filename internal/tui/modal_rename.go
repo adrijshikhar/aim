@@ -34,10 +34,10 @@ func (m Model) RenameModalError() string {
 }
 
 func (m Model) openRenameModal() (Model, tea.Cmd) {
-	if len(m.profiles) == 0 || m.cursor < 0 || m.cursor >= len(m.profiles) {
+	target, ok := m.selectedFilteredProfile()
+	if !ok {
 		return m, nil
 	}
-	target := m.profiles[m.cursor]
 	ti := textinput.New()
 	ti.Placeholder = target
 	ti.CharLimit = 64
