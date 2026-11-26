@@ -376,32 +376,53 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
   }, []);
 
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const pollSeqRef = React.useRef(0);
 
-  const loadStatus = React.useCallback(async (refresh = false) => {
+  const loadStatus = React.useCallback(async (refresh = false, signal?: AbortSignal) => {
+    const seq = ++pollSeqRef.current;
     try {
-      const res = await getShareStatus(refresh);
+      const res = await getShareStatus(refresh, signal);
+      if (signal?.aborted || seq !== pollSeqRef.current) return;
       setData(res);
       saveNetworkStatusToCache(res);
 
+      let anyApproved = false;
       if (res.outgoing_requests && res.outgoing_requests.some((r) => r.status === 'pending')) {
         for (const r of res.outgoing_requests) {
+          if (signal?.aborted || seq !== pollSeqRef.current) return;
           if (r.status === 'pending') {
             try {
-              const pollRes = await pollShareRequest(r.id);
+              const pollRes = await pollShareRequest(r.id, signal);
+              if (signal?.aborted || seq !== pollSeqRef.current) return;
               if (pollRes && pollRes.status === 'approved') {
+                anyApproved = true;
                 toast({
                   title: 'Lease Approved!',
                   description: `Teammate approved lease for ${r.profile_name}. Profile is active.`,
                   variant: 'success',
                 });
               }
-            } catch {
+            } catch (pollErr: unknown) {
+              if (pollErr instanceof DOMException && pollErr.name === 'AbortError') return;
               // Ignore until host approves
             }
           }
         }
       }
+
+      if (anyApproved && !signal?.aborted && seq === pollSeqRef.current) {
+        try {
+          const updated = await getShareStatus(false, signal);
+          if (!signal?.aborted && seq === pollSeqRef.current) {
+            setData(updated);
+            saveNetworkStatusToCache(updated);
+          }
+        } catch {
+          // Non-fatal follow-up refresh error
+        }
+      }
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : 'Failed to fetch share status';
       toast({
         title: 'Network status error',
@@ -409,31 +430,56 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
         variant: 'destructive',
       });
     } finally {
-      setIsLoading(false);
+      if (!signal?.aborted) {
+        setIsLoading(false);
+      }
     }
   }, [toast]);
 
   React.useEffect(() => {
-    // 1. Fast local daemon fetch (<10ms) to ensure instant UI rendering and sync with local daemon
-    loadStatus(false).then(() => {
-      // 2. Background subnet mesh discovery without blocking UI or showing skeletons
+    const controller = new AbortController();
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let count = 0;
+
+    const scheduleNext = () => {
+      if (disposed || controller.signal.aborted) return;
+      timer = setTimeout(async () => {
+        if (disposed || controller.signal.aborted) return;
+        if (!document.hidden) {
+          count++;
+          await loadStatus(count % 3 === 0, controller.signal);
+        }
+        scheduleNext();
+      }, 5000);
+    };
+
+    // 1. Fast local daemon fetch (<10ms) then serialized discovery + polling loop
+    loadStatus(false, controller.signal).then(async () => {
+      if (disposed || controller.signal.aborted) return;
       setIsRefreshing(true);
-      getShareStatus(true)
-        .then((fresh) => {
+      const bgSeq = ++pollSeqRef.current;
+      try {
+        const fresh = await getShareStatus(true, controller.signal);
+        if (!disposed && !controller.signal.aborted && bgSeq === pollSeqRef.current) {
           setData(fresh);
           saveNetworkStatusToCache(fresh);
-        })
-        .catch(() => {})
-        .finally(() => setIsRefreshing(false));
+        }
+      } catch {
+        // Initial background subnet probe failed; regular polling continues
+      } finally {
+        if (!disposed) {
+          setIsRefreshing(false);
+        }
+      }
+      scheduleNext();
     });
 
-    let count = 0;
-    const interval = setInterval(() => {
-      if (document.hidden) return;
-      count++;
-      loadStatus(count % 3 === 0);
-    }, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
   }, [loadStatus]);
 
   const ownProfiles = React.useMemo(
@@ -1779,7 +1825,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             <div
               onClick={() => setRequestsFilter(requestsFilter === 'pending' ? 'all' : 'pending')}
               className={cn(
-                'p-4 rounded-geist border transition-all cursor-pointer relative overflow-hidden group select-none shadow-xs',
+                'p-4 rounded-geist border transition-colors duration-150 cursor-pointer relative overflow-hidden group select-none shadow-xs',
                 requestsFilter === 'pending'
                   ? 'bg-card border-status-warning ring-1 ring-status-warning/40 shadow-sm'
                   : 'bg-card border-border hover:border-border/80'
@@ -1790,7 +1836,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 <div
                   className={cn(
                     'h-7 w-7 rounded-geist flex items-center justify-center transition-colors',
-                    pendingRequests.length > 0 ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068]' : 'bg-secondary text-muted-foreground'
+                    pendingRequests.length > 0 ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068]' : 'bg-secondary text-muted-foreground border border-border'
                   )}
                 >
                   <Inbox className="h-3.5 w-3.5" />
@@ -1817,7 +1863,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             <div
               onClick={() => setRequestsFilter(requestsFilter === 'outgoing' ? 'all' : 'outgoing')}
               className={cn(
-                'p-4 rounded-geist border transition-all cursor-pointer relative overflow-hidden group select-none shadow-xs',
+                'p-4 rounded-geist border transition-colors duration-150 cursor-pointer relative overflow-hidden group select-none shadow-xs',
                 requestsFilter === 'outgoing'
                   ? 'bg-card border-accent-cyan ring-1 ring-accent-cyan/40 shadow-sm'
                   : 'bg-card border-border hover:border-border/80'
@@ -1828,7 +1874,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
                 <div
                   className={cn(
                     'h-7 w-7 rounded-geist flex items-center justify-center transition-colors',
-                    outgoingPending.length > 0 ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068]' : 'bg-secondary text-muted-foreground'
+                    outgoingPending.length > 0 ? 'bg-[#142334] text-[#52a8ff] border border-[#1f4068]' : 'bg-secondary text-muted-foreground border border-border'
                   )}
                 >
                   <Send className="h-3.5 w-3.5" />
@@ -1855,7 +1901,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             <div
               onClick={() => setRequestsFilter(requestsFilter === 'approved' ? 'all' : 'approved')}
               className={cn(
-                'p-4 rounded-geist border transition-all cursor-pointer relative overflow-hidden group select-none shadow-xs',
+                'p-4 rounded-geist border transition-colors duration-150 cursor-pointer relative overflow-hidden group select-none shadow-xs',
                 requestsFilter === 'approved'
                   ? 'bg-card border-status-success ring-1 ring-status-success/40 shadow-sm'
                   : 'bg-card border-border hover:border-border/80'
@@ -1898,7 +1944,7 @@ export function NetworkView({ profiles = [] }: NetworkViewProps) {
             <div
               onClick={() => setRequestsFilter(requestsFilter === 'revoked' ? 'all' : 'revoked')}
               className={cn(
-                'p-4 rounded-geist border transition-all cursor-pointer relative overflow-hidden group select-none shadow-xs',
+                'p-4 rounded-geist border transition-colors duration-150 cursor-pointer relative overflow-hidden group select-none shadow-xs',
                 requestsFilter === 'revoked'
                   ? 'bg-card border-muted-foreground ring-1 ring-muted-foreground/40 shadow-sm'
                   : 'bg-card border-border hover:border-border/80'

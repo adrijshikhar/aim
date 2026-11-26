@@ -42,6 +42,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  AlertCircle,
 } from 'lucide-react';
 import { ResumeModal } from '@/components/ResumeModal';
 import { AgentBadge } from '@/components/AgentBadge';
@@ -100,6 +101,7 @@ export function SessionsView({
   // Only show skeleton on true cold boot when zero cached sessions exist
   const [loading, setLoading] = React.useState(initialSessions.length === 0);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [selectedEngines, setSelectedEngines] = React.useState<Set<string>>(new Set());
   const [selectedProfiles, setSelectedProfiles] = React.useState<Set<string>>(
@@ -134,6 +136,7 @@ export function SessionsView({
     } else {
       setLoading(true);
     }
+    setError(null);
     try {
       const data = await getSessions(force ? { force: true } : undefined);
       sessionsMemoryCache = data;
@@ -144,41 +147,21 @@ export function SessionsView({
         // Ignore storage quota errors
       }
       setSessions(data);
-    } catch {
-      // Fallback data if server unreachable and no cache exists
-      if (!sessionsMemoryCache || sessionsMemoryCache.length === 0) {
-        const fallback: SessionDTO[] = [
-          {
-            id: 'sess-89412e',
-            agent: 'claude',
-            profile: 'work',
-            title: 'Refactor auth middleware and token validation',
-            cwd: '/Users/developer/repos/enterprise-api',
-            goal: 'Migrate legacy token handlers to modern RS256 JWT checks and test coverage',
-            turns: 24,
-            updated_at: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
-            is_active: true,
-          },
-          {
-            id: 'sess-33921a',
-            agent: 'codex',
-            profile: 'personal',
-            title: 'Implement CLI flags and config loader',
-            cwd: '/Users/developer/Projects/my-cli-tool',
-            goal: 'Add viper support for ~/.config/mytool.yaml and env overrides',
-            turns: 12,
-            updated_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-            is_active: false,
-          },
-        ];
-        sessionsMemoryCache = fallback;
-        setSessions(fallback);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load sessions';
+      setError(msg);
+      if (force) {
+        toast({
+          title: 'Refresh Failed',
+          description: msg,
+          variant: 'destructive',
+        });
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [toast]);
 
   React.useEffect(() => {
     const isStale = Date.now() - lastSessionsFetchTimestamp > SESSIONS_CACHE_TTL_MS;
@@ -655,6 +638,24 @@ export function SessionsView({
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div className="rounded-geist border border-status-warning-border bg-status-warning-bg px-3.5 py-2 text-xs text-status-warning font-sans flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Failed to load sessions: {error}</span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => fetchSessions(true)}
+            disabled={loading || refreshing}
+            className="h-6 px-2 text-xs font-mono border-status-warning-border bg-[#161616] text-status-warning hover:bg-[#202020] rounded-geist cursor-pointer shrink-0"
+          >
+            Retry
+          </Button>
+        </div>
+      )}
       {/* Top Filter & Search Bar */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         {/* Search input with autofocus shortcut and clear button */}

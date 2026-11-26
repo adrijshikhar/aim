@@ -568,9 +568,9 @@ export interface ShareStatusDTO {
   schedules?: SchedulePolicyDTO[];
 }
 
-export async function getShareStatus(refresh = false): Promise<ShareStatusDTO> {
+export async function getShareStatus(refresh = false, signal?: AbortSignal): Promise<ShareStatusDTO> {
   const url = refresh ? `${BASE_URL}/share/status?refresh=true` : `${BASE_URL}/share/status`;
-  const res = await fetch(url);
+  const res = await fetch(url, { signal });
   return handleResponse<ShareStatusDTO>(res);
 }
 
@@ -601,11 +601,12 @@ export async function cancelShareRequest(requestId: string): Promise<any> {
   return handleResponse(res);
 }
 
-export async function pollShareRequest(requestId: string): Promise<any> {
+export async function pollShareRequest(requestId: string, signal?: AbortSignal): Promise<any> {
   const res = await fetch(`${BASE_URL}/share/poll`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ request_id: requestId }),
+    signal,
   });
   return handleResponse(res);
 }

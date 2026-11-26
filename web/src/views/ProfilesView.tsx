@@ -223,83 +223,6 @@ export function ProfilesView({
           variant: 'destructive',
         });
       }
-      // Fallback sample data in dev if backend server isn't reachable yet
-      const fallbackData: ProfileDTO[] = [
-        {
-          agent: 'claude',
-          name: 'work',
-          path: '/Users/nemesis/.aim/profiles/work',
-          has_credentials: true,
-          mcp_global: true,
-          plugins_global: true,
-          account: {
-            email: 'dev@company.com',
-            name: 'Work Profile',
-            auth_method: 'Google OAuth (Workspace)',
-          },
-          quota: {
-            bottleneck_pct: 68,
-            summary: '5h limit: 68% remaining',
-            is_exhausted: false,
-          },
-        },
-        {
-          agent: 'codex',
-          name: 'office',
-          path: '/Users/nemesis/.aim/profiles/office',
-          has_credentials: true,
-          mcp_global: true,
-          plugins_global: true,
-          account: {
-            email: 'adrij@hevodata.com',
-            name: 'Adrij Shikhar',
-            auth_method: 'ChatGPT (Self Serve_business_prolite)',
-          },
-          quota: {
-            bottleneck_pct: 100,
-            summary: 'Weekly Limit: 100%',
-            is_exhausted: false,
-          },
-        },
-        {
-          agent: 'antigravity',
-          name: 'bby',
-          path: '/Users/nemesis/.aim/profiles/bby',
-          has_credentials: true,
-          mcp_global: true,
-          plugins_global: true,
-          account: {
-            email: 'bhomika1.1.2000@gmail.com',
-            name: 'bby',
-            auth_method: 'Google OAuth (Consumer)',
-          },
-          quota: {
-            bottleneck_pct: 0,
-            summary: 'Gemini (5h: 0% [1h 29m], wk: 22%)',
-            is_exhausted: true,
-          },
-        },
-        {
-          agent: 'antigravity',
-          name: 'bot',
-          path: '/Users/nemesis/.aim/profiles/bot',
-          has_credentials: true,
-          mcp_global: true,
-          plugins_global: false,
-          account: {
-            email: 'adrijbot@gmail.com',
-            name: 'bot',
-            auth_method: 'Google OAuth (Consumer)',
-          },
-          quota: {
-            bottleneck_pct: 55,
-            summary: 'Gemini (5h: 77% [3h 37m], wk: 55%)',
-            is_exhausted: false,
-          },
-        },
-      ];
-      setProfiles(fallbackData);
-      onProfilesLoaded?.(fallbackData);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -1674,15 +1597,28 @@ export function ProfilesView({
   return (
     <div className="space-y-6">
       {error && (
-        <div className="rounded-geist border border-status-warning-border bg-status-warning-bg px-3.5 py-2 text-xs text-status-warning font-sans flex items-center justify-between">
-          <span>Notice: {error}</span>
-          <button
-            type="button"
-            onClick={() => setError(null)}
-            className="text-[#a1a1a1] hover:text-[#ededed] ml-2 text-xs cursor-pointer"
-          >
-            ✕
-          </button>
+        <div className="rounded-geist border border-status-warning-border bg-status-warning-bg px-3.5 py-2 text-xs text-status-warning font-sans flex items-center justify-between gap-3">
+          <span>Failed to load profiles: {error}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => fetchProfiles(true)}
+              disabled={refreshing}
+              className="h-6 px-2 text-xs font-mono border-status-warning-border bg-[#161616] text-status-warning hover:bg-[#202020] rounded-geist cursor-pointer"
+            >
+              Retry
+            </Button>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              className="text-[#a1a1a1] hover:text-[#ededed] cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
       {/* Top action row with Vercel search bar, view switcher, and solid white CTA */}
@@ -1916,7 +1852,7 @@ export function ProfilesView({
                     onSelectProfile(p.name);
                   }
                 }}
-                className="group relative overflow-hidden transition-all duration-150 border border-border bg-card hover:border-[#383838] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-geist flex flex-col justify-between cursor-pointer"
+                className="group relative overflow-hidden transition-colors duration-150 border border-border bg-card hover:border-[#383838] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-geist flex flex-col justify-between cursor-pointer"
                 onClick={() => onSelectProfile(p.name)}
               >
                 <div>

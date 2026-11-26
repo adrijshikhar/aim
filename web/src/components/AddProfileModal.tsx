@@ -10,6 +10,7 @@ import {
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Switch } from './ui/switch';
+import { SegmentedControl } from './ui/segmented-control';
 import { useToast } from './ui/use-toast';
 import { CreateProfileRequest, createProfile } from '@/lib/api';
 
@@ -97,25 +98,17 @@ export function AddProfileModal({
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <label className="text-[11px] font-mono font-medium uppercase tracking-wider text-[#a1a1a1]">
+            <label className="text-[11px] font-mono font-medium uppercase tracking-wider text-[#a1a1a1] block">
               Target Agent
             </label>
-            <div className="grid grid-cols-4 gap-2">
-              {['claude', 'codex', 'gemini', 'agy'].map((ag) => (
-                <button
-                  key={ag}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, agent: ag })}
-                  className={`py-2 px-3 text-xs font-mono rounded-geist border text-center transition-all cursor-pointer ${
-                    formData.agent === ag
-                      ? 'border-[#ededed] bg-[#222222] text-[#ededed] font-bold shadow-sm'
-                      : 'border-[#262626] bg-[#0a0a0a] text-[#a1a1a1] hover:text-[#ededed] hover:border-[#333333]'
-                  }`}
-                >
-                  {ag.toUpperCase()}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              value={formData.agent}
+              onChange={(agent) => setFormData({ ...formData, agent })}
+              options={['claude', 'codex', 'gemini', 'agy'].map((ag) => ({
+                value: ag,
+                label: ag.toUpperCase(),
+              }))}
+            />
           </div>
 
           <div className="space-y-1.5">

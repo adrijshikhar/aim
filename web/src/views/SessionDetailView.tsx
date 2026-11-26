@@ -231,35 +231,14 @@ export const SessionDetailView: React.FC<SessionDetailViewProps> = ({ session, o
       const data = await getSessionTranscript(session.agent, session.id);
       setTranscript(data);
       setVisibleCount(INITIAL_BATCH_SIZE);
-    } catch (err: any) {
-      setLoadError(err?.message || 'Could not load transcript replay from disk');
-      // Fallback synthetic transcript from session metadata
-      const fallbackData: SessionTranscriptDTO = {
-        session_id: session.id,
-        agent: session.agent,
-        profile: session.profile,
-        title: session.title,
-        cwd: session.cwd,
-        goal: session.goal,
-        turns: [
-          {
-            turn_index: 1,
-            role: 'user',
-            content: session.goal || session.title || 'Session initiated',
-          },
-          {
-            turn_index: 2,
-            role: 'assistant',
-            content: `Session in ${session.cwd} with ${session.turns} recorded turns.`,
-          },
-        ],
-      };
-      setTranscript(fallbackData);
-      setVisibleCount(INITIAL_BATCH_SIZE);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not load transcript replay from disk';
+      setLoadError(msg);
+      setTranscript(null);
     } finally {
       setLoading(false);
     }
-  }, [session.agent, session.id, session.goal, session.title, session.cwd, session.turns, session.profile]);
+  }, [session.agent, session.id]);
 
   React.useEffect(() => {
     fetchTranscript();
