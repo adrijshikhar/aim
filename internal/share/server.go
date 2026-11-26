@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -30,6 +31,7 @@ type Server struct {
 	httpServer      *http.Server
 	listener        net.Listener
 	pendingMu       sync.Mutex
+	approveMu       sync.Mutex
 	pending         map[string]*pendingRequest
 	approvedResults map[string]*LeaseResponse
 	deniedResults   map[string]bool
@@ -819,6 +821,58 @@ func (s *Server) handleNotifyRelease(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
+func (s *Server) findLeaseMetaByID(mgr *LeaseManager, leaseID string) (*LeaseMeta, int, string) {
+	profiles, err := os.ReadDir(s.profilesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, http.StatusForbidden, "Forbidden: lease not found for revocation verification"
+		}
+		return nil, http.StatusInternalServerError, "Failed to inspect local leases"
+	}
+	for _, entry := range profiles {
+		if !entry.IsDir() {
+			continue
+		}
+		meta, metaErr := mgr.GetLeaseMeta(entry.Name())
+		if metaErr == nil && meta != nil && meta.LeaseID == leaseID {
+			return meta, 0, ""
+		}
+	}
+	return nil, http.StatusForbidden, "Forbidden: unknown lease ID"
+}
+
+func (s *Server) findPinnedPeerPublicKey(lenderID string) (ed25519.PublicKey, bool) {
+	for _, p := range s.store.GetPeers() {
+		if (p.ID == lenderID || strings.EqualFold(p.HostName, lenderID) || p.VPNIP == lenderID) &&
+			len(p.PublicKey) == ed25519.PublicKeySize {
+			return p.PublicKey, true
+		}
+	}
+	return nil, false
+}
+
+func (s *Server) verifyRevocationRequest(mgr *LeaseManager, leaseID, signature string) (int, string) {
+	meta, status, msg := s.findLeaseMetaByID(mgr, leaseID)
+	if status != 0 {
+		return status, msg
+	}
+	lenderID := meta.LenderNodeID
+	if lenderID == "" {
+		lenderID = meta.SourcePeer
+	}
+	if lenderID == "" {
+		return http.StatusForbidden, "Forbidden: lender identity missing from lease metadata"
+	}
+	pinnedPubKey, ok := s.findPinnedPeerPublicKey(lenderID)
+	if !ok {
+		return http.StatusForbidden, "Forbidden: lender public key is not pinned in peers.json"
+	}
+	if signature == "" || !VerifyRevocationSignature(pinnedPubKey, leaseID, lenderID, signature) {
+		return http.StatusForbidden, "Forbidden: invalid or missing lender revocation signature"
+	}
+	return 0, ""
+}
+
 func (s *Server) handleNotifyRevoke(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -828,6 +882,7 @@ func (s *Server) handleNotifyRevoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: revoke notifications only accepted from private VPN / LAN subnets", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var req struct {
 		LeaseID   string `json:"lease_id"`
 		LenderID  string `json:"lender_id,omitempty"`
@@ -838,45 +893,16 @@ func (s *Server) handleNotifyRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.store == nil {
+		http.Error(w, "Forbidden: share store not configured for revocation verification", http.StatusForbidden)
+		return
+	}
+
 	mgr := NewLeaseManager(s.profilesDir)
-
-	// If the lease exists locally and has a pinned public key, verify signature
-	profiles, _ := os.ReadDir(s.profilesDir)
-	for _, entry := range profiles {
-		if entry.IsDir() {
-			meta, err := mgr.GetLeaseMeta(entry.Name())
-			if err == nil && meta != nil && meta.LeaseID == req.LeaseID {
-				lenderID := meta.LenderNodeID
-				if lenderID == "" {
-					lenderID = meta.SourcePeer
-				}
-
-				if s.store != nil {
-					var pinnedPubKey ed25519.PublicKey
-					for _, p := range s.store.GetPeers() {
-						if (lenderID != "" && p.ID == lenderID) ||
-							strings.EqualFold(p.HostName, lenderID) ||
-							p.ID == lenderID ||
-							p.VPNIP == lenderID {
-							if len(p.PublicKey) == ed25519.PublicKeySize {
-								pinnedPubKey = p.PublicKey
-								break
-							}
-						}
-					}
-
-					if len(pinnedPubKey) != ed25519.PublicKeySize {
-						http.Error(w, "Forbidden: lender public key is not pinned in peers.json", http.StatusForbidden)
-						return
-					}
-					if req.Signature == "" || !VerifyRevocationSignature(pinnedPubKey, req.LeaseID, lenderID, req.Signature) {
-						http.Error(w, "Forbidden: invalid or missing lender revocation signature", http.StatusForbidden)
-						return
-					}
-				}
-				break
-			}
-		}
+	status, msg := s.verifyRevocationRequest(mgr, req.LeaseID, req.Signature)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
 	}
 
 	localProf, err := mgr.RevokeLeaseByID(req.LeaseID)
@@ -1056,46 +1082,15 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 			break
 		}
 	}
+	if s.store == nil {
+		return nil, errors.New("share store not configured")
+	}
+
 	expiresAt := time.Now().Add(duration)
 	leaseID := generateID("ls")
 
-	// Atomically transition status from pending to approved in SQLite
-	// This prevents competing approvals/denials from creating multiple grants.
-	transitioned, err := s.store.TransitionRequestStatus(reqID, "pending", "approved", leaseID, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to transition request status: %w", err)
-	}
-	if !transitioned {
-		// Check current status
-		rec, _ := s.store.GetShareRequest(reqID)
-		if rec != nil && rec.Status == "approved" && rec.LeaseID != "" {
-			leases := s.store.GetGrantedLeases()
-			for _, gl := range leases {
-				if gl.LeaseID == rec.LeaseID {
-					payload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
-					return &LeaseResponse{
-						Status:       "approved",
-						LeaseID:      gl.LeaseID,
-						ProfileName:  gl.ProfileName,
-						Agent:        gl.Agent,
-						ExpiresAt:    gl.ExpiresAt,
-						Payload:      payload,
-						Signature:    gl.Signature,
-						LenderNodeID: gl.LenderNodeID,
-						BorrowerID:   gl.BorrowerID,
-					}, nil
-				}
-			}
-		}
-		if rec != nil {
-			return nil, fmt.Errorf("cannot approve request %s: current status is %s", reqID, rec.Status)
-		}
-		return nil, fmt.Errorf("request %s was already decided or cancelled", reqID)
-	}
-
 	payload, err := s.packageCredentials(profileName, agent)
 	if err != nil {
-		_ = s.store.UpdateRequestStatus(reqID, "pending", "", "Failed to read credentials: "+err.Error())
 		return nil, fmt.Errorf("failed to read credentials: %w", err)
 	}
 
@@ -1123,7 +1118,11 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		BorrowerID:   requesterID,
 	}
 
-	if err := s.store.SaveGrantedLease(GrantedLease{
+	s.approveMu.Lock()
+	defer s.approveMu.Unlock()
+
+	// Persist granted lease and commit status transition atomically before exposing approved result.
+	transitioned, err := s.store.ApproveShareRequestGrant(reqID, GrantedLease{
 		LeaseID:      leaseID,
 		ProfileName:  profileName,
 		Agent:        agent,
@@ -1136,9 +1135,36 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		AutoApproved: false,
 		Signature:    sig,
 		LenderNodeID: lenderID,
-	}); err != nil {
-		_ = s.store.UpdateRequestStatus(reqID, "pending", "", "Failed to record granted lease: "+err.Error())
-		return nil, fmt.Errorf("failed to record granted lease: %w", err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to approve request %s: %w", reqID, err)
+	}
+	if !transitioned {
+		// Check current status for idempotent replay or rejection reason
+		rec, _ := s.store.GetShareRequest(reqID)
+		if rec != nil && rec.Status == "approved" && rec.LeaseID != "" {
+			leases := s.store.GetGrantedLeases()
+			for _, gl := range leases {
+				if gl.LeaseID == rec.LeaseID {
+					approvedPayload, _ := s.packageCredentials(gl.ProfileName, gl.Agent)
+					return &LeaseResponse{
+						Status:       "approved",
+						LeaseID:      gl.LeaseID,
+						ProfileName:  gl.ProfileName,
+						Agent:        gl.Agent,
+						ExpiresAt:    gl.ExpiresAt,
+						Payload:      approvedPayload,
+						Signature:    gl.Signature,
+						LenderNodeID: gl.LenderNodeID,
+						BorrowerID:   gl.BorrowerID,
+					}, nil
+				}
+			}
+		}
+		if rec != nil {
+			return nil, fmt.Errorf("cannot approve request %s: current status is %s", reqID, rec.Status)
+		}
+		return nil, fmt.Errorf("request %s was already decided or cancelled", reqID)
 	}
 
 	s.pendingMu.Lock()

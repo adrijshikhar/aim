@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +46,76 @@ type ActiveLeaseInfo struct {
 	IsRevoked     bool      `json:"is_revoked"`
 }
 
+func extractPeerHost(raw string) (string, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", false
+	}
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		s = host
+	}
+	s = strings.TrimPrefix(s, "[")
+	s = strings.TrimSuffix(s, "]")
+	if zoneIdx := strings.IndexByte(s, '%'); zoneIdx != -1 {
+		base := s[:zoneIdx]
+		if addr, err := netip.ParseAddr(base); err == nil && addr.Is6() {
+			s = base
+		}
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	return s, true
+}
+
+const shareLeaseQueryKey = "lease_id"
+
+func buildLeaseStatusURL(rawAddr, leaseID string) (string, bool) {
+	q := neturl.Values{}
+	q.Set(shareLeaseQueryKey, leaseID)
+	return buildPeerShareURL(rawAddr, "4319", "/api/share/lease/status", q.Encode())
+}
+
+func buildPeerShareURL(rawAddr, port, path, rawQuery string) (string, bool) {
+	host, ok := extractPeerHost(rawAddr)
+	if !ok {
+		return "", false
+	}
+	u := neturl.URL{
+		Scheme:   "http",
+		Host:     net.JoinHostPort(host, port),
+		Path:     path,
+		RawQuery: rawQuery,
+	}
+	return u.String(), true
+}
+
+func normalizePeerLabel(name string) string {
+	trimmed := strings.TrimSpace(name)
+	trimmed = strings.TrimSuffix(trimmed, ".local")
+	return strings.TrimSuffix(trimmed, ".LOCAL")
+}
+
+func entryMatchesPeer(entryDirName, sourcePeer string, p share.PeerInfo) bool {
+	cleanSource := normalizePeerLabel(sourcePeer)
+	cleanHost := normalizePeerLabel(p.HostName)
+	if cleanSource != "" && cleanHost != "" && strings.EqualFold(cleanSource, cleanHost) {
+		return true
+	}
+	if sourcePeer != "" && p.VPNIP != "" && sourcePeer == p.VPNIP {
+		return true
+	}
+	if cleanHost != "" {
+		if peerPart, _, hasColon := strings.Cut(entryDirName, ":"); hasColon {
+			if strings.EqualFold(normalizePeerLabel(peerPart), cleanHost) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 	vpn, _ := share.DetectVPN()
 	store := s.getShareStore()
@@ -77,17 +149,9 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 						break
 					}
 				}
-				if borrowerTarget != "" {
-					cleanTarget := borrowerTarget
-					if idx := strings.Index(cleanTarget, "%"); idx != -1 {
-						cleanTarget = cleanTarget[:idx]
-					}
-					if idx := strings.LastIndex(cleanTarget, ":"); idx != -1 && !strings.Contains(cleanTarget, "]") {
-						cleanTarget = cleanTarget[:idx]
-					}
+				if leaseURL, ok := buildLeaseStatusURL(borrowerTarget, gl.LeaseID); ok {
 					ctxCheck, cancelCheck := context.WithTimeout(r.Context(), 500*time.Millisecond)
-					url := fmt.Sprintf("http://%s/api/share/lease/status?lease_id=%s", net.JoinHostPort(cleanTarget, "4319"), gl.LeaseID)
-					checkReq, err := http.NewRequestWithContext(ctxCheck, http.MethodGet, url, nil)
+					checkReq, err := http.NewRequestWithContext(ctxCheck, http.MethodGet, leaseURL, nil)
 					if err == nil {
 						if checkResp, err := http.DefaultClient.Do(checkReq); err == nil {
 							if checkResp.StatusCode == http.StatusOK {
@@ -136,20 +200,10 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 			isRevoked := meta.Revoked
 			if !isRevoked && now.Before(meta.ExpiresAt) && r.URL.Query().Get("refresh") == "true" {
 				for _, p := range peers {
-					cleanSource := strings.TrimSuffix(strings.TrimSuffix(meta.SourcePeer, ".local"), ".LOCAL")
-					cleanHost := strings.TrimSuffix(strings.TrimSuffix(p.HostName, ".local"), ".LOCAL")
-					if cleanSource == cleanHost || meta.SourcePeer == p.VPNIP || strings.Contains(e.Name(), cleanHost) {
-						if p.VPNIP != "" {
-							hostIP := p.VPNIP
-							if idx := strings.Index(hostIP, "%"); idx != -1 {
-								hostIP = hostIP[:idx]
-							}
-							if idx := strings.LastIndex(hostIP, ":"); idx != -1 && !strings.Contains(hostIP, "]") {
-								hostIP = hostIP[:idx]
-							}
+					if entryMatchesPeer(e.Name(), meta.SourcePeer, p) {
+						if leaseURL, ok := buildLeaseStatusURL(p.VPNIP, meta.LeaseID); ok {
 							ctxCheck, cancelCheck := context.WithTimeout(r.Context(), 600*time.Millisecond)
-							url := fmt.Sprintf("http://%s/api/share/lease/status?lease_id=%s", net.JoinHostPort(hostIP, "4319"), meta.LeaseID)
-							checkReq, err := http.NewRequestWithContext(ctxCheck, http.MethodGet, url, nil)
+							checkReq, err := http.NewRequestWithContext(ctxCheck, http.MethodGet, leaseURL, nil)
 							if err == nil {
 								if checkResp, err := http.DefaultClient.Do(checkReq); err == nil {
 									if checkResp.StatusCode == http.StatusOK {
@@ -542,14 +596,10 @@ func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) 
 	// Proactively notify borrower machine to revoke & scrub local credentials
 	if revoked != nil && revoked.BorrowerIP != "" {
 		go func(ip, leaseID string) {
-			cleanIP := ip
-			if idx := strings.Index(cleanIP, "%"); idx != -1 {
-				cleanIP = cleanIP[:idx]
+			url, ok := buildPeerShareURL(ip, "4319", "/api/share/lease/revoke", "")
+			if !ok {
+				return
 			}
-			if idx := strings.LastIndex(cleanIP, ":"); idx != -1 && !strings.Contains(cleanIP, "]") {
-				cleanIP = cleanIP[:idx]
-			}
-			url := fmt.Sprintf("http://%s:4319/api/share/lease/revoke", cleanIP)
 			bodyMap := map[string]string{"lease_id": leaseID}
 			if _, priv, err := share.EnsureNodeKeypair(config.BaseDir()); err == nil && len(priv) > 0 {
 				nodeID, _ := os.Hostname()
@@ -647,10 +697,25 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 	expiresAt := time.Now().Add(duration)
 	leaseID := share.GenerateID("ls")
 
-	// Atomically reserve transition from pending to approved before recording grant
-	transitioned, err := store.TransitionRequestStatus(req.RequestID, "pending", "approved", leaseID, "")
+	payload, err := share.PackageProfileCredentials(filepath.Join(config.BaseDir(), "profiles"), rec.ProfileName, rec.Agent)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to transition request: "+err.Error())
+		writeJSONError(w, http.StatusInternalServerError, "failed to read credentials: "+err.Error())
+		return
+	}
+
+	transitioned, err := store.ApproveShareRequestGrant(req.RequestID, share.GrantedLease{
+		LeaseID:      leaseID,
+		ProfileName:  rec.ProfileName,
+		Agent:        rec.Agent,
+		BorrowerID:   rec.PeerID,
+		BorrowerIP:   rec.PeerIP,
+		GrantedAt:    time.Now(),
+		ExpiresAt:    expiresAt,
+		Revoked:      false,
+		AutoApproved: false,
+	})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to approve request: "+err.Error())
 		return
 	}
 	if !transitioned {
@@ -661,29 +726,6 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		writeJSONError(w, http.StatusBadRequest, "request was already decided or cancelled")
-		return
-	}
-
-	payload, err := share.PackageProfileCredentials(filepath.Join(config.BaseDir(), "profiles"), rec.ProfileName, rec.Agent)
-	if err != nil {
-		_ = store.UpdateRequestStatus(req.RequestID, "pending", "", "failed to read credentials: "+err.Error())
-		writeJSONError(w, http.StatusInternalServerError, "failed to read credentials: "+err.Error())
-		return
-	}
-
-	if err := store.SaveGrantedLease(share.GrantedLease{
-		LeaseID:      leaseID,
-		ProfileName:  rec.ProfileName,
-		Agent:        rec.Agent,
-		BorrowerID:   rec.PeerID,
-		BorrowerIP:   rec.PeerIP,
-		GrantedAt:    time.Now(),
-		ExpiresAt:    expiresAt,
-		Revoked:      false,
-		AutoApproved: false,
-	}); err != nil {
-		_ = store.UpdateRequestStatus(req.RequestID, "pending", "", "failed to record grant: "+err.Error())
-		writeJSONError(w, http.StatusInternalServerError, "failed to record granted lease: "+err.Error())
 		return
 	}
 

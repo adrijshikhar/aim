@@ -660,3 +660,98 @@ func TestServer_HandleNotifyRevoke_Security(t *testing.T) {
 		t.Errorf("expected lease to be marked revoked on disk")
 	}
 }
+
+func TestServer_HandleNotifyRevoke_FailClosedWithoutStoreOrKnownLease(t *testing.T) {
+	profilesDir := filepath.Join(t.TempDir(), "profiles")
+	profDir := filepath.Join(profilesDir, "lender-peer:testprof")
+	if err := os.MkdirAll(profDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	meta := LeaseMeta{
+		LeaseID:        "ls_nil_store_123",
+		SourcePeer:     "lender-peer",
+		LenderNodeID:   "lender-peer",
+		SourceProfile:  "testprof",
+		Agent:          "claude",
+		GrantedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(2 * time.Hour),
+		LastVerifiedAt: time.Now(),
+	}
+	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
+	if err := os.WriteFile(filepath.Join(profDir, ".aim-lease.json"), metaBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nil store must fail closed (403) and keep lease unrevoked.
+	srvNil := NewServer(nil, profilesDir, "borrower-host", 0)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/share/lease/revoke", strings.NewReader(`{"lease_id":"ls_nil_store_123"}`))
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+	srvNil.handleNotifyRevoke(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when share store is nil, got %d: %s", w.Code, w.Body.String())
+	}
+
+	mgr := NewLeaseManager(profilesDir)
+	gotMeta, err := mgr.GetLeaseMeta("lender-peer:testprof")
+	if err != nil || gotMeta.Revoked {
+		t.Fatalf("expected lease to stay unrevoked when store is nil, err=%v revoked=%v", err, gotMeta != nil && gotMeta.Revoked)
+	}
+
+	// Non-nil store must also reject unknown lease IDs with 403.
+	store := NewStore(t.TempDir())
+	defer func() { _ = store.Close() }()
+	srv := NewServer(store, profilesDir, "borrower-host", 0)
+	reqUnknown := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/share/lease/revoke", strings.NewReader(`{"lease_id":"ls_does_not_exist"}`))
+	reqUnknown.RemoteAddr = "127.0.0.1:54321"
+	wUnknown := httptest.NewRecorder()
+	srv.handleNotifyRevoke(wUnknown, reqUnknown)
+	if wUnknown.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unknown lease ID, got %d: %s", wUnknown.Code, wUnknown.Body.String())
+	}
+}
+
+func TestServer_ApproveRequest_AtomicGrantRollback(t *testing.T) {
+	aimDir := t.TempDir()
+	store := NewStore(aimDir)
+	defer func() { _ = store.Close() }()
+
+	profilesDir := filepath.Join(aimDir, "profiles")
+	workCodex := filepath.Join(profilesDir, "work", ".codex")
+	if err := os.MkdirAll(workCodex, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workCodex, "auth.json"), []byte(`{"tokens":{"access_token":"tok"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const reqID = "req_atomic_1"
+	if err := store.SaveShareRequest(ShareRequestRecord{
+		ID:             reqID,
+		Direction:      "incoming",
+		PeerID:         "borrower-1",
+		PeerIP:         "100.64.0.2",
+		ProfileName:    "work",
+		Agent:          "codex",
+		RequestedHours: 2,
+		Status:         "pending",
+		ExpiresAt:      time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make granted.json overwrite fail atomically (point grantedFile to an occupied directory).
+	store.grantedFile = t.TempDir()
+	srv := NewServer(store, profilesDir, "lender-1", 0)
+
+	if _, err := srv.ApproveRequest(reqID); err == nil {
+		t.Fatal("expected ApproveRequest to fail when granted lease persistence fails")
+	}
+	rec, err := store.GetShareRequest(reqID)
+	if err != nil {
+		t.Fatalf("GetShareRequest: %v", err)
+	}
+	if rec.Status != "pending" || rec.LeaseID != "" {
+		t.Fatalf("expected request %s to remain pending after grant failure, got status=%q lease=%q", reqID, rec.Status, rec.LeaseID)
+	}
+}

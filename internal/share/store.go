@@ -5,12 +5,15 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/merge"
 )
 
 type ShareStore struct {
@@ -309,7 +312,10 @@ func (s *ShareStore) loadPeersLocked() []PeerInfo {
 func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveGrantedLeaseLocked(lease)
+}
 
+func (s *ShareStore) saveGrantedLeaseLocked(lease GrantedLease) error {
 	var leases []GrantedLease
 	if data, err := os.ReadFile(s.grantedFile); err == nil {
 		_ = json.Unmarshal(data, &leases)
@@ -349,16 +355,71 @@ func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 	finalList = append(finalList, active...)
 	finalList = append(finalList, inactive...)
 
-	_ = os.MkdirAll(s.aimDir, 0700)
 	data, err := json.MarshalIndent(finalList, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	return merge.AtomicWrite(s.grantedFile, data, 0o600)
+}
+
+func (s *ShareStore) deleteGrantedLeaseLocked(leaseID string) error {
+	data, err := os.ReadFile(s.grantedFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
-	return os.Rename(tmp, s.grantedFile)
+	var leases []GrantedLease
+	if err := json.Unmarshal(data, &leases); err != nil {
+		return err
+	}
+	filtered := leases[:0]
+	for _, l := range leases {
+		if l.LeaseID != leaseID {
+			filtered = append(filtered, l)
+		}
+	}
+	out, err := json.MarshalIndent(filtered, "", "  ")
+	if err != nil {
+		return err
+	}
+	return merge.AtomicWrite(s.grantedFile, out, 0o600)
+}
+
+// ApproveShareRequestGrant persists the granted lease before transitioning reqID from
+// "pending" to "approved" in SQLite, rolling back the granted lease on failure or lost race.
+func (s *ShareStore) ApproveShareRequestGrant(reqID string, lease GrantedLease) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		if s.dbErr != nil {
+			return false, fmt.Errorf("share database unavailable: %w", s.dbErr)
+		}
+		return false, errors.New("share database unavailable")
+	}
+
+	if err := s.saveGrantedLeaseLocked(lease); err != nil {
+		return false, fmt.Errorf("save granted lease: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	transitioned, err := s.db.TransitionRequestStatus(ctx, reqID, "pending", "approved", lease.LeaseID, "")
+	if err != nil {
+		if rbErr := s.deleteGrantedLeaseLocked(lease.LeaseID); rbErr != nil {
+			return false, fmt.Errorf("transition request status: %w (rollback failed: %w)", err, rbErr)
+		}
+		return false, err
+	}
+	if !transitioned {
+		if rbErr := s.deleteGrantedLeaseLocked(lease.LeaseID); rbErr != nil {
+			return false, fmt.Errorf("rollback unapproved grant: %w", rbErr)
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
 func (s *ShareStore) pruneExpiredGrantedLeasesLocked() ([]GrantedLease, int) {
@@ -618,7 +679,7 @@ func (s *ShareStore) TransitionRequestStatus(id, fromStatus, toStatus, leaseID, 
 		if s.dbErr != nil {
 			return false, fmt.Errorf("share database unavailable: %w", s.dbErr)
 		}
-		return false, fmt.Errorf("share database unavailable")
+		return false, errors.New("share database unavailable")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -632,7 +693,7 @@ func (s *ShareStore) CancelShareRequest(id string) (bool, error) {
 		if s.dbErr != nil {
 			return false, fmt.Errorf("share database unavailable: %w", s.dbErr)
 		}
-		return false, fmt.Errorf("share database unavailable")
+		return false, errors.New("share database unavailable")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
