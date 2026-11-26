@@ -2,11 +2,15 @@ package telemetry
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
+	"go.uber.org/goleak"
 )
 
 func TestAccountDistinctID(t *testing.T) {
@@ -42,7 +46,7 @@ func TestPostHog_DisabledWhenTelemetryDisabled(t *testing.T) {
 	}
 
 	InitPostHogLogs(nil)
-	if posthogLogProvider != nil {
+	if hasPostHogLogProvider() {
 		t.Fatalf("expected posthogLogProvider to be nil when DO_NOT_TRACK=1")
 	}
 
@@ -74,7 +78,49 @@ func TestPostHog_TestIsolation(t *testing.T) {
 	}
 
 	InitPostHogLogs(cfg)
-	if posthogLogProvider != nil {
+	if hasPostHogLogProvider() {
 		t.Fatalf("expected PostHog log provider to remain nil in tests without explicit env vars")
 	}
+}
+
+func TestTelemetry_ConcurrentInitCaptureLogClose_NoRaceOrLeak(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("AIM_HOME", t.TempDir())
+	t.Setenv("DO_NOT_TRACK", "")
+	t.Setenv("AIM_TELEMETRY_DISABLED", "")
+	t.Setenv("POSTHOG_PROJECT_TOKEN", "phc_test_token")
+	t.Setenv("POSTHOG_HOST", srv.URL)
+
+	cfg := config.NewDefaultConfig()
+	acc := profile.AccountInfo{UserID: "user_race_1", Email: "race@example.com"}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			InitPostHog(cfg)
+			InitPostHogLogs(cfg)
+			IdentifyAccount("claude", acc)
+			CaptureAccountEvent("claude", acc, "profile_login", map[string]any{"ok": true})
+			CaptureException("TestPanic", "synthetic")
+			LogPostHogInfo(context.Background(), "telemetry_check", map[string]any{"worker": 1})
+			_ = PostHogClient()
+			_ = ClosePostHog()
+			_ = ClosePostHogLogs()
+		})
+	}
+	wg.Wait()
+
+	if err := ClosePostHog(); err != nil {
+		t.Fatalf("final ClosePostHog: %v", err)
+	}
+	if err := ClosePostHogLogs(); err != nil {
+		t.Fatalf("final ClosePostHogLogs: %v", err)
+	}
+	srv.CloseClientConnections()
 }

@@ -4,22 +4,19 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/posthog/posthog-go"
 )
 
-var posthogClient posthog.Client
+var (
+	posthogMu     sync.RWMutex
+	posthogClient posthog.Client
+)
 
-// InitPostHog creates the single PostHog client for this CLI process. It is a
-// production no-op when telemetry is disabled or configuration is absent so
-// analytics never prevents a command from running.
-func InitPostHog(cfg *config.Config) {
-	if !IsTelemetryEnabled(cfg) {
-		return
-	}
-
+func resolvePostHogCredentials() (string, string) {
 	projectToken := strings.TrimSpace(os.Getenv("POSTHOG_PROJECT_TOKEN"))
 	if projectToken == "" {
 		projectToken = strings.TrimSpace(os.Getenv("AIM_TELEMETRY_API_KEY"))
@@ -32,7 +29,18 @@ func InitPostHog(cfg *config.Config) {
 	if host == "" && !isRunningInTest() {
 		host = DefaultPostHogHost
 	}
+	return projectToken, host
+}
 
+// InitPostHog creates the single PostHog client for this CLI process. It is a
+// production no-op when telemetry is disabled or configuration is absent so
+// analytics never prevents a command from running.
+func InitPostHog(cfg *config.Config) {
+	if !IsTelemetryEnabled(cfg) {
+		return
+	}
+
+	projectToken, host := resolvePostHogCredentials()
 	if projectToken == "" || host == "" {
 		if cfg != nil && cfg.Debug {
 			if projectToken == "" {
@@ -42,6 +50,12 @@ func InitPostHog(cfg *config.Config) {
 				log.Println("PostHog host is not configured; event emission skipped")
 			}
 		}
+		return
+	}
+
+	posthogMu.Lock()
+	defer posthogMu.Unlock()
+	if posthogClient != nil {
 		return
 	}
 
@@ -55,6 +69,8 @@ func InitPostHog(cfg *config.Config) {
 
 // PostHogClient returns the process-wide client, or nil when PostHog is not configured.
 func PostHogClient() posthog.Client {
+	posthogMu.RLock()
+	defer posthogMu.RUnlock()
 	return posthogClient
 }
 
@@ -71,9 +87,8 @@ func AccountDistinctID(agentName string, account profile.AccountInfo) string {
 // IdentifyAccount identifies a successfully authenticated account once at the
 // login boundary. Email and name are person properties, never event properties.
 func IdentifyAccount(agentName string, account profile.AccountInfo) {
-	client := PostHogClient()
 	agentName = strings.TrimSpace(agentName)
-	if client == nil || agentName == "" || account.UserID == "" {
+	if agentName == "" || account.UserID == "" {
 		return
 	}
 	distinctID := agentName + ":" + account.UserID
@@ -86,7 +101,12 @@ func IdentifyAccount(agentName string, account profile.AccountInfo) {
 		personProperties["name"] = account.Name
 	}
 
-	client.Enqueue(posthog.Capture{
+	posthogMu.RLock()
+	defer posthogMu.RUnlock()
+	if posthogClient == nil {
+		return
+	}
+	_ = posthogClient.Enqueue(posthog.Capture{
 		DistinctId: distinctID,
 		Event:      "user_identified",
 		Properties: posthog.NewProperties().Set("$set", personProperties),
@@ -99,10 +119,6 @@ func CaptureAccountEvent(agentName string, account profile.AccountInfo, event st
 	if !IsAllowedEvent(event) {
 		return
 	}
-	client := PostHogClient()
-	if client == nil {
-		return
-	}
 	distinctID := AccountDistinctID(agentName, account)
 	if distinctID == "" {
 		return
@@ -113,15 +129,38 @@ func CaptureAccountEvent(agentName string, account profile.AccountInfo, event st
 		properties.Set(key, value)
 	}
 
-	client.Enqueue(posthog.Capture{
+	posthogMu.RLock()
+	defer posthogMu.RUnlock()
+	if posthogClient == nil {
+		return
+	}
+	_ = posthogClient.Enqueue(posthog.Capture{
 		DistinctId: distinctID,
 		Event:      event,
 		Properties: properties,
 	})
 }
 
+// CaptureException records a sanitized exception event using synchronized client access.
+func CaptureException(exceptionType, message string) {
+	posthogMu.RLock()
+	defer posthogMu.RUnlock()
+	if posthogClient == nil {
+		return
+	}
+	_ = posthogClient.Enqueue(posthog.NewDefaultException(
+		// posthog.NewDefaultException uses current timestamp passed cleanly
+		nowUTC(),
+		AnonymousMachineID(config.BaseDir()),
+		exceptionType,
+		message,
+	))
+}
+
 // ClosePostHog flushes and closes the process-wide client during graceful shutdown.
 func ClosePostHog() error {
+	posthogMu.Lock()
+	defer posthogMu.Unlock()
 	if posthogClient == nil {
 		return nil
 	}

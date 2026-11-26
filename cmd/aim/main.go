@@ -22,7 +22,6 @@ import (
 	"github.com/aim-cli/aim/internal/updater"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
-	"github.com/posthog/posthog-go"
 )
 
 func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registry, pm *profile.ProfileManager) (exitCode int) {
@@ -61,14 +60,7 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 
 	defer func() {
 		if r := recover(); r != nil {
-			if client := telemetry.PostHogClient(); client != nil {
-				client.Enqueue(posthog.NewDefaultException(
-					time.Now(),
-					telemetry.AnonymousMachineID(config.BaseDir()),
-					"UnhandledPanic",
-					"AIM encountered an unexpected panic",
-				))
-			}
+			telemetry.CaptureException("UnhandledPanic", "AIM encountered an unexpected panic")
 
 			stack := debug.Stack()
 			home, _ := os.UserHomeDir()
