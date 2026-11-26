@@ -14,6 +14,7 @@ import (
 
 type ProfileConfig struct {
 	Agents           []string          `json:"agents,omitempty"`
+	Email            string            `json:"email,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
 	Args             []string          `json:"args,omitempty"`
 	MCPGlobal        *bool             `json:"mcp_global,omitempty"`
@@ -549,6 +550,27 @@ func (c *Config) RenameProfile(oldProfile, newProfile string) {
 	if c.DefaultProfile == oldProfile {
 		c.DefaultProfile = newProfile
 	}
+}
+
+// GetProfileEmail returns the configured email metadata for profile, if any.
+func (c *Config) GetProfileEmail(profile string) string {
+	if c == nil || c.Profiles == nil {
+		return ""
+	}
+	return c.Profiles[profile].Email
+}
+
+// SetProfileEmail stores account email metadata on the profile configuration.
+func (c *Config) SetProfileEmail(profile, email string) {
+	if c == nil {
+		return
+	}
+	if c.Profiles == nil {
+		c.Profiles = make(map[string]ProfileConfig)
+	}
+	p := c.Profiles[profile]
+	p.Email = strings.TrimSpace(email)
+	c.Profiles[profile] = p
 }
 
 func (c *Config) GetProfileEnv(profile string) map[string]string {

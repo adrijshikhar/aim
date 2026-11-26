@@ -2,6 +2,8 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -81,10 +83,14 @@ func (s *Server) handleDaemonInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		BinaryPath string `json:"binary_path,omitempty"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeJSONError(w, http.StatusBadRequest, "invalid JSON request body: "+err.Error())
+		return
+	}
 	if req.BinaryPath != "" {
 		self, err := os.Executable()
 		if err != nil || filepath.Clean(req.BinaryPath) != filepath.Clean(self) {

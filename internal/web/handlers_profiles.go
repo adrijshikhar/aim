@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/service"
 )
 
@@ -94,6 +95,10 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "profile name is required")
 		return
 	}
+	if err := profile.ValidateProfileName(strings.TrimSpace(name)); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if err := s.profiles.RemoveProfile(r.Context(), agent, name); err != nil {
 		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "not found") {
@@ -137,6 +142,10 @@ func (s *Server) handleUpdateProfileConfig(w http.ResponseWriter, r *http.Reques
 
 	if strings.TrimSpace(name) == "" {
 		writeJSONError(w, http.StatusBadRequest, "profile name is required")
+		return
+	}
+	if err := profile.ValidateProfileName(strings.TrimSpace(name)); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -207,6 +216,13 @@ func (s *Server) handleRefreshSingleProfile(w http.ResponseWriter, r *http.Reque
 			name = parts[0]
 		}
 	}
+	if strings.TrimSpace(name) != "" {
+		if err := profile.ValidateProfileName(strings.TrimSpace(name)); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	agent := r.URL.Query().Get("agent")
 
 	profiles, err := s.profiles.RefreshUsage(r.Context(), agent, name)

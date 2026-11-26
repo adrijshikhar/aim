@@ -115,10 +115,10 @@ func handleTUIOutcome(res tui.Model, reg *agents.Registry, pm *profile.ProfileMa
 		sess := res.SelectedSession()
 		if sess != nil {
 			targetProfile := res.SelectedProfile()
-			if targetProfile == "" || targetProfile == "<host>" {
+			if targetProfile == "" || targetProfile == hostProfileSentinel {
 				targetProfile = sess.Profile
 			}
-			if targetProfile == "" || targetProfile == "<host>" {
+			if targetProfile == "" || targetProfile == hostProfileSentinel {
 				targetProfile = "default"
 			}
 			mgr := getSessionManager(context.Background())
@@ -139,10 +139,10 @@ func handleTUIOutcome(res tui.Model, reg *agents.Registry, pm *profile.ProfileMa
 		sess := res.SelectedSession()
 		if sess != nil {
 			targetProfile := res.SelectedProfile()
-			if targetProfile == "" || targetProfile == "<host>" {
+			if targetProfile == "" || targetProfile == hostProfileSentinel {
 				targetProfile = sess.Profile
 			}
-			if targetProfile == "" || targetProfile == "<host>" {
+			if targetProfile == "" || targetProfile == hostProfileSentinel {
 				targetProfile = "default"
 			}
 			resumeCmd := newResumeCmd(reg, pm)

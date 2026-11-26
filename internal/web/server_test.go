@@ -1511,3 +1511,36 @@ func TestShareEndpoints(t *testing.T) {
 		t.Errorf("expected status 'cancelled', got %v", pollResp["status"])
 	}
 }
+
+func TestHandlers_ProfileValidationAndDaemonBadJSON(t *testing.T) {
+	ts, srv := setupTestServer(t, &mockProfileService{}, &mockSessionService{}, &mockLauncherService{}, false)
+
+	// Invalid profile name "." or ".." via POST /api/profiles/{name}/refresh must fail with 400.
+	reqRef, err := http.NewRequestWithContext(context.Background(), http.MethodPost, ts.URL+"/api/profiles/..%2Fevil/refresh", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resRef, err := ts.Client().Do(reqRef)
+	if err != nil {
+		t.Fatalf("POST refresh request failed: %v", err)
+	}
+	_ = resRef.Body.Close()
+	if resRef.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 BadRequest on invalid profile name, got %d", resRef.StatusCode)
+	}
+
+	// Malformed JSON in POST /api/daemon/install must return 400 BadRequest.
+	srv.SetDaemonService(&mockDaemonService{})
+	reqDaemon, err := http.NewRequestWithContext(context.Background(), http.MethodPost, ts.URL+"/api/daemon/install", strings.NewReader("{bad-json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resDaemon, err := ts.Client().Do(reqDaemon)
+	if err != nil {
+		t.Fatalf("POST daemon install failed: %v", err)
+	}
+	_ = resDaemon.Body.Close()
+	if resDaemon.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 BadRequest on invalid JSON body, got %d", resDaemon.StatusCode)
+	}
+}

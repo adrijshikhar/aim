@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 )
 
@@ -80,7 +81,16 @@ func (s *sessionService) GetSessionTranscript(ctx context.Context, agent, sessio
 	// Try reading native transcript by agent type
 	switch strings.ToLower(sess.Agent) {
 	case "claude":
-		turns, err := parseClaudeTranscript(sess)
+		turns, err := parseClaudeTranscript(sess, s.profilesRoot)
+		if len(turns) > 0 {
+			transcript.Turns = turns
+			return transcript, nil
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			_ = err
+		}
+	case agentCodex:
+		turns, err := parseCodexTranscript(sess, s.profilesRoot)
 		if len(turns) > 0 {
 			transcript.Turns = turns
 			return transcript, nil
@@ -104,35 +114,190 @@ func (s *sessionService) GetSessionTranscript(ctx context.Context, agent, sessio
 	return transcript, nil
 }
 
-func parseClaudeTranscript(sess *session.Session) ([]SessionTurnDTO, error) {
-	filePath := sess.StoragePath
-	if filePath == "" || filepath.Ext(filePath) != ".jsonl" {
-		// Look up in profile or host .claude/projects directory
-		var baseProjectsDir string
-		if sess.IsHost {
-			baseProjectsDir = filepath.Join(config.RealHomeDir(), ".claude", "projects")
-		} else if sess.Profile != "" {
-			baseProjectsDir = filepath.Join(config.BaseDir(), "profiles", sess.Profile, ".claude", "projects")
-		}
+const (
+	roleUser      = "user"
+	roleAssistant = "assistant"
+)
 
-		if baseProjectsDir != "" {
-			// Find matches
-			matches, _ := filepath.Glob(filepath.Join(baseProjectsDir, "*", sess.ID+".jsonl"))
-			if len(matches) > 0 {
-				filePath = matches[0]
-			}
-		}
+func resolveTranscriptProfilesRoot(injected string) string {
+	if strings.TrimSpace(injected) != "" {
+		return injected
 	}
+	return filepath.Join(config.BaseDir(), "profiles")
+}
 
-	if filePath == "" {
-		return nil, os.ErrNotExist
+func openStorageInProfileRoot(root *os.Root, profDir, storagePath, expectedExt string) (*os.File, bool) {
+	if storagePath == "" {
+		return nil, false
 	}
+	if expectedExt != "" && filepath.Ext(storagePath) != expectedExt {
+		return nil, false
+	}
+	rel, err := filepath.Rel(profDir, storagePath)
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return nil, false
+	}
+	f, err := root.Open(rel)
+	return f, err == nil
+}
 
-	f, err := os.Open(filePath)
+func openIsolatedSessionFile(sess *session.Session, profilesRoot, expectedExt string, findRel func(*os.Root) (string, error)) (*os.File, error) {
+	if err := profile.ValidateProfileName(sess.Profile); err != nil {
+		return nil, err
+	}
+	profDir := filepath.Join(resolveTranscriptProfilesRoot(profilesRoot), sess.Profile)
+	root, err := os.OpenRoot(profDir)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = root.Close() }()
+
+	if f, ok := openStorageInProfileRoot(root, profDir, sess.StoragePath, expectedExt); ok {
+		return f, nil
+	}
+	if findRel != nil {
+		if rel, findErr := findRel(root); findErr == nil && rel != "" {
+			return root.Open(rel)
+		}
+	}
+	return nil, os.ErrNotExist
+}
+
+func openDirectSessionFile(filePath, expectedExt string) (*os.File, bool) {
+	if filePath == "" || (expectedExt != "" && filepath.Ext(filePath) != expectedExt) {
+		return nil, false
+	}
+	//nolint:gosec // G304: host StoragePath validated from resolved host session object.
+	f, err := os.Open(filePath)
+	return f, err == nil
+}
+
+func openScopedSessionFile(sess *session.Session, profilesRoot, agentRelBase, expectedExt string, findRel func(*os.Root) (string, error)) (*os.File, error) {
+	if !sess.IsHost && sess.Profile != "" && sess.Profile != hostProfileSentinel {
+		return openIsolatedSessionFile(sess, profilesRoot, expectedExt, findRel)
+	}
+	if f, ok := openDirectSessionFile(sess.StoragePath, expectedExt); ok {
+		return f, nil
+	}
+	if !sess.IsHost || agentRelBase == "" || findRel == nil {
+		return nil, os.ErrNotExist
+	}
+	root, err := os.OpenRoot(config.RealHomeDir())
+	if err != nil {
+		return nil, os.ErrNotExist
+	}
+	defer func() { _ = root.Close() }()
+	rel, findErr := findRel(root)
+	if findErr != nil || rel == "" {
+		return nil, os.ErrNotExist
+	}
+	return root.Open(rel)
+}
+
+type rawClaudeRecord struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	Message   struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+func parseClaudeTranscriptLine(line []byte, turnIdx int) (SessionTurnDTO, bool) {
+	var rec rawClaudeRecord
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return SessionTurnDTO{}, false
+	}
+
+	role := rec.Type
+	if role == "" {
+		role = rec.Message.Role
+	}
+	if role != roleUser && role != roleAssistant {
+		return SessionTurnDTO{}, false
+	}
+
+	var parsedTime time.Time
+	if rec.Timestamp != "" {
+		parsedTime, _ = time.Parse(time.RFC3339, rec.Timestamp)
+	}
+
+	blocks, _ := session.ParseClaudeContent(rec.Message.Content)
+	content, thinking, toolCalls := collectClaudeBlockFields(blocks)
+	if role == roleUser {
+		content = cleanUserPrompt(content)
+	}
+	if strings.TrimSpace(content) == "" && strings.TrimSpace(thinking) == "" && len(toolCalls) == 0 {
+		return SessionTurnDTO{}, false
+	}
+
+	return SessionTurnDTO{
+		TurnIndex: turnIdx,
+		Role:      role,
+		Timestamp: parsedTime,
+		Content:   content,
+		Thinking:  thinking,
+		ToolCalls: toolCalls,
+	}, true
+}
+
+func collectClaudeBlockFields(blocks []session.ClaudeContentBlock) (string, string, []ToolCallDTO) {
+	var textParts []string
+	var thinkingParts []string
+	var toolCalls []ToolCallDTO
+
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if strings.TrimSpace(b.Text) != "" {
+				textParts = append(textParts, b.Text)
+			}
+		case "thinking":
+			if strings.TrimSpace(b.Thinking) != "" {
+				thinkingParts = append(thinkingParts, b.Thinking)
+			}
+		case "tool_use":
+			argsStr := string(b.Input)
+			if argsStr == "" {
+				argsStr = "{}"
+			}
+			toolCalls = append(toolCalls, ToolCallDTO{
+				ID:        b.ToolUseID,
+				ToolName:  b.Name,
+				Arguments: argsStr,
+				Status:    "ok",
+			})
+		}
+	}
+	return strings.Join(textParts, "\n\n"), strings.Join(thinkingParts, "\n\n"), toolCalls
+}
+
+func parseClaudeTranscript(sess *session.Session, profilesRoot string) ([]SessionTurnDTO, error) {
+	f, err := openScopedSessionFile(sess, profilesRoot, filepath.Join(".claude", "projects"), ".jsonl", func(root *os.Root) (string, error) {
+		projRoot, openErr := root.OpenRoot(filepath.Join(".claude", "projects"))
+		if openErr != nil {
+			return "", openErr
+		}
+		defer func() { _ = projRoot.Close() }()
+		entries, readErr := os.ReadDir(projRoot.Name())
+		if readErr != nil {
+			return "", readErr
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			rel := filepath.Join(".claude", "projects", e.Name(), sess.ID+".jsonl")
+			if _, statErr := root.Stat(rel); statErr == nil {
+				return rel, nil
+			}
+		}
+		return "", os.ErrNotExist
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
 
 	var turns []SessionTurnDTO
 	scanner := bufio.NewScanner(f)
@@ -140,106 +305,175 @@ func parseClaudeTranscript(sess *session.Session) ([]SessionTurnDTO, error) {
 	buf := make([]byte, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
 
-	type rawClaudeBlock struct {
-		Type      string          `json:"type"`
-		Text      string          `json:"text,omitempty"`
-		Thinking  string          `json:"thinking,omitempty"`
-		Name      string          `json:"name,omitempty"`
-		Input     json.RawMessage `json:"input,omitempty"`
-		Content   interface{}     `json:"content,omitempty"`
-		IsError   bool            `json:"is_error,omitempty"`
-		ToolUseID string          `json:"tool_use_id,omitempty"`
-	}
-
-	type rawClaudeMessage struct {
-		Role    string           `json:"role"`
-		Content []rawClaudeBlock `json:"content"`
-	}
-
-	type rawClaudeRecord struct {
-		Type      string           `json:"type"`
-		Timestamp string           `json:"timestamp"`
-		Message   rawClaudeMessage `json:"message"`
-	}
-
-	turnIdx := 1
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-
-		var rec rawClaudeRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
-			continue
+		if turn, ok := parseClaudeTranscriptLine(line, len(turns)+1); ok {
+			turns = append(turns, turn)
 		}
-
-		role := rec.Type
-		if role == "" {
-			role = rec.Message.Role
-		}
-
-		if role != "user" && role != "assistant" {
-			continue
-		}
-
-		var parsedTime time.Time
-		if rec.Timestamp != "" {
-			parsedTime, _ = time.Parse(time.RFC3339, rec.Timestamp)
-		}
-
-		var textParts []string
-		var thinkingParts []string
-		var toolCalls []ToolCallDTO
-
-		for _, b := range rec.Message.Content {
-			switch b.Type {
-			case "text":
-				if strings.TrimSpace(b.Text) != "" {
-					textParts = append(textParts, b.Text)
-				}
-			case "thinking":
-				if strings.TrimSpace(b.Thinking) != "" {
-					thinkingParts = append(thinkingParts, b.Thinking)
-				}
-			case "tool_use":
-				argsStr := string(b.Input)
-				if argsStr == "" {
-					argsStr = "{}"
-				}
-				toolCalls = append(toolCalls, ToolCallDTO{
-					ID:        b.ToolUseID,
-					ToolName:  b.Name,
-					Arguments: argsStr,
-					Status:    "ok",
-				})
-			}
-		}
-
-		content := strings.Join(textParts, "\n\n")
-		thinking := strings.Join(thinkingParts, "\n\n")
-
-		if role == "user" {
-			content = cleanUserPrompt(content)
-		}
-
-		// If user turn has no text content and no tool calls, skip internal noise
-		if strings.TrimSpace(content) == "" && strings.TrimSpace(thinking) == "" && len(toolCalls) == 0 {
-			continue
-		}
-
-		turns = append(turns, SessionTurnDTO{
-			TurnIndex: turnIdx,
-			Role:      role,
-			Timestamp: parsedTime,
-			Content:   content,
-			Thinking:  thinking,
-			ToolCalls: toolCalls,
-		})
-		turnIdx++
 	}
 
 	return turns, scanner.Err()
+}
+
+type codexContentPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type codexRolloutLine struct {
+	Timestamp string          `json:"timestamp"`
+	Type      string          `json:"type"`
+	Message   json.RawMessage `json:"message,omitempty"`
+	Payload   struct {
+		Type      string          `json:"type"`
+		Role      string          `json:"role"`
+		Content   json.RawMessage `json:"content,omitempty"`
+		Message   string          `json:"message,omitempty"`
+		Name      string          `json:"name,omitempty"`
+		Arguments string          `json:"arguments,omitempty"`
+		CallID    string          `json:"call_id,omitempty"`
+	} `json:"payload"`
+}
+
+func extractCodexMessageText(raw json.RawMessage) string {
+	var parts []codexContentPart
+	if err := json.Unmarshal(raw, &parts); err == nil && len(parts) > 0 {
+		var texts []string
+		for _, p := range parts {
+			if strings.TrimSpace(p.Text) != "" {
+				texts = append(texts, p.Text)
+			}
+		}
+		return strings.Join(texts, "\n\n")
+	}
+	var plain string
+	if err := json.Unmarshal(raw, &plain); err == nil {
+		return plain
+	}
+	return ""
+}
+
+func findCodexRolloutRel(root *os.Root, sessionID string) (string, error) {
+	sessionsPath := filepath.Join(root.Name(), ".codex", "sessions")
+	var match string
+	_ = filepath.WalkDir(sessionsPath, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return walkErr
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".jsonl") && strings.Contains(d.Name(), sessionID) {
+			if rel, relErr := filepath.Rel(root.Name(), p); relErr == nil {
+				match = rel
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	if match == "" {
+		return "", os.ErrNotExist
+	}
+	return match, nil
+}
+
+func appendCodexTurn(dst *[]SessionTurnDTO, role string, ts time.Time, text string, calls []ToolCallDTO) {
+	if role == roleUser {
+		text = cleanUserPrompt(text)
+	} else {
+		text = cleanAssistantResponse(text)
+	}
+	if strings.TrimSpace(text) == "" && len(calls) == 0 {
+		return
+	}
+	*dst = append(*dst, SessionTurnDTO{
+		TurnIndex: len(*dst) + 1,
+		Role:      role,
+		Timestamp: ts,
+		Content:   text,
+		ToolCalls: calls,
+	})
+}
+
+func processCodexResponseItem(rec codexRolloutLine, ts time.Time, responseTurns *[]SessionTurnDTO) {
+	switch rec.Payload.Type {
+	case "message":
+		if rec.Payload.Role == roleUser || rec.Payload.Role == roleAssistant {
+			appendCodexTurn(responseTurns, rec.Payload.Role, ts, extractCodexMessageText(rec.Payload.Content), nil)
+		}
+	case "function_call":
+		appendCodexTurn(responseTurns, roleAssistant, ts, "", []ToolCallDTO{{
+			ID:        rec.Payload.CallID,
+			ToolName:  rec.Payload.Name,
+			Arguments: rec.Payload.Arguments,
+			Status:    "ok",
+		}})
+	}
+}
+
+func processCodexRolloutLine(line []byte, responseTurns, eventTurns *[]SessionTurnDTO) {
+	var rec codexRolloutLine
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return
+	}
+	var ts time.Time
+	if rec.Timestamp != "" {
+		ts, _ = time.Parse(time.RFC3339Nano, rec.Timestamp)
+	}
+
+	switch rec.Type {
+	case "response_item":
+		processCodexResponseItem(rec, ts, responseTurns)
+	case "event_msg":
+		switch rec.Payload.Type {
+		case "user_message":
+			appendCodexTurn(eventTurns, roleUser, ts, rec.Payload.Message, nil)
+		case "agent_message":
+			appendCodexTurn(eventTurns, roleAssistant, ts, rec.Payload.Message, nil)
+		}
+	case roleUser, roleAssistant, "USER_INPUT", "PLANNER_RESPONSE":
+		role := roleUser
+		if rec.Type == roleAssistant || rec.Type == "PLANNER_RESPONSE" {
+			role = roleAssistant
+		}
+		_, txt := session.ParseClaudeContent(rec.Message)
+		appendCodexTurn(eventTurns, role, ts, txt, nil)
+	}
+}
+
+func parseCodexTranscript(sess *session.Session, profilesRoot string) ([]SessionTurnDTO, error) {
+	f, err := openScopedSessionFile(sess, profilesRoot, filepath.Join(".codex", "sessions"), ".jsonl", func(root *os.Root) (string, error) {
+		return findCodexRolloutRel(root, sess.ID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	var responseTurns []SessionTurnDTO
+	var eventTurns []SessionTurnDTO
+
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) > 0 {
+			processCodexRolloutLine(line, &responseTurns, &eventTurns)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(responseTurns) > 0 {
+		return responseTurns, nil
+	}
+	return eventTurns, nil
 }
 
 func parseAgyTranscript(sess *session.Session) ([]SessionTurnDTO, error) {

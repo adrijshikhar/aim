@@ -20,15 +20,21 @@ var (
 )
 
 type sessionService struct {
-	mgr      *session.Manager
-	launcher LauncherService
-	mu       sync.RWMutex
-	cache    []SessionDTO
-	cachedAt time.Time
+	mgr          *session.Manager
+	launcher     LauncherService
+	profilesRoot string
+	mu           sync.RWMutex
+	cache        []SessionDTO
+	cachedAt     time.Time
 }
 
 // NewSessionService creates a new SessionService wrapping session.Manager and LauncherService.
 func NewSessionService(mgr *session.Manager, launcher ...LauncherService) SessionService {
+	return NewSessionServiceWithProfilesRoot(mgr, "", launcher...)
+}
+
+// NewSessionServiceWithProfilesRoot creates a SessionService anchored to an explicit profilesRoot.
+func NewSessionServiceWithProfilesRoot(mgr *session.Manager, profilesRoot string, launcher ...LauncherService) SessionService {
 	var l LauncherService
 	if len(launcher) > 0 && launcher[0] != nil {
 		l = launcher[0]
@@ -36,8 +42,9 @@ func NewSessionService(mgr *session.Manager, launcher ...LauncherService) Sessio
 		l = NewLauncherService()
 	}
 	return &sessionService{
-		mgr:      mgr,
-		launcher: l,
+		mgr:          mgr,
+		launcher:     l,
+		profilesRoot: profilesRoot,
 	}
 }
 
@@ -182,7 +189,7 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 
 	resolvedID := sessionID
 	resolvedProfile := strings.TrimSpace(req.Profile)
-	if resolvedProfile != "" && resolvedProfile != "<host>" && !safeIdentifierPattern.MatchString(resolvedProfile) {
+	if resolvedProfile != "" && resolvedProfile != hostProfileSentinel && !safeIdentifierPattern.MatchString(resolvedProfile) {
 		return fmt.Errorf("invalid profile %q: contains illegal characters", resolvedProfile)
 	}
 
@@ -193,13 +200,13 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 		}
 		if sess != nil {
 			resolvedID = sess.ID
-			if resolvedProfile == "" && sess.Profile != "" && sess.Profile != "<host>" {
+			if resolvedProfile == "" && sess.Profile != "" && sess.Profile != hostProfileSentinel {
 				resolvedProfile = sess.Profile
 			}
 		}
 	}
 
-	if resolvedProfile != "" && resolvedProfile != "<host>" && !safeIdentifierPattern.MatchString(resolvedProfile) {
+	if resolvedProfile != "" && resolvedProfile != hostProfileSentinel && !safeIdentifierPattern.MatchString(resolvedProfile) {
 		return fmt.Errorf("invalid resolved profile %q: contains illegal characters", resolvedProfile)
 	}
 	if !safeIdentifierPattern.MatchString(resolvedID) {
@@ -264,7 +271,7 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 		cmdParts = append(cmdParts, aimFlags...)
 	}
 	cmdParts = append(cmdParts, agent)
-	if resolvedProfile != "" && resolvedProfile != "<host>" {
+	if resolvedProfile != "" && resolvedProfile != hostProfileSentinel {
 		cmdParts = append(cmdParts, resolvedProfile)
 	}
 	cmdParts = append(cmdParts, resolvedID)

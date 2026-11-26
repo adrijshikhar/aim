@@ -576,37 +576,8 @@ func extractPromptText(ev claudeLineEvent) string {
 }
 
 func extractTextFromRaw(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-
-	// Try plain string
-	var str string
-	if err := json.Unmarshal(raw, &str); err == nil && strings.TrimSpace(str) != "" {
-		return strings.TrimSpace(str)
-	}
-
-	// Try array of content blocks
-	var blocks []contentBlock
-	if err := json.Unmarshal(raw, &blocks); err == nil {
-		for _, b := range blocks {
-			if strings.TrimSpace(b.Text) != "" {
-				return strings.TrimSpace(b.Text)
-			}
-		}
-	}
-
-	// Try generic array of maps
-	var genericBlocks []map[string]interface{}
-	if err := json.Unmarshal(raw, &genericBlocks); err == nil {
-		for _, b := range genericBlocks {
-			if t, ok := b["text"].(string); ok && strings.TrimSpace(t) != "" {
-				return strings.TrimSpace(t)
-			}
-		}
-	}
-
-	return ""
+	_, firstText := session.ParseClaudeContent(raw)
+	return firstText
 }
 
 func parseTimestamp(ts string) (time.Time, bool) {

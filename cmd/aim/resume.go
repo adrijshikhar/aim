@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
@@ -20,6 +21,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
+
+const hostProfileSentinel = "<host>"
 
 func newResumeCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var (
@@ -104,8 +107,8 @@ Flags:
 						return matches[i].LastActiveAt.After(matches[j].LastActiveAt)
 					})
 					profileName = matches[0].Profile
-					if profileName == "" || profileName == "<host>" {
-						profileName = "default"
+					if profileName == "" && matches[0].IsHost {
+						profileName = hostProfileSentinel
 					}
 					if len(cleanArgs) > 2 {
 						if cleanArgs[2] == "--" {
@@ -182,6 +185,18 @@ Flags:
 					}
 				} else {
 					return fmt.Errorf("session %s is currently ACTIVE in PID %d; use --force to resume anyway", sess.ShortID, sess.PID)
+				}
+			}
+
+			if profileName == "" || profileName == hostProfileSentinel {
+				if cfg, cfgErr := config.LoadConfig(); cfgErr == nil && cfg != nil && cfg.DefaultProfile != "" && pm != nil && pm.ProfileExists(cfg.DefaultProfile) {
+					profileName = cfg.DefaultProfile
+				} else {
+					dispID := sess.ShortID
+					if dispID == "" {
+						dispID = sess.ID
+					}
+					return fmt.Errorf("session %s originates from host (<host>); specify a target profile: aim resume %s <profile> %s", dispID, agentName, dispID)
 				}
 			}
 

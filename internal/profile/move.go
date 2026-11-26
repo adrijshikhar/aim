@@ -103,11 +103,15 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 	cleanStatuslineSymlinksIfDisabled(dstDir, targetProfile, cfg)
 
 	// Update config
+	srcEmail := cfg.GetProfileEmail(sourceProfile)
 	cfg.RemoveProfileAgent(sourceProfile, canonicalAgent)
 	cfg.AddProfileAgent(targetProfile, canonicalAgent)
 
 	remaining := cfg.GetProfileAgents(sourceProfile)
 	if len(remaining) == 0 {
+		if srcEmail != "" && cfg.GetProfileEmail(targetProfile) == "" {
+			cfg.SetProfileEmail(targetProfile, srcEmail)
+		}
 		_ = m.RemoveProfile(sourceProfile)
 		cfg.DeleteProfile(sourceProfile)
 		_ = m.MergeStateStore().Remove(sourceProfile)

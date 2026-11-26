@@ -197,6 +197,12 @@ func (c *CacheStore) Delete(agent, profile string) {
 
 // Rename updates all cached reports for oldProfile to newProfile.
 func (c *CacheStore) Rename(oldProfile, newProfile string) {
+	c.RenameAgent("", oldProfile, newProfile)
+}
+
+// RenameAgent renames cached usage entries for oldProfile to newProfile. When agent
+// is non-empty, only that agent's cache entry is renamed; otherwise all agents move.
+func (c *CacheStore) RenameAgent(agent, oldProfile, newProfile string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -205,7 +211,7 @@ func (c *CacheStore) Rename(oldProfile, newProfile string) {
 	}
 	for k, rep := range c.reports {
 		parts := strings.SplitN(k, ":", 2)
-		if len(parts) == 2 && parts[1] == oldProfile {
+		if len(parts) == 2 && parts[1] == oldProfile && (agent == "" || parts[0] == agent) {
 			delete(c.reports, k)
 			rep.Profile = newProfile
 			c.reports[key(parts[0], newProfile)] = rep

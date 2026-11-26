@@ -97,7 +97,31 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 	return result, nil
 }
 
-func (s *profileService) buildAdapterInfo(agentName, profileName string, adapter agents.AgentAdapter) AdapterInfo {
+func (s *profileService) resolveAdapterQuota(agentName, profileName, pDir string) (*QuotaDTO, bool) {
+	if agentName == "" {
+		return nil, false
+	}
+	target := usage.TargetProfile{
+		Agent:      agentName,
+		Profile:    profileName,
+		ProfileDir: pDir,
+	}
+	if s.reg != nil {
+		if ad, err := s.reg.Get(agentName); err == nil && ad != nil {
+			if cachedProv, ok := ad.(agents.CachedUsageProvider); ok {
+				target.GetCachedUsageFn = cachedProv.GetCachedUsage
+			}
+		}
+	}
+	rep := usage.InspectProfile(context.Background(), target, s.cache)
+	var quotaPtr *QuotaDTO
+	if rep.Status != usage.StatusUnknown || len(rep.Windows) > 0 {
+		quotaPtr = reportToQuotaDTO(rep)
+	}
+	return quotaPtr, rep.Status == usage.StatusIdle || rep.Status == usage.StatusOK
+}
+
+func (s *profileService) buildAdapterInfo(agentName, profileName string, _ agents.AgentAdapter, cfg *config.Config) AdapterInfo {
 	pDir := s.pm.ProfileDir(profileName)
 	if s.pm != nil {
 		leaseMgr := share.NewLeaseManager(s.pm.ProfilesRoot())
@@ -112,32 +136,19 @@ func (s *profileService) buildAdapterInfo(agentName, profileName string, adapter
 	hasCreds := usage.HasCredentialsOnDisk(agentName, pDir)
 
 	acc := profile.GetProfileAccountInfoForAgent(pDir, agentName)
+	if acc.Email == "" && cfg != nil {
+		if savedEmail := cfg.GetProfileEmail(profileName); savedEmail != "" {
+			acc.Email = savedEmail
+		}
+	}
 	var accountPtr *profile.AccountInfo
 	if acc.Email != "" || acc.Name != "" || acc.AuthMethod != "" || acc.ProjectID != "" {
 		accountPtr = &acc
 	}
 
-	var quotaPtr *QuotaDTO
-	if agentName != "" {
-		target := usage.TargetProfile{
-			Agent:      agentName,
-			Profile:    profileName,
-			ProfileDir: pDir,
-		}
-		if s.reg != nil {
-			if ad, err := s.reg.Get(agentName); err == nil && ad != nil {
-				if cachedProv, ok := ad.(agents.CachedUsageProvider); ok {
-					target.GetCachedUsageFn = cachedProv.GetCachedUsage
-				}
-			}
-		}
-		rep := usage.InspectProfile(context.Background(), target, s.cache)
-		if rep.Status != usage.StatusUnknown || len(rep.Windows) > 0 {
-			quotaPtr = reportToQuotaDTO(rep)
-		}
-		if !hasCreds && (rep.Status == usage.StatusIdle || rep.Status == usage.StatusOK) {
-			hasCreds = true
-		}
+	quotaPtr, quotaCreds := s.resolveAdapterQuota(agentName, profileName, pDir)
+	if !hasCreds && quotaCreds {
+		hasCreds = true
 	}
 
 	return AdapterInfo{
@@ -160,7 +171,7 @@ func (s *profileService) buildProfileDTO(profileName string, agentNames []string
 		if s.reg != nil {
 			adapter, _ = s.reg.Get(ag)
 		}
-		adInfo := s.buildAdapterInfo(ag, profileName, adapter)
+		adInfo := s.buildAdapterInfo(ag, profileName, adapter, cfg)
 		if adInfo.HasCredentials {
 			hasAnyCreds = true
 		}
@@ -303,6 +314,11 @@ func (s *profileService) CreateProfile(ctx context.Context, req CreateProfileReq
 		}
 		if canonicalAgent != "" {
 			cfg.AddProfileAgent(name, canonicalAgent)
+		}
+		if strings.TrimSpace(req.Email) != "" {
+			cfg.SetProfileEmail(name, req.Email)
+		}
+		if canonicalAgent != "" || strings.TrimSpace(req.Email) != "" {
 			if err := config.SaveConfig(cfg); err != nil {
 				return nil, err
 			}
@@ -426,6 +442,13 @@ func (s *profileService) RenameProfile(ctx context.Context, agent, oldName, newN
 		if len(agentsList) > 0 && !cfg.HasAgent(oldName, canonicalAgent) {
 			return fmt.Errorf("agent %q is not associated with profile %q", canonicalAgent, oldName)
 		}
+		if err := s.pm.MoveAgent(canonicalAgent, oldName, newName, false, cfg, s.reg); err != nil {
+			return err
+		}
+		if s.cache != nil {
+			s.cache.RenameAgent(canonicalAgent, oldName, newName)
+		}
+		return nil
 	}
 
 	if err := s.pm.RenameProfile(oldName, newName, cfg); err != nil {

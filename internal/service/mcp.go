@@ -47,11 +47,44 @@ type rawMCPConfig struct {
 	MCPServers map[string]rawMCPEntry `json:"mcpServers"`
 }
 
+const (
+	scopeAll            = "all"
+	scopeGlobal         = "global"
+	agentAgy            = "agy"
+	agentClaude         = "claude"
+	agentCodex          = "codex"
+	authConnected       = "connected"
+	authNone            = "none"
+	hostProfileSentinel = "<host>"
+)
+
+type mcpServerKey struct {
+	client string
+	scope  string
+	name   string
+}
+
+func parseMCPJSONFromRoot(root *os.Root, relPath, scope, client string) map[string]MCPServerDTO {
+	if root == nil {
+		return nil
+	}
+	data, err := root.ReadFile(relPath)
+	if err != nil {
+		return nil
+	}
+	return parseMCPJSONBytes(data, scope, client)
+}
+
 func parseMCPJSONFile(path, scope, client string) map[string]MCPServerDTO {
+	//nolint:gosec // G304: host/global MCP configuration path constructed from fixed host home locations.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
+	return parseMCPJSONBytes(data, scope, client)
+}
+
+func parseMCPJSONBytes(data []byte, scope, client string) map[string]MCPServerDTO {
 
 	var parsed rawMCPConfig
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -64,59 +97,69 @@ func parseMCPJSONFile(path, scope, client string) map[string]MCPServerDTO {
 
 	res := make(map[string]MCPServerDTO, len(parsed.MCPServers))
 	for name, entry := range parsed.MCPServers {
-		status := "enabled"
-		if entry.Disabled || (entry.Enabled != nil && !*entry.Enabled) {
-			status = "disabled"
-		}
-
-		targetURL := entry.ServerURL
-		if targetURL == "" {
-			targetURL = entry.URL
-		}
-
-		cmd := entry.Command
-		args := entry.Args
-		typ := "stdio"
-		auth := "none"
-
-		if targetURL != "" {
-			typ = "http"
-			if strings.Contains(targetURL, "/sse") {
-				typ = "sse"
-			}
-			if cmd == "" {
-				cmd = "remote"
-				args = []string{targetURL}
-			}
-			if strings.Contains(strings.ToLower(targetURL), "oauth") || strings.Contains(strings.ToLower(name), "oauth") {
-				auth = "OAuth"
-			} else if len(entry.Headers) > 0 {
-				auth = "connected"
-			}
-		} else {
-			for ek := range entry.Env {
-				if strings.Contains(ek, "KEY") || strings.Contains(ek, "TOKEN") {
-					auth = "connected"
-					break
-				}
-			}
-		}
-
-		res[name] = MCPServerDTO{
-			Name:    name,
-			Command: cmd,
-			Args:    args,
-			Env:     entry.Env,
-			URL:     targetURL,
-			Headers: entry.Headers,
-			Scope:   scope,
-			Type:    typ,
-			Status:  status,
-			Auth:    auth,
-			Client:  client,
-		}
+		res[name] = buildMCPServerDTO(name, entry, scope, client)
 	}
 	return res
+}
+
+func buildMCPServerDTO(name string, entry rawMCPEntry, scope, client string) MCPServerDTO {
+	status := "enabled"
+	if entry.Disabled || (entry.Enabled != nil && !*entry.Enabled) {
+		status = "disabled"
+	}
+
+	targetURL := entry.ServerURL
+	if targetURL == "" {
+		targetURL = entry.URL
+	}
+
+	cmd := entry.Command
+	args := entry.Args
+	typ := "stdio"
+	auth := detectMCPAuth(name, targetURL, entry.Headers, entry.Env)
+
+	if targetURL != "" {
+		typ = "http"
+		if strings.Contains(targetURL, "/sse") {
+			typ = "sse"
+		}
+		if cmd == "" {
+			cmd = "remote"
+			args = []string{targetURL}
+		}
+	}
+
+	return MCPServerDTO{
+		Name:    name,
+		Command: cmd,
+		Args:    args,
+		Env:     entry.Env,
+		URL:     targetURL,
+		Headers: entry.Headers,
+		Scope:   scope,
+		Type:    typ,
+		Status:  status,
+		Auth:    auth,
+		Client:  client,
+	}
+}
+
+func detectMCPAuth(name, targetURL string, headers, env map[string]string) string {
+	if targetURL != "" {
+		if strings.Contains(strings.ToLower(targetURL), "oauth") || strings.Contains(strings.ToLower(name), "oauth") {
+			return "OAuth"
+		}
+		if len(headers) > 0 {
+			return authConnected
+		}
+		return authNone
+	}
+	for ek := range env {
+		if strings.Contains(ek, "KEY") || strings.Contains(ek, "TOKEN") {
+			return authConnected
+		}
+	}
+	return authNone
 }
 
 func parseCodexTOMLFile(path, scope string) map[string]MCPServerDTO {
@@ -205,102 +248,141 @@ func parseCodexTOMLFile(path, scope string) map[string]MCPServerDTO {
 	return res
 }
 
-func (s *mcpService) ListServers(ctx context.Context, profileName string) ([]MCPServerDTO, error) {
+func collectGlobalMCPServers(homeDir string, dst map[mcpServerKey]MCPServerDTO) {
+	if homeDir == "" {
+		return
+	}
+	globalSources := []struct {
+		path   string
+		client string
+		isTOML bool
+	}{
+		{filepath.Join(homeDir, ".gemini", "config", "mcp_config.json"), agentAgy, false},
+		{filepath.Join(homeDir, ".gemini", "antigravity-cli", "mcp_config.json"), agentAgy, false},
+		{filepath.Join(homeDir, ".claude.json"), agentClaude, false},
+		{filepath.Join(homeDir, ".claude", "mcp_config.json"), agentClaude, false},
+		{filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"), agentClaude, false},
+		{filepath.Join(homeDir, ".codex", "config.toml"), agentCodex, true},
+	}
+
+	for _, src := range globalSources {
+		var servers map[string]MCPServerDTO
+		if src.isTOML {
+			servers = parseCodexTOMLFile(src.path, scopeGlobal)
+		} else {
+			servers = parseMCPJSONFile(src.path, scopeGlobal, src.client)
+		}
+		for _, v := range servers {
+			key := mcpServerKey{client: v.Client, scope: v.Scope, name: v.Name}
+			if _, exists := dst[key]; !exists {
+				dst[key] = v
+			}
+		}
+	}
+}
+
+func (s *mcpService) collectProfileMCPServers(profileName string, dst map[mcpServerKey]MCPServerDTO) string {
+	if profileName == "" || profileName == scopeAll || profileName == scopeGlobal || s.pm == nil {
+		return ""
+	}
+	pDir := s.pm.ProfileDir(profileName)
+	profilesRoot, err := os.OpenRoot(s.pm.ProfilesRoot())
+	if err != nil {
+		return pDir
+	}
+	defer func() { _ = profilesRoot.Close() }()
+	profRoot, err := profilesRoot.OpenRoot(profileName)
+	if err != nil {
+		return pDir
+	}
+	defer func() { _ = profRoot.Close() }()
+
+	profileSources := []struct {
+		relPath string
+		client  string
+		isTOML  bool
+	}{
+		{filepath.Join(".gemini", "config", "mcp_config.json"), agentAgy, false},
+		{filepath.Join(".gemini", "antigravity-cli", "mcp_config.json"), agentAgy, false},
+		{".claude.json", agentClaude, false},
+		{filepath.Join(".claude", ".claude.json"), agentClaude, false},
+		{filepath.Join(".claude", "mcp_config.json"), agentClaude, false},
+		{filepath.Join(".codex", "config.toml"), agentCodex, true},
+	}
+
+	for _, src := range profileSources {
+		var servers map[string]MCPServerDTO
+		if src.isTOML {
+			if _, statErr := profRoot.Stat(src.relPath); statErr == nil {
+				servers = parseCodexTOMLFile(filepath.Join(pDir, src.relPath), profileName)
+			}
+		} else {
+			servers = parseMCPJSONFromRoot(profRoot, src.relPath, profileName, src.client)
+		}
+		for _, v := range servers {
+			key := mcpServerKey{client: v.Client, scope: v.Scope, name: v.Name}
+			dst[key] = v
+		}
+	}
+	return pDir
+}
+
+func shouldIncludeGlobalMCP(profileName string) bool {
+	if profileName == "" || profileName == scopeAll {
+		return true
+	}
+	cfg, _ := config.LoadConfig()
+	if cfg == nil || cfg.Profiles == nil {
+		return true
+	}
+	profCfg, ok := cfg.Profiles[profileName]
+	return !ok || profCfg.MCPGlobal == nil || *profCfg.MCPGlobal
+}
+
+func (s *mcpService) ListServers(_ context.Context, profileName string) ([]MCPServerDTO, error) {
 	homeDir := config.RealHomeDir()
-	allServers := make(map[string]MCPServerDTO)
+	allServers := make(map[mcpServerKey]MCPServerDTO)
 
 	profileName = strings.TrimSpace(profileName)
-	includeGlobal := true
-
-	if profileName != "" && profileName != "all" {
-		cfg, _ := config.LoadConfig()
-		if cfg != nil && cfg.Profiles != nil {
-			if profCfg, ok := cfg.Profiles[profileName]; ok {
-				if profCfg.MCPGlobal != nil && !*profCfg.MCPGlobal {
-					includeGlobal = false
-				}
-			}
+	if profileName != "" && profileName != scopeAll && profileName != scopeGlobal {
+		if err := profile.ValidateProfileName(profileName); err != nil {
+			return nil, err
 		}
 	}
 
-	// 1. Collect global MCP servers if enabled
-	if includeGlobal && homeDir != "" {
-		globalSources := []struct {
-			path   string
-			client string
-			isTOML bool
-		}{
-			{filepath.Join(homeDir, ".gemini", "config", "mcp_config.json"), "agy", false},
-			{filepath.Join(homeDir, ".gemini", "antigravity-cli", "mcp_config.json"), "agy", false},
-			{filepath.Join(homeDir, ".claude.json"), "claude", false},
-			{filepath.Join(homeDir, ".claude", "mcp_config.json"), "claude", false},
-			{filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"), "claude", false},
-			{filepath.Join(homeDir, ".codex", "config.toml"), "codex", true},
-		}
-
-		for _, src := range globalSources {
-			var servers map[string]MCPServerDTO
-			if src.isTOML {
-				servers = parseCodexTOMLFile(src.path, "global")
-			} else {
-				servers = parseMCPJSONFile(src.path, "global", src.client)
-			}
-			for k, v := range servers {
-				if _, exists := allServers[k]; !exists {
-					allServers[k] = v
-				}
-			}
-		}
+	if shouldIncludeGlobalMCP(profileName) {
+		collectGlobalMCPServers(homeDir, allServers)
 	}
-
-	// 2. Collect profile-scoped MCP servers
-	var pDir string
-	if profileName != "" && profileName != "all" && s.pm != nil {
-		pDir = s.pm.ProfileDir(profileName)
-		profileSources := []struct {
-			path   string
-			client string
-			isTOML bool
-		}{
-			{filepath.Join(pDir, ".gemini", "config", "mcp_config.json"), "agy", false},
-			{filepath.Join(pDir, ".gemini", "antigravity-cli", "mcp_config.json"), "agy", false},
-			{filepath.Join(pDir, ".claude.json"), "claude", false},
-			{filepath.Join(pDir, ".claude", ".claude.json"), "claude", false},
-			{filepath.Join(pDir, ".claude", "mcp_config.json"), "claude", false},
-			{filepath.Join(pDir, ".codex", "config.toml"), "codex", true},
-		}
-
-		for _, src := range profileSources {
-			var servers map[string]MCPServerDTO
-			if src.isTOML {
-				servers = parseCodexTOMLFile(src.path, profileName)
-			} else {
-				servers = parseMCPJSONFile(src.path, profileName, src.client)
-			}
-			for k, v := range servers {
-				allServers[k] = v // Profile overrides global
-			}
-		}
-	}
+	pDir := s.collectProfileMCPServers(profileName, allServers)
 
 	result := make([]MCPServerDTO, 0, len(allServers))
 	for _, v := range allServers {
-		// Recheck live OAuth status for remote servers if auth is OAuth
-		if v.URL != "" && (v.Auth == "OAuth" || v.Auth == "none") {
-			status := agents.InspectRemoteOAuthStatus(v.URL, pDir)
-			if status == "connected" || status == "expired" {
-				v.Auth = status
-			}
-		}
-		result = append(result, v)
+		result = append(result, enrichMCPServerOAuth(v, pDir))
 	}
-
-	// Sort deterministically by name
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Name < result[j].Name
-	})
-
+	sortMCPServers(result)
 	return result, nil
+}
+
+func enrichMCPServerOAuth(v MCPServerDTO, pDir string) MCPServerDTO {
+	if v.URL != "" && (v.Auth == "OAuth" || v.Auth == authNone) {
+		status := agents.InspectRemoteOAuthStatus(v.URL, pDir)
+		if status == authConnected || status == "expired" {
+			v.Auth = status
+		}
+	}
+	return v
+}
+
+func sortMCPServers(result []MCPServerDTO) {
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Name != result[j].Name {
+			return result[i].Name < result[j].Name
+		}
+		if result[i].Client != result[j].Client {
+			return result[i].Client < result[j].Client
+		}
+		return result[i].Scope < result[j].Scope
+	})
 }
 
 func (s *mcpService) getTargetAdapters(clients []string) []agents.MCPConfigManager {
@@ -338,6 +420,11 @@ func (s *mcpService) AddServer(ctx context.Context, req AddMCPServerRequest) err
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return fmt.Errorf("server name is required")
+	}
+	if p := strings.TrimSpace(req.Profile); p != "" && p != scopeGlobal {
+		if err := profile.ValidateProfileName(p); err != nil {
+			return err
+		}
 	}
 
 	cfg := agents.MCPServerConfig{
@@ -390,6 +477,11 @@ func (s *mcpService) SetServerState(ctx context.Context, name string, req SetMCP
 	if name == "" {
 		return fmt.Errorf("server name is required")
 	}
+	if p := strings.TrimSpace(req.Profile); p != "" && p != scopeGlobal {
+		if err := profile.ValidateProfileName(p); err != nil {
+			return err
+		}
+	}
 
 	targets := s.getTargetAdapters(req.Clients)
 	if len(targets) == 0 {
@@ -431,6 +523,11 @@ func (s *mcpService) RemoveServer(ctx context.Context, name string, profileName 
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("server name is required")
+	}
+	if p := strings.TrimSpace(profileName); p != "" && p != scopeGlobal {
+		if err := profile.ValidateProfileName(p); err != nil {
+			return err
+		}
 	}
 
 	targets := s.getTargetAdapters(clients)
