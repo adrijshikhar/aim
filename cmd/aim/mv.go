@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -30,7 +31,7 @@ Flags:
   -f, --force       Overwrite existing credentials in target profile if already present`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			exitCode := executeMv(reg, pm, args[0], args[1], args[2], forceFlag)
+			exitCode := executeMvTo(cmd.OutOrStdout(), cmd.ErrOrStderr(), reg, pm, args[0], args[1], args[2], forceFlag)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
 			}
@@ -55,6 +56,10 @@ Flags:
 }
 
 func executeMv(reg *agents.Registry, pm *profile.ProfileManager, agentName, sourceProfile, targetProfile string, force bool) int {
+	return executeMvTo(os.Stdout, os.Stderr, reg, pm, agentName, sourceProfile, targetProfile, force)
+}
+
+func executeMvTo(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName, sourceProfile, targetProfile string, force bool) int {
 	cfg, _ := config.LoadConfig()
 	if cfg == nil {
 		cfg = config.NewDefaultConfig()
@@ -69,7 +74,7 @@ func executeMv(reg *agents.Registry, pm *profile.ProfileManager, agentName, sour
 	err := pm.MoveAgent(agentName, sourceProfile, targetProfile, force, cfg, reg)
 	if err != nil {
 		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
-		fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
+		_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
 		return 1
 	}
 
@@ -81,7 +86,7 @@ func executeMv(reg *agents.Registry, pm *profile.ProfileManager, agentName, sour
 		"overwrote_target": force,
 	})
 
-	fmt.Printf("%s Moved agent %s from profile %s to %s.\n",
+	_, _ = fmt.Fprintf(out, "%s Moved agent %s from profile %s to %s.\n",
 		okBadge,
 		bold.Render(agentName),
 		cyan.Render(sourceProfile),

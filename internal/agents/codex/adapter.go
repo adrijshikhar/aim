@@ -103,12 +103,7 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	if err != nil || len(data) == 0 {
 		return false
 	}
-	tmp := destPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return false
-	}
-	if err := os.Rename(tmp, destPath); err != nil {
-		_ = os.Remove(tmp)
+	if err := merge.AtomicWrite(destPath, data, 0o600); err != nil {
 		return false
 	}
 	logger.Debug("[codex] Successfully seeded credentials from %s to %s", hostAuthPath, destPath)
@@ -266,7 +261,7 @@ func copyHostConfig(realHome, profileCodexDir string) {
 			// Host servers and plugin enablement reach sessions through the
 			// session merge (T4, G5): a new profile starts with none of its own.
 			cleaned = string(stripTables(profileCodexDir, []byte(cleaned), "mcp_servers", "plugins"))
-			_ = os.WriteFile(destConfig, []byte(cleaned), 0644)
+			_ = merge.AtomicWrite(destConfig, []byte(cleaned), 0o600)
 		}
 	} else {
 		// Migrate any existing hostHooksJSON paths and deduplicate tables
@@ -279,7 +274,7 @@ func copyHostConfig(realHome, profileCodexDir string) {
 			}
 			cleaned, dupes := deduplicateTomlTables(destStr)
 			if changed || dupes > 0 {
-				_ = os.WriteFile(destConfig, []byte(cleaned), 0644)
+				_ = merge.AtomicWrite(destConfig, []byte(cleaned), 0o600)
 			}
 		}
 	}

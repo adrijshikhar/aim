@@ -17,6 +17,7 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/service"
 	"github.com/aim-cli/aim/internal/share"
@@ -74,8 +75,7 @@ func writeWebPID(pid, port int) error {
 	if err != nil {
 		return err
 	}
-	_ = os.MkdirAll(config.BaseDir(), 0755)
-	return os.WriteFile(webPIDPath(), data, 0600)
+	return merge.AtomicWrite(webPIDPath(), data, 0o600)
 }
 
 func removeOwnWebPID() error {

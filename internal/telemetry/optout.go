@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/mattn/go-isatty"
 )
 
@@ -37,8 +38,7 @@ func MaybeDisplayFirstRunNotice(baseDir string) bool {
 		return false
 	}
 
-	_ = os.MkdirAll(baseDir, 0755)
-	_ = os.WriteFile(marker, []byte("1"), 0644)
+	_ = merge.AtomicWrite(marker, []byte("1"), 0o600)
 
 	if !IsTelemetryEnabled(nil) {
 		return true

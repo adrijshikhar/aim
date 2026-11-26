@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/aim-cli/aim/internal/merge"
 )
 
 var knownAgents = map[string]bool{
@@ -59,11 +61,12 @@ func AnonymousMachineID(baseDir string) string {
 
 	// Generate 32 random bytes and hash them
 	buf := make([]byte, 32)
-	_, _ = rand.Read(buf)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
 	h := sha256.Sum256(buf)
 	id := hex.EncodeToString(h[:])
 
-	_ = os.MkdirAll(baseDir, 0755)
-	_ = os.WriteFile(idPath, []byte(id), 0600)
+	_ = merge.AtomicWrite(idPath, []byte(id), 0o600)
 	return id
 }

@@ -56,8 +56,15 @@ func Init(dir string) {
 	if !isDebugLocked() {
 		return
 	}
-	_ = os.MkdirAll(dir, 0755)
-	f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return
+	}
+	f, err := root.OpenFile("aim-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	_ = root.Close()
 	if err == nil {
 		logFile = f
 	}

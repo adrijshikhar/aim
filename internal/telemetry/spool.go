@@ -53,8 +53,10 @@ func (s *Spooler) AppendBatch(events []Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_ = os.MkdirAll(filepath.Dir(s.SpoolPath), 0755)
-	f, err := os.OpenFile(s.SpoolPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err := os.MkdirAll(filepath.Dir(s.SpoolPath), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(s.SpoolPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}

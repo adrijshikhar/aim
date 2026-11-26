@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/oauth"
 )
 
@@ -214,11 +215,6 @@ func (c *CacheStore) Rename(oldProfile, newProfile string) {
 }
 
 func (c *CacheStore) saveAtomic() error {
-	dir := filepath.Dir(c.filePath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-
 	d := diskCacheData{
 		Version:   "1",
 		UpdatedAt: time.Now(),
@@ -230,16 +226,7 @@ func (c *CacheStore) saveAtomic() error {
 		return err
 	}
 
-	tmpFile := c.filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
-		return err
-	}
-
-	if err := os.Rename(tmpFile, c.filePath); err != nil {
-		_ = os.Remove(tmpFile)
-		return err
-	}
-	return nil
+	return merge.AtomicWrite(c.filePath, data, 0o600)
 }
 
 // IsStale returns true if the cached report for agent:profile is missing or older than maxAge.

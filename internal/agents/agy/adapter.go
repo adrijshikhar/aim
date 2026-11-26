@@ -508,11 +508,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	}
 
 	dest := a.TokenPath(profileDir)
-	tmp := dest + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, dest); err != nil {
+	if err := merge.AtomicWrite(dest, data, 0o600); err != nil {
 		return err
 	}
 

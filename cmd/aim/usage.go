@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -32,7 +33,7 @@ func newUsageCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 		Short: "Display remaining quota and usage limits",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeUsage(reg, pm, args, opts)
+			return executeUsageTo(cmd.OutOrStdout(), cmd.ErrOrStderr(), reg, pm, args, opts)
 		},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			return completeAgentAndProfile(reg, pm, args, toComplete)
@@ -53,8 +54,11 @@ func runUsage(reg *agents.Registry, pm *profile.ProfileManager, args []string) e
 }
 
 func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []string, opts usageOptions) error {
-	targetAgent := ""
-	targetProfile := ""
+	return executeUsageTo(os.Stdout, os.Stderr, reg, pm, args, opts)
+}
+
+func executeUsageTo(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, args []string, opts usageOptions) error {
+	targetAgent, targetProfile := "", ""
 	if len(args) > 0 {
 		targetAgent = args[0]
 	}
@@ -64,12 +68,7 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 	logger.Debug("[usage] Querying usage (agent=%q, profile=%q, refresh=%t, json=%t)", targetAgent, targetProfile, opts.refresh, opts.jsonOutput)
 
 	if pm == nil {
-		if opts.jsonOutput {
-			fmt.Println("[]")
-			return nil
-		}
-		fmt.Println("No profiles configured.")
-		return nil
+		return writeEmptyUsage(out, targetAgent, opts.jsonOutput, true)
 	}
 	if reg == nil {
 		reg = defaultRegistry()
@@ -77,24 +76,15 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 
 	cfg, _ := config.LoadConfig()
 	baseDir := config.BaseDir()
-	if pm != nil && pm.BaseDir != "" {
+	if pm.BaseDir != "" {
 		baseDir = pm.BaseDir
 	}
 	cache := usage.NewCacheStore(baseDir, usage.DefaultTTL)
 
-	canonicalAgent := targetAgent
-	var adapters []agents.AgentAdapter
-	if targetAgent != "" {
-		ad, err := reg.Get(targetAgent)
-		if err != nil {
-			return fmt.Errorf("unknown agent %q", targetAgent)
-		}
-		canonicalAgent = ad.Name()
-		adapters = []agents.AgentAdapter{ad}
-	} else {
-		adapters = reg.All()
+	canonicalAgent, adapters, err := resolveUsageAdapters(reg, targetAgent)
+	if err != nil {
+		return err
 	}
-
 	if opts.refresh {
 		flushAgent := ""
 		if targetAgent != "" {
@@ -103,6 +93,49 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		cache.Flush(flushAgent)
 	}
 
+	targets := collectUsageTargets(pm, cfg, reg, adapters, targetProfile)
+	if len(targets) == 0 {
+		return writeEmptyUsage(out, targetAgent, opts.jsonOutput, false)
+	}
+
+	useColor := isTerminalWriter(out) && !opts.noColor
+	reports := collectUsageReports(errOut, targets, cache, useColor, opts.jsonOutput)
+
+	if opts.jsonOutput {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(reports)
+	}
+
+	renderUsageReports(out, reports, useColor)
+	return nil
+}
+
+func writeEmptyUsage(out io.Writer, targetAgent string, jsonOutput, noProfiles bool) error {
+	if jsonOutput {
+		_, err := fmt.Fprintln(out, "[]")
+		return err
+	}
+	if !noProfiles && targetAgent != "" {
+		_, err := fmt.Fprintf(out, "No profiles found for agent %s.\n", targetAgent)
+		return err
+	}
+	_, err := fmt.Fprintln(out, "No profiles configured.")
+	return err
+}
+
+func resolveUsageAdapters(reg *agents.Registry, targetAgent string) (string, []agents.AgentAdapter, error) {
+	if targetAgent == "" {
+		return "", reg.All(), nil
+	}
+	ad, err := reg.Get(targetAgent)
+	if err != nil {
+		return "", nil, fmt.Errorf("unknown agent %q", targetAgent)
+	}
+	return ad.Name(), []agents.AgentAdapter{ad}, nil
+}
+
+func collectUsageTargets(pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry, adapters []agents.AgentAdapter, targetProfile string) []usage.TargetProfile {
 	var targets []usage.TargetProfile
 	for _, ad := range adapters {
 		profs, _ := pm.ListProfilesForAgent(ad.Name(), cfg, reg)
@@ -110,52 +143,33 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			if targetProfile != "" && p != targetProfile {
 				continue
 			}
-			pDir := pm.ProfileDir(p)
-			adapter := ad
 			var usageFn func(context.Context, string, string) (*usage.Report, error)
-			if up, ok := adapter.(agents.UsageProvider); ok {
+			if up, ok := ad.(agents.UsageProvider); ok {
 				usageFn = up.GetUsage
 			}
 			var cachedUsageFn func(context.Context, string, string) (*usage.Report, error)
-			if cp, ok := adapter.(agents.CachedUsageProvider); ok {
+			if cp, ok := ad.(agents.CachedUsageProvider); ok {
 				cachedUsageFn = cp.GetCachedUsage
 			}
 			targets = append(targets, usage.TargetProfile{
-				Agent:            adapter.Name(),
+				Agent:            ad.Name(),
 				Profile:          p,
-				ProfileDir:       pDir,
+				ProfileDir:       pm.ProfileDir(p),
 				GetUsageFn:       usageFn,
 				GetCachedUsageFn: cachedUsageFn,
 			})
 		}
 	}
+	return targets
+}
 
-	if len(targets) == 0 {
-		if opts.jsonOutput {
-			fmt.Println("[]")
-			return nil
-		}
-		if targetAgent != "" {
-			fmt.Printf("No profiles found for agent %s.\n", targetAgent)
-		} else {
-			fmt.Println("No profiles configured.")
-		}
-		return nil
-	}
-
-	useColor := isTerminal()
-	if opts.noColor {
-		useColor = false
-	}
-
+func collectUsageReports(errOut io.Writer, targets []usage.TargetProfile, cache *usage.CacheStore, useColor, jsonOutput bool) []usage.Report {
 	reportsChan := usage.RefreshAsync(context.Background(), targets, cache)
-	var reports []usage.Report
+	reports := make([]usage.Report, 0, len(targets))
 
-	// Show an interactive live spinner on stderr when querying live in an interactive terminal
-	if useColor && !opts.jsonOutput {
-		spin := presenter.NewSpinner(os.Stderr, fmt.Sprintf("Querying usage quotas for %d profile(s)...", len(targets)))
+	if useColor && !jsonOutput {
+		spin := presenter.NewSpinner(errOut, fmt.Sprintf("Querying usage quotas for %d profile(s)...", len(targets)))
 		spin.Start()
-
 		count := 0
 		for r := range reportsChan {
 			reports = append(reports, r)
@@ -175,58 +189,40 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 		}
 		return reports[i].Profile < reports[j].Profile
 	})
+	return reports
+}
 
-	if opts.jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(reports)
-	}
+func renderUsageReports(out io.Writer, reports []usage.Report, useColor bool) {
+	hasCategory, hasAccount, has5h := detectUsageColumns(reports)
+	columns := usageTableColumns{hasAccount: hasAccount, hasCategory: hasCategory, has5h: has5h}
+	rows := buildUsageRows(reports, columns, useColor)
+	presenter.PrintTable(out, columns.headers(), rows, useColor)
+}
 
-	hasCategory := false
-	for _, r := range reports {
-		for _, w := range r.Windows {
-			if strings.TrimSpace(w.Category) != "" {
-				hasCategory = true
-				break
-			}
-		}
-		if hasCategory {
-			break
-		}
-	}
-
-	hasAccount := false
+func detectUsageColumns(reports []usage.Report) (hasCategory, hasAccount, has5h bool) {
 	for _, r := range reports {
 		if r.AccountEmail != "" {
 			hasAccount = true
-			break
 		}
-	}
-
-	has5h := false
-	for _, r := range reports {
 		for i := range r.Windows {
+			if strings.TrimSpace(r.Windows[i].Category) != "" {
+				hasCategory = true
+			}
 			if r.Windows[i].IsHourly() {
 				has5h = true
-				break
 			}
 		}
-		if has5h {
-			break
-		}
 	}
+	return hasCategory, hasAccount, has5h
+}
 
-	columns := usageTableColumns{hasAccount: hasAccount, hasCategory: hasCategory, has5h: has5h}
-	headers := columns.headers()
-
+func buildUsageRows(reports []usage.Report, columns usageTableColumns, useColor bool) [][]string {
 	var rows [][]string
 	for _, r := range reports {
 		checked := "just now"
 		if r.FromCache {
-			age := time.Since(r.FetchedAt)
-			checked = usage.FormatDuration(age) + " ago"
+			checked = usage.FormatDuration(time.Since(r.FetchedAt)) + " ago"
 		}
-
 		accStr := "—"
 		if r.AccountEmail != "" {
 			accStr = r.AccountEmail
@@ -237,61 +233,68 @@ func executeUsage(reg *agents.Registry, pm *profile.ProfileManager, args []strin
 			continue
 		}
 
-		type catGroup struct {
-			category string
-			windows  []usage.LimitWindow
-		}
-		var groups []catGroup
-		catIdx := make(map[string]int)
+		rows = append(rows, buildUsageCategoryRows(r, accStr, checked, columns, useColor)...)
+	}
+	return rows
+}
 
-		for _, w := range r.Windows {
-			cat := strings.TrimSpace(w.Category)
-			idx, exists := catIdx[cat]
-			if !exists {
-				catIdx[cat] = len(groups)
-				groups = append(groups, catGroup{category: cat, windows: []usage.LimitWindow{w}})
-			} else {
-				groups[idx].windows = append(groups[idx].windows, w)
-			}
-		}
+func buildUsageCategoryRows(r usage.Report, accStr, checked string, columns usageTableColumns, useColor bool) [][]string {
+	type catGroup struct {
+		category string
+		windows  []usage.LimitWindow
+	}
+	var groups []catGroup
+	catIdx := make(map[string]int)
 
-		for _, g := range groups {
-			catStatus := usage.CalculateStatus(g.windows)
-			catName := usage.CleanModelCategory(g.category)
-			primary, weekly := findCategoryWindows(g.windows)
-
-			pStr := "—"
-			pReset := "—"
-			if primary != nil {
-				pStr = presenter.RenderCLIBar(primary.RemainingPct, 10, catStatus, useColor)
-				if primary.RemainingPct < 100 && primary.ResetsIn > 0 {
-					pReset = usage.FormatDuration(primary.ResetsIn)
-				}
-			}
-
-			wStr := "—"
-			wReset := "—"
-			if weekly != nil {
-				wStr = presenter.RenderCLIBar(weekly.RemainingPct, 10, catStatus, useColor)
-				if weekly.RemainingPct < 100 && weekly.ResetsIn > 0 {
-					wReset = usage.FormatDuration(weekly.ResetsIn)
-				}
-			}
-
-			statusStr := presenter.RenderCLIStatus(catStatus, useColor)
-			rows = append(rows, columns.row(usageRowValues{agent: r.Agent, profile: r.Profile, account: accStr, category: catName, status: statusStr, primary: pStr, primaryReset: pReset, weekly: wStr, weeklyReset: wReset, checked: checked}))
+	for _, w := range r.Windows {
+		cat := strings.TrimSpace(w.Category)
+		if idx, exists := catIdx[cat]; !exists {
+			catIdx[cat] = len(groups)
+			groups = append(groups, catGroup{category: cat, windows: []usage.LimitWindow{w}})
+		} else {
+			groups[idx].windows = append(groups[idx].windows, w)
 		}
 	}
 
-	presenter.PrintTable(os.Stdout, headers, rows, useColor)
-	return nil
+	rows := make([][]string, 0, len(groups))
+	for _, g := range groups {
+		catStatus := usage.CalculateStatus(g.windows)
+		catName := usage.CleanModelCategory(g.category)
+		primary, weekly := findCategoryWindows(g.windows)
+
+		pStr, pReset := formatUsageWindow(primary, catStatus, useColor)
+		wStr, wReset := formatUsageWindow(weekly, catStatus, useColor)
+		statusStr := presenter.RenderCLIStatus(catStatus, useColor)
+		rows = append(rows, columns.row(usageRowValues{agent: r.Agent, profile: r.Profile, account: accStr, category: catName, status: statusStr, primary: pStr, primaryReset: pReset, weekly: wStr, weeklyReset: wReset, checked: checked}))
+	}
+	return rows
+}
+
+func formatUsageWindow(w *usage.LimitWindow, catStatus usage.Status, useColor bool) (bar, reset string) {
+	if w == nil {
+		return "—", "—"
+	}
+	bar = presenter.RenderCLIBar(w.RemainingPct, 10, catStatus, useColor)
+	reset = "—"
+	if w.RemainingPct < 100 && w.ResetsIn > 0 {
+		reset = usage.FormatDuration(w.ResetsIn)
+	}
+	return bar, reset
 }
 
 func isTerminal() bool {
+	return isTerminalWriter(os.Stdout)
+}
+
+func isTerminalWriter(w io.Writer) bool {
 	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
 		return false
 	}
-	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }
 
 type usageTableColumns struct{ hasAccount, hasCategory, has5h bool }

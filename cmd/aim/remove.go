@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -21,7 +22,7 @@ func newRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 		Short: "Delete profile credentials and state",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			exitCode := executeRemove(reg, pm, args)
+			exitCode := executeRemoveTo(cmd.OutOrStdout(), cmd.ErrOrStderr(), reg, pm, args)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
 			}
@@ -42,22 +43,25 @@ func newRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 }
 
 func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []string) int {
+	return executeRemoveTo(os.Stdout, os.Stderr, reg, pm, args)
+}
+
+func executeRemoveTo(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, args []string) int {
 	var agentName, profileName string
-	if len(args) == 1 {
+	switch len(args) {
+	case 0:
+		_, _ = fmt.Fprintln(out, "Usage: aim remove [agent] <profile>")
+		return 1
+	case 1:
 		profileName = args[0]
-	} else if len(args) >= 2 {
+	default:
 		agentName = args[0]
 		profileName = args[1]
-	} else {
-		fmt.Println("Usage: aim remove [agent] <profile>")
-		return 1
 	}
 
-	if agentName != "" {
-		if reg != nil {
-			if adapter, err := reg.Get(agentName); err == nil {
-				agentName = adapter.Name()
-			}
+	if agentName != "" && reg != nil {
+		if adapter, err := reg.Get(agentName); err == nil {
+			agentName = adapter.Name()
 		}
 	}
 
@@ -68,54 +72,72 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 
 	okBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
 	cyan := lipgloss.NewStyle().Foreground(tui.AccentCyan)
-	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 
 	if agentName != "" {
-		account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agentName)
-		cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg)
-		if err != nil {
-			errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
-			if strings.Contains(err.Error(), "not associated") {
-				fmt.Fprintf(os.Stderr, "%s Agent %q is not associated with profile %q\n", errBadge, agentName, profileName)
-			} else {
-				fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
-			}
-			return 1
-		}
-		if reg != nil {
-			if ad, err := reg.Get(agentName); err == nil {
-				if purger, ok := ad.(agents.CredentialPurger); ok {
-					_ = purger.PurgeCredentials(context.Background(), profileName, pm.ProfileDir(profileName))
-				}
-			}
-		}
-		telemetry.CaptureAccountEvent(agentName, account, "agent_removed", map[string]any{
-			"profile_cleaned_up": cleanedUp,
-		})
-		if cleanedUp {
-			fmt.Printf("%s Removed agent %s and cleaned up profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
-		} else {
-			fmt.Printf("%s Removed agent %s from profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
-		}
-		return 0
+		return executeRemoveAgent(out, errOut, reg, pm, cfg, agentName, profileName, okBadge, cyan)
 	}
+	return executeRemoveProfile(out, errOut, reg, pm, cfg, profileName, okBadge, cyan)
+}
 
+func executeRemoveAgent(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config, agentName, profileName, okBadge string, cyan lipgloss.Style) int {
+	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+	account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agentName)
+	cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg)
+	if err != nil {
+		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
+		if strings.Contains(err.Error(), "not associated") {
+			_, _ = fmt.Fprintf(errOut, "%s Agent %q is not associated with profile %q\n", errBadge, agentName, profileName)
+		} else {
+			_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
+		}
+		return 1
+	}
+	purgeRemovedAgent(reg, agentName, profileName, pm.ProfileDir(profileName))
+	telemetry.CaptureAccountEvent(agentName, account, "agent_removed", map[string]any{
+		"profile_cleaned_up": cleanedUp,
+	})
+	if cleanedUp {
+		_, _ = fmt.Fprintf(out, "%s Removed agent %s and cleaned up profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
+	} else {
+		_, _ = fmt.Fprintf(out, "%s Removed agent %s from profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
+	}
+	return 0
+}
+
+func executeRemoveProfile(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config, profileName, okBadge string, cyan lipgloss.Style) int {
 	pDir := pm.ProfileDir(profileName)
 	if err := pm.DeleteProfile(profileName, cfg); err != nil {
 		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
-		fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
+		_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
 		return 1
 	}
+	purgeRemovedProfile(reg, profileName, pDir)
+	_, _ = fmt.Fprintf(out, "%s Profile %s removed successfully.\n", okBadge, cyan.Render(profileName))
+	return 0
+}
 
-	if reg != nil {
-		for _, ad := range reg.All() {
-			if purger, ok := ad.(agents.CredentialPurger); ok {
-				_ = purger.PurgeCredentials(context.Background(), profileName, pDir)
-			}
+func purgeRemovedAgent(reg *agents.Registry, agentName, profileName, pDir string) {
+	if reg == nil {
+		return
+	}
+	ad, err := reg.Get(agentName)
+	if err != nil {
+		return
+	}
+	if purger, ok := ad.(agents.CredentialPurger); ok {
+		_ = purger.PurgeCredentials(context.Background(), profileName, pDir)
+	}
+}
+
+func purgeRemovedProfile(reg *agents.Registry, profileName, pDir string) {
+	if reg == nil {
+		return
+	}
+	for _, ad := range reg.All() {
+		if purger, ok := ad.(agents.CredentialPurger); ok {
+			_ = purger.PurgeCredentials(context.Background(), profileName, pDir)
 		}
 	}
-	fmt.Printf("%s Profile %s removed successfully.\n", okBadge, cyan.Render(profileName))
-	return 0
 }
 
 func runRemove(reg *agents.Registry, pm *profile.ProfileManager, args []string) error {

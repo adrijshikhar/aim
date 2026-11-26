@@ -61,6 +61,10 @@ linters:
     - nolintlint
 
   exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - goconst
     paths:
       - vendor$
       - third_party$

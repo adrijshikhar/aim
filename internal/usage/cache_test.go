@@ -1251,3 +1251,33 @@ func TestRefreshAsync_ClearsRefusalOnSuccessfulFetch(t *testing.T) {
 		}
 	}
 }
+
+func TestCacheStore_StrictPermissions(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := usage.NewCacheStore(tmpDir, time.Minute)
+	if err := store.Put(usage.Report{
+		Agent:     "codex",
+		Profile:   "work",
+		Status:    usage.StatusOK,
+		FetchedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	cacheDir := filepath.Join(tmpDir, "cache")
+	dirInfo, err := os.Stat(cacheDir)
+	if err != nil {
+		t.Fatalf("stat cache dir: %v", err)
+	}
+	if dirInfo.Mode().Perm() != 0o700 {
+		t.Errorf("cache dir mode = %#o, want 0700", dirInfo.Mode().Perm())
+	}
+
+	fileInfo, err := os.Stat(filepath.Join(cacheDir, "usage.json"))
+	if err != nil {
+		t.Fatalf("stat usage.json: %v", err)
+	}
+	if fileInfo.Mode().Perm() != 0o600 {
+		t.Errorf("usage.json mode = %#o, want 0600", fileInfo.Mode().Perm())
+	}
+}

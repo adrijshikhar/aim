@@ -161,10 +161,11 @@ Flags:
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 			if debugFlag {
 				logger.SetDebug(true)
 			}
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -217,12 +218,13 @@ func newVersionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Show AIM version",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if verbose {
-				fmt.Printf("aim version %s (commit: %s, built at: %s)\n", Version, Commit, Date)
-			} else {
-				fmt.Printf("aim version %s\n", Version)
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "aim version %s (commit: %s, built at: %s)\n", Version, Commit, Date)
+				return err
 			}
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "aim version %s\n", Version)
+			return err
 		},
 	}
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show detailed build metadata (commit and date)")

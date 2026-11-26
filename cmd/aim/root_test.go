@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -129,6 +130,35 @@ func TestSanitizeVersion(t *testing.T) {
 			}
 			if strings.Contains(got, "-dirty") {
 				t.Fatalf("CRITICAL: sanitizeVersion(%q) returned string containing '-dirty': %q", tc.input, got)
+			}
+		})
+	}
+}
+
+func TestRootCmd_OutputRouting(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		contains string
+	}{
+		{name: "version", args: []string{"version"}, contains: "aim version"},
+		{name: "config path", args: []string{"config", "path"}, contains: "config.json"},
+		{name: "usage empty", args: []string{"usage", "--json"}, contains: "[]"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AIM_HOME", t.TempDir())
+			cmd := newRootCmd(nil, nil)
+			var out, errOut bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&errOut)
+			cmd.SetArgs(tc.args)
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("execute %v: %v (stderr: %s)", tc.args, err, errOut.String())
+			}
+			if !strings.Contains(out.String(), tc.contains) {
+				t.Fatalf("stdout = %q, want substring %q", out.String(), tc.contains)
 			}
 		})
 	}

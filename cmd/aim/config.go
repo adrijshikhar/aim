@@ -39,8 +39,9 @@ Subcommands:
 	pathCmd := &cobra.Command{
 		Use:   "path",
 		Short: "Print absolute path to active config.json",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintln(cmd.OutOrStdout(), config.ConfigFilePath())
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), config.ConfigFilePath())
+			return err
 		},
 	}
 

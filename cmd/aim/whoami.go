@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,18 +26,43 @@ func newWhoamiCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 		Use:     "whoami",
 		Aliases: []string{"current"},
 		Short:   "Show active profile, agent, session, and quota info",
-		Run: func(cmd *cobra.Command, args []string) {
-			executeWhoami(reg, pm)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			executeWhoamiTo(cmd.OutOrStdout(), reg, pm)
+			return nil
 		},
 	}
 }
 
 func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
-	profileName := os.Getenv("AIM_PROFILE")
-	agentName := os.Getenv("AIM_AGENT")
+	executeWhoamiTo(os.Stdout, reg, pm)
+}
 
+func executeWhoamiTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager) {
 	baseDir := config.BaseDir()
 	profilesDir := filepath.Join(baseDir, "profiles")
+	profileName, agentName := resolveWhoamiTarget(profilesDir)
+
+	cfg, _ := config.LoadConfig()
+	if profileName == "" {
+		renderWhoamiNoSession(out, pm, cfg)
+		return
+	}
+
+	if agentName == "" && cfg != nil {
+		if agentList := cfg.GetProfileAgents(profileName); len(agentList) > 0 {
+			agentName = agentList[0]
+		}
+	}
+	if agentName == "" {
+		agentName = "agy" // default
+	}
+
+	renderWhoamiSession(out, reg, cfg, baseDir, profilesDir, profileName, agentName)
+}
+
+func resolveWhoamiTarget(profilesDir string) (profileName, agentName string) {
+	profileName = os.Getenv("AIM_PROFILE")
+	agentName = os.Getenv("AIM_AGENT")
 	homeDir := os.Getenv("HOME")
 
 	// If AIM_PROFILE is not set, try to infer from HOME directory
@@ -57,69 +83,51 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 	}
 
 	logger.Debug("[whoami] Inferred profileName=%q, agentName=%q (HOME=%s, profilesDir=%s)", profileName, agentName, homeDir, profilesDir)
+	return profileName, agentName
+}
 
-	cfg, _ := config.LoadConfig()
+func renderWhoamiNoSession(out io.Writer, pm *profile.ProfileManager, cfg *config.Config) {
+	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+	muted := lipgloss.NewStyle().Foreground(tui.TextMuted)
+	accent := lipgloss.NewStyle().Foreground(tui.AccentBlue).Bold(true)
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(tui.TextDim).
+		Padding(0, 1)
 
-	// If still no active profile, show summary of available profiles
-	if profileName == "" {
-		bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
-		muted := lipgloss.NewStyle().Foreground(tui.TextMuted)
-		accent := lipgloss.NewStyle().Foreground(tui.AccentBlue).Bold(true)
-		cardStyle := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(tui.TextDim).
-			Padding(0, 1)
+	var b strings.Builder
+	b.WriteString(bold.Render("No active AIM session in this shell.") + "\n")
+	writeConfiguredProfiles(&b, pm, cfg, accent, muted)
+	b.WriteString("\n" + muted.Render("Run 'aim' or 'aim run <agent> <profile>' to start a session."))
+	printCard(out, cardStyle.Render(strings.TrimRight(b.String(), "\n")))
+}
 
-		var b strings.Builder
-		b.WriteString(bold.Render("No active AIM session in this shell.") + "\n")
-		if pm != nil {
-			profs, _ := pm.ListProfiles()
-			if len(profs) > 0 {
-				b.WriteString("\n" + muted.Render("Configured profiles:") + "\n")
-				for _, p := range profs {
-					var agentList []string
-					if cfg != nil {
-						agentList = cfg.GetProfileAgents(p)
-					}
-					agentTag := ""
-					if len(agentList) > 0 {
-						agentTag = fmt.Sprintf(" [%s]", strings.Join(agentList, ", "))
-					}
-					b.WriteString(fmt.Sprintf("  • %s%s\n", accent.Render(p), muted.Render(agentTag)))
-				}
-			}
-		}
-		b.WriteString("\n" + muted.Render("Run 'aim' or 'aim run <agent> <profile>' to start a session."))
-		fmt.Println()
-		fmt.Println(cardStyle.Render(strings.TrimRight(b.String(), "\n")))
-		fmt.Println()
+func writeConfiguredProfiles(b *strings.Builder, pm *profile.ProfileManager, cfg *config.Config, accent, muted lipgloss.Style) {
+	if pm == nil {
 		return
 	}
-
-	// Active session detected
-	if agentName == "" && cfg != nil {
-		agentList := cfg.GetProfileAgents(profileName)
-		if len(agentList) > 0 {
-			agentName = agentList[0]
+	profs, _ := pm.ListProfiles()
+	if len(profs) == 0 {
+		return
+	}
+	b.WriteString("\n" + muted.Render("Configured profiles:") + "\n")
+	for _, p := range profs {
+		agentTag := ""
+		if cfg != nil {
+			if agentList := cfg.GetProfileAgents(p); len(agentList) > 0 {
+				agentTag = fmt.Sprintf(" [%s]", strings.Join(agentList, ", "))
+			}
 		}
+		_, _ = fmt.Fprintf(b, "  • %s%s\n", accent.Render(p), muted.Render(agentTag))
 	}
-	if agentName == "" {
-		agentName = "agy" // default
-	}
+}
 
+func renderWhoamiSession(out io.Writer, reg *agents.Registry, cfg *config.Config, baseDir, profilesDir, profileName, agentName string) {
+	_ = cfg
 	profileDir := filepath.Join(profilesDir, profileName)
 	convID := findActiveConversationID(profileDir)
 	chatTitle := getConversationTitle(profileDir, convID)
-
-	quotaSummary := ""
-	cacheStore := usage.NewCacheStore(baseDir, usage.DefaultTTL)
-	if rep, ok := cacheStore.Get(agentName, profileName); ok && rep.Summary != "" {
-		quotaSummary = rep.Summary
-	} else if reg != nil {
-		if adapter, err := reg.Get(agentName); err == nil && adapter.HasCredentials(profileDir) {
-			quotaSummary = "[run 'aim usage' to inspect limits]"
-		}
-	}
+	quotaSummary := lookupWhoamiQuota(baseDir, reg, agentName, profileName, profileDir)
 
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -132,9 +140,30 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("⚡ Active AIM Session") + "\n\n")
-	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Profile:"), valStyle.Render(profileName)))
-	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Agent:"), valStyle.Render(agentName)))
+	_, _ = fmt.Fprintf(&b, "%s %s\n", labelStyle.Render("Profile:"), valStyle.Render(profileName))
+	_, _ = fmt.Fprintf(&b, "%s %s\n", labelStyle.Render("Agent:"), valStyle.Render(agentName))
 
+	writeWhoamiAccount(&b, labelStyle, profileDir, agentName)
+	_, _ = fmt.Fprintf(&b, "%s %s\n", labelStyle.Render("Profile Home:"), lipgloss.NewStyle().Foreground(tui.TextDim).Render(profileDir))
+	writeWhoamiSessionDetails(&b, labelStyle, valStyle, convID, chatTitle, quotaSummary)
+
+	printCard(out, cardStyle.Render(strings.TrimRight(b.String(), "\n")))
+}
+
+func lookupWhoamiQuota(baseDir string, reg *agents.Registry, agentName, profileName, profileDir string) string {
+	cacheStore := usage.NewCacheStore(baseDir, usage.DefaultTTL)
+	if rep, ok := cacheStore.Get(agentName, profileName); ok && rep.Summary != "" {
+		return rep.Summary
+	}
+	if reg != nil {
+		if adapter, err := reg.Get(agentName); err == nil && adapter.HasCredentials(profileDir) {
+			return "[run 'aim usage' to inspect limits]"
+		}
+	}
+	return ""
+}
+
+func writeWhoamiAccount(b *strings.Builder, labelStyle lipgloss.Style, profileDir, agentName string) {
 	accInfo := profile.GetProfileAccountInfoForAgent(profileDir, agentName)
 	if accInfo.Email == "" && accInfo.AuthMethod == "" {
 		accInfo = profile.GetProfileAccountInfo(profileDir)
@@ -144,36 +173,36 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 		if accInfo.Name != "" {
 			accStr += " (" + accInfo.Name + ")"
 		}
-		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Account:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Bold(true).Render(accStr)))
+		_, _ = fmt.Fprintf(b, "%s %s\n", labelStyle.Render("Account:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Bold(true).Render(accStr))
 	}
 	if accInfo.AuthMethod != "" {
-		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Auth Method:"), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(accInfo.AuthMethod)))
+		_, _ = fmt.Fprintf(b, "%s %s\n", labelStyle.Render("Auth Method:"), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(accInfo.AuthMethod))
 	}
 	if accInfo.ProjectID != "" {
-		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Project ID:"), lipgloss.NewStyle().Foreground(tui.TextDim).Render(accInfo.ProjectID)))
+		_, _ = fmt.Fprintf(b, "%s %s\n", labelStyle.Render("Project ID:"), lipgloss.NewStyle().Foreground(tui.TextDim).Render(accInfo.ProjectID))
 	}
+}
 
-	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Profile Home:"), lipgloss.NewStyle().Foreground(tui.TextDim).Render(profileDir)))
-
+func writeWhoamiSessionDetails(b *strings.Builder, labelStyle, valStyle lipgloss.Style, convID, chatTitle, quotaSummary string) {
 	if convID != "" {
 		shortID := convID
 		if len(shortID) > 8 {
 			shortID = shortID[:8]
 		}
-		b.WriteString(fmt.Sprintf("%s %s %s\n", labelStyle.Render("Session ID:"), valStyle.Render(shortID), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("(%s)", convID))))
+		_, _ = fmt.Fprintf(b, "%s %s %s\n", labelStyle.Render("Session ID:"), valStyle.Render(shortID), lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("(%s)", convID)))
 	}
-
 	if chatTitle != "" {
-		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Chat Title:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(chatTitle)))
+		_, _ = fmt.Fprintf(b, "%s %s\n", labelStyle.Render("Chat Title:"), lipgloss.NewStyle().Foreground(tui.AccentCyan).Render(chatTitle))
 	}
-
 	if quotaSummary != "" {
-		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Quota:"), lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(quotaSummary)))
+		_, _ = fmt.Fprintf(b, "%s %s\n", labelStyle.Render("Quota:"), lipgloss.NewStyle().Foreground(tui.StatusGreen).Render(quotaSummary))
 	}
+}
 
-	fmt.Println()
-	fmt.Println(cardStyle.Render(strings.TrimRight(b.String(), "\n")))
-	fmt.Println()
+func printCard(out io.Writer, card string) {
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, card)
+	_, _ = fmt.Fprintln(out)
 }
 
 func findActiveConversationID(profileDir string) string {
