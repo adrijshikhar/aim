@@ -135,7 +135,7 @@ func isAllowedLinuxTerminal(term string) bool {
 	if idx := strings.LastIndexAny(base, `/\`); idx >= 0 {
 		return false
 	}
-	for _, allowed := range linuxTerminals {
+	for _, allowed := range LinuxCandidateTerminals {
 		if base == allowed {
 			return true
 		}
