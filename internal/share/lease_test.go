@@ -54,7 +54,7 @@ func setupTestLeaseManager(t *testing.T) (*LeaseManager, string) {
 		t.Fatalf("failed to create temp profiles dir: %v", err)
 	}
 	mgr := NewLeaseManager(profilesDir)
-	mgr.NotifyFn = func(sourcePeer, leaseID string) {} // stub network notifications in tests
+	mgr.NotifyFn = func(_, _ string) {} // stub network notifications in tests
 
 	if len(testLenderPub) == 0 {
 		pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -610,7 +610,7 @@ func TestLeaseManager_SignatureRecordingAndPinnedVerification(t *testing.T) {
 
 	mgr := NewLeaseManager(profilesDir)
 	mgr.SetAimDir(tempHome)
-	mgr.NotifyFn = func(sourcePeer, leaseID string) {}
+	mgr.NotifyFn = func(_, _ string) {}
 
 	store := NewStore(tempHome)
 	mgr.SetStore(store)
@@ -754,5 +754,64 @@ func TestLeaseManager_RevokeLeaseByID(t *testing.T) {
 	credPath := filepath.Join(profilesDir, pName, ".claude", ".credentials.json")
 	if _, err := os.Stat(credPath); !os.IsNotExist(err) {
 		t.Errorf("expected credentials file to be scrubbed, but it still exists")
+	}
+}
+
+func TestLeaseManager_RejectsMismatchedLenderNodeID(t *testing.T) {
+	tempHome := t.TempDir()
+	profilesDir := filepath.Join(tempHome, "profiles")
+	_ = os.MkdirAll(profilesDir, 0o700)
+
+	mgr := NewLeaseManager(profilesDir)
+	mgr.SetAimDir(tempHome)
+	mgr.NotifyFn = func(_, _ string) {}
+
+	store := NewStore(tempHome)
+	defer func() { _ = store.Close() }()
+	mgr.SetStore(store)
+
+	pubA, _, err := EnsureNodeKeypair(tempHome)
+	if err != nil {
+		t.Fatalf("EnsureNodeKeypair A: %v", err)
+	}
+	otherDir := t.TempDir()
+	pubB, privB, err := EnsureNodeKeypair(otherDir)
+	if err != nil {
+		t.Fatalf("EnsureNodeKeypair B: %v", err)
+	}
+
+	_ = store.SavePeer(PeerInfo{ID: "peer-a", HostName: "peer-a", VPNIP: "10.8.0.10", PublicKey: pubA})
+	_ = store.SavePeer(PeerInfo{ID: "peer-b", HostName: "peer-b", VPNIP: "10.8.0.20", PublicKey: pubB})
+
+	borrowerID, _ := os.Hostname()
+	if borrowerID == "" {
+		borrowerID = "borrower-node"
+	}
+	expiresAt := time.Now().Add(2 * time.Hour)
+	sigB := SignLease(privB, "ls_spoof_1", "peer-b", borrowerID, "work", "claude", expiresAt.UTC().Format(time.RFC3339))
+
+	// Request sent to peer-a, but attacker responds with LenderNodeID="peer-b" and peer-b's signature: must fail!
+	respSpoof := &LeaseResponse{
+		Status:       "approved",
+		LeaseID:      "ls_spoof_1",
+		ProfileName:  "work",
+		Agent:        "claude",
+		ExpiresAt:    expiresAt,
+		Signature:    sigB,
+		LenderNodeID: "peer-b",
+		BorrowerID:   borrowerID,
+		Payload: &SharePayload{
+			Files: map[string]string{
+				".claude/.credentials.json": base64.StdEncoding.EncodeToString([]byte(`{"token":"spoofed"}`)),
+			},
+		},
+	}
+	if _, err := mgr.InstallLease("peer-a", "work", respSpoof); err == nil || !strings.Contains(err.Error(), "does not match pinned peer") {
+		t.Fatalf("expected lender_node_id mismatch error, got %v", err)
+	}
+
+	// Unknown sourcePeer cannot borrow peer-b's pinned key via spoofed LenderNodeID
+	if _, err := mgr.InstallLease("unpinned-peer", "work", respSpoof); err == nil || !strings.Contains(err.Error(), "no pinned public key") {
+		t.Fatalf("expected unpinned peer rejection even when lender_node_id names peer-b, got %v", err)
 	}
 }

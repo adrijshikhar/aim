@@ -38,6 +38,7 @@ func (s *Server) handleAddMcpServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req service.AddMCPServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -66,6 +67,7 @@ func (s *Server) handleSetMcpServerState(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req service.SetMCPServerStateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body: "+err.Error())

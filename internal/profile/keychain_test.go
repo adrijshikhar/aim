@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
+
+	"github.com/aim-cli/aim/internal/config"
 )
 
 func TestGetIgnoredKeychainEntries(t *testing.T) {
@@ -50,26 +53,19 @@ func TestGetIgnoredKeychainEntries(t *testing.T) {
 }
 
 func TestPurgeIgnoredKeychains_NonDarwinOrMissing(t *testing.T) {
-	origDeleteGen := deleteGenericPasswordFn
-	origDeleteNet := deleteInternetPasswordFn
-	defer func() {
-		deleteGenericPasswordFn = origDeleteGen
-		deleteInternetPasswordFn = origDeleteNet
-	}()
-
 	var (
 		mu      sync.Mutex
 		deleted []string
 	)
-	deleteGenericPasswordFn = func(service, account string) error {
+	defer SetKeychainPasswordDeleterForTest(func(service, _ string) error {
 		mu.Lock()
 		deleted = append(deleted, service)
 		mu.Unlock()
 		return nil
-	}
-	deleteInternetPasswordFn = func(service, account string) error {
+	})()
+	defer SetKeychainInternetDeleterForTest(func(_, _ string) error {
 		return nil
-	}
+	})()
 
 	// Calling PurgeIgnoredKeychains should not error out even if items do not exist
 	err := PurgeIgnoredKeychains("non-existent-agent")
@@ -126,16 +122,14 @@ func TestDecodeKeychainPassword(t *testing.T) {
 
 func TestHarvestKeychainTokenToProfile(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
-	origFn := getGenericPasswordFn
-	defer func() { getGenericPasswordFn = origFn }()
 
 	mockTokenJSON := `{"token":{"access_token":"mock_harvested_token"}}`
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	defer SetKeychainPasswordGetterForTest(func(service, account string) (string, error) {
 		if service == "gemini" && account == "antigravity" {
 			return "go-keyring-base64:eyJ0b2tlbiI6eyJhY2Nlc3NfdG9rZW4iOiJtb2NrX2hhcnZlc3RlZF90b2tlbiJ9fQ==", nil
 		}
 		return "", fmt.Errorf("not found")
-	}
+	})()
 
 	// 1. Non-seed profile (e.g. "bby") should NOT harvest from macOS Keychain
 	nonSeedProfile := filepath.Join(t.TempDir(), "bby")
@@ -218,8 +212,6 @@ func TestHasClaudeCredentials(t *testing.T) {
 
 func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
-	origFn := getGenericPasswordFn
-	defer func() { getGenericPasswordFn = origFn }()
 
 	targetProfile := t.TempDir()
 	claudeDir := filepath.Join(targetProfile, ".claude")
@@ -227,12 +219,17 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	destFile := filepath.Join(claudeDir, ".credentials.json")
 
 	// 1. With only mcpOAuth in scoped keychain: should return false and NOT write file
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore := SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
 		if service == scopedService {
 			return `{"mcpOAuth":{"test":"token"}}`, nil
 		}
 		return "", fmt.Errorf("not found")
-	}
+	})
+	defer func() {
+		if restore != nil {
+			restore()
+		}
+	}()
 	if HarvestKeychainTokenToProfile("claude", targetProfile) {
 		t.Fatalf("expected HarvestKeychainTokenToProfile to return false when only mcpOAuth is in keychain")
 	}
@@ -242,12 +239,13 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 
 	// 2. With scoped service containing valid claudeAiOauth: should succeed and write file
 	validTokenJSON := `{"claudeAiOauth":{"accessToken":"sk-ant-access-123","refreshToken":"sk-ant-refresh-123","subscriptionType":"team"},"mcpOAuth":{"plugin":"ok"}}`
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore()
+	restore = SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
 		if service == scopedService {
 			return validTokenJSON, nil
 		}
 		return "", fmt.Errorf("not found")
-	}
+	})
 
 	if !HarvestKeychainTokenToProfile("claude", targetProfile) {
 		t.Fatalf("expected HarvestKeychainTokenToProfile to return true with scoped claudeAiOauth")
@@ -270,9 +268,10 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	}
 
 	// 3. Re-harvesting when file already exists on disk should return true even if keychain is empty
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore()
+	restore = SetKeychainPasswordGetterForTest(func(_, _ string) (string, error) {
 		return "", fmt.Errorf("not found")
-	}
+	})
 	if !HarvestKeychainTokenToProfile("claude", targetProfile) {
 		t.Fatalf("expected HarvestKeychainTokenToProfile to return true from existing valid file")
 	}
@@ -280,20 +279,23 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 
 func TestReadScopedClaudeKeychainCredentials(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
-	origFn := getGenericPasswordFn
-	defer func() { getGenericPasswordFn = origFn }()
 
 	claudeDir := filepath.Join(t.TempDir(), ".claude")
 	scopedService := ClaudeScopedKeychainService(claudeDir)
 
 	validTokenJSON := `{"claudeAiOauth":{"accessToken":"sk-ant-test-456","refreshToken":"sk-ant-refresh-456"}}`
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore := SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
 		if service == scopedService {
 			return validTokenJSON, nil
 		}
 		// Return different token for any other service (e.g. host account)
 		return `{"claudeAiOauth":{"accessToken":"sk-ant-host-999"}}`, nil
-	}
+	})
+	defer func() {
+		if restore != nil {
+			restore()
+		}
+	}()
 
 	creds := ReadScopedClaudeKeychainCredentials(claudeDir)
 	if string(creds) != validTokenJSON {
@@ -302,12 +304,13 @@ func TestReadScopedClaudeKeychainCredentials(t *testing.T) {
 
 	// For a different directory whose scoped service is not in keychain:
 	otherDir := filepath.Join(t.TempDir(), ".claude")
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore()
+	restore = SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
 		if service == scopedService {
 			return validTokenJSON, nil
 		}
 		return "", fmt.Errorf("not found")
-	}
+	})
 	if otherCreds := ReadScopedClaudeKeychainCredentials(otherDir); otherCreds != nil {
 		t.Fatalf("expected nil for non-matching scoped service, got %s", string(otherCreds))
 	}
@@ -388,5 +391,163 @@ func TestPurgeProfileKeychain_Delegation(t *testing.T) {
 	if purger.calledWithProfile != "claude-work" || purger.calledWithDir != profileDir {
 		t.Errorf("expected purger to be called with profile 'claude-work' and dir %s, got %s and %s",
 			profileDir, purger.calledWithProfile, purger.calledWithDir)
+	}
+}
+
+func TestProfileManager_RenameProfile_MigratesClaudeKeychain(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	pm := NewProfileManager(t.TempDir())
+	cfg := config.NewDefaultConfig()
+
+	oldDir, err := pm.EnsureProfile("old")
+	if err != nil {
+		t.Fatalf("EnsureProfile old: %v", err)
+	}
+	cfg.AddProfileAgent("old", "claude")
+	oldClaudeDir := filepath.Join(oldDir, ".claude")
+	if err := os.MkdirAll(oldClaudeDir, 0o700); err != nil {
+		t.Fatalf("mkdir old .claude: %v", err)
+	}
+
+	oldService := ClaudeScopedKeychainService(oldClaudeDir)
+	const payload = `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-migrated"}}`
+	defer SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
+		if service == oldService {
+			return payload, nil
+		}
+		return "", fmt.Errorf("not found: %s", service)
+	})()
+
+	var deleted []string
+	defer SetKeychainPasswordDeleterForTest(func(service, _ string) error {
+		deleted = append(deleted, service)
+		return nil
+	})()
+
+	if err := pm.RenameProfile("old", "newname", cfg); err != nil {
+		t.Fatalf("RenameProfile failed: %v", err)
+	}
+
+	newRoot, err := os.OpenRoot(filepath.Join(pm.ProfileDir("newname"), ".claude"))
+	if err != nil {
+		t.Fatalf("open new .claude root: %v", err)
+	}
+	defer func() { _ = newRoot.Close() }()
+	got, err := newRoot.ReadFile(".credentials.json")
+	if err != nil {
+		t.Fatalf("expected migrated .credentials.json: %v", err)
+	}
+	if string(got) != payload {
+		t.Fatalf("migrated payload mismatch: got %s, want %s", string(got), payload)
+	}
+
+	if !slices.Contains(deleted, oldService) {
+		t.Fatalf("expected old scoped keychain service %q to be deleted; deleted=%v", oldService, deleted)
+	}
+}
+
+func TestProfileManager_MoveAgent_ClaudeMigratesKeychain(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	pm := NewProfileManager(t.TempDir())
+	cfg := config.NewDefaultConfig()
+
+	srcDir, err := pm.EnsureProfile("src")
+	if err != nil {
+		t.Fatalf("EnsureProfile src: %v", err)
+	}
+	cfg.AddProfileAgent("src", "claude")
+	srcClaudeDir := filepath.Join(srcDir, ".claude")
+	if err := os.MkdirAll(srcClaudeDir, 0o700); err != nil {
+		t.Fatalf("mkdir src .claude: %v", err)
+	}
+
+	oldService := ClaudeScopedKeychainService(srcClaudeDir)
+	const payload = `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-moved"}}`
+	defer SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
+		if service == oldService {
+			return payload, nil
+		}
+		return "", fmt.Errorf("not found: %s", service)
+	})()
+
+	var deleted []string
+	defer SetKeychainPasswordDeleterForTest(func(service, _ string) error {
+		deleted = append(deleted, service)
+		return nil
+	})()
+
+	if err := pm.MoveAgent("claude", "src", "dst", false, cfg, nil); err != nil {
+		t.Fatalf("MoveAgent failed: %v", err)
+	}
+
+	dstRoot, err := os.OpenRoot(filepath.Join(pm.ProfileDir("dst"), ".claude"))
+	if err != nil {
+		t.Fatalf("open dst .claude root: %v", err)
+	}
+	defer func() { _ = dstRoot.Close() }()
+	got, err := dstRoot.ReadFile(".credentials.json")
+	if err != nil {
+		t.Fatalf("expected migrated .credentials.json: %v", err)
+	}
+	if string(got) != payload {
+		t.Fatalf("migrated payload mismatch: got %s, want %s", string(got), payload)
+	}
+
+	if !slices.Contains(deleted, oldService) {
+		t.Fatalf("expected old scoped keychain service %q to be deleted; deleted=%v", oldService, deleted)
+	}
+}
+
+func TestProfileManager_RemoveAgent_PurgesKeychainWhenOtherAgentsRemain(t *testing.T) {
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+	pm := NewProfileManager(t.TempDir())
+	cfg := config.NewDefaultConfig()
+
+	workDir, err := pm.EnsureProfile("work")
+	if err != nil {
+		t.Fatalf("EnsureProfile work: %v", err)
+	}
+	cfg.AddProfileAgent("work", "claude")
+	cfg.AddProfileAgent("work", "codex")
+
+	claudeDir := filepath.Join(workDir, ".claude")
+	codexDir := filepath.Join(workDir, ".codex")
+	for _, d := range []string{claudeDir, codexDir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"secret"}}`), 0o600); err != nil {
+		t.Fatalf("write claude creds: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"tokens":{"access_token":"codex-keep"}}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+
+	scopedService := ClaudeScopedKeychainService(claudeDir)
+	var deleted []string
+	defer SetKeychainPasswordDeleterForTest(func(service, _ string) error {
+		deleted = append(deleted, service)
+		return nil
+	})()
+
+	deletedProfile, err := pm.RemoveAgent("work", "claude", cfg)
+	if err != nil {
+		t.Fatalf("RemoveAgent failed: %v", err)
+	}
+	if deletedProfile {
+		t.Fatal("expected profile to be preserved when codex agent remains")
+	}
+	if cfg.HasAgent("work", "claude") || !cfg.HasAgent("work", "codex") {
+		t.Fatalf("unexpected agent membership: claude=%v codex=%v", cfg.HasAgent("work", "claude"), cfg.HasAgent("work", "codex"))
+	}
+	if _, err := os.Stat(filepath.Join(codexDir, "auth.json")); err != nil {
+		t.Fatalf("expected codex auth.json preserved, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(claudeDir, ".credentials.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected claude credentials purged, got err=%v", err)
+	}
+	if !slices.Contains(deleted, scopedService) {
+		t.Fatalf("expected scoped keychain service %q to be deleted; deleted=%v", scopedService, deleted)
 	}
 }

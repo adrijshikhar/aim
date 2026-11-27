@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/charmbracelet/lipgloss"
@@ -44,6 +45,9 @@ func runHookGuard(cmd *cobra.Command, args []string, stdinReader io.Reader) erro
 		return fmt.Errorf("profile name required")
 	}
 	profName := args[0]
+	if err := profile.ValidateProfileName(profName); err != nil {
+		return err
+	}
 	aimDir := config.BaseDir()
 	profDir := filepath.Join(aimDir, "profiles", profName)
 

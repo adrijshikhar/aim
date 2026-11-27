@@ -2,13 +2,16 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/service"
 )
 
-// handleGetProfiles handles GET /api/profiles (supports optional ?agent=, ?profile=, and ?refresh=true).
+// handleGetProfiles handles GET /api/profiles (strictly read-only; supports optional ?agent=).
 func (s *Server) handleGetProfiles(w http.ResponseWriter, r *http.Request) {
 	if s.profiles == nil {
 		writeJSONError(w, http.StatusInternalServerError, "profile service unavailable")
@@ -16,16 +19,7 @@ func (s *Server) handleGetProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent := r.URL.Query().Get("agent")
-	profile := r.URL.Query().Get("profile")
-	refresh := r.URL.Query().Get("refresh") == "true" || r.URL.Query().Get("refresh") == "1"
-
-	var profiles []service.ProfileDTO
-	var err error
-	if refresh {
-		profiles, err = s.profiles.RefreshUsage(r.Context(), agent, profile)
-	} else {
-		profiles, err = s.profiles.ListProfiles(r.Context(), agent)
-	}
+	profiles, err := s.profiles.ListProfiles(r.Context(), agent)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -43,6 +37,7 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req service.CreateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -94,6 +89,10 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "profile name is required")
 		return
 	}
+	if err := profile.ValidateProfileName(strings.TrimSpace(name)); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if err := s.profiles.RemoveProfile(r.Context(), agent, name); err != nil {
 		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "not found") {
@@ -139,7 +138,12 @@ func (s *Server) handleUpdateProfileConfig(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusBadRequest, "profile name is required")
 		return
 	}
+	if err := profile.ValidateProfileName(strings.TrimSpace(name)); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req UpdateProfileConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -169,11 +173,15 @@ func (s *Server) handleRefreshProfiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		Agent   string `json:"agent,omitempty"`
 		Profile string `json:"profile,omitempty"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
 
 	if req.Agent == "" {
 		req.Agent = r.URL.Query().Get("agent")
@@ -181,10 +189,17 @@ func (s *Server) handleRefreshProfiles(w http.ResponseWriter, r *http.Request) {
 	if req.Profile == "" {
 		req.Profile = r.URL.Query().Get("profile")
 	}
+	req.Profile = strings.TrimSpace(req.Profile)
+	if req.Profile != "" {
+		if err := profile.ValidateProfileName(req.Profile); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	profiles, err := s.profiles.RefreshUsage(r.Context(), req.Agent, req.Profile)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeProfileServiceError(w, err)
 		return
 	}
 	if profiles == nil {
@@ -207,15 +222,37 @@ func (s *Server) handleRefreshSingleProfile(w http.ResponseWriter, r *http.Reque
 			name = parts[0]
 		}
 	}
+	name = strings.TrimSpace(name)
+	if name != "" {
+		if err := profile.ValidateProfileName(name); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	agent := r.URL.Query().Get("agent")
 
 	profiles, err := s.profiles.RefreshUsage(r.Context(), agent, name)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeProfileServiceError(w, err)
 		return
 	}
 	if profiles == nil {
 		profiles = []service.ProfileDTO{}
 	}
 	writeJSON(w, http.StatusOK, profiles)
+}
+
+func writeProfileServiceError(w http.ResponseWriter, err error) {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "does not exist") || strings.Contains(msg, "not found"):
+		writeJSONError(w, http.StatusNotFound, msg)
+	case strings.Contains(msg, "running"):
+		writeJSONError(w, http.StatusConflict, msg)
+	case strings.Contains(msg, "invalid") || strings.Contains(msg, "required") || strings.Contains(msg, "not allowed"):
+		writeJSONError(w, http.StatusBadRequest, msg)
+	default:
+		writeJSONError(w, http.StatusInternalServerError, msg)
+	}
 }

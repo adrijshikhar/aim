@@ -68,6 +68,14 @@ func (m Model) filteredProfiles() []string {
 	return res
 }
 
+func (m Model) selectedFilteredProfile() (string, bool) {
+	filtered := m.filteredProfiles()
+	if len(filtered) == 0 || m.cursor < 0 || m.cursor >= len(filtered) {
+		return "", false
+	}
+	return filtered[m.cursor], true
+}
+
 func (m Model) renderFilterBar() string {
 	return fmt.Sprintf("  FILTER: %s  (Enter to apply, Esc to clear)\n", m.filter.input.View())
 }

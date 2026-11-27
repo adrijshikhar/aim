@@ -486,9 +486,9 @@ else
 fi
 
 # 3. aim sessions show
-# When show is passed, aim sessions treats it as [agent] filter which will find no agent or no sessions, NOT a subcommand
+# When show is passed, aim sessions treats it as [agent] filter which rejects unknown agents or finds no sessions, NOT a subcommand
 SHOW_OUT=$("$AIM_BIN" sessions show --plain 2>&1 || true)
-if echo "$SHOW_OUT" | grep -qi "no sessions found"; then
+if echo "$SHOW_OUT" | grep -qiE "unsupported agent|no sessions found"; then
   echo "  ✔ 'aim sessions show' is not a registered subcommand"
 else
   echo "FAIL: 'aim sessions show' behaved unexpectedly: $SHOW_OUT"
@@ -497,7 +497,7 @@ fi
 
 # 4. aim sessions import
 IMPORT_OUT=$("$AIM_BIN" sessions import --plain 2>&1 || true)
-if echo "$IMPORT_OUT" | grep -qi "no sessions found"; then
+if echo "$IMPORT_OUT" | grep -qiE "unsupported agent|no sessions found"; then
   echo "  ✔ 'aim sessions import' is not a registered subcommand"
 else
   echo "FAIL: 'aim sessions import' behaved unexpectedly: $IMPORT_OUT"

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
@@ -20,6 +22,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
+
+const hostProfileSentinel = "<host>"
 
 func newResumeCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command {
 	var (
@@ -71,6 +75,11 @@ Flags:
 			agentName := cleanArgs[0]
 			profileName := cleanArgs[1]
 
+			if profileName != "" {
+				if err := profile.ValidateProfileName(profileName); err != nil {
+					return err
+				}
+			}
 			if pm != nil {
 				leaseMgr := share.NewLeaseManager(pm.ProfilesRoot())
 				if leaseMgr.HasLease(profileName) && leaseMgr.IsLeaseExpired(profileName) {
@@ -104,8 +113,8 @@ Flags:
 						return matches[i].LastActiveAt.After(matches[j].LastActiveAt)
 					})
 					profileName = matches[0].Profile
-					if profileName == "" || profileName == "<host>" {
-						profileName = "default"
+					if profileName == "" && matches[0].IsHost {
+						profileName = hostProfileSentinel
 					}
 					if len(cleanArgs) > 2 {
 						if cleanArgs[2] == "--" {
@@ -185,6 +194,18 @@ Flags:
 				}
 			}
 
+			if profileName == "" || profileName == hostProfileSentinel {
+				if cfg, cfgErr := config.LoadConfig(); cfgErr == nil && cfg != nil && cfg.DefaultProfile != "" && pm != nil && pm.ProfileExists(cfg.DefaultProfile) {
+					profileName = cfg.DefaultProfile
+				} else {
+					dispID := sess.ShortID
+					if dispID == "" {
+						dispID = sess.ID
+					}
+					return fmt.Errorf("session %s originates from host (<host>); specify a target profile: aim resume %s <profile> %s", dispID, agentName, dispID)
+				}
+			}
+
 			ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("resume %s", agentName), false)
 			if err != nil {
 				return err
@@ -224,11 +245,14 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 		ctx = context.Background()
 	}
 
+	if pm == nil {
+		return errors.New("profile manager not initialized")
+	}
 	mgr := getSessionManager(ctx)
 	workingDir := resolveSessionWorkingDir(ctx, mgr, sess)
 
-	repoRoot := getGitRepoRoot(workingDir)
-	branch := getGitBranch(repoRoot)
+	repoRoot := getGitRepoRootWithContext(ctx, workingDir)
+	branch := getGitBranch(ctx, repoRoot)
 
 	bridge := catalyst.NewBridge()
 	handoffPath, err := bridge.WriteHandoffBrief(repoRoot, branch, sess)
@@ -380,7 +404,14 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 }
 
 func getGitRepoRoot(dir ...string) string {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	return getGitRepoRootWithContext(context.Background(), dir...)
+}
+
+func getGitRepoRootWithContext(ctx context.Context, dir ...string) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	if len(dir) > 0 && dir[0] != "" {
 		cmd.Dir = dir[0]
 	}
@@ -398,8 +429,11 @@ func getGitRepoRoot(dir ...string) string {
 	return "."
 }
 
-func getGitBranch(repoRoot string) string {
-	cmd := exec.Command("git", "branch", "--show-current")
+func getGitBranch(ctx context.Context, repoRoot string) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
 	if repoRoot != "" {
 		cmd.Dir = repoRoot
 	}

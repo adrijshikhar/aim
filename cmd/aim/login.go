@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -26,7 +27,7 @@ func newLoginCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			exitCode := executeLoginWithContext(ctx, reg, pm, args[0], args[1])
+			exitCode := executeLoginWithIO(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), reg, pm, args[0], args[1])
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
 			}
@@ -39,86 +40,122 @@ func newLoginCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 }
 
 func executeLogin(reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string) int {
-	return executeLoginWithContext(context.Background(), reg, pm, agentName, profileName)
+	return executeLoginWithIO(context.Background(), os.Stdout, os.Stderr, reg, pm, agentName, profileName)
 }
 
 func executeLoginWithContext(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string) int {
+	return executeLoginWithIO(ctx, os.Stdout, os.Stderr, reg, pm, agentName, profileName)
+}
+
+func executeLoginWithIO(ctx context.Context, _ io.Writer, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName, profileName string) int {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if errOut == nil {
+		errOut = os.Stderr
+	}
+	if reg == nil {
+		reg = defaultRegistry()
+	}
+	if pm == nil {
+		_, _ = fmt.Fprintln(errOut, "Error: profile manager not initialized")
+		return 1
+	}
+
 	logger.Debug("[login] Starting login for agent=%q, profile=%q", agentName, profileName)
 	adapter, err := reg.Get(agentName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(errOut, "Error: %v\n", err)
 		return 1
 	}
-	pDir, err := pm.EnsureProfile(profileName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error preparing profile: %v\n", err)
-		return 1
-	}
-
-	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
-		cfg = config.NewDefaultConfig()
-	}
-
-	loginSucceeded := false
-	// Harvest any agent credentials into the profile directory after login completes.
-	// Never purge host keychains, as doing so breaks host tools (CodexBar, host CLIs) and triggers security prompts.
-	defer func() {
-		if harvester, ok := adapter.(agents.CredentialHarvester); ok {
-			_ = harvester.HarvestCredentials(ctx, profileName, pDir)
-		} else {
-			_ = profile.HarvestKeychainTokenToProfile(agentName, pDir)
-		}
-		if loginSucceeded {
-			acc := profile.GetProfileAccountInfoForAgent(pDir, adapter.Name())
-			telemetry.IdentifyAccount(adapter.Name(), acc)
-			if acc.Email != "" && pm != nil {
-				if existingProfiles, err := pm.ListConfiguredProfiles(); err == nil {
-					for _, otherProf := range existingProfiles {
-						if otherProf == profileName {
-							continue
-						}
-						otherDir := pm.ProfileDir(otherProf)
-						otherAcc := profile.GetProfileAccountInfoForAgent(otherDir, adapter.Name())
-						if otherAcc.Email != "" && strings.EqualFold(otherAcc.Email, acc.Email) {
-							fmt.Fprintf(os.Stderr, "\nNotice: Profile %q authenticated with %s (already used by profile %q)\n", profileName, acc.Email, otherProf)
-							break
-						}
-					}
-				}
-			}
-		}
-	}()
-
 	auth, ok := adapter.(agents.Authenticator)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Agent %s does not support login\n", adapter.Name())
+		_, _ = fmt.Fprintf(errOut, "Agent %s does not support login\n", adapter.Name())
+		return 1
+	}
+
+	cfg, err := loadOrRecoverConfig(errOut)
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "Error loading config: %v\n", err)
+		return 1
+	}
+
+	pDir, err := pm.EnsureProfile(profileName)
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "Error preparing profile: %v\n", err)
 		return 1
 	}
 	if err := auth.Login(ctx, profileName, pDir); err != nil {
-		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		_, _ = fmt.Fprintf(errOut, "Login failed: %v\n", err)
 		return 1
 	}
-	loginSucceeded = true
+
+	return finalizeLoginState(ctx, errOut, pm, adapter, cfg, agentName, profileName, pDir)
+}
+
+func finalizeLoginState(
+	ctx context.Context,
+	errOut io.Writer,
+	pm *profile.ProfileManager,
+	adapter agents.AgentAdapter,
+	cfg *config.Config,
+	agentName, profileName, pDir string,
+) int {
+	// Only clear logout state and finalize credentials once Login succeeds cleanly.
+	_ = profile.ClearAgentLoggedOut(pDir, adapter.Name())
+	if !adapter.HasCredentials(pDir) {
+		if harvester, ok := adapter.(agents.CredentialHarvester); ok {
+			_ = harvester.HarvestCredentials(ctx, profileName, pDir)
+		} else {
+			_ = profile.HarvestKeychainTokenToProfile(adapter.Name(), pDir)
+		}
+	}
+
+	acc := profile.GetProfileAccountInfoForAgent(pDir, adapter.Name())
+	telemetry.IdentifyAccount(adapter.Name(), acc)
+	warnDuplicateAccountEmail(errOut, pm, adapter.Name(), acc.Email, profileName)
 
 	baseDir := config.BaseDir()
-	if pm != nil && pm.BaseDir != "" {
+	if pm.BaseDir != "" {
 		baseDir = pm.BaseDir
 	}
 	refStore := oauth.NewRefusalStore(baseDir)
 	_ = refStore.Clear(adapter.Name(), profileName)
-	if agentName != adapter.Name() {
-		_ = refStore.Clear(agentName, profileName)
-	}
-
-	// Invalidate any cached usage failure report so subsequent usage checks reflect the active session
 	cacheStore := usage.NewCacheStore(baseDir, usage.DefaultTTL)
 	cacheStore.Delete(adapter.Name(), profileName)
 	if agentName != adapter.Name() {
+		_ = refStore.Clear(agentName, profileName)
 		cacheStore.Delete(agentName, profileName)
 	}
 
 	cfg.AddProfileAgent(profileName, adapter.Name())
-	_ = config.SaveConfig(cfg)
+	if err := config.SaveConfig(cfg); err != nil {
+		_, _ = fmt.Fprintf(errOut, "Error saving config: %v\n", err)
+		return 1
+	}
 	return 0
+}
+
+func warnDuplicateAccountEmail(errOut io.Writer, pm *profile.ProfileManager, agentName, email, profileName string) {
+	if email == "" || pm == nil {
+		return
+	}
+	if errOut == nil {
+		errOut = os.Stderr
+	}
+	existingProfiles, err := pm.ListConfiguredProfiles()
+	if err != nil {
+		return
+	}
+	for _, otherProf := range existingProfiles {
+		if otherProf == profileName {
+			continue
+		}
+		otherDir := pm.ProfileDir(otherProf)
+		otherAcc := profile.GetProfileAccountInfoForAgent(otherDir, agentName)
+		if otherAcc.Email != "" && strings.EqualFold(otherAcc.Email, email) {
+			_, _ = fmt.Fprintf(errOut, "\nNotice: Profile %q authenticated with %s (already used by profile %q)\n", profileName, email, otherProf)
+			return
+		}
+	}
 }

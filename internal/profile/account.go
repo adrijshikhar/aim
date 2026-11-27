@@ -31,16 +31,21 @@ func GetProfileAccountInfoForAgent(profileDir, agentName string) AccountInfo {
 		return AccountInfo{}
 	}
 
+	agentName = canonicalAuthAgent(agentName)
+	if agentName != "" && IsAgentLoggedOut(profileDir, agentName) {
+		return AccountInfo{}
+	}
+
 	switch agentName {
-	case "claude", "claude-code":
+	case agentClaude:
 		return extractFromClaudeAuth(profileDir)
-	case "codex", "codex-cli", "openai-codex":
+	case agentCodex:
 		codexAuthPath := filepath.Join(profileDir, ".codex", "auth.json")
 		return extractFromCodexAuthFile(codexAuthPath)
-	case "gemini", "gemini-cli":
+	case agentGemini:
 		geminiTokenPath := filepath.Join(profileDir, ".gemini", "gemini-oauth-token")
 		return extractFromTokenFile(geminiTokenPath)
-	case "agy", "antigravity":
+	case agentAgy:
 		agyTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
 		return extractFromTokenFile(agyTokenPath)
 	}
@@ -51,29 +56,37 @@ func GetProfileAccountInfoForAgent(profileDir, agentName string) AccountInfo {
 		return AccountInfo{}
 	}
 
-	// Unspecified agentName: check in priority order
+	// Unspecified agentName: check in priority order, skipping logged-out agents.
 	// 1. Check Antigravity OAuth token
-	agyTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
-	if info := extractFromTokenFile(agyTokenPath); info.Email != "" || info.AuthMethod != "" {
-		return info
+	if !IsAgentLoggedOut(profileDir, agentAgy) {
+		agyTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+		if info := extractFromTokenFile(agyTokenPath); info.Email != "" || info.AuthMethod != "" {
+			return info
+		}
 	}
 
 	// 2. Check Gemini CLI OAuth token
-	geminiTokenPath := filepath.Join(profileDir, ".gemini", "gemini-oauth-token")
-	if info := extractFromTokenFile(geminiTokenPath); info.Email != "" || info.AuthMethod != "" {
-		return info
+	if !IsAgentLoggedOut(profileDir, agentGemini) {
+		geminiTokenPath := filepath.Join(profileDir, ".gemini", "gemini-oauth-token")
+		if info := extractFromTokenFile(geminiTokenPath); info.Email != "" || info.AuthMethod != "" {
+			return info
+		}
 	}
 
 	// 3. Check Google Application Default Credentials (ADC)
-	adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
-	if info := extractFromADCFile(adcPath); info.Email != "" || info.AuthMethod != "" {
-		return info
+	if !IsAgentLoggedOut(profileDir, agentAgy) && !IsAgentLoggedOut(profileDir, agentGemini) {
+		adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
+		if info := extractFromADCFile(adcPath); info.Email != "" || info.AuthMethod != "" {
+			return info
+		}
 	}
 
 	// 4. Check Codex auth file
-	codexAuthPath := filepath.Join(profileDir, ".codex", "auth.json")
-	if info := extractFromCodexAuthFile(codexAuthPath); info.Email != "" || info.AuthMethod != "" {
-		return info
+	if !IsAgentLoggedOut(profileDir, agentCodex) {
+		codexAuthPath := filepath.Join(profileDir, ".codex", "auth.json")
+		if info := extractFromCodexAuthFile(codexAuthPath); info.Email != "" || info.AuthMethod != "" {
+			return info
+		}
 	}
 
 	// 5. Check Claude auth files
@@ -85,6 +98,9 @@ func GetProfileAccountInfoForAgent(profileDir, agentName string) AccountInfo {
 }
 
 func extractFromClaudeAuth(profileDir string) AccountInfo {
+	if IsAgentLoggedOut(profileDir, agentClaude) {
+		return AccountInfo{}
+	}
 	claudeDir := filepath.Join(profileDir, ".claude")
 
 	var email, name, authMethod string
@@ -140,11 +156,6 @@ func extractFromClaudeAuth(profileDir string) AccountInfo {
 				authMethod = "Claude OAuth"
 			}
 		}
-	}
-
-	// 3. Check for API key in env
-	if authMethod == "" && os.Getenv("ANTHROPIC_API_KEY") != "" {
-		authMethod = "Anthropic API Key"
 	}
 
 	return AccountInfo{

@@ -74,21 +74,21 @@ func TestCloneDirectory_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to stat cloned file: %v", err)
 	}
-	if info.Mode().Perm() != 0644 {
-		t.Errorf("expected mode 0644, got %v", info.Mode().Perm())
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("expected masked owner-only mode 0600, got %v", info.Mode().Perm())
 	}
 	if info.ModTime().Unix() != modTime.Unix() {
 		t.Errorf("expected modtime %v, got %v", modTime.Unix(), info.ModTime().Unix())
 	}
 
-	// Verify script permissions
+	// Verify script permissions (owner execute bit preserved, group/other stripped)
 	dstScript := filepath.Join(dstDir, "run.sh")
 	scriptInfo, err := os.Stat(dstScript)
 	if err != nil {
 		t.Fatalf("failed to stat cloned script: %v", err)
 	}
-	if scriptInfo.Mode().Perm() != 0755 {
-		t.Errorf("expected mode 0755, got %v", scriptInfo.Mode().Perm())
+	if scriptInfo.Mode().Perm() != 0o700 {
+		t.Errorf("expected masked owner-only mode 0700, got %v", scriptInfo.Mode().Perm())
 	}
 
 	// Verify subdirectory and nested file

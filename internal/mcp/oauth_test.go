@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 func TestDiscoverEndpointAuth_Unprotected(t *testing.T) {
@@ -264,5 +266,90 @@ func TestAuthorizeMCPOAuth_DynamicClientRegistration(t *testing.T) {
 	}
 	if tokens["access_token"] != "token-from-dynamic" {
 		t.Errorf("expected access_token 'token-from-dynamic', got %v", tokens["access_token"])
+	}
+}
+
+func TestAuthorizeMCPOAuth_CancelAndDuplicateCallback_NoLeak(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	//nolint:gosec // G101: synthetic test endpoint URL, not a credential.
+	disc := &OAuthDiscovery{
+		AuthURL:  "https://auth.example.com/oauth/authorize",
+		TokenURL: "https://auth.example.com/oauth/token",
+		AuthType: "oauth",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := &http.Client{
+		Transport: &http.Transport{DisableKeepAlives: true},
+		Timeout:   time.Second,
+	}
+
+	doneHit := make(chan struct{})
+	_, err := AuthorizeMCPOAuth(ctx, disc, func(authURL string) {
+		u, parseErr := url.Parse(authURL)
+		if parseErr != nil {
+			t.Errorf("parse authURL: %v", parseErr)
+			close(doneHit)
+			return
+		}
+		redirectURI := u.Query().Get("redirect_uri")
+		go func() {
+			defer close(doneHit)
+			// Fire multiple bad/duplicate callbacks concurrently, then cancel.
+			for range 3 {
+				req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, redirectURI+"?state=wrong", nil)
+				if reqErr == nil {
+					if resp, doErr := client.Do(req); doErr == nil {
+						_ = resp.Body.Close()
+					}
+				}
+			}
+			cancel()
+		}()
+	})
+	<-doneHit
+
+	if err == nil {
+		t.Fatal("expected AuthorizeMCPOAuth to fail on wrong state / cancellation")
+	}
+}
+
+func TestDiscoverEndpointAuth_RejectsUnsafeSchemesAndLoop(t *testing.T) {
+	if _, err := DiscoverEndpointAuth(context.Background(), "ftp://example.com/mcp"); err == nil {
+		t.Fatal("expected non-http scheme to fail")
+	}
+
+	var selfURL string
+	var reqCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		if r.URL.Path == "/mcp" {
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/meta"`, selfURL))
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/meta" || r.URL.Path == "/.well-known/oauth-authorization-server" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"authorization_servers":[%q]}`, selfURL)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	selfURL = srv.URL
+
+	//nolint:staticcheck // SA1012: intentionally test nil context fallback
+	disc, err := DiscoverEndpointAuth(nil, srv.URL+"/mcp")
+	if err != nil {
+		t.Fatalf("expected graceful non-infinite discovery fallback, got err: %v", err)
+	}
+	if disc.AuthType == "oauth" {
+		t.Fatalf("expected self-referential metadata loop not to produce oauth discovery, got %+v", disc)
+	}
+	if reqCount > 15 {
+		t.Fatalf("expected bounded discovery requests, got %d", reqCount)
 	}
 }

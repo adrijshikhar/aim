@@ -263,9 +263,14 @@ func TestGetProfiles_EmptyAndError(t *testing.T) {
 
 func TestGetProfiles_Refresh(t *testing.T) {
 	refreshCalled := false
+	listCalled := false
 	var passedAgent, passedProfile string
 	profs := &mockProfileService{
-		refreshUsageFn: func(ctx context.Context, agent, profileName string) ([]service.ProfileDTO, error) {
+		listProfilesFn: func(_ context.Context, _ string) ([]service.ProfileDTO, error) {
+			listCalled = true
+			return []service.ProfileDTO{{Name: "cached-prof", Agent: "agy"}}, nil
+		},
+		refreshUsageFn: func(_ context.Context, agent, profileName string) ([]service.ProfileDTO, error) {
 			refreshCalled = true
 			passedAgent = agent
 			passedProfile = profileName
@@ -279,40 +284,40 @@ func TestGetProfiles_Refresh(t *testing.T) {
 		},
 	}
 	ts, _ := setupTestServer(t, profs, nil, nil, false)
+	ctx := context.Background()
 
-	// Call GET /api/profiles?refresh=true&profile=bby&agent=agy
-	resp, err := http.Get(ts.URL + "/api/profiles?refresh=true&profile=bby&agent=agy")
+	// GET /api/profiles?refresh=true must stay strictly read-only (AGENTS.md 3.3)
+	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/profiles?refresh=true&profile=bby&agent=agy", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ts.Client().Do(getReq)
 	if err != nil {
 		t.Fatalf("GET /api/profiles?refresh=true failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
-	if !refreshCalled {
-		t.Fatal("expected refreshUsageFn to be called when refresh=true")
+	if !listCalled {
+		t.Fatal("expected listProfilesFn to be called on GET /api/profiles")
 	}
-	if passedAgent != "agy" || passedProfile != "bby" {
-		t.Fatalf("unexpected agent/profile passed: agent=%q profile=%q", passedAgent, passedProfile)
+	if refreshCalled {
+		t.Fatal("expected GET /api/profiles?refresh=true to stay read-only without calling refreshUsageFn")
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 	}
 
-	var list []service.ProfileDTO
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
+	// Test POST /api/profiles/refresh
+	postReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/api/profiles/refresh", bytes.NewBufferString(`{"agent":"codex","profile":"office"}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].Name != "refreshed-prof" || list[0].Quota == nil || list[0].Quota.BottleneckPct != 95 {
-		t.Fatalf("unexpected refreshed profile data: %+v", list)
-	}
-
-	// Also test POST /api/profiles/refresh
-	refreshCalled = false
-	postBody := bytes.NewBufferString(`{"agent":"codex","profile":"office"}`)
-	postResp, err := http.Post(ts.URL+"/api/profiles/refresh", "application/json", postBody)
+	postReq.Header.Set("Content-Type", "application/json")
+	postResp, err := ts.Client().Do(postReq)
 	if err != nil {
 		t.Fatalf("POST /api/profiles/refresh failed: %v", err)
 	}
-	defer postResp.Body.Close()
+	defer func() { _ = postResp.Body.Close() }()
 
 	if !refreshCalled {
 		t.Fatal("expected refreshUsageFn to be called on POST /api/profiles/refresh")
@@ -322,6 +327,44 @@ func TestGetProfiles_Refresh(t *testing.T) {
 	}
 	if postResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", postResp.StatusCode)
+	}
+
+	var list []service.ProfileDTO
+	if err := json.NewDecoder(postResp.Body).Decode(&list); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(list) != 1 || list[0].Name != "refreshed-prof" || list[0].Quota == nil || list[0].Quota.BottleneckPct != 95 {
+		t.Fatalf("unexpected refreshed profile data: %+v", list)
+	}
+
+	// Invalid profile name on POST /api/profiles/refresh must return 400 Bad Request
+	badReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/api/profiles/refresh", bytes.NewBufferString(`{"profile":"../evil"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	badReq.Header.Set("Content-Type", "application/json")
+	badResp, err := ts.Client().Do(badReq)
+	if err != nil {
+		t.Fatalf("POST /api/profiles/refresh invalid body failed: %v", err)
+	}
+	defer func() { _ = badResp.Body.Close() }()
+	if badResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for invalid profile name, got %d", badResp.StatusCode)
+	}
+
+	// Malformed JSON on POST /api/profiles/refresh must return 400 Bad Request
+	malReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/api/profiles/refresh", bytes.NewBufferString(`{"profile":`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	malReq.Header.Set("Content-Type", "application/json")
+	malformedResp, err := ts.Client().Do(malReq)
+	if err != nil {
+		t.Fatalf("POST /api/profiles/refresh malformed JSON failed: %v", err)
+	}
+	defer func() { _ = malformedResp.Body.Close() }()
+	if malformedResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for malformed JSON, got %d", malformedResp.StatusCode)
 	}
 }
 
@@ -1378,19 +1421,37 @@ func TestShareEndpoints(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("AIM_HOME", tempDir)
 	store := share.NewStore(tempDir)
+	fixedLastSeen := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+	if err := store.SavePeer(share.PeerInfo{
+		ID:       "peer-readonly",
+		HostName: "127.0.0.1",
+		VPNIP:    "127.0.0.1",
+		Port:     4319,
+		LastSeen: fixedLastSeen,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	server := web.NewServer(&mockProfileService{}, nil, nil, 0, false)
 	server.SetShareStore(store)
+	defer func() { _ = server.Shutdown(context.Background()) }()
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 
-	// GET /api/share/status
-	res, err := http.Get(ts.URL + "/api/share/status")
+	// GET /api/share/status?refresh=true must stay read-only without probing peers
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+"/api/share/status?refresh=true", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := ts.Client().Do(req)
 	if err != nil {
 		t.Fatalf("GET /api/share/status failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", res.StatusCode)
+	}
+	if peers := store.GetPeers(); len(peers) != 1 || !peers[0].LastSeen.Equal(fixedLastSeen) {
+		t.Errorf("expected GET /api/share/status to remain read-only, got peers=%+v", peers)
 	}
 
 	// POST /api/share/toggle
@@ -1509,5 +1570,38 @@ func TestShareEndpoints(t *testing.T) {
 	_ = json.NewDecoder(resPoll.Body).Decode(&pollResp)
 	if pollResp["status"] != "cancelled" {
 		t.Errorf("expected status 'cancelled', got %v", pollResp["status"])
+	}
+}
+
+func TestHandlers_ProfileValidationAndDaemonBadJSON(t *testing.T) {
+	ts, srv := setupTestServer(t, &mockProfileService{}, &mockSessionService{}, &mockLauncherService{}, false)
+
+	// Invalid profile name "." or ".." via POST /api/profiles/{name}/refresh must fail with 400.
+	reqRef, err := http.NewRequestWithContext(context.Background(), http.MethodPost, ts.URL+"/api/profiles/..%2Fevil/refresh", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resRef, err := ts.Client().Do(reqRef)
+	if err != nil {
+		t.Fatalf("POST refresh request failed: %v", err)
+	}
+	_ = resRef.Body.Close()
+	if resRef.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 BadRequest on invalid profile name, got %d", resRef.StatusCode)
+	}
+
+	// Malformed JSON in POST /api/daemon/install must return 400 BadRequest.
+	srv.SetDaemonService(&mockDaemonService{})
+	reqDaemon, err := http.NewRequestWithContext(context.Background(), http.MethodPost, ts.URL+"/api/daemon/install", strings.NewReader("{bad-json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resDaemon, err := ts.Client().Do(reqDaemon)
+	if err != nil {
+		t.Fatalf("POST daemon install failed: %v", err)
+	}
+	_ = resDaemon.Body.Close()
+	if resDaemon.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 BadRequest on invalid JSON body, got %d", resDaemon.StatusCode)
 	}
 }

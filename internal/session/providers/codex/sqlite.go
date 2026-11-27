@@ -2,7 +2,7 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,17 +12,6 @@ import (
 
 	"github.com/aim-cli/aim/internal/session"
 )
-
-type sqliteThreadRow struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	Title            string          `json:"title"`
-	FirstUserMessage string          `json:"first_user_message"`
-	Preview          string          `json:"preview"`
-	Cwd              string          `json:"cwd"`
-	UpdatedAt        json.RawMessage `json:"updated_at"`
-	RolloutPath      string          `json:"rollout_path"`
-}
 
 func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName string, isHost bool) ([]session.Session, error) {
 	cols, err := p.getTableColumns(ctx, dbPath, "threads")
@@ -99,7 +88,7 @@ func (p *Provider) listFromSQLite(ctx context.Context, dbPath, profileName strin
 	}
 	query += " ORDER BY updated_at DESC LIMIT 100;\n"
 
-	matches, err := p.queryThreadsSQLite(ctx, dbPath, query, profileName, isHost)
+	matches, err := p.queryThreadsSQLite(ctx, dbPath, query, nil, profileName, isHost)
 	if err != nil {
 		return nil, err
 	}
@@ -153,15 +142,18 @@ func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profil
 	}
 	selectCols = append(selectCols, "updated_at", "rollout_path")
 
+	likePattern := escapeSQLLike(idOrPrefix) + "%"
 	var matchClauses []string
-	matchClauses = append(matchClauses, fmt.Sprintf("id = '%s'", escapeSQL(idOrPrefix)))
-	matchClauses = append(matchClauses, fmt.Sprintf("id LIKE '%s%%'", escapeSQL(idOrPrefix)))
+	var args []any
+	matchClauses = append(matchClauses, "id = ?", `id LIKE ? ESCAPE '\'`)
+	args = append(args, idOrPrefix, likePattern)
 	if colSet["name"] {
-		matchClauses = append(matchClauses, fmt.Sprintf("name = '%s'", escapeSQL(idOrPrefix)))
-		matchClauses = append(matchClauses, fmt.Sprintf("name LIKE '%s%%'", escapeSQL(idOrPrefix)))
+		matchClauses = append(matchClauses, "name = ?", `name LIKE ? ESCAPE '\'`)
+		args = append(args, idOrPrefix, likePattern)
 	}
 	if colSet["title"] {
-		matchClauses = append(matchClauses, fmt.Sprintf("title = '%s'", escapeSQL(idOrPrefix)))
+		matchClauses = append(matchClauses, "title = ?")
+		args = append(args, idOrPrefix)
 	}
 	whereClause := "(" + strings.Join(matchClauses, " OR ") + ")"
 	if colSet["thread_source"] {
@@ -174,7 +166,7 @@ func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profil
 	query := fmt.Sprintf("SELECT %s FROM threads WHERE %s ORDER BY updated_at DESC LIMIT 5;\n",
 		strings.Join(selectCols, ", "), whereClause)
 
-	matches, err := p.queryThreadsSQLite(ctx, dbPath, query, profileName, isHost)
+	matches, err := p.queryThreadsSQLite(ctx, dbPath, query, args, profileName, isHost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
 	}
@@ -199,151 +191,246 @@ func (p *Provider) getFromSQLite(ctx context.Context, dbPath, idOrPrefix, profil
 	return nil, nil
 }
 
-func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query, profileName string, isHost bool) ([]*session.Session, error) {
-	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, dbPath, query, "-json")
+func escapeSQLLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
+type codexThreadRecord struct {
+	ID               string
+	Name             string
+	Title            string
+	FirstUserMessage string
+	Preview          string
+	Cwd              string
+	UpdatedSec       int64
+	RolloutPath      string
+}
+
+type codexTurnInfo struct {
+	maxTime   time.Time
+	turnCount int
+}
+
+func parseUnixTimestampAny(raw any) int64 {
+	switch v := raw.(type) {
+	case int64:
+		return v
+	case float64:
+		return int64(v)
+	case string:
+		sec, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return sec
+	case []byte:
+		sec, _ := strconv.ParseInt(strings.TrimSpace(string(v)), 10, 64)
+		return sec
+	default:
+		return 0
+	}
+}
+
+func (p *Provider) scanCodexThreadRows(ctx context.Context, dbPath, query string, args []any) ([]codexThreadRecord, error) {
+	db, err := session.OpenReadOnlySQLite(ctx, dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite db %s: %w", dbPath, err)
+	}
+	defer func() { _ = db.Close() }()
+
+	sqlRows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", dbPath, err)
 	}
+	defer func() { _ = sqlRows.Close() }()
 
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" || trimmed == "[]" {
+	var recs []codexThreadRecord
+	for sqlRows.Next() {
+		var (
+			id, name, title, firstMsg, preview, cwd, rollout sql.NullString
+			updatedRaw                                       any
+		)
+		if err := sqlRows.Scan(&id, &name, &title, &firstMsg, &preview, &cwd, &updatedRaw, &rollout); err != nil {
+			return nil, fmt.Errorf("scan sqlite row: %w", err)
+		}
+		recs = append(recs, codexThreadRecord{
+			ID:               id.String,
+			Name:             name.String,
+			Title:            title.String,
+			FirstUserMessage: firstMsg.String,
+			Preview:          preview.String,
+			Cwd:              cwd.String,
+			UpdatedSec:       parseUnixTimestampAny(updatedRaw),
+			RolloutPath:      rollout.String,
+		})
+	}
+	if err := sqlRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sqlite rows: %w", err)
+	}
+	return recs, nil
+}
+
+func loadCodexTurnInfo(ctx context.Context, dbPath string, rows []codexThreadRecord) map[string]codexTurnInfo {
+	turnsByThread := make(map[string]codexTurnInfo)
+	historyDB := filepath.Join(filepath.Dir(dbPath), "thread_history_1.sqlite")
+	fi, err := os.Stat(historyDB)
+	if err != nil || fi.Size() == 0 || len(rows) == 0 {
+		return turnsByThread
+	}
+	db, err := session.OpenReadOnlySQLite(ctx, historyDB)
+	if err != nil {
+		return turnsByThread
+	}
+	defer func() { _ = db.Close() }()
+
+	stmt, err := db.PrepareContext(ctx, "SELECT MAX(COALESCE(completed_at, started_at, 0)), COUNT(*) FROM thread_turns WHERE thread_id = ?")
+	if err != nil {
+		return turnsByThread
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, r := range rows {
+		if r.ID == "" {
+			continue
+		}
+		var (
+			maxRaw any
+			cnt    int
+		)
+		if err := stmt.QueryRowContext(ctx, r.ID).Scan(&maxRaw, &cnt); err != nil || cnt == 0 {
+			continue
+		}
+		var tTime time.Time
+		if tSec := parseUnixTimestampAny(maxRaw); tSec > 0 {
+			tTime = time.Unix(tSec, 0)
+		}
+		turnsByThread[r.ID] = codexTurnInfo{maxTime: tTime, turnCount: cnt}
+	}
+	return turnsByThread
+}
+
+func (p *Provider) queryThreadsSQLite(ctx context.Context, dbPath, query string, args []any, profileName string, isHost bool) ([]*session.Session, error) {
+	rows, err := p.scanCodexThreadRows(ctx, dbPath, query, args)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
 		return nil, nil
 	}
 
-	var rows []sqliteThreadRow
-	if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
-		return nil, fmt.Errorf("failed to parse json output from sqlite: %w", err)
-	}
+	turnsByThread := loadCodexTurnInfo(ctx, dbPath, rows)
 
-	historyDB := filepath.Join(filepath.Dir(dbPath), "thread_history_1.sqlite")
-	hasHistory := false
-	if fi, err := os.Stat(historyDB); err == nil && fi.Size() > 0 {
-		hasHistory = true
-	}
-
-	type turnInfo struct {
-		maxTime   time.Time
-		turnCount int
-	}
-	turnsByThread := make(map[string]turnInfo)
-	if hasHistory && len(rows) > 0 {
-		var ids []string
-		for _, r := range rows {
-			if r.ID != "" {
-				ids = append(ids, fmt.Sprintf("'%s'", escapeSQL(r.ID)))
-			}
-		}
-		if len(ids) > 0 {
-			turnQuery := fmt.Sprintf("SELECT thread_id, MAX(COALESCE(completed_at, started_at, 0)), COUNT(*) FROM thread_turns WHERE thread_id IN (%s) GROUP BY thread_id;\n", strings.Join(ids, ","))
-			if tOut, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, historyDB, turnQuery, "-separator", "|"); err == nil {
-				for _, line := range strings.Split(strings.TrimSpace(string(tOut)), "\n") {
-					parts := strings.Split(strings.TrimSpace(line), "|")
-					if len(parts) >= 3 {
-						tID := parts[0]
-						var tTime time.Time
-						if tSec, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64); err == nil && tSec > 0 {
-							tTime = time.Unix(tSec, 0)
-						}
-						cnt, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
-						turnsByThread[tID] = turnInfo{maxTime: tTime, turnCount: cnt}
-					}
-				}
-			}
-		}
-	}
-
-	var sessions []*session.Session
+	sessions := make([]*session.Session, 0, len(rows))
 	for _, row := range rows {
-		displayTitle := row.Name
-		if displayTitle == "" {
-			displayTitle = row.Title
-		}
-		if displayTitle == "" && row.FirstUserMessage != "" {
-			displayTitle = session.CleanPromptText(strings.Split(row.FirstUserMessage, "\n")[0])
-		}
-		if displayTitle == "" && row.Preview != "" {
-			displayTitle = session.CleanPromptText(strings.Split(row.Preview, "\n")[0])
-		}
-		if displayTitle == "" {
-			displayTitle = "Untitled Session"
-		}
-
-		cleanFirst := session.CleanPromptText(row.FirstUserMessage)
-		if cleanFirst == "" {
-			cleanFirst = session.CleanPromptText(row.Preview)
-		}
-
-		var sec int64
-		if len(row.UpdatedAt) > 0 {
-			raw := strings.Trim(string(row.UpdatedAt), `"`)
-			sec, _ = strconv.ParseInt(raw, 10, 64)
-		}
-		modTime := time.Unix(sec, 0)
-
-		if row.RolloutPath != "" {
-			if fi, err := os.Stat(row.RolloutPath); err == nil && fi.ModTime().After(modTime) {
-				modTime = fi.ModTime()
-			}
-		}
-
-		var turnCount int
-		if ti, ok := turnsByThread[row.ID]; ok {
-			if ti.maxTime.After(modTime) {
-				modTime = ti.maxTime
-			}
-			turnCount = ti.turnCount
-		}
-		if turnCount == 0 && row.RolloutPath != "" {
-			if f, err := os.Open(row.RolloutPath); err == nil {
-				if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
-					turnCount = tc
-				}
-				_ = f.Close()
-			}
-		}
-
-		s := session.NewSession(row.ID, displayTitle, "codex", profileName, isHost, modTime)
-		s.Goal = session.CleanPromptText(displayTitle)
-		if s.Goal == "Untitled Session" && cleanFirst != "" {
-			s.Goal = cleanFirst
-		}
-		if turnCount > 0 {
-			s.Progress = fmt.Sprintf("%d turns", turnCount)
-			s.MessageCount = turnCount
-		}
-		s.StoragePath = row.RolloutPath
-		s.Cwd = row.Cwd
-
-		sum := session.SessionSummary{
-			Goal:     s.Goal,
-			Progress: s.Progress,
-			Raw:      row.FirstUserMessage,
-		}
-		s.Summary = sum.Text()
-		sessions = append(sessions, &s)
+		sessions = append(sessions, buildCodexSQLiteSession(row, turnsByThread[row.ID], profileName, isHost))
 	}
-
 	return sessions, nil
+}
+
+func buildCodexSQLiteSession(row codexThreadRecord, ti codexTurnInfo, profileName string, isHost bool) *session.Session {
+	displayTitle := pickCodexDisplayTitle(row)
+	cleanFirst := session.CleanPromptText(row.FirstUserMessage)
+	if cleanFirst == "" {
+		cleanFirst = session.CleanPromptText(row.Preview)
+	}
+	modTime, turnCount := resolveCodexTimingAndTurns(row, ti)
+
+	s := session.NewSession(row.ID, displayTitle, "codex", profileName, isHost, modTime)
+	s.Goal = session.CleanPromptText(displayTitle)
+	if s.Goal == "Untitled Session" && cleanFirst != "" {
+		s.Goal = cleanFirst
+	}
+	if turnCount > 0 {
+		s.Progress = fmt.Sprintf("%d turns", turnCount)
+		s.MessageCount = turnCount
+	}
+	s.StoragePath = row.RolloutPath
+	s.Cwd = row.Cwd
+
+	sum := session.SessionSummary{
+		Goal:     s.Goal,
+		Progress: s.Progress,
+		Raw:      row.FirstUserMessage,
+	}
+	s.Summary = sum.Text()
+	return &s
+}
+
+func resolveCodexTimingAndTurns(row codexThreadRecord, ti codexTurnInfo) (time.Time, int) {
+	modTime := time.Unix(row.UpdatedSec, 0)
+	if row.RolloutPath != "" {
+		if fi, err := os.Stat(row.RolloutPath); err == nil && fi.ModTime().After(modTime) {
+			modTime = fi.ModTime()
+		}
+	}
+	turnCount := ti.turnCount
+	if ti.maxTime.After(modTime) {
+		modTime = ti.maxTime
+	}
+	if turnCount == 0 && row.RolloutPath != "" {
+		if f, err := os.Open(row.RolloutPath); err == nil {
+			if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
+				turnCount = tc
+			}
+			_ = f.Close()
+		}
+	}
+	return modTime, turnCount
+}
+
+func pickCodexDisplayTitle(row codexThreadRecord) string {
+	if row.Name != "" {
+		return row.Name
+	}
+	if row.Title != "" {
+		return row.Title
+	}
+	if row.FirstUserMessage != "" {
+		if t := session.CleanPromptText(strings.Split(row.FirstUserMessage, "\n")[0]); t != "" {
+			return t
+		}
+	}
+	if row.Preview != "" {
+		if t := session.CleanPromptText(strings.Split(row.Preview, "\n")[0]); t != "" {
+			return t
+		}
+	}
+	return "Untitled Session"
 }
 
 func (p *Provider) getTableColumns(ctx context.Context, dbPath, table string) ([]string, error) {
 	if !isValidIdentifier(table) {
 		return nil, fmt.Errorf("invalid table name %q", table)
 	}
-	query := fmt.Sprintf("PRAGMA table_info(%s);\n", table)
-	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, dbPath, query, "-separator", "|")
+	db, err := session.OpenReadOnlySQLite(ctx, dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open sqlite db %s: %w", dbPath, err)
+	}
+	defer func() { _ = db.Close() }()
+
+	rows, err := db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s);", table))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query table info for %s in %s: %w", table, dbPath, err)
 	}
+	defer func() { _ = rows.Close() }()
+
 	var cols []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.Split(line, "|")
-		if len(parts) >= 2 {
-			colName := strings.TrimSpace(parts[1])
-			if colName != "" && isValidIdentifier(colName) {
-				cols = append(cols, colName)
-			}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			typ     string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			continue
 		}
+		colName := strings.TrimSpace(name)
+		if colName != "" && isValidIdentifier(colName) {
+			cols = append(cols, colName)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate table info for %s: %w", table, err)
 	}
 	return cols, nil
 }

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/agents"
@@ -64,5 +67,36 @@ func TestDoctorReport_FlagGeneratesSanitizedMarkdown(t *testing.T) {
 	realHome, _ := os.UserHomeDir()
 	if realHome != "" && realHome != "/" && strings.Contains(out, realHome) {
 		t.Errorf("expected real home dir %q to be sanitized with ~/, got:\n%s", realHome, out)
+	}
+}
+
+func TestDoctorReport_RespectsTelemetryDisabled(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+	t.Setenv("POSTHOG_HOST", srv.URL)
+	t.Setenv("POSTHOG_PROJECT_TOKEN", "phc_test_token")
+	t.Setenv("AIM_TELEMETRY_API_KEY", "phc_test_token")
+
+	cfg := config.NewDefaultConfig()
+	cfg.TelemetryDisabled = true
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+	code := dispatch([]string{"doctor", "--report"}, reg, pm)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("expected 0 telemetry requests when telemetry_disabled=true, got %d", hits.Load())
 	}
 }

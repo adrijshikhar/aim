@@ -240,3 +240,42 @@ func TestInspectRemoteOAuthStatus(t *testing.T) {
 		t.Errorf("expected 'connected' for cloudflare agy token, got %q", status)
 	}
 }
+
+func TestInspectRemoteOAuthStatus_DoesNotLeakHostOrShared(t *testing.T) {
+	baseDir := t.TempDir()
+	hostHome := t.TempDir()
+	t.Setenv("HOME", hostHome)
+	t.Setenv("AIM_REAL_HOME", hostHome)
+	t.Setenv("AIM_HOME", baseDir)
+
+	futureExpiry := time.Now().Add(24 * time.Hour).Unix()
+	payload := fmt.Sprintf(`{"https://mcp.posthog.com/mcp":{"access_token":"secret","expires_at":%d}}`, futureExpiry)
+
+	hostMCPDir := filepath.Join(hostHome, ".mcp-auth")
+	if err := os.MkdirAll(hostMCPDir, 0o700); err != nil {
+		t.Fatalf("mkdir host mcp-auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hostMCPDir, "tokens.json"), []byte(payload), 0o600); err != nil {
+		t.Fatalf("write host tokens: %v", err)
+	}
+
+	sharedMCPDir := filepath.Join(baseDir, "shared", "mcp-auth")
+	if err := os.MkdirAll(sharedMCPDir, 0o700); err != nil {
+		t.Fatalf("mkdir shared mcp-auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedMCPDir, "tokens.json"), []byte(payload), 0o600); err != nil {
+		t.Fatalf("write shared tokens: %v", err)
+	}
+
+	isolatedProf := filepath.Join(baseDir, "profiles", "fresh")
+	if err := os.MkdirAll(isolatedProf, 0o700); err != nil {
+		t.Fatalf("mkdir isolatedProf: %v", err)
+	}
+
+	if got := InspectRemoteOAuthStatus("https://mcp.posthog.com/mcp", isolatedProf); got != "none" {
+		t.Fatalf("LEAK: fresh profile inherited host/shared OAuth status %q instead of 'none'", got)
+	}
+	if got := InspectRemoteOAuthStatus("https://mcp.posthog.com/mcp", ""); got != "connected" {
+		t.Fatalf("expected explicit host scope to see host OAuth status 'connected', got %q", got)
+	}
+}

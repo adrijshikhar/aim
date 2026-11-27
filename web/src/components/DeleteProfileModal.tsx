@@ -106,7 +106,7 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
             size="sm"
             disabled={!isMatched || isDeleting}
             onClick={onConfirm}
-            className="text-xs font-sans font-medium shadow-sm transition-all cursor-pointer rounded-geist disabled:opacity-40 disabled:cursor-not-allowed"
+            className="text-xs font-sans font-medium shadow-sm transition-colors duration-150 cursor-pointer rounded-geist disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isDeleting ? (
               <>

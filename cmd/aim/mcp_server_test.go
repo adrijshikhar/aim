@@ -1391,3 +1391,106 @@ func TestMCPLoginCmd_Execution(t *testing.T) {
 		}
 	})
 }
+
+func TestSaveScopedMCPOAuthTokens_IsolatedPerProfile(t *testing.T) {
+	base := t.TempDir()
+	homeDir := filepath.Join(base, "home")
+	workDir := filepath.Join(base, "profiles", "work")
+	personalDir := filepath.Join(base, "profiles", "personal")
+
+	tok := map[string]any{"access_token": "work-secret-token"}
+	targets := []ProfileTarget{{Name: "work", Dir: workDir}}
+	if err := saveScopedMCPOAuthTokens(homeDir, targets, "https://mcp.example.com/mcp", tok); err != nil {
+		t.Fatalf("saveScopedMCPOAuthTokens failed: %v", err)
+	}
+
+	workRoot, err := os.OpenRoot(filepath.Join(workDir, ".mcp-auth"))
+	if err != nil {
+		t.Fatalf("open work .mcp-auth root: %v", err)
+	}
+	defer func() { _ = workRoot.Close() }()
+	data, err := workRoot.ReadFile("tokens.json")
+	if err != nil {
+		t.Fatalf("read work tokens.json: %v", err)
+	}
+	if !strings.Contains(string(data), "work-secret-token") {
+		t.Fatalf("expected token persisted in work profile, got: %s", string(data))
+	}
+	fi, err := workRoot.Stat("tokens.json")
+	if err != nil {
+		t.Fatalf("stat work tokens.json: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("expected 0600 permissions on tokens.json, got %v", fi.Mode().Perm())
+	}
+
+	if _, err := os.Stat(filepath.Join(personalDir, ".mcp-auth", "tokens.json")); !os.IsNotExist(err) {
+		t.Fatalf("LEAK: personal profile received work MCP token, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, ".mcp-auth", "tokens.json")); !os.IsNotExist(err) {
+		t.Fatalf("LEAK: host home received work MCP token, err=%v", err)
+	}
+}
+
+func TestResolveTargetScope_AllSkipsLeasedAndRejectsTraversalAIMProfile(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("AIM_HOME", tempDir)
+	pm := profile.NewProfileManager(tempDir)
+	_, _ = pm.EnsureProfile("work")
+	leasedDir := pm.ProfileDir("peer1:borrowed")
+	if err := os.MkdirAll(leasedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leasedDir, ".aim-lease.json"), []byte(`{"lease_id":"l1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	targets, err := ResolveTargetScope(pm, "", false, true, strings.NewReader(""), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("ResolveTargetScope(--all) failed: %v", err)
+	}
+	if len(targets) != 1 || targets[0].Name != "work" {
+		t.Fatalf("expected only configured profile 'work', got %+v", targets)
+	}
+
+	t.Setenv("AIM_PROFILE", "../escape")
+	if _, err := ResolveTargetScope(pm, "", false, false, strings.NewReader(""), &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected error for traversal AIM_PROFILE")
+	}
+}
+
+func TestWriteMCPOAuthTokenFile_RejectsSymlinkAndCorruptJSON(t *testing.T) {
+	base := t.TempDir()
+	targetDir := filepath.Join(base, "target")
+	if err := os.MkdirAll(targetDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	symlinkAuth := filepath.Join(base, "prof", ".mcp-auth")
+	if err := os.MkdirAll(filepath.Dir(symlinkAuth), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetDir, symlinkAuth); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMCPOAuthTokenFile(filepath.Join(symlinkAuth, "tokens.json"), "https://example.com", map[string]any{"a": "b"}); err == nil {
+		t.Fatalf("expected writeMCPOAuthTokenFile to reject symlinked .mcp-auth dir")
+	}
+
+	corruptDir := filepath.Join(base, "corrupt", ".mcp-auth")
+	if err := os.MkdirAll(corruptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	corruptFile := filepath.Join(corruptDir, "tokens.json")
+	if err := os.WriteFile(corruptFile, []byte("{not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMCPOAuthTokenFile(corruptFile, "https://example.com", map[string]any{"a": "b"}); err == nil {
+		t.Fatalf("expected writeMCPOAuthTokenFile to reject corrupt tokens.json")
+	}
+
+	cmd := newRootCmd(defaultRegistry(), profile.NewProfileManager(base))
+	cmd.SetArgs([]string{"mcp", "add", "srv", "uvx", "--profile", "work", "--host"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatalf("expected error when both --profile and --host are set")
+	}
+}

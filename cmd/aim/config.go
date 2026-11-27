@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
@@ -39,8 +42,9 @@ Subcommands:
 	pathCmd := &cobra.Command{
 		Use:   "path",
 		Short: "Print absolute path to active config.json",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintln(cmd.OutOrStdout(), config.ConfigFilePath())
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), config.ConfigFilePath())
+			return err
 		},
 	}
 
@@ -246,4 +250,36 @@ func runConfigSet(out io.Writer, reg *agents.Registry, pm *profile.ProfileManage
 		fmt.Fprintf(out, "  %s Profile %q does not exist yet. Run 'aim login <agent> %s' to create it.\n", noteBadge, val, val)
 	}
 	return nil
+}
+
+func loadOrRecoverConfig(errOut io.Writer) (*config.Config, error) {
+	cfg, err := config.LoadConfig()
+	if err == nil {
+		if cfg == nil {
+			return config.NewDefaultConfig(), nil
+		}
+		return cfg, nil
+	}
+	if _, ok := errors.AsType[*json.SyntaxError](err); ok {
+		return backupCorruptConfig(errOut, err), nil
+	}
+	if _, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+		return backupCorruptConfig(errOut, err), nil
+	}
+	return nil, err
+}
+
+func backupCorruptConfig(errOut io.Writer, loadErr error) *config.Config {
+	backupName := fmt.Sprintf("config.json.corrupt.%d", time.Now().UnixNano())
+	cfgDir := config.ConfigDir()
+	if root, err := os.OpenRoot(cfgDir); err == nil {
+		defer func() { _ = root.Close() }()
+		if data, readErr := root.ReadFile("config.json"); readErr == nil {
+			_ = root.WriteFile(backupName, data, 0o600)
+		}
+	}
+	if errOut != nil {
+		_, _ = fmt.Fprintf(errOut, "Warning: corrupted config backed up to %s/%s (%v); using defaults\n", cfgDir, backupName, loadErr)
+	}
+	return config.NewDefaultConfig()
 }

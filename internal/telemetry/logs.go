@@ -2,8 +2,7 @@ package telemetry
 
 import (
 	"context"
-	"os"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/config"
@@ -15,30 +14,38 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
 
-var posthogLogProvider *sdklog.LoggerProvider
+var (
+	posthogLogMu       sync.RWMutex
+	posthogLogProvider *sdklog.LoggerProvider
+	otelErrHandlerOnce sync.Once
+)
+
+func nowUTC() time.Time {
+	return time.Now().UTC()
+}
+
+func hasPostHogLogProvider() bool {
+	posthogLogMu.RLock()
+	defer posthogLogMu.RUnlock()
+	return posthogLogProvider != nil
+}
 
 // InitPostHogLogs creates a dedicated OpenTelemetry logger for purpose-written
 // AIM lifecycle logs. It intentionally does not register a global provider or
 // attach to AIM's existing logger, so no pre-existing log lines are exported.
 func InitPostHogLogs(cfg *config.Config) {
-	if posthogLogProvider != nil || !IsTelemetryEnabled(cfg) {
+	if !IsTelemetryEnabled(cfg) {
 		return
 	}
 
-	projectToken := strings.TrimSpace(os.Getenv("POSTHOG_PROJECT_TOKEN"))
-	if projectToken == "" {
-		projectToken = strings.TrimSpace(os.Getenv("AIM_TELEMETRY_API_KEY"))
-	}
-	if projectToken == "" && !isRunningInTest() {
-		projectToken = DefaultPostHogAPIKey
-	}
-
-	host := strings.TrimRight(strings.TrimSpace(os.Getenv("POSTHOG_HOST")), "/")
-	if host == "" && !isRunningInTest() {
-		host = DefaultPostHogHost
-	}
-
+	projectToken, host := resolvePostHogCredentials()
 	if projectToken == "" || host == "" {
+		return
+	}
+
+	posthogLogMu.Lock()
+	defer posthogLogMu.Unlock()
+	if posthogLogProvider != nil {
 		return
 	}
 
@@ -53,9 +60,11 @@ func InitPostHogLogs(cfg *config.Config) {
 		return
 	}
 
-	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
-		logger.Debug("otel background error: %v", err)
-	}))
+	otelErrHandlerOnce.Do(func() {
+		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+			logger.Debug("otel background error: %v", err)
+		}))
+	})
 
 	posthogLogProvider = sdklog.NewLoggerProvider(
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(exporter)),
@@ -65,9 +74,6 @@ func InitPostHogLogs(cfg *config.Config) {
 // LogPostHogInfo emits an integration-owned log record. Callers must supply
 // only non-PII, non-sensitive attributes because this record is exported.
 func LogPostHogInfo(ctx context.Context, message string, attributes map[string]any) {
-	if posthogLogProvider == nil {
-		return
-	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -88,17 +94,33 @@ func LogPostHogInfo(ctx context.Context, message string, attributes map[string]a
 		}
 	}
 
-	posthogLogProvider.Logger("aim.posthog").Emit(ctx, record)
+	posthogLogMu.RLock()
+	provider := posthogLogProvider
+	posthogLogMu.RUnlock()
+	if provider == nil {
+		return
+	}
+	provider.Logger("aim.posthog").Emit(ctx, record)
 }
 
 // ClosePostHogLogs flushes integration-owned log records at process shutdown.
 func ClosePostHogLogs() error {
-	if posthogLogProvider == nil {
-		return nil
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
-	err := posthogLogProvider.Shutdown(ctx)
+	return ClosePostHogLogsWithContext(ctx)
+}
+
+// ClosePostHogLogsWithContext flushes integration-owned log records using ctx.
+func ClosePostHogLogsWithContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	posthogLogMu.Lock()
+	provider := posthogLogProvider
 	posthogLogProvider = nil
-	return err
+	posthogLogMu.Unlock()
+	if provider == nil {
+		return nil
+	}
+	return provider.Shutdown(ctx)
 }

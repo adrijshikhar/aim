@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/config"
@@ -33,7 +34,9 @@ func NewBaseAdapter(name, displayName, binaryName string, aliases []string, extr
 func (b *BaseAdapter) Name() string        { return b.name }
 func (b *BaseAdapter) DisplayName() string { return b.displayName }
 func (b *BaseAdapter) BinaryName() string  { return b.binaryName }
-func (b *BaseAdapter) Aliases() []string   { return b.aliases }
+
+// Aliases returns a copy of the adapter's CLI aliases.
+func (b *BaseAdapter) Aliases() []string { return slices.Clone(b.aliases) }
 
 // ResolveBinary locates the agent's executable on the system, checking PATH first and falling back
 // to ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, and any adapter-specific extra paths.
@@ -76,6 +79,36 @@ func (b *BaseAdapter) BuildCleanEnv(profileName, profileDir string, overrides ma
 	return BuildEnv(os.Environ(), launchEnv)
 }
 
+var isolatedEnvKeys = map[string]struct{}{
+	"SSH_CONNECTION":                  {},
+	"SSH_CLIENT":                      {},
+	"SSH_TTY":                         {},
+	"GEMINI_CLI_HOME":                 {},
+	"CODEX_HOME":                      {},
+	"CLAUDE_CONFIG_DIR":               {},
+	"HOME":                            {},
+	"AIM_AGENT":                       {},
+	"AIM_PROFILE":                     {},
+	"AIM_HOME":                        {},
+	"AIM_SESSION_ID":                  {},
+	"CLAUDE_CODE_OAUTH_TOKEN":         {},
+	"CLAUDE_CODE_OAUTH_REFRESH_TOKEN": {},
+	"ANTHROPIC_API_KEY":               {},
+	"ANTHROPIC_AUTH_TOKEN":            {},
+	"OPENAI_API_KEY":                  {},
+	"CODEX_API_KEY":                   {},
+	"GEMINI_API_KEY":                  {},
+	"GOOGLE_API_KEY":                  {},
+	"GOOGLE_APPLICATION_CREDENTIALS":  {},
+	"GOOGLE_OAUTH_ACCESS_TOKEN":       {},
+	"CURSOR_API_KEY":                  {},
+	"CURSOR_AUTH_TOKEN":               {},
+	"XDG_CONFIG_HOME":                 {},
+	"XDG_DATA_HOME":                   {},
+	"XDG_CACHE_HOME":                  {},
+	"XDG_STATE_HOME":                  {},
+}
+
 // BuildEnv constructs the execution environment by filtering out sensitive/managed variables
 // (SSH variables, HOME, AIM_* variables, agent-specific ambient tokens) unless explicitly provided in launchEnv,
 // and applying overrides. This prevents host tokens from inadvertently leaking into profile executions.
@@ -87,11 +120,7 @@ func BuildEnv(environ []string, launchEnv map[string]string) []string {
 			continue
 		}
 		key := e[:idx]
-		if key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" ||
-			key == "GEMINI_CLI_HOME" || key == "CODEX_HOME" || key == "CLAUDE_CONFIG_DIR" ||
-			key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" || key == "AIM_HOME" ||
-			key == "AIM_SESSION_ID" || key == "CLAUDE_CODE_OAUTH_TOKEN" ||
-			key == "ANTHROPIC_API_KEY" || key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" {
+		if _, stripped := isolatedEnvKeys[key]; stripped {
 			continue
 		}
 		if _, overridden := launchEnv[key]; overridden {

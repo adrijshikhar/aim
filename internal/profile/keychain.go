@@ -39,7 +39,7 @@ var DefaultIgnoredKeychainEntries = []IgnoredKeychainEntry{
 	{
 		Agent:       "agy",
 		Service:     "gemini",
-		Account:     "antigravity",
+		Account:     agentAliasAntigravity,
 		Description: "Antigravity OAuth token (service: gemini, account: antigravity)",
 	},
 	{
@@ -50,7 +50,7 @@ var DefaultIgnoredKeychainEntries = []IgnoredKeychainEntry{
 	},
 	{
 		Agent:       "agy",
-		Service:     "antigravity",
+		Service:     agentAliasAntigravity,
 		Account:     "",
 		Description: "Antigravity CLI token (service: antigravity)",
 	},
@@ -144,12 +144,12 @@ func PurgeIgnoredKeychains(agent string, customServices ...string) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := deleteGenericPassword(ent.Service, ent.Account); err != nil {
+			if err := deleteGenericPassword(context.Background(), ent.Service, ent.Account); err != nil {
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()
 			}
-			if err := deleteInternetPassword(ent.Service, ent.Account); err != nil {
+			if err := deleteInternetPassword(context.Background(), ent.Service, ent.Account); err != nil {
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()
@@ -165,30 +165,34 @@ func PurgeIgnoredKeychains(agent string, customServices ...string) error {
 }
 
 var (
-	keychainMu               sync.RWMutex
-	deleteGenericPasswordFn  = deleteGenericPasswordReal
-	deleteInternetPasswordFn = deleteInternetPasswordReal
+	keychainMu                  sync.RWMutex
+	deleteGenericPasswordCtxFn  = deleteGenericPasswordReal
+	deleteInternetPasswordCtxFn = deleteInternetPasswordReal
+	getGenericPasswordCtxFn     = getGenericPasswordReal
 )
 
-func deleteGenericPassword(service, account string) error {
+func deleteGenericPassword(ctx context.Context, service, account string) error {
 	keychainMu.RLock()
-	fn := deleteGenericPasswordFn
+	fn := deleteGenericPasswordCtxFn
 	keychainMu.RUnlock()
-	return fn(service, account)
+	return fn(ctx, service, account)
 }
 
-func deleteInternetPassword(service, account string) error {
+func deleteInternetPassword(ctx context.Context, service, account string) error {
 	keychainMu.RLock()
-	fn := deleteInternetPasswordFn
+	fn := deleteInternetPasswordCtxFn
 	keychainMu.RUnlock()
-	return fn(service, account)
+	return fn(ctx, service, account)
 }
 
-func deleteGenericPasswordReal(service, account string) error {
+func deleteGenericPasswordReal(ctx context.Context, service, account string) error {
 	if os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	args := []string{"delete-generic-password", "-s", service}
@@ -200,23 +204,28 @@ func deleteGenericPasswordReal(service, account string) error {
 		cmd := exec.CommandContext(ctx, "security", args...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 {
 				// Exit code 44 means item not found in keychain, which is completely expected
-				if exitErr.ExitCode() == 44 {
-					return nil
-				}
+				return nil
 			}
 			logger.Debug("[keychain] security delete-generic-password error: %v (output: %s)", err, strings.TrimSpace(string(out)))
 			return fmt.Errorf("security delete-generic-password: %w", err)
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
 }
 
-func deleteInternetPasswordReal(service, account string) error {
+func deleteInternetPasswordReal(ctx context.Context, service, account string) error {
 	if os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	args := []string{"delete-internet-password", "-s", service}
@@ -228,12 +237,14 @@ func deleteInternetPasswordReal(service, account string) error {
 		cmd := exec.CommandContext(ctx, "security", args...)
 		_, err := cmd.CombinedOutput()
 		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				if exitErr.ExitCode() == 44 {
-					return nil
-				}
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 {
+				return nil
 			}
-			return nil
+			return fmt.Errorf("security delete-internet-password: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 	}
 }
@@ -271,13 +282,14 @@ func FindIgnoredKeychains(agent string, customServices ...string) []IgnoredKeych
 	return found
 }
 
-var getGenericPasswordFn = getGenericPasswordReal
-
-func getGenericPasswordReal(service, account string) (string, error) {
+func getGenericPasswordReal(ctx context.Context, service, account string) (string, error) {
 	if os.Getenv("AIM_MOCK_KEYCHAIN") != "" {
 		return "", fmt.Errorf("item not found in mock keychain: service=%q, account=%q", service, account)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	args := []string{"find-generic-password", "-s", service}
@@ -294,81 +306,95 @@ func getGenericPasswordReal(service, account string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func getGenericPasswordHook(service, account string) (string, error) {
+func getGenericPasswordHook(ctx context.Context, service, account string) (string, error) {
 	keychainMu.RLock()
-	fn := getGenericPasswordFn
+	fn := getGenericPasswordCtxFn
 	keychainMu.RUnlock()
-	return fn(service, account)
+	return fn(ctx, service, account)
 }
 
 // GetGenericPassword retrieves a generic password from the macOS Keychain.
 func GetGenericPassword(service, account string) (string, error) {
-	return getGenericPasswordHook(service, account)
+	return getGenericPasswordHook(context.Background(), service, account)
 }
 
 // GetGenericPasswordWithContext retrieves a generic password from the macOS Keychain with context cancellation.
 func GetGenericPasswordWithContext(ctx context.Context, service, account string) (string, error) {
-	type result struct {
-		val string
-		err error
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	ch := make(chan result, 1)
-	go func() {
-		val, err := getGenericPasswordHook(service, account)
-		ch <- result{val: val, err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case res := <-ch:
-		return res.val, res.err
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
+	return getGenericPasswordHook(ctx, service, account)
 }
 
 // DeleteGenericPassword deletes a generic password from the macOS Keychain.
 func DeleteGenericPassword(service, account string) error {
-	return deleteGenericPassword(service, account)
+	return deleteGenericPassword(context.Background(), service, account)
 }
 
 // DeleteGenericPasswordWithContext deletes a generic password from the macOS Keychain with context cancellation.
 func DeleteGenericPasswordWithContext(ctx context.Context, service, account string) error {
-	type result struct {
-		err error
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	ch := make(chan result, 1)
-	go func() {
-		ch <- result{err: deleteGenericPassword(service, account)}
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case res := <-ch:
-		return res.err
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	return deleteGenericPassword(ctx, service, account)
 }
 
-// SetKeychainPasswordGetterForTest replaces getGenericPasswordFn for testing.
+// SetKeychainPasswordGetterForTest replaces the generic keychain getter hook for testing.
 func SetKeychainPasswordGetterForTest(fn func(service, account string) (string, error)) func() {
 	keychainMu.Lock()
-	orig := getGenericPasswordFn
-	getGenericPasswordFn = fn
+	orig := getGenericPasswordCtxFn
+	getGenericPasswordCtxFn = func(ctx context.Context, service, account string) (string, error) {
+		if ctx != nil && ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return fn(service, account)
+	}
 	keychainMu.Unlock()
 	return func() {
 		keychainMu.Lock()
-		getGenericPasswordFn = orig
+		getGenericPasswordCtxFn = orig
 		keychainMu.Unlock()
 	}
 }
 
-// SetKeychainPasswordDeleterForTest replaces deleteGenericPasswordFn for testing.
+// SetKeychainPasswordDeleterForTest replaces the generic keychain deleter hook for testing.
 func SetKeychainPasswordDeleterForTest(fn func(service, account string) error) func() {
 	keychainMu.Lock()
-	orig := deleteGenericPasswordFn
-	deleteGenericPasswordFn = fn
+	orig := deleteGenericPasswordCtxFn
+	deleteGenericPasswordCtxFn = func(ctx context.Context, service, account string) error {
+		if ctx != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fn(service, account)
+	}
 	keychainMu.Unlock()
 	return func() {
 		keychainMu.Lock()
-		deleteGenericPasswordFn = orig
+		deleteGenericPasswordCtxFn = orig
+		keychainMu.Unlock()
+	}
+}
+
+// SetKeychainInternetDeleterForTest replaces the internet keychain deleter hook for testing.
+func SetKeychainInternetDeleterForTest(fn func(service, account string) error) func() {
+	keychainMu.Lock()
+	orig := deleteInternetPasswordCtxFn
+	deleteInternetPasswordCtxFn = func(ctx context.Context, service, account string) error {
+		if ctx != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fn(service, account)
+	}
+	keychainMu.Unlock()
+	return func() {
+		keychainMu.Lock()
+		deleteInternetPasswordCtxFn = orig
 		keychainMu.Unlock()
 	}
 }
@@ -411,7 +437,7 @@ func GetAgentKeychainToken(agent string) ([]byte, error) {
 		if entry.Agent != agent {
 			continue
 		}
-		raw, err := getGenericPasswordFn(entry.Service, entry.Account)
+		raw, err := getGenericPasswordHook(context.Background(), entry.Service, entry.Account)
 		if err != nil || raw == "" {
 			continue
 		}
@@ -438,7 +464,7 @@ func ReadScopedClaudeKeychainCredentials(claudeConfigDir string) []byte {
 		return nil
 	}
 	scopedService := ClaudeScopedKeychainService(claudeConfigDir)
-	if raw, err := getGenericPasswordFn(scopedService, ""); err == nil && raw != "" {
+	if raw, err := getGenericPasswordHook(context.Background(), scopedService, ""); err == nil && raw != "" {
 		data := DecodeKeychainPassword(raw)
 		if HasClaudeCredentials(data) {
 			return data
@@ -483,9 +509,15 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
 		return false
 	}
+	if IsAgentLoggedOut(profileDir, agent) {
+		return false
+	}
 	switch agent {
 	case "agy":
 		destTokenPath := filepath.Join(profileDir, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+		if fi, err := os.Stat(destTokenPath); err == nil && fi.Size() > 0 {
+			return true
+		}
 		if ShouldSeedCredentials(filepath.Base(profileDir)) {
 			tokData, err := GetAgentKeychainToken(agent)
 			if err == nil && len(tokData) > 0 {
@@ -496,9 +528,6 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 				return false
 			}
 		}
-		if fi, err := os.Stat(destTokenPath); err == nil && fi.Size() > 0 {
-			return true
-		}
 		return false
 
 	case "claude":
@@ -506,8 +535,15 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 		claudeDir := filepath.Join(profileDir, ".claude")
 		scopedService := ClaudeScopedKeychainService(claudeDir)
 
-		// 1. Check scoped service in macOS Keychain first (Claude Code's primary store on macOS)
-		if raw, err := getGenericPasswordFn(scopedService, ""); err == nil && raw != "" {
+		// 1. Check existing profile credentials on disk first.
+		if data, err := readFileInDir(claudeDir, ".credentials.json"); err == nil && len(data) > 0 {
+			if HasClaudeCredentials(data) {
+				return true
+			}
+		}
+
+		// 2. Check scoped service in macOS Keychain (Claude Code's primary store on macOS).
+		if raw, err := getGenericPasswordHook(context.Background(), scopedService, ""); err == nil && raw != "" {
 			data := DecodeKeychainPassword(raw)
 			if HasClaudeCredentials(data) {
 				if writeProfileCredentials(destTokenPath, data) {
@@ -517,11 +553,10 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 			}
 		}
 
-		// 2. Check legacy / host service in macOS Keychain (without deleting it)
-		// Only seed from host credentials if this is the primary/default profile.
+		// 3. Explicit host seeding only for eligible uninitialized primary profiles.
 		if ShouldSeedCredentials(filepath.Base(profileDir)) {
 			for _, svc := range claudeKeychainServices {
-				if raw, err := getGenericPasswordFn(svc, ""); err == nil && raw != "" {
+				if raw, err := getGenericPasswordHook(context.Background(), svc, ""); err == nil && raw != "" {
 					data := DecodeKeychainPassword(raw)
 					if HasClaudeCredentials(data) {
 						if writeProfileCredentials(destTokenPath, data) {
@@ -530,13 +565,6 @@ func HarvestKeychainTokenToProfile(agent, profileDir string) bool {
 						}
 					}
 				}
-			}
-		}
-
-		// 3. If file already exists on disk, verify it contains valid credentials
-		if data, err := os.ReadFile(destTokenPath); err == nil && len(data) > 0 {
-			if HasClaudeCredentials(data) {
-				return true
 			}
 		}
 
@@ -593,23 +621,67 @@ func PurgeAgentKeychain(agent string) error {
 }
 
 // PurgeProfileKeychain deletes agent credentials scoped specifically to a profile.
-// If purgers are provided, the first non-nil purger is used; otherwise it delegates
-// cleanly based on known agent keychain scoping.
+// All non-nil CredentialPurgers are invoked and errors are joined; if none are supplied,
+// it cleans up known profile-scoped Keychain items directly.
 func PurgeProfileKeychain(agent, profileDir string, purgers ...agents.CredentialPurger) error {
+	return PurgeProfileKeychainWithContext(context.Background(), agent, profileDir, purgers...)
+}
+
+// PurgeProfileKeychainWithContext deletes profile-scoped Keychain credentials honoring ctx.
+func PurgeProfileKeychainWithContext(ctx context.Context, agent, profileDir string, purgers ...agents.CredentialPurger) error {
+	var errs []error
+	called := false
 	for _, cp := range purgers {
 		if cp != nil {
-			return cp.PurgeCredentials(context.Background(), filepath.Base(profileDir), profileDir)
+			called = true
+			if err := cp.PurgeCredentials(ctx, filepath.Base(profileDir), profileDir); err != nil {
+				errs = append(errs, err)
+			}
 		}
+	}
+	if called {
+		return errors.Join(errs...)
 	}
 	if runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "" {
 		return nil
 	}
-	switch agent {
-	case "claude":
+	switch canonicalAuthAgent(agent) {
+	case agentClaude:
 		claudeDir := filepath.Join(profileDir, ".claude")
 		scopedService := ClaudeScopedKeychainService(claudeDir)
-		return deleteGenericPassword(scopedService, "")
+		return DeleteGenericPasswordWithContext(ctx, scopedService, "")
 	default:
 		return nil
 	}
+}
+
+// MigrateClaudeScopedKeychain preserves credentials stored in the old path-hashed
+// macOS Keychain service when a Claude profile directory moves, writing them to
+// newClaudeDir/.credentials.json if needed before purging the old Keychain entry.
+func MigrateClaudeScopedKeychain(oldClaudeDir, newClaudeDir string) error {
+	if (runtime.GOOS != "darwin" && os.Getenv("AIM_MOCK_KEYCHAIN") == "") ||
+		oldClaudeDir == "" || newClaudeDir == "" || filepath.Clean(oldClaudeDir) == filepath.Clean(newClaudeDir) {
+		return nil
+	}
+	oldService := ClaudeScopedKeychainService(oldClaudeDir)
+	if data := ReadScopedClaudeKeychainCredentials(oldClaudeDir); len(data) > 0 {
+		newCredsPath := filepath.Join(newClaudeDir, ".credentials.json")
+		hasDest := false
+		if existing, err := readFileInDir(newClaudeDir, ".credentials.json"); err == nil && HasClaudeCredentials(existing) {
+			hasDest = true
+		}
+		if !hasDest && !writeProfileCredentials(newCredsPath, data) {
+			return fmt.Errorf("failed to persist migrated claude credentials to %s", newCredsPath)
+		}
+	}
+	return deleteGenericPassword(context.Background(), oldService, "")
+}
+
+func readFileInDir(dir, name string) ([]byte, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return root.ReadFile(name)
 }

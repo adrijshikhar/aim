@@ -2,6 +2,7 @@ package profile
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -83,10 +84,16 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 		return fmt.Errorf("target profile %q already has credentials for agent %q (use --force to overwrite)", targetProfile, canonicalAgent)
 	}
 
-	// Move agent files on disk
+	// Move agent files on disk before migrating scoped Keychain credentials so
+	// moveAgentData's destination directory replacement cannot wipe .credentials.json.
 	if srcDirExists {
 		if err := moveAgentData(canonicalAgent, srcDir, dstDir, force, adapter); err != nil {
 			return fmt.Errorf("failed to move agent data: %w", err)
+		}
+		if canonicalAgent == agentClaude {
+			if err := MigrateClaudeScopedKeychain(filepath.Join(srcDir, ".claude"), filepath.Join(dstDir, ".claude")); err != nil {
+				return fmt.Errorf("failed to migrate claude keychain: %w", err)
+			}
 		}
 	}
 
@@ -95,19 +102,57 @@ func (m *ProfileManager) MoveAgent(agentName, sourceProfile, targetProfile strin
 	extraPaths := ProfileExtraPaths(cfg, targetProfile)
 	_ = EnsureDotfiles(realHome, dstDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(dstDir, targetProfile, cfg)
+	m.ensureMCPAuthIsolation(dstDir, targetProfile)
+
+	srcProf, hadSrcProf := cfg.Profiles[sourceProfile]
+	_, dstHadCfg := cfg.Profiles[targetProfile]
 
 	// Update config
+	srcEmail := cfg.GetProfileEmail(sourceProfile)
 	cfg.RemoveProfileAgent(sourceProfile, canonicalAgent)
 	cfg.AddProfileAgent(targetProfile, canonicalAgent)
 
 	remaining := cfg.GetProfileAgents(sourceProfile)
 	if len(remaining) == 0 {
-		_ = m.RemoveProfile(sourceProfile)
+		if srcEmail != "" && cfg.GetProfileEmail(targetProfile) == "" {
+			cfg.SetProfileEmail(targetProfile, srcEmail)
+		}
+		if hadSrcProf && !dstHadCfg {
+			dstProf := cfg.Profiles[targetProfile]
+			if len(srcProf.Env) > 0 {
+				dstProf.Env = make(map[string]string, len(srcProf.Env))
+				maps.Copy(dstProf.Env, srcProf.Env)
+			}
+			if len(srcProf.Args) > 0 {
+				dstProf.Args = append([]string(nil), srcProf.Args...)
+			}
+			if srcProf.MCPGlobal != nil {
+				v := *srcProf.MCPGlobal
+				dstProf.MCPGlobal = &v
+			}
+			if srcProf.PluginsGlobal != nil {
+				v := *srcProf.PluginsGlobal
+				dstProf.PluginsGlobal = &v
+			}
+			if srcProf.StatuslineGlobal != nil {
+				v := *srcProf.StatuslineGlobal
+				dstProf.StatuslineGlobal = &v
+			}
+			cfg.Profiles[targetProfile] = dstProf
+		}
 		cfg.DeleteProfile(sourceProfile)
 		_ = m.MergeStateStore().Remove(sourceProfile)
 	}
 
-	return config.SaveConfig(cfg)
+	if err := config.SaveConfig(cfg); err != nil {
+		return err
+	}
+	if len(remaining) == 0 && srcDirExists {
+		if err := m.RemoveProfile(sourceProfile); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func hasAgentCredentialsOnDisk(agent, dir string) bool {
@@ -139,6 +184,10 @@ func hasAgentCredentialsOnDisk(agent, dir string) bool {
 		return errADC == nil && !fiADC.IsDir() && fiADC.Size() > 0
 	case "gemini":
 		p := filepath.Join(dir, ".gemini", "gemini-oauth-token")
+		fi, err := os.Stat(p)
+		return err == nil && !fi.IsDir() && fi.Size() > 0
+	case "cursor":
+		p := filepath.Join(dir, ".cursor", "user-data", "User", "globalStorage", "state.vscdb")
 		fi, err := os.Stat(p)
 		return err == nil && !fi.IsDir() && fi.Size() > 0
 	default:
@@ -190,17 +239,38 @@ func moveAgentData(agent, srcDir, dstDir string, force bool, adapter agents.Agen
 		srcGcloud := filepath.Join(srcDir, ".config", "gcloud")
 		dstGcloud := filepath.Join(dstDir, ".config", "gcloud")
 		if fi, err := os.Stat(srcGcloud); err == nil && fi.IsDir() {
-			_ = os.RemoveAll(dstGcloud)
-			_ = os.MkdirAll(filepath.Dir(dstGcloud), 0700)
-			_ = moveOrCopyDir(srcGcloud, dstGcloud)
+			if err := os.RemoveAll(dstGcloud); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(dstGcloud), 0o700); err != nil {
+				return err
+			}
+			if err := moveOrCopyDir(srcGcloud, dstGcloud); err != nil {
+				return err
+			}
 		}
 	case "gemini":
 		srcTok := filepath.Join(srcDir, ".gemini", "gemini-oauth-token")
 		dstTok := filepath.Join(dstDir, ".gemini", "gemini-oauth-token")
 		if fi, err := os.Stat(srcTok); err == nil && !fi.IsDir() {
 			_ = os.Remove(dstTok)
-			_ = os.MkdirAll(filepath.Dir(dstTok), 0700)
-			_ = moveOrCopyFile(srcTok, dstTok)
+			if err := os.MkdirAll(filepath.Dir(dstTok), 0o700); err != nil {
+				return err
+			}
+			if err := moveOrCopyFile(srcTok, dstTok); err != nil {
+				return err
+			}
+		}
+	case "cursor":
+		srcCursor := filepath.Join(srcDir, ".cursor")
+		dstCursor := filepath.Join(dstDir, ".cursor")
+		if fi, err := os.Stat(srcCursor); err == nil && fi.IsDir() {
+			if err := os.RemoveAll(dstCursor); err != nil {
+				return err
+			}
+			if err := moveOrCopyDir(srcCursor, dstCursor); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -212,8 +282,12 @@ func moveAgentData(agent, srcDir, dstDir string, force bool, adapter agents.Agen
 			if force {
 				_ = os.Remove(dstTok)
 			}
-			_ = os.MkdirAll(filepath.Dir(dstTok), 0700)
-			_ = moveOrCopyFile(srcTok, dstTok)
+			if err := os.MkdirAll(filepath.Dir(dstTok), 0o700); err != nil {
+				return err
+			}
+			if err := moveOrCopyFile(srcTok, dstTok); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

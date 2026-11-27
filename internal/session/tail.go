@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const maxLineLength = 4 * 1024 * 1024 // 4MB safety ceiling
+const maxLineLength = 10 * 1024 * 1024 // 10MB safety ceiling matching transcript parsers
 
 // ReadTurnCounts extracts session start and turn count without full in-memory JSON parsing.
 func ReadTurnCounts(f *os.File) (int, error) {

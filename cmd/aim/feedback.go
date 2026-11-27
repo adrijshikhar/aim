@@ -60,7 +60,7 @@ func newFeedbackCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 				Category:      cat,
 				Message:       message,
 				IncludeDoctor: includeDoctor,
-				AIMVersion:    Version,
+				AIMVersion:    GetVersion(),
 				OS:            runtime.GOOS,
 				Arch:          runtime.GOARCH,
 				Timestamp:     time.Now().UTC(),
@@ -74,10 +74,17 @@ func newFeedbackCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 				endpoint = os.Getenv("AIM_FEEDBACK_ENDPOINT")
 			}
 
+			cfg, _ := config.LoadConfig()
+			baseDir := config.BaseDir()
+			if pm != nil && pm.BaseDir != "" {
+				baseDir = pm.BaseDir
+			}
+
+			out := cmd.OutOrStdout()
 			d := feedback.NewDispatcher(endpoint)
 			if d.Endpoint == "" {
-				fmt.Print("Submitting feedback...")
-				telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
+				_, _ = fmt.Fprint(out, "Submitting feedback...")
+				telClient := telemetry.NewClient(baseDir, config.CacheDir(), GetVersion(), cfg)
 				props := map[string]any{
 					"category":       string(cat),
 					"message":        message,
@@ -88,43 +95,40 @@ func newFeedbackCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 				}
 				telClient.Track(telemetry.EventFeedbackSubmitted, props)
 
-				flushCtx, flushCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				baseCtx := cmd.Context()
+				if baseCtx == nil {
+					baseCtx = context.Background()
+				}
+				flushCtx, flushCancel := context.WithTimeout(baseCtx, 2*time.Second)
 				defer flushCancel()
 				_ = telClient.Flush(flushCtx)
 				_ = telClient.Close()
 
-				fmt.Println("\r" + tui.GaugeGreenStyle.Render("✓ Thank you! Your feedback has been submitted."))
+				_, _ = fmt.Fprintln(out, "\r"+tui.GaugeGreenStyle.Render("✓ Thank you! Your feedback has been submitted."))
 				fallbackURL := d.FallbackURL(sub)
-				fmt.Println("You can also view or discuss this publicly on GitHub:")
-				fmt.Printf("  %s\n\n", lipgloss.NewStyle().Foreground(tui.AccentCyan).Underline(true).Render(fallbackURL))
+				_, _ = fmt.Fprintln(out, "You can also view or discuss this publicly on GitHub:")
+				_, _ = fmt.Fprintf(out, "  %s\n\n", lipgloss.NewStyle().Foreground(tui.AccentCyan).Underline(true).Render(fallbackURL))
 				return nil
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			baseCtx := cmd.Context()
+			if baseCtx == nil {
+				baseCtx = context.Background()
+			}
+			ctx, cancel := context.WithTimeout(baseCtx, 5*time.Second)
 			defer cancel()
 
-			fmt.Print("Submitting feedback...")
+			_, _ = fmt.Fprint(out, "Submitting feedback...")
 			if err := d.Submit(ctx, sub); err != nil {
-				fmt.Println()
-				fmt.Printf("⚠️  Failed to submit feedback directly: %v\n", err)
+				_, _ = fmt.Fprintln(out)
+				_, _ = fmt.Fprintf(out, "⚠️  Failed to submit feedback directly: %v\n", err)
 				fallbackURL := d.FallbackURL(sub)
-				fmt.Println("You can submit this via GitHub instead:")
-				fmt.Printf("  %s\n", fallbackURL)
+				_, _ = fmt.Fprintln(out, "You can submit this via GitHub instead:")
+				_, _ = fmt.Fprintf(out, "  %s\n", fallbackURL)
 				return nil
 			}
 
-			fmt.Println("\r" + tui.GaugeGreenStyle.Render("✓ Thank you! Your feedback has been submitted."))
-			telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
-			props := map[string]any{
-				"category":       string(cat),
-				"message":        message,
-				"include_doctor": includeDoctor,
-			}
-			if includeDoctor && sub.DoctorReport != "" {
-				props["doctor_report"] = sub.DoctorReport
-			}
-			telClient.Track(telemetry.EventFeedbackSubmitted, props)
-			_ = telClient.Close()
+			_, _ = fmt.Fprintln(out, "\r"+tui.GaugeGreenStyle.Render("✓ Thank you! Your feedback has been submitted."))
 			return nil
 		},
 	}

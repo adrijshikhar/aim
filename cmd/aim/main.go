@@ -16,13 +16,13 @@ import (
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/diagnostics"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/updater"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
-	"github.com/posthog/posthog-go"
 )
 
 func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registry, pm *profile.ProfileManager) (exitCode int) {
@@ -61,22 +61,17 @@ func dispatchWithContext(ctx context.Context, args []string, reg *agents.Registr
 
 	defer func() {
 		if r := recover(); r != nil {
-			if client := telemetry.PostHogClient(); client != nil {
-				client.Enqueue(posthog.NewDefaultException(
-					time.Now(),
-					telemetry.AnonymousMachineID(config.BaseDir()),
-					"UnhandledPanic",
-					"AIM encountered an unexpected panic",
-				))
-			}
+			telemetry.CaptureException("UnhandledPanic", "AIM encountered an unexpected panic")
 
 			stack := debug.Stack()
 			home, _ := os.UserHomeDir()
-			issueURL, report := diagnostics.HandlePanic(r, stack, home, Version, Commit)
+			issueURL, report := diagnostics.HandlePanic(r, stack, home, GetVersion(), Commit)
 			logger.Error("Unhandled panic in AIM: %v\n%s", r, report)
-			fmt.Fprintf(os.Stderr, "\n\x1b[31;1m⚠️  AIM encountered an unexpected crash: %v\x1b[0m\n", r)
+			crashStyle := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true)
+			linkStyle := lipgloss.NewStyle().Foreground(tui.AccentCyan).Underline(true)
+			fmt.Fprintf(os.Stderr, "\n%s\n", crashStyle.Render(fmt.Sprintf("AIM encountered an unexpected crash: %v", r)))
 			fmt.Fprintf(os.Stderr, "A sanitized crash report has been logged to %s\n\n", logger.LogFilePath())
-			fmt.Fprintf(os.Stderr, "Help improve AIM by reporting this issue:\n\x1b[36m%s\x1b[0m\n\n", issueURL)
+			fmt.Fprintf(os.Stderr, "Help improve AIM by reporting this issue:\n%s\n\n", linkStyle.Render(issueURL))
 			exitCode = 1
 		}
 	}()
@@ -145,7 +140,7 @@ func recordCommandTelemetry(args []string, code int, duration time.Duration, cfg
 		}
 	}
 	cleanCmd, cleanAgent := telemetry.SanitizeCommand(cmdName, args)
-	telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, cfg)
+	telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), GetVersion(), cfg)
 	telClient.Track(telemetry.EventCommandExecuted, map[string]any{
 		"command":         cleanCmd,
 		"agent":           cleanAgent,
@@ -169,7 +164,8 @@ func notifyUpdate(ctx context.Context, args []string) {
 		}
 	}
 	updater.AwaitBackgroundCheck(300 * time.Millisecond)
-	cached := updater.CheckCached(Version, config.CacheDir())
+	ver := GetVersion()
+	cached := updater.CheckCached(ver, config.CacheDir())
 	if cached != nil && cached.UpdateAvailable {
 		cfg, _ := config.LoadConfig()
 		mode := cfg.GetAutoUpdate()
@@ -177,20 +173,22 @@ func notifyUpdate(ctx context.Context, args []string) {
 		case config.AutoUpdateOff:
 			return
 		case config.AutoUpdateAuto:
-			lockFile := filepath.Join(config.CacheDir(), "last_auto_update")
+			cacheDir := config.CacheDir()
+			_ = os.MkdirAll(cacheDir, 0o700)
+			lockFile := filepath.Join(cacheDir, "last_auto_update")
 			if fi, err := os.Stat(lockFile); err == nil && time.Since(fi.ModTime()) < 30*time.Minute {
 				return
 			}
-			_ = os.WriteFile(lockFile, []byte(time.Now().Format(time.RFC3339)), 0600)
+			_ = merge.AtomicWrite(lockFile, []byte(time.Now().Format(time.RFC3339)), 0o600)
 			execPath, err := os.Executable()
 			if err == nil {
-				cmd := exec.Command(execPath, "update", "--background")
+				cmd := exec.Command(execPath, "update", "--background") //nolint:noctx,gosec // detached background self-update must outlive current CLI invocation
 				_ = cmd.Start()
 			}
 		case config.AutoUpdatePrompt:
 			if isatty.IsTerminal(os.Stderr.Fd()) && isatty.IsTerminal(os.Stdin.Fd()) {
 				arrow := lipgloss.NewStyle().Foreground(tui.AccentCyan).Bold(true).Render("▲")
-				curVer := lipgloss.NewStyle().Foreground(tui.TextMuted).Render(Version)
+				curVer := lipgloss.NewStyle().Foreground(tui.TextMuted).Render(ver)
 				latVer := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render(cached.LatestVersion)
 				prompt := lipgloss.NewStyle().Foreground(tui.TextPrimary).Render("  Update now? [y/N]: ")
 				fmt.Fprintf(os.Stderr, "\n%s A new version of aim is available: %s → %s\n%s", arrow, curVer, latVer, prompt)
@@ -204,10 +202,10 @@ func notifyUpdate(ctx context.Context, args []string) {
 					}
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'aim update')\n", Version, cached.LatestVersion)
+				fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'aim update')\n", ver, cached.LatestVersion)
 			}
 		case config.AutoUpdateNotify:
-			fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'aim update')\n", Version, cached.LatestVersion)
+			fmt.Fprintf(os.Stderr, "\nA new version of aim is available: %s → %s (run 'aim update')\n", ver, cached.LatestVersion)
 		}
 	}
 }

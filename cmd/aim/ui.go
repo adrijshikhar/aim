@@ -101,69 +101,96 @@ func promptProfileName(agent, defaultProfile string) string {
 	return val
 }
 
-func handleTUIOutcome(res tui.Model, reg *agents.Registry, pm *profile.ProfileManager) int {
+func resolveUITargetProfile(pm *profile.ProfileManager, resTarget, sessProfile, agentName, sessID string) (string, error) {
+	targetProfile := resTarget
+	if targetProfile == "" || targetProfile == hostProfileSentinel {
+		targetProfile = sessProfile
+	}
+	if targetProfile == "" || targetProfile == hostProfileSentinel {
+		if cfg, cfgErr := config.LoadConfig(); cfgErr == nil && cfg != nil && cfg.DefaultProfile != "" && pm != nil && pm.ProfileExists(cfg.DefaultProfile) {
+			return cfg.DefaultProfile, nil
+		}
+		return "", fmt.Errorf("session %s originates from host (<host>); specify a target profile: aim resume %s <profile> %s", sessID, agentName, sessID)
+	}
+	return targetProfile, nil
+}
+
+func handleTUIOutcome(ctx context.Context, res tui.Model, reg *agents.Registry, pm *profile.ProfileManager) int {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	agent := res.SelectedAgent()
 	switch res.Outcome() {
 	case tui.ActionRun:
-		return executeRun(reg, pm, agent, res.SelectedProfile(), nil)
+		return executeRunWithOptions(ctx, reg, pm, RunOptions{
+			AgentName:   agent,
+			ProfileName: res.SelectedProfile(),
+		})
 	case tui.ActionLogin:
 		name := promptProfileName(agent, res.SelectedProfile())
 		if name != "" {
-			return executeLogin(reg, pm, agent, name)
+			return executeLoginWithContext(ctx, reg, pm, agent, name)
 		}
 	case tui.ActionResumeExact:
-		sess := res.SelectedSession()
-		if sess != nil {
-			targetProfile := res.SelectedProfile()
-			if targetProfile == "" || targetProfile == "<host>" {
-				targetProfile = sess.Profile
-			}
-			if targetProfile == "" || targetProfile == "<host>" {
-				targetProfile = "default"
-			}
-			mgr := getSessionManager(context.Background())
-			pDir, err := pm.EnsureProfile(targetProfile)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error ensuring profile: %v\n", err)
-				return 1
-			}
-			resumeCmd := newResumeCmd(reg, pm)
-			extraArgs := res.SelectedArgs()
-			if err := executeExactResume(resumeCmd, reg, pm, mgr, sess.Agent, targetProfile, pDir, sess, res.IsForkResume(), extraArgs); err != nil {
-				fmt.Fprintf(os.Stderr, "Resume error: %v\n", err)
-				return 1
-			}
-			return 0
-		}
+		return handleTUIResume(ctx, res, reg, pm, false)
 	case tui.ActionResumeCatalyst:
-		sess := res.SelectedSession()
-		if sess != nil {
-			targetProfile := res.SelectedProfile()
-			if targetProfile == "" || targetProfile == "<host>" {
-				targetProfile = sess.Profile
-			}
-			if targetProfile == "" || targetProfile == "<host>" {
-				targetProfile = "default"
-			}
-			resumeCmd := newResumeCmd(reg, pm)
-			extraArgs := res.SelectedArgs()
-			if err := executeCatalystResume(resumeCmd, reg, pm, sess.Agent, targetProfile, sess, extraArgs); err != nil {
-				fmt.Fprintf(os.Stderr, "Catalyst resume error: %v\n", err)
-				return 1
-			}
-			return 0
-		}
+		return handleTUIResume(ctx, res, reg, pm, true)
 	}
 	return 0
 }
 
-func defaultTUIRunner(reg *agents.Registry, pm *profile.ProfileManager) int {
+func handleTUIResume(ctx context.Context, res tui.Model, reg *agents.Registry, pm *profile.ProfileManager, catalyst bool) int {
+	sess := res.SelectedSession()
+	if sess == nil {
+		return 0
+	}
+	if pm == nil {
+		fmt.Fprintln(os.Stderr, "Error: profile manager not initialized")
+		return 1
+	}
+	dispID := sess.ShortID
+	if dispID == "" {
+		dispID = sess.ID
+	}
+	targetProfile, err := resolveUITargetProfile(pm, res.SelectedProfile(), sess.Profile, sess.Agent, dispID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+	resumeCmd := newResumeCmd(reg, pm)
+	resumeCmd.SetContext(ctx)
+	extraArgs := res.SelectedArgs()
+	if catalyst {
+		if err := executeCatalystResume(resumeCmd, reg, pm, sess.Agent, targetProfile, sess, extraArgs); err != nil {
+			fmt.Fprintf(os.Stderr, "Catalyst resume error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	mgr := getSessionManager(ctx)
+	pDir, err := pm.EnsureProfile(targetProfile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error ensuring profile: %v\n", err)
+		return 1
+	}
+	if err := executeExactResume(resumeCmd, reg, pm, mgr, sess.Agent, targetProfile, pDir, sess, res.IsForkResume(), extraArgs); err != nil {
+		fmt.Fprintf(os.Stderr, "Resume error: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func defaultTUIRunner(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager) int {
 	cfg, _ := config.LoadConfig()
-	telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, cfg)
+	baseDir := config.BaseDir()
+	if pm != nil && pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	telClient := telemetry.NewClient(baseDir, config.CacheDir(), GetVersion(), cfg)
 	telClient.Track(telemetry.EventTUIOpened, map[string]any{})
 	_ = telClient.Close()
 
-	m := tui.NewModel(reg, pm, cfg).WithVersion(Version)
+	m := tui.NewModel(reg, pm, cfg).WithVersion(GetVersion())
 	p := tea.NewProgram(m)
 	// Console logging would draw over the TUI; the session it launches below
 	// runs after the TUI has closed and must show its warnings.
@@ -179,13 +206,13 @@ func defaultTUIRunner(reg *agents.Registry, pm *profile.ProfileManager) int {
 	if !ok {
 		return 0
 	}
-	return handleTUIOutcome(res, reg, pm)
+	return handleTUIOutcome(ctx, res, reg, pm)
 }
 
-func defaultTUISessionsRunner(reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
+func defaultTUISessionsRunner(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, initialAgent, profileFilter string, activeOnly bool) int {
 	cfg, _ := config.LoadConfig()
 	m := tui.NewModel(reg, pm, cfg).
-		WithVersion(Version).
+		WithVersion(GetVersion()).
 		WithSessionsDrawerConfig(initialAgent, profileFilter, activeOnly, true)
 	p := tea.NewProgram(m)
 	logger.SetConsoleOutput(false)
@@ -200,7 +227,7 @@ func defaultTUISessionsRunner(reg *agents.Registry, pm *profile.ProfileManager, 
 	if !ok {
 		return 0
 	}
-	return handleTUIOutcome(res, reg, pm)
+	return handleTUIOutcome(ctx, res, reg, pm)
 }
 
 func runTUIWithContext(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager) int {
@@ -210,7 +237,7 @@ func runTUIWithContext(ctx context.Context, reg *agents.Registry, pm *profile.Pr
 			return fn(reg, pm)
 		}
 	}
-	code := defaultTUIRunner(reg, pm)
+	code := defaultTUIRunner(ctx, reg, pm)
 	logger.Debug("[tui] TUI exited with code %d", code)
 	return code
 }
@@ -229,7 +256,7 @@ func runTUISessionsWithContext(ctx context.Context, reg *agents.Registry, pm *pr
 			return fn(reg, pm, initialAgent, profileFilter, activeOnly)
 		}
 	}
-	code := defaultTUISessionsRunner(reg, pm, initialAgent, profileFilter, activeOnly)
+	code := defaultTUISessionsRunner(ctx, reg, pm, initialAgent, profileFilter, activeOnly)
 	logger.Debug("[tui] Sessions drawer exited with code %d", code)
 	return code
 }

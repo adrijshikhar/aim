@@ -52,12 +52,10 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 
 	// 1. Try SQLite state_5.sqlite first
 	dbPath := filepath.Join(cDir, "state_5.sqlite")
-	if p.sqliteBin != "" {
-		if fi, err := os.Stat(dbPath); err == nil && fi.Size() > 0 {
-			sessions, err := p.listFromSQLite(ctx, dbPath, profileName, isHost)
-			if err == nil && len(sessions) > 0 {
-				return sessions, nil
-			}
+	if fi, err := os.Stat(dbPath); err == nil && fi.Size() > 0 {
+		sessions, err := p.listFromSQLite(ctx, dbPath, profileName, isHost)
+		if err == nil && len(sessions) > 0 {
+			return sessions, nil
 		}
 	}
 
@@ -81,24 +79,8 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 	}
 
 	dbPath := filepath.Join(cDir, "state_5.sqlite")
-	if p.sqliteBin != "" {
-		if fi, err := os.Stat(dbPath); err == nil && fi.Size() > 0 {
-			s, err := p.getFromSQLite(ctx, dbPath, idOrPrefix, profileName, isHost)
-			if err != nil {
-				return nil, err
-			}
-			if s != nil {
-				if sum, err := p.ResolveSummary(ctx, s); err == nil {
-					s.Goal = sum.Goal
-					s.Progress = sum.Progress
-					s.Recent = sum.RecentActivity
-					if sum.Text() != "" {
-						s.Summary = sum.Text()
-					}
-				}
-				return s, nil
-			}
-		}
+	if s, handled, err := p.lookupSessionFromSQLite(ctx, dbPath, idOrPrefix, profileName, isHost); handled {
+		return s, err
 	}
 
 	indexPath := filepath.Join(cDir, "session_index.jsonl")
@@ -175,4 +157,31 @@ func isValidSessionQuery(s string) bool {
 func escapeSQL(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
 	return strings.ReplaceAll(s, "'", "''")
+}
+
+func hasNonEmptyCodexDB(path string) bool {
+	fi, statErr := os.Stat(path)
+	return statErr == nil && fi.Size() > 0
+}
+
+func (p *Provider) lookupSessionFromSQLite(ctx context.Context, dbPath, idOrPrefix, profileName string, isHost bool) (*session.Session, bool, error) {
+	if !hasNonEmptyCodexDB(dbPath) {
+		return nil, false, nil
+	}
+	s, err := p.getFromSQLite(ctx, dbPath, idOrPrefix, profileName, isHost)
+	if err != nil {
+		return nil, true, err
+	}
+	if s == nil {
+		return nil, false, nil
+	}
+	if sum, sumErr := p.ResolveSummary(ctx, s); sumErr == nil {
+		s.Goal = sum.Goal
+		s.Progress = sum.Progress
+		s.Recent = sum.RecentActivity
+		if sum.Text() != "" {
+			s.Summary = sum.Text()
+		}
+	}
+	return s, true, nil
 }

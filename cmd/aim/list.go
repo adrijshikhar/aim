@@ -92,8 +92,8 @@ func formatProfileUsageBadge(cache *usage.CacheStore, reg *agents.Registry, agen
 		}
 		if rep.Error != "" {
 			cleanErr := strings.TrimSpace(strings.ReplaceAll(rep.Error, "\n", " "))
-			if len(cleanErr) > 20 {
-				cleanErr = cleanErr[:20] + "..."
+			if runes := []rune(cleanErr); len(runes) > 20 {
+				cleanErr = string(runes[:20]) + "..."
 			}
 			return fmt.Sprintf("[%s]", strings.ToLower(cleanErr))
 		}
@@ -184,10 +184,12 @@ func runListTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, 
 
 	if agentName != "" {
 		canonicalAgent := agentName
-		if reg != nil {
-			if ad, err := reg.Get(agentName); err == nil {
-				canonicalAgent = ad.Name()
+		if reg != nil && len(reg.All()) > 0 {
+			ad, err := reg.Get(agentName)
+			if err != nil {
+				return err
 			}
+			canonicalAgent = ad.Name()
 		}
 		profiles, err := pm.ListProfilesForAgent(canonicalAgent, cfg, reg)
 		if err != nil {

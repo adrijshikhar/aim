@@ -119,9 +119,10 @@ func (d SessionsDrawer) Init() tea.Cmd {
 func (d *SessionsDrawer) setSessions(sessions []session.Session) {
 	d.sessions = sessions
 	d.index = NewSessionsIndex(sessions)
-	if d.cursor >= len(sessions) {
-		if len(sessions) > 0 {
-			d.cursor = len(sessions) - 1
+	filtered := d.filteredSessions()
+	if d.cursor >= len(filtered) {
+		if len(filtered) > 0 {
+			d.cursor = len(filtered) - 1
 		} else {
 			d.cursor = 0
 		}
@@ -879,17 +880,24 @@ func (m Model) renderSessionsDrawer() string {
 	return d.View()
 }
 
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	if maxRunes > 3 {
+		return string(r[:maxRunes-3]) + "..."
+	}
+	return string(r[:maxRunes])
+}
+
 func truncateString(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
-	r := []rune(s)
-	if len(r) > maxLen {
-		if maxLen > 3 {
-			return string(r[:maxLen-3]) + "..."
-		}
-		return string(r[:maxLen])
-	}
-	return s
+	return truncateRunes(s, maxLen)
 }
 
 func formatTimeOrRelative(started, lastActive time.Time) string {
@@ -931,66 +939,120 @@ func formatRelativeTime(t time.Time) string {
 
 func wrapText(text string, maxWidth int, maxLines int) []string {
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" || maxWidth <= 0 || maxLines <= 0 {
 		return nil
 	}
 
 	paragraphs := strings.Split(text, "\n")
-	var lines []string
-
+	wordGroups := make([][]string, 0, len(paragraphs))
 	for _, p := range paragraphs {
-		words := strings.Fields(p)
-		if len(words) == 0 {
-			continue
+		if words := strings.Fields(p); len(words) > 0 {
+			wordGroups = append(wordGroups, words)
 		}
+	}
+	if len(wordGroups) == 0 {
+		return nil
+	}
 
+	var lines []string
+	for pIdx, words := range wordGroups {
 		var current strings.Builder
-		for i, w := range words {
-			if len(w) > maxWidth {
-				w = w[:maxWidth-3] + "..."
-			}
+		currentRunes := 0
+		for wIdx, w := range words {
+			w = truncateRunes(w, maxWidth)
+			wLen := len([]rune(w))
+			hasMore := wIdx < len(words)-1 || pIdx < len(wordGroups)-1
 
 			if len(lines) == maxLines-1 {
-				// We are on the final line allowed.
-				// Fit as many remaining words as possible.
-				if current.Len() == 0 {
-					current.WriteString(w)
-				} else if current.Len()+1+len(w) <= maxWidth-4 {
-					current.WriteString(" " + w)
-				} else {
-					// Word doesn't fit or there are more words remaining
-					current.WriteString("...")
-					lines = append(lines, current.String())
-					return lines
-				}
-				// If this was the last word of all paragraphs, append and return
-				if i == len(words)-1 && p == paragraphs[len(paragraphs)-1] {
-					lines = append(lines, current.String())
-					return lines
+				if line, done := appendFinalWrapWord(w, wLen, hasMore, maxWidth, &current, &currentRunes); done {
+					return append(lines, line)
 				}
 				continue
 			}
 
-			if current.Len() == 0 {
+			switch {
+			case currentRunes == 0:
 				current.WriteString(w)
-			} else if current.Len()+1+len(w) <= maxWidth {
-				current.WriteString(" " + w)
-			} else {
+				currentRunes = wLen
+			case currentRunes+1+wLen <= maxWidth:
+				current.WriteByte(' ')
+				current.WriteString(w)
+				currentRunes += 1 + wLen
+			default:
 				lines = append(lines, current.String())
 				current.Reset()
+				currentRunes = 0
+				if len(lines) == maxLines-1 {
+					if line, done := appendFinalWrapWord(w, wLen, hasMore, maxWidth, &current, &currentRunes); done {
+						return append(lines, line)
+					}
+					continue
+				}
 				current.WriteString(w)
+				currentRunes = wLen
 			}
 		}
 
-		if current.Len() > 0 && len(lines) < maxLines {
-			lines = append(lines, current.String())
-			current.Reset()
+		if currentRunes > 0 && len(lines) < maxLines {
+			lastLine := current.String()
+			if len(lines) == maxLines-1 && pIdx < len(wordGroups)-1 {
+				lastLine = appendWrapEllipsis(lastLine, maxWidth)
+			}
+			lines = append(lines, lastLine)
 		}
-
 		if len(lines) >= maxLines {
 			break
 		}
 	}
 
 	return lines
+}
+
+func appendWrapEllipsis(line string, maxWidth int) string {
+	if strings.HasSuffix(line, "...") {
+		return line
+	}
+	if maxWidth <= 3 {
+		return truncateRunes(line, maxWidth)
+	}
+	runes := []rune(line)
+	if len(runes) > maxWidth-3 {
+		runes = runes[:maxWidth-3]
+	}
+	return strings.TrimRight(string(runes), " ") + "..."
+}
+
+func appendFinalWrapWord(w string, wLen int, hasMore bool, maxWidth int, current *strings.Builder, currentRunes *int) (string, bool) {
+	limit := maxWidth
+	if hasMore && maxWidth > 3 {
+		limit = maxWidth - 3
+	}
+	sep := 0
+	if *currentRunes > 0 {
+		sep = 1
+	}
+
+	if *currentRunes+sep+wLen <= limit {
+		if sep == 1 {
+			current.WriteByte(' ')
+		}
+		current.WriteString(w)
+		*currentRunes += sep + wLen
+		if !hasMore {
+			return current.String(), true
+		}
+		return "", false
+	}
+
+	if *currentRunes == 0 {
+		if hasMore && maxWidth > 3 {
+			return truncateRunes(w, maxWidth-3) + "...", true
+		}
+		return truncateRunes(w, maxWidth), true
+	}
+
+	if maxWidth > 3 {
+		current.WriteString("...")
+	}
+	return current.String(), true
 }

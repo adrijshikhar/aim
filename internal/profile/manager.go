@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -204,11 +205,7 @@ func (m *ProfileManager) EnsureProfile(name string) (string, error) {
 	extraPaths := ProfileExtraPaths(cfg, name)
 	_ = EnsureDotfiles(realHome, pDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(pDir, name, cfg)
-	if m.IsLeased(name) {
-		_ = os.Remove(filepath.Join(pDir, ".mcp-auth"))
-	} else {
-		_ = m.EnsureMCPAuth(name)
-	}
+	m.ensureMCPAuthIsolation(pDir, name)
 	return pDir, nil
 }
 
@@ -229,70 +226,65 @@ func (m *ProfileManager) EnsureAllProfilesDotfiles() error {
 			errs = append(errs, err)
 		}
 		cleanStatuslineSymlinksIfDisabled(pDir, p, cfg)
-		if m.IsLeased(p) {
-			_ = os.Remove(filepath.Join(pDir, ".mcp-auth"))
-		} else {
-			_ = m.EnsureMCPAuth(p)
-		}
+		m.ensureMCPAuthIsolation(pDir, p)
 	}
 	return errors.Join(errs...)
 }
 
-// EnsureMCPAuth bridges ~/.mcp-auth to the shared mcp-auth directory for non-leased profiles.
+func (m *ProfileManager) ensureMCPAuthIsolation(pDir, profileName string) {
+	if m != nil && m.IsLeased(profileName) {
+		profAuth := filepath.Join(pDir, ".mcp-auth")
+		if fi, err := os.Lstat(profAuth); err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				_ = os.Remove(profAuth)
+			} else {
+				_ = os.RemoveAll(profAuth)
+			}
+		}
+		return
+	}
+	_ = m.EnsureMCPAuth(profileName)
+}
+
+// EnsureMCPAuth provisions a profile-isolated 0700 ~/.mcp-auth directory for non-leased profiles,
+// migrating away from any legacy shared or dangling symlink without touching symlink targets.
 func (m *ProfileManager) EnsureMCPAuth(profileName string) error {
 	if m == nil || m.IsLeased(profileName) {
 		return nil
 	}
-	realHome := config.RealHomeDir()
 	pDir := m.ProfileDir(profileName)
-	return BridgeMCPAuthDirectory(realHome, pDir)
+	return BridgeMCPAuthDirectory("", pDir)
 }
 
-// BridgeMCPAuthDirectory links ~/.mcp-auth in profileDir to a shared storage directory.
-func BridgeMCPAuthDirectory(realHome, profileDir string) error {
-	sharedDir := filepath.Join(config.BaseDir(), "shared", "mcp-auth")
-	if err := os.MkdirAll(sharedDir, 0700); err != nil {
+// BridgeMCPAuthDirectory ensures ~/.mcp-auth in profileDir is an isolated 0700 directory
+// (unlinking any legacy shared symlink instead of cross-contaminating profiles or host).
+func BridgeMCPAuthDirectory(_, profileDir string) error {
+	if strings.TrimSpace(profileDir) == "" {
+		return nil
+	}
+	profAuth := filepath.Join(profileDir, ".mcp-auth")
+	fi, err := os.Lstat(profAuth)
+	if os.IsNotExist(err) {
+		return os.MkdirAll(profAuth, 0o700)
+	}
+	if err != nil {
 		return err
 	}
-
-	if realHome != "" {
-		hostAuth := filepath.Join(realHome, ".mcp-auth")
-		bridgeOrMigrateToShared(hostAuth, sharedDir)
-	}
-
-	if profileDir != "" {
-		profAuth := filepath.Join(profileDir, ".mcp-auth")
-		bridgeOrMigrateToShared(profAuth, sharedDir)
-	}
-
-	return nil
-}
-
-func bridgeOrMigrateToShared(targetPath, sharedDir string) {
-	fi, err := os.Lstat(targetPath)
-	if err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			target, readErr := os.Readlink(targetPath)
-			if readErr == nil && (target == sharedDir || sameFile(targetPath, sharedDir)) {
-				return
-			}
-			_ = os.Remove(targetPath)
-		} else if fi.IsDir() {
-			entries, _ := os.ReadDir(targetPath)
-			for _, e := range entries {
-				srcFile := filepath.Join(targetPath, e.Name())
-				dstFile := filepath.Join(sharedDir, e.Name())
-				if _, statErr := os.Stat(dstFile); os.IsNotExist(statErr) {
-					data, err := os.ReadFile(srcFile)
-					if err == nil {
-						_ = os.WriteFile(dstFile, data, 0600)
-					}
-				}
-			}
-			_ = os.RemoveAll(targetPath)
+	if fi.Mode()&os.ModeSymlink != 0 {
+		// Remove only the symlink entry so host/shared files are never disturbed.
+		if rmErr := os.Remove(profAuth); rmErr != nil {
+			return fmt.Errorf("remove legacy mcp-auth symlink: %w", rmErr)
 		}
+		return os.MkdirAll(profAuth, 0o700)
 	}
-	_ = os.Symlink(sharedDir, targetPath)
+	if !fi.IsDir() {
+		return fmt.Errorf("unexpected file at %s", profAuth)
+	}
+	if fi.Mode().Perm() != 0o700 {
+		//nolint:gosec // G302: profAuth is verified fi.IsDir(); private directory requires 0700 traverse bit.
+		_ = os.Chmod(profAuth, 0o700)
+	}
+	return nil
 }
 
 func cleanStatuslineSymlinksIfDisabled(pDir, profileName string, cfg *config.Config) {
@@ -451,8 +443,20 @@ func (m *ProfileManager) RemoveProfile(name string) error {
 	return os.RemoveAll(pDir)
 }
 
+func purgeCredentialPurgers(profileName, pDir string, purgers []agents.CredentialPurger) []error {
+	var errs []error
+	for _, cp := range purgers {
+		if cp != nil {
+			if err := cp.PurgeCredentials(context.Background(), profileName, pDir); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errs
+}
+
 // DeleteProfile removes the profile directory on disk and cleans up its entry in config.
-func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) error {
+func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config, purgers ...agents.CredentialPurger) error {
 	if err := validateProfileName(profileName); err != nil {
 		return err
 	}
@@ -467,35 +471,56 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 		}
 	}
 	pDir := m.ProfileDir(profileName)
-	dirExists := false
-	if _, err := os.Stat(pDir); err == nil {
-		dirExists = true
-	}
-	cfgExists := false
-	if cfg.Profiles != nil {
-		_, cfgExists = cfg.Profiles[profileName]
-	}
+	_, statErr := os.Stat(pDir)
+	dirExists := statErr == nil
+	_, cfgExists := cfg.Profiles[profileName]
 	if !dirExists && !cfgExists {
 		return fmt.Errorf("profile '%s' does not exist", profileName)
 	}
 
+	var cleanupErrs []error
 	if dirExists {
-		_ = PurgeProfileKeychain("claude", pDir)
+		if err := PurgeProfileKeychain("claude", pDir); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
+		cleanupErrs = append(cleanupErrs, purgeCredentialPurgers(profileName, pDir, purgers)...)
 		if err := m.RemoveProfile(profileName); err != nil {
-			return err
+			cleanupErrs = append(cleanupErrs, err)
 		}
 	}
 	cfg.DeleteProfile(profileName)
 	if err := m.MergeStateStore().Remove(profileName); err != nil {
-		return err
+		cleanupErrs = append(cleanupErrs, err)
 	}
-	return config.SaveConfig(cfg)
+	if err := config.SaveConfig(cfg); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	return errors.Join(cleanupErrs...)
+}
+
+func (m *ProfileManager) cleanupRemovedAgentDir(profileName, agentName, pDir string, dirExists, hasRemaining bool, purgers []agents.CredentialPurger) []error {
+	if !dirExists {
+		return nil
+	}
+	var errs []error
+	if err := PurgeProfileKeychain(agentName, pDir); err != nil {
+		errs = append(errs, err)
+	}
+	errs = append(errs, purgeCredentialPurgers(profileName, pDir, purgers)...)
+	if hasRemaining {
+		if err := PurgeLocalAgentCredentials(pDir, agentName); err != nil {
+			errs = append(errs, err)
+		}
+	} else if err := m.RemoveProfile(profileName); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
 }
 
 // RemoveAgent unlinks an agent from a profile in config.
 // If other agents remain associated with the profile, the directory is preserved and cleanedUp is false.
 // If no agents remain, the entire profile directory is deleted and cleanedUp is true.
-func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.Config) (bool, error) {
+func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.Config, purgers ...agents.CredentialPurger) (bool, error) {
 	if err := validateProfileName(profileName); err != nil {
 		return false, err
 	}
@@ -510,38 +535,30 @@ func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.
 		}
 	}
 	pDir := m.ProfileDir(profileName)
-	dirExists := false
-	if _, err := os.Stat(pDir); err == nil {
-		dirExists = true
-	}
-	cfgExists := false
-	if cfg.Profiles != nil {
-		_, cfgExists = cfg.Profiles[profileName]
-	}
+	_, statErr := os.Stat(pDir)
+	dirExists := statErr == nil
+	_, cfgExists := cfg.Profiles[profileName]
 	if !dirExists && !cfgExists {
 		return false, fmt.Errorf("profile '%s' does not exist", profileName)
 	}
-
 	if !cfg.HasAgent(profileName, agentName) {
 		return false, fmt.Errorf("agent %q is not associated with profile %q", agentName, profileName)
 	}
 
 	cfg.RemoveProfileAgent(profileName, agentName)
 	remaining := cfg.GetProfileAgents(profileName)
-	if len(remaining) > 0 {
-		return false, config.SaveConfig(cfg)
-	}
+	cleanupErrs := m.cleanupRemovedAgentDir(profileName, agentName, pDir, dirExists, len(remaining) > 0, purgers)
 
-	if dirExists {
-		if err := m.RemoveProfile(profileName); err != nil {
-			return false, err
+	if len(remaining) == 0 {
+		cfg.DeleteProfile(profileName)
+		if err := m.MergeStateStore().Remove(profileName); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
 		}
 	}
-	cfg.DeleteProfile(profileName)
-	if err := m.MergeStateStore().Remove(profileName); err != nil {
-		return false, err
+	if err := config.SaveConfig(cfg); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
 	}
-	return true, config.SaveConfig(cfg)
+	return len(remaining) == 0, errors.Join(cleanupErrs...)
 }
 
 // ListProfilesForAgent returns profile names associated with the given agent.
@@ -583,9 +600,26 @@ func (m *ProfileManager) ListProfilesForAgent(agentName string, cfg *config.Conf
 	return matched, nil
 }
 
+const claudeJSONFileName = ".claude.json"
+
 func isSensitiveProfileFile(name string) bool {
 	lower := strings.ToLower(name)
-	return strings.Contains(lower, "token") || strings.Contains(lower, "credential") || strings.HasSuffix(lower, ".db")
+	if strings.Contains(lower, "token") || strings.Contains(lower, "credential") {
+		return true
+	}
+	if strings.HasSuffix(lower, ".db") || strings.HasSuffix(lower, ".db-wal") || strings.HasSuffix(lower, ".db-shm") ||
+		strings.HasSuffix(lower, ".vscdb") || strings.HasSuffix(lower, ".vscdb-wal") || strings.HasSuffix(lower, ".vscdb-shm") ||
+		strings.Contains(lower, "state.vscdb") {
+		return true
+	}
+	if strings.HasPrefix(lower, ".aim-logged-out") {
+		return true
+	}
+	switch lower {
+	case "auth.json", claudeJSONFileName, ".mcp-auth", "mcp_oauth_tokens.json", ".aim-lease.json":
+		return true
+	}
+	return false
 }
 
 // CloneProfile duplicates a profile's non-sensitive configuration and dotfile symlinks to a new profile.
@@ -638,6 +672,7 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 	// If source directory exists, copy non-sensitive files and symlinks
 	if srcDirExists {
 		if err := cloneDirectory(srcDir, dstDir); err != nil {
+			_ = os.RemoveAll(dstDir)
 			return fmt.Errorf("failed to clone profile files: %w", err)
 		}
 	}
@@ -686,8 +721,14 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 	extraPaths := ProfileExtraPaths(cfg, newProfile)
 	_ = EnsureDotfiles(realHome, dstDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(dstDir, newProfile, cfg)
+	m.ensureMCPAuthIsolation(dstDir, newProfile)
 
-	return config.SaveConfig(cfg)
+	if err := config.SaveConfig(cfg); err != nil {
+		cfg.DeleteProfile(newProfile)
+		_ = os.RemoveAll(dstDir)
+		return err
+	}
+	return nil
 }
 
 // RenameProfile renames an existing profile to a new name.
@@ -749,7 +790,17 @@ func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Conf
 		return fmt.Errorf("failed to update config for renamed profile: %w", err)
 	}
 	if err := m.MergeStateStore().Rename(oldName, newName); err != nil {
+		cfg.RenameProfile(newName, oldName)
+		_ = config.SaveConfig(cfg)
+		if oldDirExists {
+			_ = os.Rename(newDir, oldDir)
+		}
 		return fmt.Errorf("failed to rename merge state: %w", err)
+	}
+	if oldDirExists {
+		if err := MigrateClaudeScopedKeychain(filepath.Join(oldDir, ".claude"), filepath.Join(newDir, ".claude")); err != nil {
+			logger.Warn("[profile] Failed to migrate scoped keychain during rename %s -> %s: %v", oldName, newName, err)
+		}
 	}
 
 	// Ensure dotfile symlinks in new location are intact
@@ -757,6 +808,7 @@ func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Conf
 	extraPaths := ProfileExtraPaths(cfg, newName)
 	_ = EnsureDotfiles(realHome, newDir, extraPaths...)
 	cleanStatuslineSymlinksIfDisabled(newDir, newName, cfg)
+	m.ensureMCPAuthIsolation(newDir, newName)
 
 	return nil
 }

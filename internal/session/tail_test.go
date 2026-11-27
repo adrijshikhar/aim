@@ -77,8 +77,8 @@ func TestReadTurnCounts_LargeLineSafety(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "large.jsonl")
 
-	// 2MB line padding
-	largePadding := strings.Repeat("x", 2*1024*1024)
+	// 5MB line padding (exceeds legacy 4MB cap, within 10MB ceiling)
+	largePadding := strings.Repeat("x", 5*1024*1024)
 	content := strings.Join([]string{
 		`{"type":"user","payload":"` + largePadding + `"}`,
 		`{"type":"assistant","payload":"ok"}`,
@@ -121,5 +121,24 @@ func TestReadTurnCounts_EmptyFile(t *testing.T) {
 	}
 	if turns != 0 {
 		t.Errorf("expected 0 turns for empty file, got %d", turns)
+	}
+}
+
+func TestParseClaudeContent_PartialMalformedArrayPreservesValidBlocks(t *testing.T) {
+	raw := []byte(`[
+		{"type":"text","text":"First valid block"},
+		"unexpected-string-element",
+		{"type":"tool_use","tool_use_id":"call_1","name":"Bash","input":{"cmd":"ls"}},
+		{"type":"thinking","thinking":"Reasoning here"}
+	]`)
+	blocks, firstText := ParseClaudeContent(raw)
+	if firstText != "First valid block" {
+		t.Fatalf("expected firstText 'First valid block', got %q", firstText)
+	}
+	if len(blocks) != 3 {
+		t.Fatalf("expected 3 valid blocks preserved around malformed string element, got %d (%+v)", len(blocks), blocks)
+	}
+	if blocks[1].Type != "tool_use" || blocks[1].ToolUseID != "call_1" || blocks[2].Type != "thinking" {
+		t.Fatalf("unexpected decoded blocks: %+v", blocks)
 	}
 }

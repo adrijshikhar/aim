@@ -91,7 +91,7 @@ func (c *Client) RequestLease(ctx context.Context, peerIP, profile, agent string
 	}
 
 	var leaseResp LeaseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&leaseResp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&leaseResp); err != nil {
 		return nil, err
 	}
 	return &leaseResp, nil
@@ -125,7 +125,7 @@ func (c *Client) PollLease(ctx context.Context, peerIP, requestID string) (*Leas
 	}
 
 	var leaseResp LeaseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&leaseResp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&leaseResp); err != nil {
 		return nil, err
 	}
 	return &leaseResp, nil
@@ -184,7 +184,7 @@ func (c *Client) CheckLeaseStatus(ctx context.Context, peerIP, leaseID string) (
 	}
 
 	var statusResp LeaseStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&statusResp); err != nil {
 		return nil, err
 	}
 	return &statusResp, nil

@@ -17,6 +17,7 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/agents/codex"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
 	"github.com/aim-cli/aim/internal/session"
@@ -1127,4 +1128,55 @@ func TestLeaseSupervisor_Heartbeat(t *testing.T) {
 			t.Fatalf("expected LastVerifiedAt to be updated on disk within deadline")
 		}
 	})
+}
+
+func TestRunCmd_RejectsTraversalAndSkipsP2PLeaseConfig(t *testing.T) {
+	baseDir := t.TempDir()
+	t.Setenv("AIM_HOME", baseDir)
+	t.Setenv("HOME", baseDir)
+
+	pm := profile.NewProfileManager(baseDir)
+	mock := &mockAdapter{
+		name:       "mock",
+		binaryPath: "/bin/sh",
+		args:       []string{"-c", "exit 0"},
+	}
+	reg := agents.NewRegistry()
+	reg.Register(mock)
+
+	for _, badProfile := range []string{"../escape", "peer:../escape", "..:work", "."} {
+		cmd := newRootCmd(reg, pm)
+		cmd.SetArgs([]string{"run", "mock", badProfile})
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("expected run to reject invalid/traversal profile %q", badProfile)
+		}
+	}
+
+	leaseProfile := "p2p-borrowed"
+	leaseDir := pm.ProfileDir(leaseProfile)
+	if err := os.MkdirAll(leaseDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	metaBytes, _ := json.Marshal(share.LeaseMeta{
+		LeaseID:        "ls_p2p",
+		SourcePeer:     "peer1",
+		SourceProfile:  "work",
+		Agent:          "mock",
+		GrantedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(2 * time.Hour),
+		LastVerifiedAt: time.Now(),
+	})
+	if err := os.WriteFile(filepath.Join(leaseDir, ".aim-lease.json"), metaBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCmd(reg, pm)
+	cmd.SetArgs([]string{"run", "mock", leaseProfile})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run on p2p leased profile failed: %v", err)
+	}
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && cfg.HasAgent(leaseProfile, "mock") {
+		t.Fatalf("expected leased profile %q not to be persisted into config.json", leaseProfile)
+	}
 }

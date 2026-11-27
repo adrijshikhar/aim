@@ -43,6 +43,15 @@ func TestInterfaceSegregation_MinimalAdapter(t *testing.T) {
 	if _, ok := any(stub).(agents.AccountInfoProvider); ok {
 		t.Fatal("minimal stub should not implement AccountInfoProvider")
 	}
+	if _, ok := any(stub).(agents.CredentialSeeder); ok {
+		t.Fatal("minimal stub should not implement CredentialSeeder")
+	}
+	if _, ok := any(stub).(agents.CredentialHarvester); ok {
+		t.Fatal("minimal stub should not implement CredentialHarvester")
+	}
+	if _, ok := any(stub).(agents.CredentialPurger); ok {
+		t.Fatal("minimal stub should not implement CredentialPurger")
+	}
 	if _, ok := any(stub).(agents.FullAdapter); ok {
 		t.Fatal("minimal stub should not implement FullAdapter")
 	}

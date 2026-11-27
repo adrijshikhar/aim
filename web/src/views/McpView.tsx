@@ -91,6 +91,7 @@ export function McpView({
   const onSelectScope = propOnSelectScope ?? onSelectProfile;
   const [servers, setServers] = React.useState<MCPServerDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [copiedName, setCopiedName] = React.useState<string | null>(null);
   const [expandedTools, setExpandedTools] = React.useState<Record<string, boolean>>({});
@@ -116,44 +117,16 @@ export function McpView({
 
   const fetchServers = React.useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const profileParam =
         selectedScope === 'all' || selectedScope === 'global' ? undefined : selectedScope;
       const data = await getMcpServers(profileParam);
       setServers(data);
-    } catch {
-      // Dev fallback data
-      setServers([
-        {
-          name: 'claude-mem',
-          command: 'npx',
-          args: ['-y', '@claude-mem/server'],
-          env: { MEMORY_DIR: '~/.claude-mem' },
-          scope: 'global',
-          type: 'stdio',
-          status: 'enabled',
-          auth: 'none',
-        },
-        {
-          name: 'posthog',
-          url: 'https://mcp.posthog.com/mcp',
-          headers: { Authorization: 'Bearer phx_secret_token' },
-          scope: 'global',
-          type: 'http',
-          status: 'enabled',
-          auth: 'connected',
-        },
-        {
-          name: 'hevo-services',
-          command: 'python3',
-          args: ['-m', 'hevo_services.mcp'],
-          env: { ENVIRONMENT: 'nonprod' },
-          scope: 'office',
-          type: 'stdio',
-          status: 'enabled',
-          auth: 'none',
-        },
-      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch MCP servers';
+      setError(msg);
+      setServers([]);
     } finally {
       setLoading(false);
     }
@@ -511,6 +484,25 @@ export function McpView({
           >
             Reset all
           </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-geist border border-status-warning-border bg-status-warning-bg px-3.5 py-2 text-xs text-status-warning font-sans flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Failed to load MCP catalog: {error}</span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={fetchServers}
+            disabled={loading}
+            className="h-6 px-2 text-xs font-mono border-status-warning-border bg-[#161616] text-status-warning hover:bg-[#202020] rounded-geist cursor-pointer shrink-0"
+          >
+            Retry
+          </Button>
         </div>
       )}
 

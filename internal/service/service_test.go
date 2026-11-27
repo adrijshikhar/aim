@@ -1076,3 +1076,247 @@ func TestProfileService_IdleProfileQuotaSummary(t *testing.T) {
 		t.Errorf("expected Quota.Summary == 'Ready on use', got %q", profs[0].Quota.Summary)
 	}
 }
+
+func TestMCPService_CompositeKeyAndTraversal(t *testing.T) {
+	ctx := context.Background()
+	_, pm, _, _ := setupTestEnv(t)
+
+	profDir, err := pm.EnsureProfile("work")
+	if err != nil {
+		t.Fatalf("EnsureProfile work: %v", err)
+	}
+	claudeDir := filepath.Join(profDir, ".claude")
+	codexDir := filepath.Join(profDir, ".codex")
+	for _, d := range []string{claudeDir, codexDir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "mcp_config.json"), []byte(`{"mcpServers":{"github":{"command":"gh-claude"}}}`), 0o600); err != nil {
+		t.Fatalf("write claude mcp_config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte("[mcp_servers.github]\ncommand = \"gh-codex\"\n"), 0o600); err != nil {
+		t.Fatalf("write codex config.toml: %v", err)
+	}
+
+	reg := agents.NewRegistry()
+	mcpSvc := service.NewMCPService(pm, reg)
+
+	if _, err := mcpSvc.ListServers(ctx, "../evil"); err == nil {
+		t.Fatal("expected traversal profile name to fail")
+	}
+
+	servers, err := mcpSvc.ListServers(ctx, "work")
+	if err != nil {
+		t.Fatalf("ListServers work: %v", err)
+	}
+	clients := make(map[string]bool)
+	for _, srv := range servers {
+		if srv.Name == "github" {
+			clients[srv.Client] = true
+		}
+	}
+	if !clients["claude"] || !clients["codex"] {
+		t.Fatalf("expected distinct github MCP entries for both claude and codex, got clients=%v (%+v)", clients, servers)
+	}
+}
+
+func TestProfileService_EmailPersistenceAndScopedRename(t *testing.T) {
+	ctx := context.Background()
+	_, pm, reg, cache := setupTestEnv(t)
+	svc := service.NewProfileService(pm, reg, cache)
+
+	_, err := svc.CreateProfile(ctx, service.CreateProfileRequest{
+		Agent: "claude",
+		Name:  "multi",
+		Email: "persisted@example.com",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	cfg, _ := config.LoadConfig()
+	cfg.AddProfileAgent("multi", "codex")
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	listed, err := svc.ListProfiles(ctx, "")
+	if err != nil {
+		t.Fatalf("ListProfiles: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Account == nil || listed[0].Account.Email != "persisted@example.com" {
+		t.Fatalf("expected persisted email on ListProfiles, got %+v", listed)
+	}
+
+	// Scoped rename of claude must move only claude and leave codex intact on "multi".
+	if err := svc.RenameProfile(ctx, "claude", "multi", "claude-moved"); err != nil {
+		t.Fatalf("scoped RenameProfile failed: %v", err)
+	}
+	if !pm.ProfileExists("multi") {
+		t.Fatal("expected 'multi' profile to remain for codex agent")
+	}
+	if !pm.ProfileExists("claude-moved") {
+		t.Fatal("expected 'claude-moved' destination profile to exist")
+	}
+	updatedCfg, _ := config.LoadConfig()
+	if !updatedCfg.HasAgent("multi", "codex") || updatedCfg.HasAgent("multi", "claude") {
+		t.Fatalf("unexpected agents remaining on multi: %v", updatedCfg.GetProfileAgents("multi"))
+	}
+	if !updatedCfg.HasAgent("claude-moved", "claude") {
+		t.Fatalf("expected claude agent moved to claude-moved: %v", updatedCfg.GetProfileAgents("claude-moved"))
+	}
+}
+
+func mustWriteTranscriptFixture(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestTranscript_ClaudeStringAndBlocks_AndCodex(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	aimHome := filepath.Join(tempDir, "aim-home")
+	t.Setenv("AIM_HOME", aimHome)
+	t.Setenv("AIM_REAL_HOME", aimHome)
+	t.Setenv("HOME", aimHome)
+	if err := os.MkdirAll(filepath.Join(aimHome, "profiles", "work"), 0o700); err != nil {
+		t.Fatalf("mkdir aim-home work: %v", err)
+	}
+
+	profilesRoot := filepath.Join(tempDir, "custom-profiles")
+	claudeID := "11111111-1111-1111-1111-111111111111"
+	mustWriteTranscriptFixture(t, filepath.Join(profilesRoot, "work", ".claude", "projects", "proj1", claudeID+".jsonl"), strings.Join([]string{
+		`{"type":"user","timestamp":"2026-11-26T10:00:00Z","message":{"role":"user","content":"plain string prompt"}}`,
+		`{"type":"assistant","timestamp":"2026-11-26T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"block reply"}]}}`,
+	}, "\n")+"\n")
+
+	codexID := "22222222-2222-2222-2222-222222222222"
+	mustWriteTranscriptFixture(t, filepath.Join(profilesRoot, "work", ".codex", "sessions", "rollout-"+codexID+".jsonl"), strings.Join([]string{
+		`{"timestamp":"2026-11-26T11:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"codex question"}]}}`,
+		`{"timestamp":"2026-11-26T11:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"codex answer"}]}}`,
+	}, "\n")+"\n")
+
+	mgr := session.NewManager()
+	mgr.RegisterProvider(&mockSessionProvider{
+		agent: "claude",
+		sessions: []session.Session{
+			{ID: claudeID, ShortID: "11111111", Agent: "claude", Profile: "work", LastActiveAt: time.Now()},
+		},
+	})
+	mgr.RegisterProvider(&mockSessionProvider{
+		agent: "codex",
+		sessions: []session.Session{
+			{ID: codexID, ShortID: "22222222", Agent: "codex", Profile: "work", LastActiveAt: time.Now()},
+		},
+	})
+
+	svc := service.NewSessionServiceWithProfilesRoot(mgr, profilesRoot, &mockLauncher{})
+
+	ct, err := svc.GetSessionTranscript(ctx, "claude", claudeID)
+	if err != nil {
+		t.Fatalf("GetSessionTranscript claude: %v", err)
+	}
+	if len(ct.Turns) != 2 || ct.Turns[0].Content != "plain string prompt" || ct.Turns[1].Content != "block reply" {
+		t.Fatalf("unexpected claude turns: %+v", ct.Turns)
+	}
+
+	xt, err := svc.GetSessionTranscript(ctx, "codex", codexID)
+	if err != nil {
+		t.Fatalf("GetSessionTranscript codex: %v", err)
+	}
+	if len(xt.Turns) != 2 || xt.Turns[0].Content != "codex question" || xt.Turns[1].Content != "codex answer" {
+		t.Fatalf("unexpected codex turns: %+v", xt.Turns)
+	}
+}
+
+func TestTranscript_BlocksEscapedStoragePathOutsideProfileRoot(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	aimHome := filepath.Join(tempDir, "aim-home")
+	t.Setenv("AIM_HOME", aimHome)
+	t.Setenv("AIM_REAL_HOME", aimHome)
+	t.Setenv("HOME", aimHome)
+	if err := os.MkdirAll(filepath.Join(aimHome, "profiles", "work"), 0o700); err != nil {
+		t.Fatalf("mkdir aim-home work: %v", err)
+	}
+
+	profilesRoot := filepath.Join(tempDir, "custom-profiles")
+	outsidePath := filepath.Join(tempDir, "outside-secret.jsonl")
+	mustWriteTranscriptFixture(t, outsidePath, `{"type":"user","message":{"role":"user","content":"TOP SECRET OUTSIDE"}}`+"\n")
+
+	traversalID := "33333333-3333-3333-3333-333333333333"
+	mgr := session.NewManager()
+	mgr.RegisterProvider(&mockSessionProvider{
+		agent: "claude",
+		sessions: []session.Session{
+			{ID: traversalID, ShortID: "33333333", Agent: "claude", Profile: "work", Title: "fallback-title", StoragePath: outsidePath, LastActiveAt: time.Now()},
+		},
+	})
+
+	svc := service.NewSessionServiceWithProfilesRoot(mgr, profilesRoot, &mockLauncher{})
+	esc, err := svc.GetSessionTranscript(ctx, "claude", traversalID)
+	if err != nil {
+		t.Fatalf("GetSessionTranscript escaped storage path: %v", err)
+	}
+	for _, turn := range esc.Turns {
+		if strings.Contains(turn.Content, "TOP SECRET OUTSIDE") {
+			t.Fatalf("SECURITY BREACH: escaped StoragePath outside profile root was read: %+v", esc.Turns)
+		}
+	}
+}
+
+func TestSessionService_RejectsDotSegmentsAndHostOutsideHome(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	aimHome := filepath.Join(tempDir, "aim-home")
+	realHome := filepath.Join(tempDir, "real-home")
+	t.Setenv("AIM_HOME", aimHome)
+	t.Setenv("AIM_REAL_HOME", realHome)
+	t.Setenv("HOME", realHome)
+	if err := os.MkdirAll(aimHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(realHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	outsideHostFile := filepath.Join(tempDir, "host-outside.jsonl")
+	mustWriteTranscriptFixture(t, outsideHostFile, `{"type":"user","message":{"role":"user","content":"HOST SECRET"}}`+"\n")
+
+	mgr := session.NewManager()
+	mgr.RegisterProvider(&mockSessionProvider{
+		agent: "claude",
+		sessions: []session.Session{
+			{ID: "44444444-4444-4444-4444-444444444444", ShortID: "44444444", Agent: "claude", IsHost: true, Profile: "<host>", StoragePath: outsideHostFile, LastActiveAt: time.Now()},
+		},
+	})
+	svc := service.NewSessionService(mgr, &mockLauncher{})
+
+	for _, bad := range []service.ResumeRequest{
+		{Agent: "..", SessionID: "44444444"},
+		{Agent: "claude", SessionID: "."},
+		{Agent: "claude", SessionID: "44444444", Profile: ".."},
+	} {
+		if err := svc.ResumeSessionInTerminal(ctx, bad); err == nil {
+			t.Fatalf("expected ResumeSessionInTerminal(%+v) to reject dot segment", bad)
+		}
+	}
+	if _, err := svc.GetSessionTranscript(ctx, "claude", ".."); err == nil {
+		t.Fatalf("expected GetSessionTranscript to reject '..' session ID")
+	}
+	tr, err := svc.GetSessionTranscript(ctx, "claude", "44444444")
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	for _, turn := range tr.Turns {
+		if strings.Contains(turn.Content, "HOST SECRET") {
+			t.Fatalf("SECURITY BREACH: host StoragePath outside real home was read: %+v", tr.Turns)
+		}
+	}
+}

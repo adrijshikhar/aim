@@ -68,7 +68,11 @@ func runPrewarm(reg *agents.Registry, pm *profile.ProfileManager, targetAgent st
 		return
 	}
 
-	cache := usage.NewCacheStore(config.BaseDir(), usage.DefaultTTL)
+	baseDir := config.BaseDir()
+	if pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	cache := usage.NewCacheStore(baseDir, usage.DefaultTTL)
 	reportsChan := usage.RefreshAsync(context.Background(), targets, cache)
 	for range reportsChan {
 		// Draining reportsChan ensures all background probes finish

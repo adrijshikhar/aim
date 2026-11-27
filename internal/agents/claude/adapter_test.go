@@ -125,16 +125,16 @@ func TestAdapter_HasCredentials(t *testing.T) {
 		}
 	})
 
-	// 2. With ANTHROPIC_API_KEY environment variable
-	t.Run("with ANTHROPIC_API_KEY env", func(t *testing.T) {
+	// 2. Ambient ANTHROPIC_API_KEY in parent shell does NOT establish profile-scoped credentials
+	t.Run("with ANTHROPIC_API_KEY env does not establish credentials", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles", "work")
 		_ = os.MkdirAll(filepath.Join(profileDir, ".claude"), 0755)
 
 		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-123")
 		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-		if !a.HasCredentials(profileDir) {
-			t.Errorf("expected HasCredentials=true when ANTHROPIC_API_KEY is set")
+		if a.HasCredentials(profileDir) {
+			t.Errorf("expected HasCredentials=false when only ambient ANTHROPIC_API_KEY is set")
 		}
 	})
 
@@ -230,13 +230,18 @@ func TestClaudeAdapter_HasCredentials_CustomProfile(t *testing.T) {
 		t.Fatalf("expected HasCredentials=true for custom profile %q with scoped keychain entry", profileName)
 	}
 
+	// HasCredentials must stay strictly read-only and never write .credentials.json.
 	credsPath := filepath.Join(claudeDir, ".credentials.json")
-	data, err := os.ReadFile(credsPath)
-	if err != nil {
-		t.Fatalf("expected .credentials.json to be created, but got err: %v", err)
+	if _, err := os.Stat(credsPath); !os.IsNotExist(err) {
+		t.Fatalf("HasCredentials mutated disk by creating %s", credsPath)
 	}
-	if string(data) != validTokenJSON {
-		t.Errorf("expected credentials file content %s, got %s", validTokenJSON, string(data))
+
+	// Logged-out marker blocks HarvestCredentials from restoring scoped Keychain tokens.
+	if err := profile.MarkAgentLoggedOut(profileDir, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.HarvestCredentials(context.Background(), profileName, profileDir); err == nil {
+		t.Fatalf("expected HarvestCredentials to reject explicitly logged-out profile")
 	}
 }
 
@@ -507,10 +512,15 @@ func TestAdapter_DoctorHooksCheckIgnoresOtherMembers(t *testing.T) {
 	}
 	_ = os.WriteFile(dest, []byte(`{"hooks": {"Stop": "`+h+`/hooks/stop.sh"}}`), 0o644)
 	if !hooksReported() {
-		t.Fatal("a host path in hooks must be migrated and reported")
+		t.Fatal("a host path in hooks must be reported as WARN during Doctor")
 	}
-	if data, _ := os.ReadFile(dest); strings.Contains(string(data), h) {
-		t.Fatalf("hooks not rewritten:\n%s", data)
+	claudeRoot, err := os.OpenRoot(filepath.Join(profileDir, ".claude"))
+	if err != nil {
+		t.Fatalf("open claude root: %v", err)
+	}
+	defer func() { _ = claudeRoot.Close() }()
+	if data, _ := claudeRoot.ReadFile("settings.json"); !strings.Contains(string(data), h) {
+		t.Fatalf("Doctor must stay read-only and preserve settings.json on disk:\n%s", data)
 	}
 }
 

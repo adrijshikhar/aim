@@ -181,8 +181,22 @@ func TestDoctor_UnclaimedTokens_ReportsPruning(t *testing.T) {
 	reg := agents.NewRegistry()
 	pm := profile.NewProfileManager(tempDir)
 
+	// Default `aim doctor` stays strictly read-only and leaves stale records unpruned.
+	cmdReadOnly := newRootCmd(reg, pm)
+	cmdReadOnly.SetArgs([]string{"doctor"})
+	var roBuf bytes.Buffer
+	cmdReadOnly.SetOut(&roBuf)
+	_ = cmdReadOnly.Execute()
+	if strings.Contains(roBuf.String(), "Pruned") {
+		t.Errorf("read-only doctor must not prune tokens, got:\n%s", roBuf.String())
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Errorf("expected read-only doctor to preserve expired stash file, got: %v", err)
+	}
+
+	// `aim doctor --fix` prunes expired records and reports the count.
 	cmd := newRootCmd(reg, pm)
-	cmd.SetArgs([]string{"doctor"})
+	cmd.SetArgs([]string{"doctor", "--fix"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 
@@ -190,7 +204,7 @@ func TestDoctor_UnclaimedTokens_ReportsPruning(t *testing.T) {
 	output := buf.String()
 
 	if !strings.Contains(output, "Pruned 1 expired unclaimed token record(s)") {
-		t.Errorf("expected doctor to report pruned records, got:\n%s", output)
+		t.Errorf("expected doctor --fix to report pruned records, got:\n%s", output)
 	}
 }
 

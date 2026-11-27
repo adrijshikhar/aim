@@ -5,12 +5,16 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aim-cli/aim/internal/merge"
 )
 
 type ShareStore struct {
@@ -163,17 +167,25 @@ func (s *ShareStore) loadSharesLocked() []SharedProfileConfig {
 	return configs
 }
 
+func stripPortAndZone(raw string) string {
+	s := strings.TrimSpace(raw)
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
+	}
+	s = strings.Trim(s, "[]")
+	if idx := strings.IndexByte(s, '%'); idx >= 0 {
+		s = s[:idx]
+	}
+	return s
+}
+
 func (s *ShareStore) saveSharesLocked(configs []SharedProfileConfig) error {
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(configs, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.shareFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.shareFile)
+	return merge.AtomicWrite(s.shareFile, data, 0o600)
 }
 
 func (s *ShareStore) SavePeer(peer PeerInfo) error {
@@ -182,13 +194,14 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 
 	peers := s.loadPeersLocked()
 	found := false
+	peerHost := stripPortAndZone(peer.VPNIP)
 	for i := range peers {
 		match := false
 		if peer.ID != "" && peers[i].ID == peer.ID {
 			match = true
 		} else if peer.HostName != "" && strings.EqualFold(peers[i].HostName, peer.HostName) {
 			match = true
-		} else if peer.VPNIP != "" && (peers[i].VPNIP == peer.VPNIP || strings.Split(peers[i].VPNIP, ":")[0] == strings.Split(peer.VPNIP, ":")[0]) {
+		} else if peer.VPNIP != "" && (peers[i].VPNIP == peer.VPNIP || (peerHost != "" && strings.EqualFold(stripPortAndZone(peers[i].VPNIP), peerHost))) {
 			match = true
 		}
 		if match {
@@ -210,49 +223,34 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 		peers = append(peers, peer)
 	}
 
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(peers, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.peerFile, os.Getpid(), time.Now().UnixNano())
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	_ = f.Sync()
-	_ = f.Close()
-	return os.Rename(tmp, s.peerFile)
+	return merge.AtomicWrite(s.peerFile, data, 0o600)
 }
 
 func (s *ShareStore) DeletePeer(target string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	targetHost := stripPortAndZone(target)
 	peers := s.loadPeersLocked()
 	var next []PeerInfo
 	for _, p := range peers {
-		if p.VPNIP == target || p.HostName == target || p.ID == target || strings.Split(p.VPNIP, ":")[0] == target {
+		if p.VPNIP == target || p.HostName == target || p.ID == target || (targetHost != "" && strings.EqualFold(stripPortAndZone(p.VPNIP), targetHost)) {
 			continue
 		}
 		next = append(next, p)
 	}
 
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(next, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.peerFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.peerFile)
+	return merge.AtomicWrite(s.peerFile, data, 0o600)
 }
 
 func (s *ShareStore) GetPeers() []PeerInfo {
@@ -283,17 +281,13 @@ func (s *ShareStore) SetGlobalMode(mode string) error {
 	if mode != "off" && mode != "request" && mode != "auto" {
 		mode = "off"
 	}
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	target := filepath.Join(s.aimDir, "share_global.json")
 	data, err := json.MarshalIndent(map[string]string{"mode": mode}, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", target, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, target)
+	return merge.AtomicWrite(target, data, 0o600)
 }
 
 func (s *ShareStore) loadPeersLocked() []PeerInfo {
@@ -309,7 +303,10 @@ func (s *ShareStore) loadPeersLocked() []PeerInfo {
 func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveGrantedLeaseLocked(lease)
+}
 
+func (s *ShareStore) saveGrantedLeaseLocked(lease GrantedLease) error {
 	var leases []GrantedLease
 	if data, err := os.ReadFile(s.grantedFile); err == nil {
 		_ = json.Unmarshal(data, &leases)
@@ -349,16 +346,71 @@ func (s *ShareStore) SaveGrantedLease(lease GrantedLease) error {
 	finalList = append(finalList, active...)
 	finalList = append(finalList, inactive...)
 
-	_ = os.MkdirAll(s.aimDir, 0700)
 	data, err := json.MarshalIndent(finalList, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	return merge.AtomicWrite(s.grantedFile, data, 0o600)
+}
+
+func (s *ShareStore) deleteGrantedLeaseLocked(leaseID string) error {
+	data, err := os.ReadFile(s.grantedFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
-	return os.Rename(tmp, s.grantedFile)
+	var leases []GrantedLease
+	if err := json.Unmarshal(data, &leases); err != nil {
+		return err
+	}
+	filtered := leases[:0]
+	for _, l := range leases {
+		if l.LeaseID != leaseID {
+			filtered = append(filtered, l)
+		}
+	}
+	out, err := json.MarshalIndent(filtered, "", "  ")
+	if err != nil {
+		return err
+	}
+	return merge.AtomicWrite(s.grantedFile, out, 0o600)
+}
+
+// ApproveShareRequestGrant persists the granted lease before transitioning reqID from
+// "pending" to "approved" in SQLite, rolling back the granted lease on failure or lost race.
+func (s *ShareStore) ApproveShareRequestGrant(reqID string, lease GrantedLease) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		if s.dbErr != nil {
+			return false, fmt.Errorf("share database unavailable: %w", s.dbErr)
+		}
+		return false, errors.New("share database unavailable")
+	}
+
+	if err := s.saveGrantedLeaseLocked(lease); err != nil {
+		return false, fmt.Errorf("save granted lease: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	transitioned, err := s.db.TransitionRequestStatus(ctx, reqID, "pending", "approved", lease.LeaseID, "")
+	if err != nil {
+		if rbErr := s.deleteGrantedLeaseLocked(lease.LeaseID); rbErr != nil {
+			return false, fmt.Errorf("transition request status: %w (rollback failed: %w)", err, rbErr)
+		}
+		return false, err
+	}
+	if !transitioned {
+		if rbErr := s.deleteGrantedLeaseLocked(lease.LeaseID); rbErr != nil {
+			return false, fmt.Errorf("rollback unapproved grant: %w", rbErr)
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
 func (s *ShareStore) pruneExpiredGrantedLeasesLocked() ([]GrantedLease, int) {
@@ -412,10 +464,7 @@ func (s *ShareStore) PruneExpiredGrantedLeases() int {
 	if pruned > 0 {
 		data, err := json.MarshalIndent(active, "", "  ")
 		if err == nil {
-			tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
-			if err := os.WriteFile(tmp, data, 0600); err == nil {
-				_ = os.Rename(tmp, s.grantedFile)
-			}
+			_ = merge.AtomicWrite(s.grantedFile, data, 0o600)
 		}
 	}
 	return pruned
@@ -446,11 +495,7 @@ func (s *ShareStore) RevokeGrantedLease(leaseID string) (*GrantedLease, error) {
 	if err != nil {
 		return nil, err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(tmp, s.grantedFile); err != nil {
+	if err := merge.AtomicWrite(s.grantedFile, data, 0o600); err != nil {
 		return nil, err
 	}
 	return revoked, nil
@@ -486,16 +531,12 @@ func (s *ShareStore) AppendAudit(entry AuditEntry) error {
 		logs = logs[:500]
 	}
 
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(logs, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.auditFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.auditFile)
+	return merge.AtomicWrite(s.auditFile, data, 0o600)
 }
 
 func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
@@ -618,7 +659,7 @@ func (s *ShareStore) TransitionRequestStatus(id, fromStatus, toStatus, leaseID, 
 		if s.dbErr != nil {
 			return false, fmt.Errorf("share database unavailable: %w", s.dbErr)
 		}
-		return false, fmt.Errorf("share database unavailable")
+		return false, errors.New("share database unavailable")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -632,7 +673,7 @@ func (s *ShareStore) CancelShareRequest(id string) (bool, error) {
 		if s.dbErr != nil {
 			return false, fmt.Errorf("share database unavailable: %w", s.dbErr)
 		}
-		return false, fmt.Errorf("share database unavailable")
+		return false, errors.New("share database unavailable")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -704,16 +745,12 @@ func (s *ShareStore) DeleteSchedule(id string) error {
 }
 
 func (s *ShareStore) saveSchedulesLocked(list []SchedulePolicy) error {
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.scheduleFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.scheduleFile)
+	return merge.AtomicWrite(s.scheduleFile, data, 0o600)
 }
 
 // GetEffectiveGlobalMode returns the active global mode considering scheduled policies.

@@ -963,3 +963,61 @@ func TestCleanStatuslineSymlinksIfDisabled_PreservesCustomDir(t *testing.T) {
 		t.Fatalf("custom settings.json content altered: %s", string(data))
 	}
 }
+
+func TestProfileManager_CloneAndMoveCursorIsolation(t *testing.T) {
+	base := t.TempDir()
+	host := t.TempDir()
+	t.Setenv("AIM_HOME", base)
+	t.Setenv("AIM_REAL_HOME", host)
+	t.Setenv("HOME", host)
+	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
+
+	pm := NewProfileManager(base)
+	srcDir, err := pm.EnsureProfile("src")
+	if err != nil {
+		t.Fatalf("EnsureProfile: %v", err)
+	}
+	mustWrite := func(rel, content string) {
+		p := filepath.Join(srcDir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	mustWrite(".codex/auth.json", `{"access_token":"secret"}`)
+	mustWrite(".claude/auth.json", `{"oauth":"secret"}`)
+	mustWrite(".claude/.claude.json", `{"oauthAccount":{"emailAddress":"a@b.com"}}`)
+	mustWrite(".cursor/user-data/User/globalStorage/state.vscdb", "sqlite-cursor")
+	mustWrite(".cursor/extensions/ext.txt", "ext-data")
+	mustWrite(".aim-logged-out", "logged-out")
+	mustWrite(".codex/config.toml", "model = \"gpt-5\"\n")
+
+	cfg := config.NewDefaultConfig()
+	cfg.Profiles["src"] = config.ProfileConfig{Agents: []string{"codex", "claude", "cursor"}}
+
+	if err := pm.CloneProfile("src", "clone-clean", "", cfg); err != nil {
+		t.Fatalf("CloneProfile: %v", err)
+	}
+	cloneDir := pm.ProfileDir("clone-clean")
+	for _, secretRel := range []string{
+		".codex/auth.json",
+		".claude/auth.json",
+		".claude/.claude.json",
+		".cursor/user-data/User/globalStorage/state.vscdb",
+		".aim-logged-out",
+	} {
+		if _, err := os.Stat(filepath.Join(cloneDir, secretRel)); !os.IsNotExist(err) {
+			t.Fatalf("CloneProfile leaked sensitive file %s", secretRel)
+		}
+	}
+
+	if err := pm.MoveAgent("cursor", "src", "cursor-dst", false, cfg, nil); err != nil {
+		t.Fatalf("MoveAgent cursor: %v", err)
+	}
+	dstDB := filepath.Join(pm.ProfileDir("cursor-dst"), ".cursor", "user-data", "User", "globalStorage", "state.vscdb")
+	if _, err := os.Stat(dstDB); err != nil {
+		t.Fatalf("MoveAgent did not move Cursor state.vscdb: %v", err)
+	}
+}

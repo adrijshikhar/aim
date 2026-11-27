@@ -22,6 +22,7 @@ import (
 	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/usage"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Compile-time assertions that Adapter implements the segregated agent interfaces.
@@ -34,6 +35,8 @@ var (
 	_ agents.AccountInfoProvider   = (*Adapter)(nil)
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
 	_ agents.SessionResumer        = (*Adapter)(nil)
+	_ agents.CredentialSeeder      = (*Adapter)(nil)
+	_ agents.CredentialPurger      = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 )
 
@@ -68,23 +71,38 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 		logger.Debug("[codex] HasCredentials: true (auth.json at %s)", p)
 		return true
 	}
-
-	// Auto-seed credentials if eligible profile doesn't have credentials yet
-	profileName := filepath.Base(profileDir)
-	if a.SeedDefaultCredentials(profileName, profileDir) {
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
-			logger.Debug("[codex] HasCredentials: true (auto-seeded auth.json at %s)", p)
-			return true
-		}
-	}
-
 	logger.Debug("[codex] HasCredentials: false (no auth.json at %s)", p)
 	return false
 }
 
+// SeedCredentials implements agents.CredentialSeeder for explicit one-time host credential import.
+func (a *Adapter) SeedCredentials(_ context.Context, profileName, profileDir string) error {
+	if profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		return fmt.Errorf("profile %q is explicitly logged out", profileName)
+	}
+	if a.SeedDefaultCredentials(profileName, profileDir) {
+		return nil
+	}
+	return fmt.Errorf("no host credentials seeded for %q", profileName)
+}
+
+// PurgeCredentials implements agents.CredentialPurger scoped to external OS credential stores.
+// Isolated Codex profiles store auth in $CODEX_HOME/auth.json via cli_auth_credentials_store="file".
+func (a *Adapter) PurgeCredentials(_ context.Context, _, _ string) error {
+	return nil
+}
+
 // SeedDefaultCredentials seeds host ~/.codex/auth.json into profile directory for eligible primary profiles.
+// It never overwrites existing profile credentials and never re-seeds an explicitly logged-out profile.
 func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	if !profile.ShouldSeedCredentials(profileName) {
+		return false
+	}
+	if profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		return false
+	}
+	destPath := a.TokenPath(profileDir)
+	if existingFi, err := os.Stat(destPath); err == nil && !existingFi.IsDir() && existingFi.Size() > 0 {
 		return false
 	}
 	realHome := config.RealHomeDir()
@@ -98,17 +116,11 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	if err := os.MkdirAll(profileAuthDir, 0700); err != nil {
 		return false
 	}
-	destPath := a.TokenPath(profileDir)
 	data, err := os.ReadFile(hostAuthPath)
 	if err != nil || len(data) == 0 {
 		return false
 	}
-	tmp := destPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return false
-	}
-	if err := os.Rename(tmp, destPath); err != nil {
-		_ = os.Remove(tmp)
+	if err := merge.AtomicWrite(destPath, data, 0o600); err != nil {
 		return false
 	}
 	logger.Debug("[codex] Successfully seeded credentials from %s to %s", hostAuthPath, destPath)
@@ -120,35 +132,16 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		return err
 	}
+	if err := ensureCodexFileStore(codexDir); err != nil {
+		return fmt.Errorf("configure codex file credential store: %w", err)
+	}
 
 	bin := a.ResolveBinary()
 	cmd := exec.CommandContext(ctx, bin, "login")
 	cmd.Dir = profileDir
-
-	storageEnv := config.StorageEnv()
-	cleanEnv := make([]string, 0, len(os.Environ())+4)
-	for _, env := range os.Environ() {
-		idx := strings.IndexByte(env, '=')
-		if idx == -1 {
-			continue
-		}
-		key := env[:idx]
-		_, storageKey := storageEnv[key]
-		if storageKey || key == "HOME" || key == "CODEX_HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" {
-			continue
-		}
-		cleanEnv = append(cleanEnv, env)
-	}
-
-	cmd.Env = append(cleanEnv,
-		"HOME="+profileDir,
-		"CODEX_HOME="+codexDir,
-		"AIM_AGENT="+a.Name(),
-		"AIM_PROFILE="+profileName,
-	)
-	for key, value := range storageEnv {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
+	cmd.Env = a.BuildCleanEnv(profileName, profileDir, map[string]string{
+		"CODEX_HOME": codexDir,
+	})
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -156,7 +149,7 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("codex login failed: %w", err)
 	}
-
+	_ = profile.ClearAgentLoggedOut(profileDir, a.Name())
 	return nil
 }
 
@@ -166,12 +159,18 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 		return agents.LaunchEnv{}, err
 	}
 
-	// Auto-seed credentials for eligible profile if missing in profileDir but available on host
-	_ = a.SeedDefaultCredentials(profileName, profileDir)
+	// Only seed eligible primary profiles when missing local auth and not explicitly logged out.
+	if profile.ShouldSeedCredentials(profileName) && !profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		_ = a.SeedDefaultCredentials(profileName, profileDir)
+	}
 
-	// Copy host config.toml to profile if not present (with hook trust path rewriting)
+	// Copy host config.toml to profile if not present (with hook trust path rewriting),
+	// and enforce cli_auth_credentials_store = "file" so Codex never writes host Keychain.
 	realHome := config.RealHomeDir()
 	copyHostConfig(realHome, codexDir)
+	if err := ensureCodexFileStore(codexDir); err != nil {
+		return agents.LaunchEnv{}, fmt.Errorf("enforce codex file credential store: %w", err)
+	}
 
 	// Probe and auto-start local sidecar proxy daemons (e.g. Caveman) if configured
 	ensureSidecarDaemons(ctx, realHome, codexDir)
@@ -266,7 +265,7 @@ func copyHostConfig(realHome, profileCodexDir string) {
 			// Host servers and plugin enablement reach sessions through the
 			// session merge (T4, G5): a new profile starts with none of its own.
 			cleaned = string(stripTables(profileCodexDir, []byte(cleaned), "mcp_servers", "plugins"))
-			_ = os.WriteFile(destConfig, []byte(cleaned), 0644)
+			_ = merge.AtomicWrite(destConfig, []byte(cleaned), 0o600)
 		}
 	} else {
 		// Migrate any existing hostHooksJSON paths and deduplicate tables
@@ -279,10 +278,138 @@ func copyHostConfig(realHome, profileCodexDir string) {
 			}
 			cleaned, dupes := deduplicateTomlTables(destStr)
 			if changed || dupes > 0 {
-				_ = os.WriteFile(destConfig, []byte(cleaned), 0644)
+				_ = merge.AtomicWrite(destConfig, []byte(cleaned), 0o600)
 			}
 		}
 	}
+}
+
+//nolint:gosec // G101: TOML config setting name, not a credential value.
+const codexCredStoreKey = "cli_auth_credentials_store"
+
+// ensureCodexFileStore guarantees cli_auth_credentials_store = "file" in
+// <codexDir>/config.toml so Codex CLI isolates auth in $CODEX_HOME/auth.json
+// instead of mutating the shared macOS host Keychain.
+func ensureCodexFileStore(codexDir string) error {
+	var data []byte
+	if root, err := os.OpenRoot(codexDir); err == nil {
+		defer func() { _ = root.Close() }()
+		b, readErr := root.ReadFile("config.toml")
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return readErr
+		}
+		data = b
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	updated, changed, err := setTopLevelTOMLString(data, codexCredStoreKey, "file")
+	if err != nil {
+		return err
+	}
+	if !changed && len(data) > 0 {
+		return nil
+	}
+	return merge.AtomicWrite(filepath.Join(codexDir, "config.toml"), updated, 0o600)
+}
+
+func setTopLevelTOMLString(data []byte, key, value string) ([]byte, bool, error) {
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return fmt.Appendf(nil, "%s = %q\n", key, value), true, nil
+	}
+
+	var parsed map[string]any
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		return nil, false, fmt.Errorf("parse config.toml: %w", err)
+	}
+	if existing, ok := parsed[key].(string); ok && existing == value {
+		return data, false, nil
+	}
+
+	out := spliceTopLevelTOMLKey(string(data), key, value)
+	var verify map[string]any
+	if err := toml.Unmarshal([]byte(out), &verify); err != nil {
+		return nil, false, fmt.Errorf("verify updated config.toml: %w", err)
+	}
+	return []byte(out), true, nil
+}
+
+func spliceTopLevelTOMLKey(text, key, value string) string {
+	lines := strings.Split(text, "\n")
+	replacement := fmt.Sprintf("%s = %q", key, value)
+	firstTableIdx := len(lines)
+	bracketDepth := 0
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if bracketDepth == 0 && strings.HasPrefix(trimmed, "[") {
+			firstTableIdx = i
+			break
+		}
+		if bracketDepth == 0 {
+			if name, _, ok := strings.Cut(trimmed, "="); ok && strings.TrimSpace(name) == key {
+				lines[i] = replacement
+				return strings.Join(lines, "\n")
+			}
+		}
+		bracketDepth = updateTOMLBracketDepth(line, bracketDepth)
+	}
+
+	if firstTableIdx < len(lines) {
+		prefix := append([]string(nil), lines[:firstTableIdx]...)
+		if len(prefix) == 0 || strings.TrimSpace(prefix[len(prefix)-1]) != "" {
+			prefix = append(prefix, replacement, "")
+		} else {
+			prefix[len(prefix)-1] = replacement
+			prefix = append(prefix, "")
+		}
+		prefix = append(prefix, lines[firstTableIdx:]...)
+		return strings.Join(prefix, "\n")
+	}
+
+	return strings.TrimRight(text, "\n") + "\n" + replacement + "\n"
+}
+
+func updateTOMLBracketDepth(line string, depth int) int {
+	var inSingle, inDouble, escaped bool
+	for i := range len(line) {
+		c := line[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inDouble && c == '\\' {
+			escaped = true
+			continue
+		}
+		if !inSingle && !inDouble && c == '#' {
+			return depth
+		}
+		inSingle, inDouble, depth = stepTOMLState(c, inSingle, inDouble, depth)
+	}
+	return depth
+}
+
+func stepTOMLState(c byte, inSingle, inDouble bool, depth int) (bool, bool, int) {
+	switch c {
+	case '\'':
+		if !inDouble {
+			inSingle = !inSingle
+		}
+	case '"':
+		if !inSingle {
+			inDouble = !inDouble
+		}
+	case '[':
+		if !inSingle && !inDouble {
+			depth++
+		}
+	case ']':
+		if !inSingle && !inDouble && depth > 0 {
+			depth--
+		}
+	}
+	return inSingle, inDouble, depth
 }
 
 // stripTables removes whole top-level tables from TOML text with the merge
@@ -439,7 +566,7 @@ func bridgeCxStatusline(realHome, profileDir string) {
 	if fi, err := os.Stat(hostConfig); err == nil && fi.IsDir() {
 		lfi, err := os.Lstat(destConfig)
 		if os.IsNotExist(err) {
-			_ = os.MkdirAll(filepath.Dir(destConfig), 0755)
+			_ = os.MkdirAll(filepath.Dir(destConfig), 0o700)
 			_ = os.Symlink(hostConfig, destConfig)
 		} else if err == nil && lfi.IsDir() && (lfi.Mode()&os.ModeSymlink == 0) {
 			// If destConfig exists as a non-symlink directory, check if it only has an auto-generated settings.json or is empty.
@@ -529,7 +656,7 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 	if cfgData, err := os.ReadFile(cfgPath); err == nil {
 		cfgStr := string(cfgData)
 		if strings.Contains(cfgStr, "127.0.0.1:8787") || strings.Contains(cfgStr, "localhost:8787") || strings.Contains(cfgStr, "model_provider = \"caveman\"") {
-			conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 250*time.Millisecond)
+			conn, err := (&net.Dialer{Timeout: 250 * time.Millisecond}).DialContext(ctx, "tcp", "127.0.0.1:8787")
 			if err == nil {
 				conn.Close()
 				results = append(results, agents.DiagnosticResult{
@@ -546,25 +673,23 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 			}
 		}
 
-		// 5. Hooks Trust Check
+		// 5. Hooks Trust Check (strictly read-only inspection)
 		realHome := config.RealHomeDir()
 		hostHooksJSON := filepath.Join(realHome, ".codex", "hooks.json")
 		if strings.Contains(cfgStr, hostHooksJSON) {
-			copyHostConfig(realHome, codexDir)
 			results = append(results, agents.DiagnosticResult{
 				Category: "Hooks",
-				Status:   "OK",
-				Message:  "Auto-migrated host hook trust paths in config.toml to profile",
+				Status:   "WARN",
+				Message:  "Host hook trust paths detected in config.toml; run aim sync to isolate",
 			})
 		}
 
-		// 6. TOML Integrity Check (Deduplication)
+		// 6. TOML Integrity Check (Deduplication, strictly read-only inspection)
 		if _, dupes := deduplicateTomlTables(cfgStr); dupes > 0 {
-			copyHostConfig(realHome, codexDir)
 			results = append(results, agents.DiagnosticResult{
 				Category: "Config",
-				Status:   "OK",
-				Message:  fmt.Sprintf("Auto-repaired %d duplicate table key(s) in config.toml", dupes),
+				Status:   "WARN",
+				Message:  fmt.Sprintf("Found %d duplicate table key(s) in config.toml; run aim sync to repair", dupes),
 			})
 		}
 	}
@@ -858,27 +983,7 @@ func getAllLatestCodexRateLimits(profileName, profileDir string) []*codexRateLim
 		}
 	}
 
-	// 2. If fewer than 2 models found, and profile is eligible for seeding (e.g. primary profile),
-	// also check host ~/.codex/sessions
-	if len(collected) < 2 && profile.ShouldSeedCredentials(profileName) {
-		hostSessionsDir := filepath.Join(config.RealHomeDir(), ".codex", "sessions")
-		hostFiles := findRecentSessionFiles(hostSessionsDir)
-		hostLimit := maxCheck
-		if len(hostFiles) < hostLimit {
-			hostLimit = len(hostFiles)
-		}
-		for i := 0; i < hostLimit; i++ {
-			fileLimits := parseSessionFileAllRateLimits(hostFiles[i].path)
-			for k, rl := range fileLimits {
-				if _, exists := collected[k]; !exists {
-					collected[k] = rl
-				}
-			}
-			if len(collected) >= 2 {
-				break
-			}
-		}
-	}
+	// Strictly inspect profile-local sessions only (never mix host ~/.codex/sessions into profile quota).
 
 	var results []*codexRateLimits
 	// Guarantee stable ordering: "codex" (default) first, then Spark / others

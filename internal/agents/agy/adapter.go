@@ -22,6 +22,7 @@ import (
 	"github.com/aim-cli/aim/internal/merge"
 	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
+	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/otiai10/copy"
@@ -70,6 +71,8 @@ var (
 	_ agents.RunnableFlagsProvider = (*Adapter)(nil)
 	_ agents.SessionResumer        = (*Adapter)(nil)
 	_ agents.CredentialHarvester   = (*Adapter)(nil)
+	_ agents.CredentialPurger      = (*Adapter)(nil)
+	_ agents.CredentialSeeder      = (*Adapter)(nil)
 	_ agents.FullAdapter           = (*Adapter)(nil)
 	_ agents.PostLauncher          = (*Adapter)(nil)
 )
@@ -102,9 +105,10 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 	p := a.TokenPath(profileDir)
 	data, err := os.ReadFile(p)
 	if err == nil && len(data) > 0 {
-		_, _ = validateAndRepairTokenJSON(p, data)
-		logger.Debug("[agy] HasCredentials: true (valid token at %s)", p)
-		return true
+		if _, ok := extractValidTokenJSON(data); ok {
+			logger.Debug("[agy] HasCredentials: true (valid token at %s)", p)
+			return true
+		}
 	}
 
 	// Check if Google Application Default Credentials (ADC) exist
@@ -114,17 +118,25 @@ func (a *Adapter) HasCredentials(profileDir string) bool {
 		return true
 	}
 
-	// Auto-seed credentials if eligible profile doesn't have credentials yet
-	profileName := filepath.Base(profileDir)
-	if a.SeedDefaultCredentials(profileName, profileDir) {
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
-			logger.Debug("[agy] HasCredentials: true (auto-seeded token at %s)", p)
-			return true
-		}
-	}
-
 	logger.Debug("[agy] HasCredentials: false (no token at %s or ADC at %s)", p, adcPath)
 	return false
+}
+
+// SeedCredentials implements agents.CredentialSeeder for explicit one-time host seeding.
+func (a *Adapter) SeedCredentials(_ context.Context, profileName, profileDir string) error {
+	if profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		return fmt.Errorf("profile %q is explicitly logged out", profileName)
+	}
+	if a.SeedDefaultCredentials(profileName, profileDir) {
+		return nil
+	}
+	return fmt.Errorf("no host credentials seeded for %q", profileName)
+}
+
+// PurgeCredentials implements agents.CredentialPurger for profile logout/cleanup.
+// Isolated Antigravity profiles store OAuth tokens on disk and never use host Keychain items.
+func (a *Adapter) PurgeCredentials(_ context.Context, _, _ string) error {
+	return nil
 }
 
 // IsTokenHealthy checks whether the profile has a valid, healthy authentication token.
@@ -143,7 +155,7 @@ func (a *Adapter) IsTokenHealthy(profileName, profileDir string) bool {
 		return false
 	}
 
-	cleanedData, valid := validateAndRepairTokenJSON(p, data)
+	cleanedData, valid := extractValidTokenJSON(data)
 	if !valid {
 		return false
 	}
@@ -302,10 +314,9 @@ func (a *Adapter) SyncHostSettings(ctx context.Context, profileName, profileDir 
 }
 
 // SeedDefaultCredentials copies the host's existing Antigravity CLI token to an
-// eligible profile (such as "personal", "default", "p", or the configured default profile)
-// if the profile doesn't have credentials yet.
+// eligible profile if the profile doesn't have credentials yet and has not logged out.
 func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
-	if !profile.ShouldSeedCredentials(profileName) {
+	if !profile.ShouldSeedCredentials(profileName) || profile.IsAgentLoggedOut(profileDir, a.Name()) {
 		return false
 	}
 	p := a.TokenPath(profileDir)
@@ -319,11 +330,7 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	if filepath.Clean(realToken) != filepath.Clean(p) {
 		if realFi, err := os.Stat(realToken); err == nil && !realFi.IsDir() {
 			if rData, err := os.ReadFile(realToken); err == nil && len(rData) > 0 {
-				perm := realFi.Mode().Perm()
-				if perm == 0 {
-					perm = 0600
-				}
-				if err := merge.AtomicWrite(p, rData, perm); err == nil {
+				if err := merge.AtomicWrite(p, rData, 0o600); err == nil {
 					logger.Debug("[agy] Seeded profile %q from host token file %s", profileName, realToken)
 					return true
 				}
@@ -340,25 +347,25 @@ func (a *Adapter) SeedDefaultCredentials(profileName, profileDir string) bool {
 	return false
 }
 
-// HarvestCredentials extracts existing Antigravity credentials from the macOS Keychain
-// and writes them atomically into the profile's token path.
-func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDir string) error {
+// HarvestCredentials ensures profile-local credentials exist, falling back to host
+// macOS Keychain ONLY for eligible primary profiles that have no local token and are not logged out.
+func (a *Adapter) HarvestCredentials(_ context.Context, profileName, profileDir string) error {
 	destTokenPath := a.TokenPath(profileDir)
+	if fi, statErr := os.Stat(destTokenPath); statErr == nil && !fi.IsDir() && fi.Size() > 0 {
+		return nil
+	}
+	if profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		return fmt.Errorf("profile %q is explicitly logged out", profileName)
+	}
 	if !profile.ShouldSeedCredentials(profileName) {
-		if fi, statErr := os.Stat(destTokenPath); statErr == nil && fi.Size() > 0 {
-			return nil
-		}
 		return fmt.Errorf("credential harvesting skipped for non-primary profile %q", profileName)
 	}
 	tokData, err := profile.GetAgentKeychainToken(a.Name())
 	if err == nil && len(tokData) > 0 {
-		if err := merge.AtomicWrite(destTokenPath, tokData, 0600); err != nil {
+		if err := merge.AtomicWrite(destTokenPath, tokData, 0o600); err != nil {
 			return fmt.Errorf("failed to save harvested credentials: %w", err)
 		}
 		logger.Debug("[agy] Successfully harvested keychain token for %s into %s", a.Name(), destTokenPath)
-		return nil
-	}
-	if fi, statErr := os.Stat(destTokenPath); statErr == nil && fi.Size() > 0 {
 		return nil
 	}
 	if err != nil {
@@ -367,7 +374,8 @@ func (a *Adapter) HarvestCredentials(ctx context.Context, profileName, profileDi
 	return fmt.Errorf("no keychain credentials found for %s", a.Name())
 }
 
-func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
+// extractValidTokenJSON validates and trims trailing braces in-memory without writing to disk.
+func extractValidTokenJSON(data []byte) ([]byte, bool) {
 	var tok struct {
 		Token struct {
 			RefreshToken string `json:"refresh_token"`
@@ -381,7 +389,7 @@ func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
 			tok.RefreshToken != "" || tok.AccessToken != ""
 		return data, hasTok
 	}
-	// Attempt to repair trailing garbage or extra braces
+	// Attempt to repair trailing garbage or extra braces in-memory
 	trimmed := strings.TrimSpace(string(data))
 	for {
 		lastIdx := strings.LastIndexByte(trimmed, '}')
@@ -393,7 +401,6 @@ func validateAndRepairTokenJSON(path string, data []byte) ([]byte, bool) {
 			hasTok := tok.Token.RefreshToken != "" || tok.Token.AccessToken != "" ||
 				tok.RefreshToken != "" || tok.AccessToken != ""
 			if hasTok {
-				_ = os.WriteFile(path, append(candidate, '\n'), 0600)
 				return candidate, true
 			}
 		}
@@ -439,34 +446,14 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 		_ = bridgeSharedState(realHome, profileDir, profileName)
 		cmd := exec.CommandContext(ctx, bin)
 		cmd.Dir = profileDir
-		storageEnv := config.StorageEnv()
-		cleanEnv := make([]string, 0, len(os.Environ())+4)
-		for _, env := range os.Environ() {
-			idx := strings.IndexByte(env, '=')
-			if idx == -1 {
-				continue
-			}
-			key := env[:idx]
-			_, storageKey := storageEnv[key]
-			if storageKey || key == "SSH_CONNECTION" || key == "SSH_CLIENT" || key == "SSH_TTY" || key == "GEMINI_CLI_HOME" || key == "HOME" || key == "AIM_AGENT" || key == "AIM_PROFILE" {
-				continue
-			}
-			cleanEnv = append(cleanEnv, env)
-		}
-		cmd.Env = append(cleanEnv,
-			"HOME="+profileDir,
-			"AIM_AGENT="+a.Name(),
-			"AIM_PROFILE="+profileName,
-		)
-		for key, value := range storageEnv {
-			cmd.Env = append(cmd.Env, key+"="+value)
-		}
+		cmd.Env = a.BuildCleanEnv(profileName, profileDir, nil)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			return err
 		}
+		_ = profile.ClearAgentLoggedOut(profileDir, a.Name())
 		_ = profile.HarvestKeychainTokenToProfile(a.Name(), profileDir)
 		loginCfg, cfgErr = config.LoadConfig()
 		if cfgErr != nil {
@@ -508,13 +495,11 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	}
 
 	dest := a.TokenPath(profileDir)
-	tmp := dest + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	if err := merge.AtomicWrite(dest, data, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, dest); err != nil {
-		return err
-	}
+
+	_ = profile.ClearAgentLoggedOut(profileDir, a.Name())
 
 	loginCfg, cfgErr := config.LoadConfig()
 	if cfgErr != nil {
@@ -522,8 +507,8 @@ func (a *Adapter) Login(ctx context.Context, profileName, profileDir string) err
 	}
 	_ = a.SyncHostSettings(ctx, profileName, profileDir, loginCfg)
 
-	okBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#98c379")).Bold(true).Render("✔")
-	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("#56b6c2"))
+	okBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
+	cyan := lipgloss.NewStyle().Foreground(tui.AccentCyan)
 	fmt.Printf("%s Authenticated profile %s as %s\n", okBadge, cyan.Render(profileName), cyan.Render(tok.UserEmail))
 	return nil
 }
@@ -537,8 +522,10 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	realHome := config.RealHomeDir()
 	_ = bridgeSharedState(realHome, profileDir, profileName)
 
-	// Auto-seed credentials for personal/default profile if missing in profileDir but available on host
-	_ = a.SeedDefaultCredentials(profileName, profileDir)
+	// Auto-seed credentials for eligible primary profile if missing and not logged out.
+	if profile.ShouldSeedCredentials(profileName) && !profile.IsAgentLoggedOut(profileDir, a.Name()) {
+		_ = a.SeedDefaultCredentials(profileName, profileDir)
+	}
 
 	// Synchronize host status line settings if enabled
 	cfg, err := config.LoadConfig()
@@ -571,7 +558,7 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 // PostLaunch monitors and harvests OAuth tokens from macOS Keychain for unauthenticated profiles.
 // Authenticated profiles run with SSH_CONNECTION (keyring bypass mode) and never touch the Keychain.
 func (a *Adapter) PostLaunch(ctx context.Context, profileName, profileDir string) {
-	if profileDir == "" || !profile.ShouldSeedCredentials(profileName) {
+	if profileDir == "" || !profile.ShouldSeedCredentials(profileName) || profile.IsAgentLoggedOut(profileDir, a.Name()) {
 		return
 	}
 
@@ -658,21 +645,19 @@ func bridgeSharedState(realHome, profileDir string, optProfileName ...string) er
 	if !isLeased {
 		pPluginData := filepath.Join(tokenDir, "plugin_data")
 		sPluginData := filepath.Join(sharedDir, "plugin_data")
-		_ = os.MkdirAll(sPluginData, 0755)
+		_ = os.MkdirAll(sPluginData, 0o700)
 		bridgeDir(pPluginData, sPluginData)
-
-		// 5b. mcp_oauth_tokens.json (strictly not bridged for leased profiles)
-		pMcpTokens := filepath.Join(tokenDir, "mcp_oauth_tokens.json")
-		sMcpTokens := filepath.Join(sharedDir, "mcp_oauth_tokens.json")
-		bridgeMCPTokens(pMcpTokens, sMcpTokens)
 	}
+
+	// 5b. Isolate mcp_oauth_tokens.json per profile (never symlink to host/shared).
+	isolateMCPTokens(filepath.Join(tokenDir, "mcp_oauth_tokens.json"))
 
 	// 6. Gemini config directory (plugins, import_manifest.json, hooks, settings)
 	sharedDirCfg := sharedConfigDir(realHome)
-	_ = os.MkdirAll(sharedDirCfg, 0755)
+	_ = os.MkdirAll(sharedDirCfg, 0o700)
 
 	profileConfigDir := filepath.Join(profileDir, ".gemini", "config")
-	_ = os.MkdirAll(profileConfigDir, 0755)
+	_ = os.MkdirAll(profileConfigDir, 0o700)
 
 	if isLeased {
 		// Strictly do NOT bridge host plugins or host hooks.
@@ -798,37 +783,20 @@ func bridgeDir(profilePath, sharedPath string) {
 	}
 }
 
-func extractMCPExpiry(entry map[string]any) string {
-	if exp, ok := entry["expiry"].(string); ok && exp != "" {
-		return exp
+// isolateMCPTokens ensures profileFile is never a shared/host symlink and has 0600 mode.
+// Legacy symlinks are unlinked without copying shared tokens across profiles.
+func isolateMCPTokens(profileFile string) {
+	fi, err := os.Lstat(profileFile)
+	if err != nil {
+		return
 	}
-	if tok, ok := entry["token"].(map[string]any); ok {
-		if exp, ok := tok["expiry"].(string); ok && exp != "" {
-			return exp
-		}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		_ = os.Remove(profileFile)
+		return
 	}
-	return ""
-}
-
-func isNewerExpiry(pExp, sExp string) bool {
-	if pExp == "" {
-		return false
+	if fi.Mode().IsRegular() && fi.Mode().Perm()&0o077 != 0 {
+		_ = os.Chmod(profileFile, 0o600)
 	}
-	if sExp == "" {
-		return true
-	}
-	pTime, errP := time.Parse(time.RFC3339Nano, pExp)
-	if errP != nil {
-		pTime, errP = time.Parse(time.RFC3339, pExp)
-	}
-	sTime, errS := time.Parse(time.RFC3339Nano, sExp)
-	if errS != nil {
-		sTime, errS = time.Parse(time.RFC3339, sExp)
-	}
-	if errP == nil && errS == nil {
-		return pTime.After(sTime)
-	}
-	return pExp > sExp
 }
 
 func replaceWithSymlink(linkPath, target string) {
@@ -844,85 +812,6 @@ func replaceWithSymlink(linkPath, target string) {
 	} else {
 		_ = os.Remove(linkPath)
 		_ = os.Symlink(target, linkPath)
-	}
-}
-
-func bridgeMCPTokens(profileFile, sharedFile string) {
-	if profileFile == sharedFile {
-		return
-	}
-
-	fi, err := os.Lstat(profileFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if _, sErr := os.Stat(sharedFile); sErr == nil {
-				replaceWithSymlink(profileFile, sharedFile)
-			}
-		}
-		return
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		target, rErr := os.Readlink(profileFile)
-		if rErr == nil && target == sharedFile {
-			return
-		}
-		if _, sErr := os.Stat(sharedFile); sErr == nil {
-			replaceWithSymlink(profileFile, sharedFile)
-		}
-		return
-	}
-
-	// File lock shared state to prevent race conditions during concurrent merges
-	lock, lockErr := merge.LockExclusive(sharedFile+".lock", 5*time.Second)
-	if lockErr == nil {
-		defer lock.Unlock()
-	}
-
-	// Parse profile tokens
-	profMap := make(map[string]map[string]any)
-	if pData, err := os.ReadFile(profileFile); err == nil && len(pData) > 0 {
-		if uErr := json.Unmarshal(pData, &profMap); uErr != nil {
-			logger.Debug("[agy] bridgeMCPTokens: unmarshal profile tokens failed: %v", uErr)
-		}
-	}
-
-	// Parse existing shared tokens
-	sharedMap := make(map[string]map[string]any)
-	if sData, err := os.ReadFile(sharedFile); err == nil && len(sData) > 0 {
-		if uErr := json.Unmarshal(sData, &sharedMap); uErr != nil {
-			logger.Debug("[agy] bridgeMCPTokens: unmarshal shared tokens failed: %v", uErr)
-		}
-	}
-
-	// Merge: add new keys, update if profile entry has newer expiry
-	for k, pEntry := range profMap {
-		sEntry, exists := sharedMap[k]
-		if !exists {
-			sharedMap[k] = pEntry
-			continue
-		}
-		pExp := extractMCPExpiry(pEntry)
-		sExp := extractMCPExpiry(sEntry)
-		if isNewerExpiry(pExp, sExp) {
-			sharedMap[k] = pEntry
-		}
-	}
-
-	// Write merged JSON atomically to sharedFile
-	if len(sharedMap) > 0 {
-		out, err := json.MarshalIndent(sharedMap, "", "  ")
-		if err != nil {
-			return
-		}
-		if err := merge.AtomicWrite(sharedFile, out, 0600); err != nil {
-			logger.Debug("[agy] bridgeMCPTokens: AtomicWrite shared tokens failed: %v", err)
-			return
-		}
-	}
-
-	// Replace profile file with atomic symlink only after successful write
-	if _, sErr := os.Stat(sharedFile); sErr == nil {
-		replaceWithSymlink(profileFile, sharedFile)
 	}
 }
 
@@ -988,7 +877,6 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 		})
 	}
 
-	_ = a.SeedDefaultCredentials(profileName, profileDir)
 	tokFile := a.TokenPath(profileDir)
 	if data, err := os.ReadFile(tokFile); err != nil {
 		adcPath := filepath.Join(profileDir, ".config", "gcloud", "application_default_credentials.json")
@@ -1006,7 +894,7 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 			})
 		}
 	} else {
-		cleanedData, valid := validateAndRepairTokenJSON(tokFile, data)
+		cleanedData, valid := extractValidTokenJSON(data)
 		var tok struct {
 			Token struct {
 				AccessToken  string `json:"access_token"`
@@ -1158,8 +1046,7 @@ func ParseUsageTSV(raw string) []usage.LimitWindow {
 }
 
 func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
-	_ = a.SeedDefaultCredentials(profileName, profileDir)
-	acc := profile.GetProfileAccountInfo(profileDir)
+	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
 	if !a.HasCredentials(profileDir) {
 		return &usage.Report{
 			Agent:        a.Name(),
@@ -1189,12 +1076,9 @@ func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) 
 		}, nil
 	}
 
-	env := append(os.Environ(),
-		"HOME="+profileDir,
-		"SSH_CONNECTION=127.0.0.1 50000 127.0.0.1 22",
-		"AIM_AGENT="+a.Name(),
-		"AIM_PROFILE="+profileName,
-	)
+	env := a.BuildCleanEnv(profileName, profileDir, map[string]string{
+		"SSH_CONNECTION": "127.0.0.1 50000 127.0.0.1 22",
+	})
 
 	var (
 		usageOut   []byte

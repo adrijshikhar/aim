@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -193,20 +194,29 @@ func (m *LeaseManager) InstallLease(sourcePeer, profileName string, resp *LeaseR
 		store = NewStore(aimDir)
 		closeStore = true
 	}
+	var matchedPeer *PeerInfo
 	if store != nil {
 		for _, p := range store.GetPeers() {
-			if (resp.LenderNodeID != "" && p.ID == resp.LenderNodeID) ||
-				strings.EqualFold(p.HostName, sourcePeer) ||
+			if strings.EqualFold(p.HostName, sourcePeer) ||
 				p.ID == sourcePeer ||
 				p.VPNIP == sourcePeer {
+				cp := p
+				matchedPeer = &cp
 				if len(p.PublicKey) == ed25519.PublicKeySize {
-					pinnedPubKey = p.PublicKey
 					break
 				}
 			}
 		}
 		if closeStore {
 			_ = store.Close()
+		}
+	}
+	if matchedPeer != nil {
+		if matchedPeer.ID != "" && resp.LenderNodeID != "" && matchedPeer.ID != resp.LenderNodeID {
+			return "", fmt.Errorf("security violation: lease response lender_node_id %q does not match pinned peer %q (%q)", resp.LenderNodeID, sourcePeer, matchedPeer.ID)
+		}
+		if len(matchedPeer.PublicKey) == ed25519.PublicKeySize {
+			pinnedPubKey = matchedPeer.PublicKey
 		}
 	}
 
@@ -509,12 +519,9 @@ func (m *LeaseManager) RevokeLease(localProfileName string) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", metaFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, updated, 0600); err == nil {
-		_ = os.Rename(tmp, metaFile)
-	}
+	writeErr := merge.AtomicWrite(metaFile, updated, 0o600)
 	m.ScrubCredentials(cleanTargetDir)
-	return nil
+	return writeErr
 }
 
 // GetLeaseMeta retrieves the lease metadata for a leased profile if it exists.
@@ -634,8 +641,15 @@ func (m *LeaseManager) NotifyHostLeaseReleased(sourcePeer, leaseID string) {
 	go func() {
 		host, _ := os.Hostname()
 		targets := []string{sourcePeer}
-		store := NewStore(config.BaseDir())
-		defer store.Close()
+		store := m.store
+		closeStore := false
+		if store == nil {
+			store = NewStore(m.getAimDir())
+			closeStore = true
+		}
+		if closeStore {
+			defer func() { _ = store.Close() }()
+		}
 		for _, p := range store.GetPeers() {
 			if strings.EqualFold(p.HostName, sourcePeer) || p.ID == sourcePeer || p.VPNIP == sourcePeer {
 				if p.VPNIP != "" && p.VPNIP != sourcePeer {
@@ -651,20 +665,31 @@ func (m *LeaseManager) NotifyHostLeaseReleased(sourcePeer, leaseID string) {
 			"lease_id":    leaseID,
 			"borrower_id": host,
 		})
+		tr := &http.Transport{DisableKeepAlives: true}
+		defer tr.CloseIdleConnections()
+		client := &http.Client{
+			Timeout:   1500 * time.Millisecond,
+			Transport: tr,
+		}
 		for _, target := range targets {
-			cleanTarget := target
-			if idx := strings.Index(cleanTarget, "%"); idx != -1 {
+			cleanTarget := strings.TrimSpace(target)
+			if h, _, err := net.SplitHostPort(cleanTarget); err == nil {
+				cleanTarget = h
+			}
+			cleanTarget = strings.Trim(cleanTarget, "[]")
+			if idx := strings.IndexByte(cleanTarget, '%'); idx != -1 {
 				cleanTarget = cleanTarget[:idx]
 			}
-			if idx := strings.LastIndex(cleanTarget, ":"); idx != -1 && !strings.Contains(cleanTarget, "]") {
-				cleanTarget = cleanTarget[:idx]
+			if cleanTarget == "" {
+				continue
 			}
 			url := fmt.Sprintf("http://%s/api/share/lease/release", net.JoinHostPort(cleanTarget, "4319"))
 			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 			if err == nil {
 				req.Header.Set("Content-Type", "application/json")
-				if resp, err := http.DefaultClient.Do(req); err == nil {
+				if resp, err := client.Do(req); err == nil {
+					_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 					_ = resp.Body.Close()
 					cancel()
 					return // successfully notified host

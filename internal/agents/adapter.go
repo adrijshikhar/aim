@@ -33,6 +33,8 @@ type AgentAdapter interface {
 	DisplayName() string
 	Aliases() []string
 	BinaryName() string
+	// HasCredentials reports whether the profile directory holds credentials for this agent.
+	// Contract: strictly read-only — zero file writes, zero host seeding/harvesting, zero global env fallbacks.
 	HasCredentials(profileDir string) bool
 	PrepareEnv(ctx context.Context, profileName, profileDir string) (LaunchEnv, error)
 }
@@ -43,6 +45,7 @@ type Authenticator interface {
 }
 
 // Diagnostician is optionally implemented by adapters that can evaluate profile health and connectivity.
+// Contract: strictly read-only — must report diagnostic findings without mutating profile or host files.
 type Diagnostician interface {
 	Doctor(ctx context.Context, profileName, profileDir string) []DiagnosticResult
 }
@@ -73,9 +76,15 @@ type CredentialHarvester interface {
 }
 
 // CredentialPurger is optionally implemented by adapters to clean up external or OS-level
-// credentials (e.g. macOS Keychain items) when a profile is purged or deleted.
+// credentials (e.g. macOS Keychain items) when a profile is purged, deleted, or logged out.
 type CredentialPurger interface {
 	PurgeCredentials(ctx context.Context, profileName, profileDir string) error
+}
+
+// CredentialSeeder is optionally implemented by adapters that support explicit,
+// one-time import of host credentials into an uninitialized isolated profile directory.
+type CredentialSeeder interface {
+	SeedCredentials(ctx context.Context, profileName, profileDir string) error
 }
 
 // SessionResumer is optionally implemented by adapters that define the command-line

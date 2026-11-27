@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/aim-cli/aim/internal/agents"
-	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
 )
 
@@ -43,18 +42,9 @@ func (a *Adapter) GetAccountInfo(profileDir string) (email, authMethod, projectI
 }
 
 func (a *Adapter) HasCredentials(profileDir string) bool {
-	// Cursor can authenticate via API keys in env, or stored auth in ~/.cursor or user-data
-	if os.Getenv("CURSOR_API_KEY") != "" || os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("OPENAI_API_KEY") != "" {
-		return true
-	}
+	// Strictly inspect profile-local Cursor storage (never host env keys or host state.vscdb).
 	dbPath := filepath.Join(profileDir, ".cursor", "user-data", "User", "globalStorage", "state.vscdb")
-	if fi, err := os.Stat(dbPath); err == nil && fi.Size() > 0 {
-		return true
-	}
-	// Also check host state.vscdb
-	realHome := config.RealHomeDir()
-	hostDb := filepath.Join(realHome, "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb")
-	if fi, err := os.Stat(hostDb); err == nil && fi.Size() > 0 {
+	if fi, err := os.Stat(dbPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
 		return true
 	}
 	return false

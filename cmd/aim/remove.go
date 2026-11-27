@@ -1,16 +1,18 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
+	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +23,7 @@ func newRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 		Short: "Delete profile credentials and state",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			exitCode := executeRemove(reg, pm, args)
+			exitCode := executeRemoveTo(cmd.OutOrStdout(), cmd.ErrOrStderr(), reg, pm, args)
 			if exitCode != 0 {
 				return &ExitError{Code: exitCode}
 			}
@@ -42,80 +44,134 @@ func newRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 }
 
 func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []string) int {
+	return executeRemoveTo(os.Stdout, os.Stderr, reg, pm, args)
+}
+
+func executeRemoveTo(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, args []string) int {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errOut == nil {
+		errOut = os.Stderr
+	}
+	if reg == nil {
+		reg = defaultRegistry()
+	}
+
 	var agentName, profileName string
-	if len(args) == 1 {
+	switch len(args) {
+	case 0:
+		_, _ = fmt.Fprintln(errOut, "Usage: aim remove [agent] <profile>")
+		return 1
+	case 1:
 		profileName = args[0]
-	} else if len(args) >= 2 {
+	default:
 		agentName = args[0]
 		profileName = args[1]
-	} else {
-		fmt.Println("Usage: aim remove [agent] <profile>")
+	}
+
+	errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
+	if pm == nil {
+		_, _ = fmt.Fprintf(errOut, "%s Error: profile manager not initialized\n", errBadge)
 		return 1
 	}
 
 	if agentName != "" {
-		if reg != nil {
-			if adapter, err := reg.Get(agentName); err == nil {
-				agentName = adapter.Name()
-			}
+		adapter, err := reg.Get(agentName)
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
+			return 1
 		}
+		agentName = adapter.Name()
 	}
 
-	cfg, _ := config.LoadConfig()
-	if cfg == nil {
-		cfg = config.NewDefaultConfig()
+	cfg, err := loadOrRecoverConfig(errOut)
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "%s Error loading config: %v\n", errBadge, err)
+		return 1
 	}
 
 	okBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
 	cyan := lipgloss.NewStyle().Foreground(tui.AccentCyan)
-	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 
 	if agentName != "" {
-		account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agentName)
-		cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg)
-		if err != nil {
-			errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
-			if strings.Contains(err.Error(), "not associated") {
-				fmt.Fprintf(os.Stderr, "%s Agent %q is not associated with profile %q\n", errBadge, agentName, profileName)
-			} else {
-				fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
-			}
-			return 1
-		}
-		if reg != nil {
-			if ad, err := reg.Get(agentName); err == nil {
-				if purger, ok := ad.(agents.CredentialPurger); ok {
-					_ = purger.PurgeCredentials(context.Background(), profileName, pm.ProfileDir(profileName))
-				}
-			}
-		}
-		telemetry.CaptureAccountEvent(agentName, account, "agent_removed", map[string]any{
-			"profile_cleaned_up": cleanedUp,
-		})
-		if cleanedUp {
-			fmt.Printf("%s Removed agent %s and cleaned up profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
-		} else {
-			fmt.Printf("%s Removed agent %s from profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
-		}
-		return 0
+		return executeRemoveAgent(out, errOut, reg, pm, cfg, agentName, profileName, okBadge, errBadge, cyan)
 	}
+	return executeRemoveProfile(out, errOut, reg, pm, cfg, profileName, okBadge, errBadge, cyan)
+}
 
-	pDir := pm.ProfileDir(profileName)
-	if err := pm.DeleteProfile(profileName, cfg); err != nil {
-		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
-		fmt.Fprintf(os.Stderr, "%s Error: %v\n", errBadge, err)
+func executeRemoveAgent(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config, agentName, profileName, okBadge, errBadge string, cyan lipgloss.Style) int {
+	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
+	account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agentName)
+	purgers := collectAgentPurgers(reg, agentName)
+	cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg, purgers...)
+	if err != nil {
+		if strings.Contains(err.Error(), "not associated") {
+			_, _ = fmt.Fprintf(errOut, "%s Agent %q is not associated with profile %q\n", errBadge, agentName, profileName)
+		} else {
+			_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
+		}
 		return 1
 	}
+	clearRemovedStateStores(pm, profileName, agentName)
+	telemetry.CaptureAccountEvent(agentName, account, "agent_removed", map[string]any{
+		"profile_cleaned_up": cleanedUp,
+	})
+	if cleanedUp {
+		_, _ = fmt.Fprintf(out, "%s Removed agent %s and cleaned up profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
+	} else {
+		_, _ = fmt.Fprintf(out, "%s Removed agent %s from profile %s\n", okBadge, bold.Render(agentName), cyan.Render(profileName))
+	}
+	return 0
+}
 
-	if reg != nil {
-		for _, ad := range reg.All() {
-			if purger, ok := ad.(agents.CredentialPurger); ok {
-				_ = purger.PurgeCredentials(context.Background(), profileName, pDir)
-			}
+func executeRemoveProfile(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config, profileName, okBadge, errBadge string, cyan lipgloss.Style) int {
+	purgers := collectAllPurgers(reg)
+	if err := pm.DeleteProfile(profileName, cfg, purgers...); err != nil {
+		_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
+		return 1
+	}
+	for _, ad := range reg.All() {
+		clearRemovedStateStores(pm, profileName, ad.Name())
+	}
+	_, _ = fmt.Fprintf(out, "%s Profile %s removed successfully.\n", okBadge, cyan.Render(profileName))
+	return 0
+}
+
+func collectAgentPurgers(reg *agents.Registry, agentName string) []agents.CredentialPurger {
+	if reg == nil {
+		return nil
+	}
+	ad, err := reg.Get(agentName)
+	if err != nil {
+		return nil
+	}
+	if purger, ok := ad.(agents.CredentialPurger); ok {
+		return []agents.CredentialPurger{purger}
+	}
+	return nil
+}
+
+func collectAllPurgers(reg *agents.Registry) []agents.CredentialPurger {
+	if reg == nil {
+		return nil
+	}
+	var purgers []agents.CredentialPurger
+	for _, ad := range reg.All() {
+		if purger, ok := ad.(agents.CredentialPurger); ok {
+			purgers = append(purgers, purger)
 		}
 	}
-	fmt.Printf("%s Profile %s removed successfully.\n", okBadge, cyan.Render(profileName))
-	return 0
+	return purgers
+}
+
+func clearRemovedStateStores(pm *profile.ProfileManager, profileName, agentName string) {
+	baseDir := config.BaseDir()
+	if pm != nil && pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	_ = oauth.NewRefusalStore(baseDir).Clear(agentName, profileName)
+	usage.NewCacheStore(baseDir, usage.DefaultTTL).Delete(agentName, profileName)
 }
 
 func runRemove(reg *agents.Registry, pm *profile.ProfileManager, args []string) error {

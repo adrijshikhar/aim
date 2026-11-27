@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/merge"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/runner"
@@ -20,6 +23,7 @@ import (
 	"github.com/aim-cli/aim/internal/share"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
+	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
@@ -94,14 +98,17 @@ func newRunCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command 
 			if len(extraArgs) > 0 && extraArgs[0] == "--" {
 				extraArgs = extraArgs[1:]
 			}
-			if profile.IsLeased(profileName) || (pm != nil && pm.IsLeased(profileName)) {
+			if err := validateRunProfileName(pm, profileName); err != nil {
+				return err
+			}
+			if isLeaseTarget(pm, profileName) {
 				sanitized, err := sanitizeLeasedRunFlags(extraArgs)
 				if err != nil {
 					return err
 				}
 				extraArgs = sanitized
 			}
-			if !strings.Contains(profileName, ":") {
+			if !strings.Contains(profileName, ":") && !isLeaseTarget(pm, profileName) {
 				ok, err := confirmProfileExists(cmd, pm, profileName, fmt.Sprintf("start %s", agentName), autoCreate)
 				if err != nil {
 					return err
@@ -162,9 +169,45 @@ func executeRunWithSession(ctx context.Context, reg *agents.Registry, pm *profil
 	})
 }
 
+func validateRunProfileName(pm *profile.ProfileManager, name string) error {
+	if pm == nil {
+		return errors.New("profile manager not initialized")
+	}
+	if err := profile.ValidateProfileName(name); err != nil {
+		return err
+	}
+	if strings.Contains(name, ":") {
+		parts := strings.SplitN(name, ":", 2)
+		if err := profile.ValidateProfileName(parts[0]); err != nil {
+			return fmt.Errorf("invalid peer name in %q: %w", name, err)
+		}
+		if err := profile.ValidateProfileName(parts[1]); err != nil {
+			return fmt.Errorf("invalid leased profile name in %q: %w", name, err)
+		}
+	}
+	root := filepath.Clean(pm.ProfilesRoot())
+	cand := filepath.Clean(filepath.Join(root, name))
+	rel, err := filepath.Rel(root, cand)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return fmt.Errorf("invalid profile path %q: escapes profiles directory", name)
+	}
+	return nil
+}
+
+func isLeaseTarget(pm *profile.ProfileManager, name string) bool {
+	return profile.IsLeased(name) || (pm != nil && pm.IsLeased(name))
+}
+
 func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profile.ProfileManager, opts RunOptions) int {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if reg == nil {
+		reg = defaultRegistry()
+	}
+	if pm == nil {
+		fmt.Fprintln(os.Stderr, "Error: profile manager not initialized")
+		return 1
 	}
 	logger.Debug("[run] Executing agent %q with profile %q (sessionID=%s, workingDir=%s, extraArgs=%v)", opts.AgentName, opts.ProfileName, opts.SessionID, opts.WorkingDir, opts.ExtraArgs)
 	adapter, err := reg.Get(opts.AgentName)
@@ -174,6 +217,10 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		return 1
 	}
 	profileName := opts.ProfileName
+	if err := validateRunProfileName(pm, profileName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
 	var pDir string
 	if strings.Contains(profileName, ":") {
 		parts := strings.SplitN(profileName, ":", 2)
@@ -184,7 +231,7 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		leaseFile := filepath.Join(candidateDir, ".aim-lease.json")
 		if _, err := os.Stat(leaseFile); os.IsNotExist(err) {
 			logger.Debug("[run] Leased profile %q not found locally, attempting auto-lease from %s...", profileName, hostPart)
-			client := share.NewClient(4319)
+			client := getShareClient(4319)
 			reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			resp, reqErr := client.RequestLease(reqCtx, hostPart, profPart, adapter.Name(), 2)
 			cancel()
@@ -211,6 +258,10 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 				fmt.Fprintf(os.Stderr, "Error: Failed to install lease: %v\n", installErr)
 				return 1
 			}
+			if err := validateRunProfileName(pm, installedName); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: invalid installed lease name: %v\n", err)
+				return 1
+			}
 			profileName = installedName
 			opts.ProfileName = profileName
 			pDir = filepath.Join(pm.ProfilesRoot(), profileName)
@@ -228,7 +279,7 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		// Active verification with peer host if connected
 		meta, metaErr := mgr.GetLeaseMeta(profileName)
 		if metaErr == nil && meta != nil && meta.LeaseID != "" {
-			client := share.NewClient(4319)
+			client := getShareClient(4319)
 			checkCtx, checkCancel := context.WithTimeout(ctx, 600*time.Millisecond)
 			st, checkErr := client.CheckLeaseStatus(checkCtx, hostPart, meta.LeaseID)
 			checkCancel()
@@ -255,12 +306,6 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 	}
 	logger.Debug("[run] Profile %q directory: %s", profileName, pDir)
 
-	cfg, _ := config.LoadConfig()
-	if cfg != nil {
-		cfg.AddProfileAgent(opts.ProfileName, adapter.Name())
-		_ = config.SaveConfig(cfg)
-	}
-
 	launchEnv, err := adapter.PrepareEnv(ctx, opts.ProfileName, pDir)
 	if err != nil {
 		logger.Debug("[run] PrepareEnv failed for %q: %v", opts.ProfileName, err)
@@ -268,7 +313,13 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		return 1
 	}
 
-	if profile.IsLeased(opts.ProfileName) {
+	cfg, _ := config.LoadConfig()
+	if cfg != nil && !isLeaseTarget(pm, opts.ProfileName) {
+		cfg.AddProfileAgent(opts.ProfileName, adapter.Name())
+		_ = config.SaveConfig(cfg)
+	}
+
+	if isLeaseTarget(pm, opts.ProfileName) {
 		if mcpMgr, ok := adapter.(agents.MCPConfigManager); ok {
 			if err := mcpMgr.AddProfileMCPServer(ctx, opts.ProfileName, pDir, "aim_share", agents.MCPServerConfig{
 				Command: "aim",
@@ -311,7 +362,7 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 
 	applyProfileOverrides(&launchEnv, cfg, opts.ProfileName, true)
 
-	if profile.IsLeased(opts.ProfileName) || (pm != nil && pm.IsLeased(opts.ProfileName)) {
+	if isLeaseTarget(pm, opts.ProfileName) {
 		sanitized, sErr := sanitizeLeasedRunFlags(opts.ExtraArgs)
 		if sErr != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", sErr)
@@ -330,10 +381,16 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	if profile.IsLeased(opts.ProfileName) || (pm != nil && pm.IsLeased(opts.ProfileName)) {
+	if isLeaseTarget(pm, opts.ProfileName) {
 		startLeaseSupervisor(runCtx, pDir, opts.ProfileName, cancel)
 	}
 
+	baseDir := config.BaseDir()
+	if pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+
+	hadCredsPre := adapter.HasCredentials(pDir)
 	r := runner.NewRunner(adapter)
 	logger.Debug("[run] Invoking runner.Run with extraArgs=%v", opts.ExtraArgs)
 	code := withSessionMerge(adapter, pm.MergeStateStore(), opts.ProfileName, pDir, cfg, opts.ExtraArgs, func() int {
@@ -356,15 +413,45 @@ func executeRunWithOptions(ctx context.Context, reg *agents.Registry, pm *profil
 		return 1
 	}
 	logger.Debug("[run] Process finished with exit code %d", code)
+	reconcilePostRunAuthState(ctx, baseDir, adapter, opts.ProfileName, pDir, hadCredsPre)
 	telemetry.CaptureAccountEvent(adapter.Name(), profile.GetProfileAccountInfoForAgent(pDir, adapter.Name()), "agent_run_completed", map[string]any{
 		"exit_code":        code,
 		"session_attached": sessionID != "",
 	})
 
 	// Trigger asynchronous cache pre-warming upon session exit so quotas reflect recent usage
-	triggerPrewarmAsync(config.BaseDir(), adapter.Name())
+	triggerPrewarmAsync(baseDir, adapter.Name())
 
 	return code
+}
+
+// reconcilePostRunAuthState records explicit in-session logins and logouts so an
+// agent that logged out interactively cannot be silently re-seeded on the next run.
+func reconcilePostRunAuthState(ctx context.Context, baseDir string, adapter agents.AgentAdapter, profileName, pDir string, hadCredsPre bool) {
+	if adapter == nil || pDir == "" {
+		return
+	}
+	hasCredsPost := adapter.HasCredentials(pDir)
+	invalidateStores := func() {
+		if baseDir == "" || profileName == "" {
+			return
+		}
+		_ = oauth.NewRefusalStore(baseDir).Clear(adapter.Name(), profileName)
+		usage.NewCacheStore(baseDir, usage.DefaultTTL).Delete(adapter.Name(), profileName)
+	}
+	switch {
+	case hadCredsPre && !hasCredsPost:
+		if purger, ok := adapter.(agents.CredentialPurger); ok {
+			_ = profile.PurgeProfileKeychainWithContext(ctx, adapter.Name(), pDir, purger)
+		} else {
+			_ = profile.PurgeProfileKeychainWithContext(ctx, adapter.Name(), pDir)
+		}
+		_ = profile.MarkAgentLoggedOut(pDir, adapter.Name())
+		invalidateStores()
+	case !hadCredsPre && hasCredsPost:
+		_ = profile.ClearAgentLoggedOut(pDir, adapter.Name())
+		invalidateStores()
+	}
 }
 
 func applyProfileOverrides(launch *agents.LaunchEnv, cfg *config.Config, profileName string, includeArgs bool) {
@@ -641,7 +728,11 @@ func performLeaseHeartbeat(ctx context.Context, profDir, profileName string) {
 	}
 
 	// Resolve targetPeer from peers.json preferring VPNIP with fallback to .local
-	store := share.NewStore(config.BaseDir())
+	baseDir := config.BaseDir()
+	if root := filepath.Dir(profDir); filepath.Base(root) == "profiles" {
+		baseDir = filepath.Dir(root)
+	}
+	store := share.NewStore(baseDir)
 	targetHost := targetPeer
 	for _, p := range store.GetPeers() {
 		shortHost := strings.TrimSuffix(strings.ToLower(p.HostName), ".local")
@@ -687,10 +778,7 @@ func performLeaseHeartbeat(ctx context.Context, profDir, profileName string) {
 			if json.Unmarshal(latestData, &latestMeta) == nil && !latestMeta.Revoked {
 				latestMeta.LastVerifiedAt = time.Now()
 				if updated, err := json.MarshalIndent(latestMeta, "", "  "); err == nil {
-					tmp := fmt.Sprintf("%s.tmp.%d.%d", leaseFile, os.Getpid(), time.Now().UnixNano())
-					if err := os.WriteFile(tmp, updated, 0600); err == nil {
-						_ = os.Rename(tmp, leaseFile)
-					}
+					_ = merge.AtomicWrite(leaseFile, updated, 0o600)
 				}
 			}
 		}

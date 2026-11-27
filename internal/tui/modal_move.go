@@ -40,11 +40,10 @@ func (m Model) MoveModalError() string {
 }
 
 func (m Model) openMoveModal() (Model, tea.Cmd) {
-	filtered := m.filteredProfiles()
-	if len(filtered) == 0 || m.cursor < 0 || m.cursor >= len(filtered) {
+	target, ok := m.selectedFilteredProfile()
+	if !ok {
 		return m, nil
 	}
-	target := filtered[m.cursor]
 	currentAgent := m.agent
 	if currentAgent == "" || currentAgent == "all" {
 		// If on "all" tab, find first agent for this profile
@@ -111,7 +110,7 @@ func (m Model) executeMove() (Model, tea.Cmd) {
 		m.moveModal.err = "Destination profile must be different from source profile"
 		return m, nil
 	}
-	if strings.ContainsAny(dstProfile, "/\\") || strings.Contains(dstProfile, "..") {
+	if dstProfile == "." || dstProfile == ".." || strings.ContainsAny(dstProfile, "/\\") || strings.Contains(dstProfile, "..") {
 		m.moveModal.err = "Profile name cannot contain slashes or '..'"
 		return m, nil
 	}
@@ -139,6 +138,7 @@ func (m Model) executeMove() (Model, tea.Cmd) {
 			rep.Profile = dstProfile
 			_ = m.cache.Put(rep)
 		}
+		m.cache.Delete(agent, srcProfile)
 	}
 	if m.reports != nil {
 		srcKey := fmt.Sprintf("%s:%s", agent, srcProfile)

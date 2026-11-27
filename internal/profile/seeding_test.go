@@ -17,7 +17,7 @@ func TestShouldSeedCredentials(t *testing.T) {
 		{"me alias", "me", `{}`, true},
 		{"main alias", "main", `{}`, true},
 		{"default", "work", `{"default_profile":"work","profiles":{"work":{},"other":{}}}`, true},
-		{"sole profile", "work", `{"profiles":{"work":{}}}`, true},
+		{"sole profile disabled", "work", `{"profiles":{"work":{}}}`, false},
 		{"other sole profile", "work", `{"profiles":{"other":{}}}`, false},
 		{"multiple profiles", "work", `{"profiles":{"work":{},"other":{}}}`, false},
 		{"empty config", "work", `{}`, false},

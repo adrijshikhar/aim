@@ -95,4 +95,18 @@ func TestLinuxLauncher_Unit(t *testing.T) {
 	if err := emptyLauncher.LaunchTerminal(ctx, "echo 1"); !errors.Is(err, service.ErrNoTerminalAvailable) {
 		t.Errorf("expected ErrNoTerminalAvailable, got %v", err)
 	}
+
+	// 6. LaunchInTerminal enforces LinuxCandidateTerminals allowlist
+	startedCmds = nil
+	if err := launcher.LaunchInTerminal(ctx, "kitty", "aim resume agy 1234"); err != nil {
+		t.Fatalf("expected allowlisted terminal kitty to succeed: %v", err)
+	}
+	if len(startedCmds) != 1 || startedCmds[0][0] != "/usr/bin/kitty" {
+		t.Fatalf("expected /usr/bin/kitty invocation, got %v", startedCmds)
+	}
+	for _, disallowed := range []string{"/usr/bin/kitty", "bash", "custom-term", `../kitty`} {
+		if err := launcher.LaunchInTerminal(ctx, disallowed, "echo pwn"); err == nil {
+			t.Errorf("expected disallowed terminal %q to be rejected", disallowed)
+		}
+	}
 }

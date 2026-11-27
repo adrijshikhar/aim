@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/share"
 )
 
@@ -55,10 +56,18 @@ func (s *ShareMCPServer) getClient() *share.Client {
 }
 
 func (s *ShareMCPServer) getProfileName() string {
-	if s.profileName != "" {
-		return s.profileName
+	name := s.profileName
+	if name == "" {
+		name = os.Getenv("AIM_PROFILE")
 	}
-	return os.Getenv("AIM_PROFILE")
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if err := profile.ValidateProfileName(name); err != nil {
+		return ""
+	}
+	return name
 }
 
 func (s *ShareMCPServer) getProfilesDir() string {

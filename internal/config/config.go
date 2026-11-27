@@ -14,6 +14,7 @@ import (
 
 type ProfileConfig struct {
 	Agents           []string          `json:"agents,omitempty"`
+	Email            string            `json:"email,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
 	Args             []string          `json:"args,omitempty"`
 	MCPGlobal        *bool             `json:"mcp_global,omitempty"`
@@ -551,6 +552,27 @@ func (c *Config) RenameProfile(oldProfile, newProfile string) {
 	}
 }
 
+// GetProfileEmail returns the configured email metadata for profile, if any.
+func (c *Config) GetProfileEmail(profile string) string {
+	if c == nil || c.Profiles == nil {
+		return ""
+	}
+	return c.Profiles[profile].Email
+}
+
+// SetProfileEmail stores account email metadata on the profile configuration.
+func (c *Config) SetProfileEmail(profile, email string) {
+	if c == nil {
+		return
+	}
+	if c.Profiles == nil {
+		c.Profiles = make(map[string]ProfileConfig)
+	}
+	p := c.Profiles[profile]
+	p.Email = strings.TrimSpace(email)
+	c.Profiles[profile] = p
+}
+
 func (c *Config) GetProfileEnv(profile string) map[string]string {
 	if c == nil || c.Profiles == nil {
 		return nil
@@ -617,15 +639,10 @@ func LoadConfig() (*Config, error) {
 	if cfg.Profiles == nil {
 		cfg.Profiles = make(map[string]ProfileConfig)
 	}
-	hasLeased := false
 	for k := range cfg.Profiles {
 		if strings.Contains(k, ":") {
 			delete(cfg.Profiles, k)
-			hasLeased = true
 		}
-	}
-	if hasLeased {
-		_ = SaveConfig(cfg)
 	}
 	if len(cfg.Profiles) == 0 && cfg.DefaultProfile == "default" {
 		cfg.DefaultProfile = ""

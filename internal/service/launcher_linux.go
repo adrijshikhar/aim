@@ -35,9 +35,13 @@ func NewLinuxLauncher(
 	}
 	if startCmd == nil {
 		startCmd = func(ctx context.Context, name string, args ...string) error {
-			cmd := exec.Command(name, args...)
+			cmd := exec.CommandContext(ctx, name, args...)
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			return cmd.Start()
+			if err := cmd.Start(); err != nil {
+				return err
+			}
+			go func() { _ = cmd.Wait() }()
+			return nil
 		}
 	}
 	return &linuxLauncher{
@@ -113,6 +117,9 @@ func (l *linuxLauncher) LaunchInTerminal(ctx context.Context, term, cmdStr strin
 	if term == "" || strings.EqualFold(term, "default") {
 		return l.LaunchTerminal(ctx, cmdStr)
 	}
+	if !isAllowedLinuxTerminal(term) {
+		return fmt.Errorf("terminal %q is not in allowlist", term)
+	}
 
 	bin, err := l.lookPath(term)
 	if err != nil {
@@ -121,4 +128,17 @@ func (l *linuxLauncher) LaunchInTerminal(ctx context.Context, term, cmdStr strin
 
 	args := FormatLinuxArgs(bin, cmdStr)
 	return l.startCmd(ctx, args[0], args[1:]...)
+}
+
+func isAllowedLinuxTerminal(term string) bool {
+	base := strings.ToLower(term)
+	if idx := strings.LastIndexAny(base, `/\`); idx >= 0 {
+		return false
+	}
+	for _, allowed := range LinuxCandidateTerminals {
+		if base == allowed {
+			return true
+		}
+	}
+	return false
 }

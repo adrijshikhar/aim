@@ -163,10 +163,10 @@ func (m Model) DoctorDrawerTargetProfile() string {
 
 func (m Model) fetchDoctorDiagnosticsCmd() tea.Cmd {
 	targetAgent := m.agent
-	if len(m.profiles) == 0 || m.cursor < 0 || m.cursor >= len(m.profiles) {
+	targetProfile, ok := m.selectedFilteredProfile()
+	if !ok {
 		return nil
 	}
-	targetProfile := m.profiles[m.cursor]
 	var pDir string
 	if m.pm != nil {
 		pDir = m.pm.ProfileDir(targetProfile)
@@ -253,7 +253,8 @@ func (m Model) openDoctorDrawer() (Model, tea.Cmd) {
 func (m Model) fetchDoctorDiagnostics() Model {
 	reg := m.reg
 
-	if len(m.profiles) == 0 || m.cursor < 0 || m.cursor >= len(m.profiles) {
+	p, ok := m.selectedFilteredProfile()
+	if !ok {
 		var results []agents.DiagnosticResult
 		results = append(results, agents.DiagnosticResult{
 			Category: "Profile",
@@ -273,7 +274,6 @@ func (m Model) fetchDoctorDiagnostics() Model {
 		return m
 	}
 
-	p := m.profiles[m.cursor]
 	pDir := ""
 	if m.pm != nil {
 		pDir = m.pm.ProfileDir(p)
