@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -157,6 +158,7 @@ func (s *Server) setupRoutes() {
 
 	// P2P Sharing & VPN Endpoints
 	mux.HandleFunc("GET /api/share/status", s.handleGetShareStatus)
+	mux.HandleFunc("POST /api/share/refresh", s.handleRefreshShareStatus)
 	mux.HandleFunc("POST /api/share/global", s.handleSetGlobalMode)
 	mux.HandleFunc("POST /api/share/toggle", s.handleToggleShare)
 	mux.HandleFunc("GET /api/share/peers", s.handleGetSharePeers)
@@ -327,6 +329,8 @@ func (s *Server) Listen() error {
 	s.httpServer = &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	return nil
@@ -350,7 +354,7 @@ func (s *Server) Serve() error {
 	}
 
 	err := srv.Serve(ln)
-	if err != nil && err != http.ErrServerClosed {
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
@@ -361,17 +365,30 @@ func (s *Server) Start() error {
 	return s.Serve()
 }
 
-// Shutdown gracefully shuts down the server.
+// Shutdown gracefully shuts down the server and closes any owned ShareStore.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.httpServer != nil {
-		return s.httpServer.Shutdown(ctx)
+	srv := s.httpServer
+	ln := s.listener
+	s.mu.Unlock()
+
+	var shutdownErr error
+	if srv != nil {
+		shutdownErr = srv.Shutdown(ctx)
+	} else if ln != nil {
+		shutdownErr = ln.Close()
 	}
-	if s.listener != nil {
-		return s.listener.Close()
+
+	s.mu.Lock()
+	st := s.shareStore
+	s.shareStore = nil
+	s.mu.Unlock()
+	if st != nil {
+		if closeErr := st.Close(); closeErr != nil && shutdownErr == nil {
+			shutdownErr = closeErr
+		}
 	}
-	return nil
+	return shutdownErr
 }
 
 // Close immediately closes the server.
@@ -394,8 +411,12 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 // SetShareStore sets the store used by sharing handlers (used to inject test stores).
 func (s *Server) SetShareStore(store *share.ShareStore) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	prev := s.shareStore
 	s.shareStore = store
+	s.mu.Unlock()
+	if prev != nil && prev != store {
+		_ = prev.Close()
+	}
 }
 
 func (s *Server) getShareStore() *share.ShareStore {

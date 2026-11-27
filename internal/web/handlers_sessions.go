@@ -52,6 +52,7 @@ func (s *Server) handleResumeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req service.ResumeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body: "+err.Error())

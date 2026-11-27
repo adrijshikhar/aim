@@ -755,3 +755,74 @@ func TestServer_ApproveRequest_AtomicGrantRollback(t *testing.T) {
 		t.Fatalf("expected request %s to remain pending after grant failure, got status=%q lease=%q", reqID, rec.Status, rec.LeaseID)
 	}
 }
+
+func TestServer_HandlePing_DoesNotReflectHostHeader(t *testing.T) {
+	store := NewStore(t.TempDir())
+	defer func() { _ = store.Close() }()
+	srv := NewServer(store, t.TempDir(), "lender-node", 4319)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/share/ping", nil)
+	req.Host = "198.51.100.77:9999"
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+	srv.handlePing(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+	var pr PingResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &pr); err != nil {
+		t.Fatalf("decode PingResponse: %v", err)
+	}
+	if strings.Contains(pr.VPNIP, "198.51.100.77") || strings.Contains(pr.VPNIP, "9999") {
+		t.Fatalf("handlePing reflected untrusted Host header in VPNIP: %q", pr.VPNIP)
+	}
+}
+
+func TestServer_HandleNotifyRelease_RejectsSpoofedCallerAndUnknownLease(t *testing.T) {
+	store := NewStore(t.TempDir())
+	defer func() { _ = store.Close() }()
+	srv := NewServer(store, t.TempDir(), "lender-node", 4319)
+
+	now := time.Now()
+	if err := store.SaveGrantedLease(GrantedLease{
+		LeaseID:     "ls_release_auth",
+		ProfileName: "work",
+		Agent:       "codex",
+		BorrowerID:  "bob-mac",
+		BorrowerIP:  "10.8.0.2",
+		GrantedAt:   now,
+		ExpiresAt:   now.Add(2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unknown lease fails closed with 403
+	reqUnknown := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/share/lease/release", strings.NewReader(`{"lease_id":"ls_unknown","borrower_id":"bob-mac"}`))
+	reqUnknown.RemoteAddr = "10.8.0.2:4444"
+	wUnknown := httptest.NewRecorder()
+	srv.handleNotifyRelease(wUnknown, reqUnknown)
+	if wUnknown.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unknown lease, got %d", wUnknown.Code)
+	}
+
+	// Different borrower IP claiming bob-mac's borrower_id fails with 403
+	reqSpoof := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/share/lease/release", strings.NewReader(`{"lease_id":"ls_release_auth","borrower_id":"bob-mac"}`))
+	reqSpoof.RemoteAddr = "10.8.0.99:5555"
+	wSpoof := httptest.NewRecorder()
+	srv.handleNotifyRelease(wSpoof, reqSpoof)
+	if wSpoof.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for spoofed borrower IP, got %d", wSpoof.Code)
+	}
+
+	// Matching borrower IP succeeds and revokes lease
+	reqOK := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/share/lease/release", strings.NewReader(`{"lease_id":"ls_release_auth","borrower_id":"bob-mac"}`))
+	reqOK.RemoteAddr = "10.8.0.2:5556"
+	wOK := httptest.NewRecorder()
+	srv.handleNotifyRelease(wOK, reqOK)
+	if wOK.Code != http.StatusOK {
+		t.Fatalf("expected 200 for authorized borrower IP, got %d: %s", wOK.Code, wOK.Body.String())
+	}
+	if active := store.GetActiveGrantedLeases(); len(active) != 0 {
+		t.Fatalf("expected lease to be revoked, got active=%+v", active)
+	}
+}

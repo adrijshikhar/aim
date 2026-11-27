@@ -7,8 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/netip"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,22 +126,52 @@ func (d *DiscoveryService) PingPeerWithURL(ctx context.Context, rawURL string) (
 	}
 
 	var pr PingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&pr); err != nil {
 		return nil, err
 	}
 
+	vpnIP := normalizeVerifiedPeerIP(pr.VPNIP, rawURL)
 	peer := &PeerInfo{
 		ID:             pr.NodeID,
 		HostName:       pr.HostName,
-		VPNIP:          pr.VPNIP,
+		VPNIP:          vpnIP,
 		Port:           d.port,
 		LastSeen:       time.Now(),
 		Profiles:       pr.Profiles,
 		SharedProfiles: pr.SharedProfiles,
 		PublicKey:      pr.PublicKey,
 	}
-	_ = d.store.SavePeer(*peer)
+	if d.store != nil {
+		if err := d.store.SavePeer(*peer); err != nil {
+			return nil, fmt.Errorf("persist peer: %w", err)
+		}
+	}
 	return peer, nil
+}
+
+func normalizeVerifiedPeerIP(claimedIP, dialedURL string) string {
+	candidate := strings.TrimSpace(claimedIP)
+	if candidate != "" {
+		if h, _, err := net.SplitHostPort(candidate); err == nil {
+			candidate = h
+		}
+		candidate = strings.Trim(candidate, "[]")
+		if idx := strings.IndexByte(candidate, '%'); idx >= 0 {
+			candidate = candidate[:idx]
+		}
+		if addr, err := netip.ParseAddr(candidate); err == nil && addr.IsValid() && !addr.IsUnspecified() {
+			return addr.String()
+		}
+	}
+	u, err := neturl.Parse(dialedURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	host := u.Hostname()
+	if addr, err := netip.ParseAddr(host); err == nil && addr.IsValid() && !addr.IsUnspecified() {
+		return addr.String()
+	}
+	return host
 }
 
 func (d *DiscoveryService) PingPeer(ctx context.Context, target string) (*PeerInfo, error) {
@@ -190,7 +223,6 @@ func (d *DiscoveryService) RefreshPeers(ctx context.Context) ([]PeerInfo, error)
 			mu.Lock()
 			if err == nil && res != nil {
 				updated = append(updated, *res)
-				_ = d.store.SavePeer(*res)
 			} else {
 				updated = append(updated, peer)
 			}

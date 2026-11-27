@@ -63,3 +63,33 @@ func FuzzParsePeerHost(f *testing.F) {
 		}
 	})
 }
+
+func TestExtractPeerHost_RejectsMaliciousAndInvalidHosts(t *testing.T) {
+	invalid := []string{
+		"",
+		"   ",
+		".",
+		"..",
+		"alice@evil.com",
+		"10.0.0.1/admin",
+		"10.0.0.1?x=1",
+		"10.0.0.1#frag",
+		"bad host.local",
+		"-bad.local",
+		"bad-.local",
+		"127.0.0.1%en0",
+		"foo%2Fbar.local",
+		"not_valid_underscore.local",
+	}
+	for _, raw := range invalid {
+		if got, ok := extractPeerHost(raw); ok {
+			t.Fatalf("expected extractPeerHost(%q) to reject, got (%q, true)", raw, got)
+		}
+	}
+	if got, ok := extractPeerHost("[fe80::1%en0]:4319"); !ok || got != "fe80::1" {
+		t.Fatalf("expected bracketed IPv6 zone host fe80::1, got (%q, %v)", got, ok)
+	}
+	if got, ok := extractPeerHost("bobs-mac.local:4319"); !ok || got != "bobs-mac.local" {
+		t.Fatalf("expected bobs-mac.local, got (%q, %v)", got, ok)
+	}
+}

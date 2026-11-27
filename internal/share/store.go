@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,17 +167,25 @@ func (s *ShareStore) loadSharesLocked() []SharedProfileConfig {
 	return configs
 }
 
+func stripPortAndZone(raw string) string {
+	s := strings.TrimSpace(raw)
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
+	}
+	s = strings.Trim(s, "[]")
+	if idx := strings.IndexByte(s, '%'); idx >= 0 {
+		s = s[:idx]
+	}
+	return s
+}
+
 func (s *ShareStore) saveSharesLocked(configs []SharedProfileConfig) error {
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(configs, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.shareFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.shareFile)
+	return merge.AtomicWrite(s.shareFile, data, 0o600)
 }
 
 func (s *ShareStore) SavePeer(peer PeerInfo) error {
@@ -185,13 +194,14 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 
 	peers := s.loadPeersLocked()
 	found := false
+	peerHost := stripPortAndZone(peer.VPNIP)
 	for i := range peers {
 		match := false
 		if peer.ID != "" && peers[i].ID == peer.ID {
 			match = true
 		} else if peer.HostName != "" && strings.EqualFold(peers[i].HostName, peer.HostName) {
 			match = true
-		} else if peer.VPNIP != "" && (peers[i].VPNIP == peer.VPNIP || strings.Split(peers[i].VPNIP, ":")[0] == strings.Split(peer.VPNIP, ":")[0]) {
+		} else if peer.VPNIP != "" && (peers[i].VPNIP == peer.VPNIP || (peerHost != "" && strings.EqualFold(stripPortAndZone(peers[i].VPNIP), peerHost))) {
 			match = true
 		}
 		if match {
@@ -213,49 +223,34 @@ func (s *ShareStore) SavePeer(peer PeerInfo) error {
 		peers = append(peers, peer)
 	}
 
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(peers, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.peerFile, os.Getpid(), time.Now().UnixNano())
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	_ = f.Sync()
-	_ = f.Close()
-	return os.Rename(tmp, s.peerFile)
+	return merge.AtomicWrite(s.peerFile, data, 0o600)
 }
 
 func (s *ShareStore) DeletePeer(target string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	targetHost := stripPortAndZone(target)
 	peers := s.loadPeersLocked()
 	var next []PeerInfo
 	for _, p := range peers {
-		if p.VPNIP == target || p.HostName == target || p.ID == target || strings.Split(p.VPNIP, ":")[0] == target {
+		if p.VPNIP == target || p.HostName == target || p.ID == target || (targetHost != "" && strings.EqualFold(stripPortAndZone(p.VPNIP), targetHost)) {
 			continue
 		}
 		next = append(next, p)
 	}
 
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(next, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.peerFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.peerFile)
+	return merge.AtomicWrite(s.peerFile, data, 0o600)
 }
 
 func (s *ShareStore) GetPeers() []PeerInfo {
@@ -286,17 +281,13 @@ func (s *ShareStore) SetGlobalMode(mode string) error {
 	if mode != "off" && mode != "request" && mode != "auto" {
 		mode = "off"
 	}
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	target := filepath.Join(s.aimDir, "share_global.json")
 	data, err := json.MarshalIndent(map[string]string{"mode": mode}, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", target, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, target)
+	return merge.AtomicWrite(target, data, 0o600)
 }
 
 func (s *ShareStore) loadPeersLocked() []PeerInfo {
@@ -473,10 +464,7 @@ func (s *ShareStore) PruneExpiredGrantedLeases() int {
 	if pruned > 0 {
 		data, err := json.MarshalIndent(active, "", "  ")
 		if err == nil {
-			tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
-			if err := os.WriteFile(tmp, data, 0600); err == nil {
-				_ = os.Rename(tmp, s.grantedFile)
-			}
+			_ = merge.AtomicWrite(s.grantedFile, data, 0o600)
 		}
 	}
 	return pruned
@@ -507,11 +495,7 @@ func (s *ShareStore) RevokeGrantedLease(leaseID string) (*GrantedLease, error) {
 	if err != nil {
 		return nil, err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.grantedFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(tmp, s.grantedFile); err != nil {
+	if err := merge.AtomicWrite(s.grantedFile, data, 0o600); err != nil {
 		return nil, err
 	}
 	return revoked, nil
@@ -547,16 +531,12 @@ func (s *ShareStore) AppendAudit(entry AuditEntry) error {
 		logs = logs[:500]
 	}
 
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(logs, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.auditFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.auditFile)
+	return merge.AtomicWrite(s.auditFile, data, 0o600)
 }
 
 func (s *ShareStore) GetAuditLogs(limit int) []AuditEntry {
@@ -765,16 +745,12 @@ func (s *ShareStore) DeleteSchedule(id string) error {
 }
 
 func (s *ShareStore) saveSchedulesLocked(list []SchedulePolicy) error {
-	_ = os.MkdirAll(s.aimDir, 0700)
+	_ = os.MkdirAll(s.aimDir, 0o700)
 	data, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", s.scheduleFile, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.scheduleFile)
+	return merge.AtomicWrite(s.scheduleFile, data, 0o600)
 }
 
 // GetEffectiveGlobalMode returns the active global mode considering scheduled policies.

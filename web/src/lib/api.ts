@@ -569,8 +569,8 @@ export interface ShareStatusDTO {
 }
 
 export async function getShareStatus(refresh = false, signal?: AbortSignal): Promise<ShareStatusDTO> {
-  const url = refresh ? `${BASE_URL}/share/status?refresh=true` : `${BASE_URL}/share/status`;
-  const res = await fetch(url, { signal });
+  const url = refresh ? `${BASE_URL}/share/refresh` : `${BASE_URL}/share/status`;
+  const res = await fetch(url, { method: refresh ? 'POST' : 'GET', signal });
   return handleResponse<ShareStatusDTO>(res);
 }
 

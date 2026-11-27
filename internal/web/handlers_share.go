@@ -48,7 +48,7 @@ type ActiveLeaseInfo struct {
 
 func extractPeerHost(raw string) (string, bool) {
 	s := strings.TrimSpace(raw)
-	if s == "" {
+	if s == "" || strings.ContainsAny(s, "/\\?#@ \t\r\n") {
 		return "", false
 	}
 	if host, _, err := net.SplitHostPort(s); err == nil {
@@ -56,17 +56,63 @@ func extractPeerHost(raw string) (string, bool) {
 	}
 	s = strings.TrimPrefix(s, "[")
 	s = strings.TrimSuffix(s, "]")
+	if strings.ContainsAny(s, "[]") {
+		return "", false
+	}
 	if zoneIdx := strings.IndexByte(s, '%'); zoneIdx != -1 {
 		base := s[:zoneIdx]
 		if addr, err := netip.ParseAddr(base); err == nil && addr.Is6() {
 			s = base
+		} else {
+			return "", false
 		}
 	}
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if s == "" || strings.ContainsRune(s, '%') {
+		return "", false
+	}
+	if addr, err := netip.ParseAddr(s); err == nil && addr.IsValid() {
+		return addr.String(), true
+	}
+	if !isValidPeerHostname(s) {
 		return "", false
 	}
 	return s, true
+}
+
+func isValidPeerHostname(host string) bool {
+	if len(host) == 0 || len(host) > 253 || host == "." || host == ".." {
+		return false
+	}
+	trimmed := strings.TrimSuffix(host, ".")
+	if trimmed == "" {
+		return false
+	}
+	for label := range strings.SplitSeq(trimmed, ".") {
+		if !isValidHostLabel(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidHostLabel(label string) bool {
+	if len(label) == 0 || len(label) > 63 {
+		return false
+	}
+	if label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	for i := range label {
+		if !isHostnameChar(label[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isHostnameChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'
 }
 
 const shareLeaseQueryKey = "lease_id"
@@ -75,6 +121,139 @@ func buildLeaseStatusURL(rawAddr, leaseID string) (string, bool) {
 	q := neturl.Values{}
 	q.Set(shareLeaseQueryKey, leaseID)
 	return buildPeerShareURL(rawAddr, "4319", "/api/share/lease/status", q.Encode())
+}
+
+func refreshGrantedLeases(ctx context.Context, client *http.Client, store *share.ShareStore, peers []share.PeerInfo, granted []share.GrantedLease, now time.Time) {
+	for i := range granted {
+		gl := &granted[i]
+		if gl.Revoked || !now.Before(gl.ExpiresAt) {
+			continue
+		}
+		target := resolveGrantedBorrowerTarget(gl, peers)
+		leaseURL, ok := buildLeaseStatusURL(target, gl.LeaseID)
+		if !ok {
+			continue
+		}
+		if queryGrantedLeaseRevoked(ctx, client, leaseURL) {
+			gl.Revoked = true
+			_, _ = store.RevokeGrantedLease(gl.LeaseID)
+		}
+	}
+}
+
+func resolveGrantedBorrowerTarget(gl *share.GrantedLease, peers []share.PeerInfo) string {
+	for _, p := range peers {
+		if strings.EqualFold(p.HostName, gl.BorrowerID) || p.ID == gl.BorrowerID || p.VPNIP == gl.BorrowerIP {
+			if p.VPNIP != "" {
+				return p.VPNIP
+			}
+			break
+		}
+	}
+	return gl.BorrowerIP
+}
+
+func queryGrantedLeaseRevoked(ctx context.Context, client *http.Client, leaseURL string) bool {
+	ctxCheck, cancelCheck := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancelCheck()
+	req, err := http.NewRequestWithContext(ctxCheck, http.MethodGet, leaseURL, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+	}()
+	return resp.StatusCode == http.StatusOK && isLeaseStatusRevoked(resp)
+}
+
+func collectActiveLeases(ctx context.Context, client *http.Client, peers []share.PeerInfo, refresh bool, now time.Time) []ActiveLeaseInfo {
+	activeLeases := make([]ActiveLeaseInfo, 0)
+	profRoot := filepath.Join(config.BaseDir(), "profiles")
+	root, err := os.OpenRoot(profRoot)
+	if err != nil {
+		return activeLeases
+	}
+	defer func() { _ = root.Close() }()
+	entries, err := os.ReadDir(profRoot)
+	if err != nil {
+		return activeLeases
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		data, err := root.ReadFile(filepath.Join(e.Name(), ".aim-lease.json"))
+		if err != nil {
+			continue
+		}
+		var meta share.LeaseMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		isRevoked := meta.Revoked
+		if !isRevoked && now.Before(meta.ExpiresAt) && refresh {
+			isRevoked = verifyActiveLeaseWithPeers(ctx, client, profRoot, e.Name(), meta, peers)
+		}
+		activeLeases = append(activeLeases, ActiveLeaseInfo{
+			LocalProfile:  e.Name(),
+			SourcePeer:    meta.SourcePeer,
+			SourceProfile: meta.SourceProfile,
+			Agent:         meta.Agent,
+			Agents:        meta.Agents,
+			GrantedAt:     meta.GrantedAt,
+			ExpiresAt:     meta.ExpiresAt,
+			IsExpired:     now.After(meta.ExpiresAt),
+			IsRevoked:     isRevoked,
+		})
+	}
+	return activeLeases
+}
+
+func verifyActiveLeaseWithPeers(ctx context.Context, client *http.Client, profRoot, dirName string, meta share.LeaseMeta, peers []share.PeerInfo) bool {
+	for _, p := range peers {
+		if !entryMatchesPeer(dirName, meta.SourcePeer, p) {
+			continue
+		}
+		leaseURL, ok := buildLeaseStatusURL(p.VPNIP, meta.LeaseID)
+		if !ok {
+			return false
+		}
+		ctxCheck, cancelCheck := context.WithTimeout(ctx, 600*time.Millisecond)
+		req, err := http.NewRequestWithContext(ctxCheck, http.MethodGet, leaseURL, nil)
+		revoked := false
+		if err == nil {
+			if resp, doErr := client.Do(req); doErr == nil {
+				revoked = isLeaseStatusRevoked(resp)
+				if revoked {
+					_ = share.NewLeaseManager(profRoot).RevokeLease(dirName)
+				}
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+				_ = resp.Body.Close()
+			}
+		}
+		cancelCheck()
+		return revoked
+	}
+	return false
+}
+
+func isLeaseStatusRevoked(resp *http.Response) bool {
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		return true
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var st struct {
+		Revoked bool `json:"revoked"`
+		Active  bool `json:"active"`
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&st) == nil && (st.Revoked || !st.Active)
 }
 
 func buildPeerShareURL(rawAddr, port, path, rawQuery string) (string, bool) {
@@ -117,15 +296,23 @@ func entryMatchesPeer(entryDirName, sourcePeer string, p share.PeerInfo) bool {
 }
 
 func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
+	s.respondShareStatus(w, r, false)
+}
+
+func (s *Server) handleRefreshShareStatus(w http.ResponseWriter, r *http.Request) {
+	s.respondShareStatus(w, r, true)
+}
+
+func (s *Server) respondShareStatus(w http.ResponseWriter, r *http.Request, refresh bool) {
 	vpn, _ := share.DetectVPN()
 	store := s.getShareStore()
 
-	// Live refresh of known peers if requested or on poll
-	if r.URL.Query().Get("refresh") == "true" {
+	// Live refresh of known peers only on explicit POST /api/share/refresh
+	if refresh {
 		disc := share.NewDiscovery(store, 4319)
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
 		_, _ = disc.RefreshPeers(ctx)
+		cancel()
 	}
 
 	shared := store.GetSharedProfiles()
@@ -135,115 +322,16 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 	totalAudit := store.GetAuditCount()
 
 	now := time.Now()
-	// Active verification: if host has granted leases that appear active, verify borrower status when refresh is requested
-	if r.URL.Query().Get("refresh") == "true" {
-		for i := range granted {
-			gl := &granted[i]
-			if !gl.Revoked && now.Before(gl.ExpiresAt) {
-				borrowerTarget := gl.BorrowerIP
-				for _, p := range peers {
-					if strings.EqualFold(p.HostName, gl.BorrowerID) || p.ID == gl.BorrowerID || p.VPNIP == gl.BorrowerIP {
-						if p.VPNIP != "" {
-							borrowerTarget = p.VPNIP
-						}
-						break
-					}
-				}
-				if leaseURL, ok := buildLeaseStatusURL(borrowerTarget, gl.LeaseID); ok {
-					ctxCheck, cancelCheck := context.WithTimeout(r.Context(), 500*time.Millisecond)
-					checkReq, err := http.NewRequestWithContext(ctxCheck, http.MethodGet, leaseURL, nil)
-					if err == nil {
-						if checkResp, err := http.DefaultClient.Do(checkReq); err == nil {
-							if checkResp.StatusCode == http.StatusOK {
-								var st struct {
-									Revoked bool `json:"revoked"`
-									Expired bool `json:"expired"`
-									Active  bool `json:"active"`
-								}
-								if err := json.NewDecoder(checkResp.Body).Decode(&st); err == nil {
-									if st.Revoked || !st.Active {
-										gl.Revoked = true
-										_, _ = store.RevokeGrantedLease(gl.LeaseID)
-									}
-								}
-							}
-							_ = checkResp.Body.Close()
-						}
-					}
-					cancelCheck()
-				}
-			}
-		}
+	var checkClient *http.Client
+	if refresh {
+		checkTr := &http.Transport{DisableKeepAlives: true}
+		defer checkTr.CloseIdleConnections()
+		checkClient = &http.Client{Transport: checkTr}
+		refreshGrantedLeases(r.Context(), checkClient, store, peers, granted, now)
 	}
 
 	// Read active leased profiles on disk
-	activeLeases := make([]ActiveLeaseInfo, 0)
-	profRoot := filepath.Join(config.BaseDir(), "profiles")
-	entries, err := os.ReadDir(profRoot)
-	if err == nil {
-		now := time.Now()
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			metaPath := filepath.Join(profRoot, e.Name(), ".aim-lease.json")
-			data, err := os.ReadFile(metaPath)
-			if err != nil {
-				continue
-			}
-			var meta share.LeaseMeta
-			if err := json.Unmarshal(data, &meta); err != nil {
-				continue
-			}
-
-			// If not marked revoked locally and not yet expired, check with host if refresh requested
-			isRevoked := meta.Revoked
-			if !isRevoked && now.Before(meta.ExpiresAt) && r.URL.Query().Get("refresh") == "true" {
-				for _, p := range peers {
-					if entryMatchesPeer(e.Name(), meta.SourcePeer, p) {
-						if leaseURL, ok := buildLeaseStatusURL(p.VPNIP, meta.LeaseID); ok {
-							ctxCheck, cancelCheck := context.WithTimeout(r.Context(), 600*time.Millisecond)
-							checkReq, err := http.NewRequestWithContext(ctxCheck, http.MethodGet, leaseURL, nil)
-							if err == nil {
-								if checkResp, err := http.DefaultClient.Do(checkReq); err == nil {
-									if checkResp.StatusCode == http.StatusOK {
-										var st struct {
-											Revoked bool `json:"revoked"`
-											Active  bool `json:"active"`
-										}
-										if err := json.NewDecoder(checkResp.Body).Decode(&st); err == nil && (st.Revoked || !st.Active) {
-											isRevoked = true
-											mgr := share.NewLeaseManager(profRoot)
-											_ = mgr.RevokeLease(e.Name())
-										}
-									} else if checkResp.StatusCode == http.StatusNotFound || checkResp.StatusCode == http.StatusGone {
-										isRevoked = true
-										mgr := share.NewLeaseManager(profRoot)
-										_ = mgr.RevokeLease(e.Name())
-									}
-									_ = checkResp.Body.Close()
-								}
-							}
-							cancelCheck()
-						}
-						break
-					}
-				}
-			}
-
-			activeLeases = append(activeLeases, ActiveLeaseInfo{
-				LocalProfile:  e.Name(),
-				SourcePeer:    meta.SourcePeer,
-				SourceProfile: meta.SourceProfile,
-				Agent:         meta.Agent,
-				Agents:        meta.Agents,
-				GrantedAt:     meta.GrantedAt,
-				ExpiresAt:     meta.ExpiresAt,
-				IsExpired:     now.After(meta.ExpiresAt),
-				IsRevoked:     isRevoked,
-			})
-		}
-	}
+	activeLeases := collectActiveLeases(r.Context(), checkClient, peers, refresh, now)
 
 	// Query active pending approval requests from P2P daemon on :4319
 	var pendingRequests []share.PendingRequestInfo
@@ -253,7 +341,7 @@ func (s *Server) handleGetShareStatus(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		if pResp, err := http.DefaultClient.Do(pReq); err == nil {
 			if pResp.StatusCode == http.StatusOK {
-				_ = json.NewDecoder(pResp.Body).Decode(&pendingRequests)
+				_ = json.NewDecoder(io.LimitReader(pResp.Body, 4<<20)).Decode(&pendingRequests)
 			}
 			pResp.Body.Close()
 		}
@@ -295,6 +383,7 @@ func (s *Server) handleSetGlobalMode(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req SetGlobalModeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Mode == "" {
 		writeJSONError(w, http.StatusBadRequest, "mode is required")
@@ -323,6 +412,7 @@ type ToggleShareRequest struct {
 }
 
 func (s *Server) handleToggleShare(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req ToggleShareRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -379,6 +469,7 @@ type AddPeerRequest struct {
 }
 
 func (s *Server) handleAddSharePeer(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req AddPeerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Host == "" {
 		writeJSONError(w, http.StatusBadRequest, "host is required")
@@ -412,6 +503,7 @@ type RequestLeasePayload struct {
 }
 
 func (s *Server) handleRequestShareLease(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req RequestLeasePayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -532,9 +624,14 @@ type ReleaseLeasePayload struct {
 }
 
 func (s *Server) handleReleaseShareLease(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req ReleaseLeasePayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Profile == "" {
 		writeJSONError(w, http.StatusBadRequest, "profile is required")
+		return
+	}
+	if strings.ContainsAny(req.Profile, `/\`) || strings.Contains(req.Profile, "..") || req.Profile == "." {
+		writeJSONError(w, http.StatusBadRequest, "invalid profile name")
 		return
 	}
 
@@ -572,6 +669,7 @@ func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req RevokeLeasePayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LeaseID == "" {
 		writeJSONError(w, http.StatusBadRequest, "lease_id is required")
@@ -612,10 +710,14 @@ func (s *Server) handleRevokeShareLease(w http.ResponseWriter, r *http.Request) 
 			nReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 			if err == nil {
 				nReq.Header.Set("Content-Type", "application/json")
-				nResp, err := http.DefaultClient.Do(nReq)
+				tr := &http.Transport{DisableKeepAlives: true}
+				notifyClient := &http.Client{Timeout: 2 * time.Second, Transport: tr}
+				nResp, err := notifyClient.Do(nReq)
 				if err == nil {
+					_, _ = io.Copy(io.Discard, io.LimitReader(nResp.Body, 4096))
 					_ = nResp.Body.Close()
 				}
+				tr.CloseIdleConnections()
 			}
 		}(revoked.BorrowerIP, req.LeaseID)
 	}
@@ -629,6 +731,7 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
@@ -646,7 +749,7 @@ func (s *Server) handleApproveShareRequest(w http.ResponseWriter, r *http.Reques
 		pReq.Header.Set("Content-Type", "application/json")
 		pResp, err := http.DefaultClient.Do(pReq)
 		if err == nil {
-			respBody, _ := io.ReadAll(pResp.Body)
+			respBody, _ := io.ReadAll(io.LimitReader(pResp.Body, 4<<20))
 			pResp.Body.Close()
 
 			// If daemon handled it successfully (200), or explicitly rejected with domain error (400, 403)
@@ -753,6 +856,7 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
@@ -770,7 +874,7 @@ func (s *Server) handleDenyShareRequest(w http.ResponseWriter, r *http.Request) 
 		pReq.Header.Set("Content-Type", "application/json")
 		pResp, err := http.DefaultClient.Do(pReq)
 		if err == nil {
-			respBody, _ := io.ReadAll(pResp.Body)
+			respBody, _ := io.ReadAll(io.LimitReader(pResp.Body, 4<<20))
 			pResp.Body.Close()
 
 			if pResp.StatusCode == http.StatusOK || pResp.StatusCode == http.StatusBadRequest || pResp.StatusCode == http.StatusForbidden {
@@ -817,6 +921,7 @@ func (s *Server) handleCancelShareRequest(w http.ResponseWriter, r *http.Request
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
@@ -878,6 +983,7 @@ func (s *Server) handlePollShareRequest(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
@@ -991,6 +1097,7 @@ func (s *Server) handleGetSchedules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSaveSchedule(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var sched share.SchedulePolicy
 	if err := json.NewDecoder(r.Body).Decode(&sched); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -1069,6 +1176,7 @@ func (s *Server) handleSaveSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		ID string `json:"id"`
 	}

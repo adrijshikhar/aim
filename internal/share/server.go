@@ -21,6 +21,12 @@ import (
 	"github.com/aim-cli/aim/internal/profile"
 )
 
+var (
+	errRequestNotFound   = errors.New("request not found")
+	errRequestNotPending = errors.New("request is not pending")
+	errRequestExpired    = errors.New("request has expired")
+)
+
 type Server struct {
 	store           *ShareStore
 	profilesDir     string
@@ -304,13 +310,68 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	resp := PingResponse{
 		NodeID:         s.nodeID,
 		HostName:       host,
-		VPNIP:          r.Host,
+		VPNIP:          s.resolveAdvertisedVPNIP(r),
 		Profiles:       names,
 		SharedProfiles: profiles,
 		PublicKey:      s.pubKey,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) resolveAdvertisedVPNIP(r *http.Request) string {
+	ip, isLoopback := localBoundIP(r)
+	if ip != "" && !isLoopback {
+		return ip
+	}
+	if vpn, err := DetectVPN(); err == nil && vpn != nil && vpn.Connected && vpn.IP != "" {
+		return vpn.IP
+	}
+	return ip
+}
+
+func localBoundIP(r *http.Request) (string, bool) {
+	localAddr, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok || localAddr == nil {
+		return "", false
+	}
+	ipStr := extractAddrHost(localAddr.String())
+	ip := net.ParseIP(ipStr)
+	if ip == nil || ip.IsUnspecified() {
+		return "", false
+	}
+	return ip.String(), ip.IsLoopback()
+}
+
+func extractAddrHost(raw string) string {
+	s := strings.TrimSpace(raw)
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
+	}
+	if idx := strings.IndexByte(s, '%'); idx >= 0 {
+		s = s[:idx]
+	}
+	return strings.Trim(s, "[]")
+}
+
+func callerMatchesGrantedBorrower(remoteAddr string, gl *GrantedLease, claimedBorrowerID string) bool {
+	if gl == nil {
+		return false
+	}
+	callerHost := extractAddrHost(remoteAddr)
+	callerIP := net.ParseIP(callerHost)
+	grantedHost := extractAddrHost(gl.BorrowerIP)
+	grantedIP := net.ParseIP(grantedHost)
+	if callerIP != nil && grantedIP != nil {
+		if callerIP.IsLoopback() && grantedIP.IsLoopback() {
+			return claimedBorrowerID == "" || gl.BorrowerID == "" || claimedBorrowerID == gl.BorrowerID
+		}
+		return callerIP.Equal(grantedIP)
+	}
+	if callerIP != nil && callerIP.IsLoopback() && grantedHost == "" {
+		return claimedBorrowerID != "" && gl.BorrowerID == claimedBorrowerID
+	}
+	return grantedHost != "" && strings.EqualFold(callerHost, grantedHost)
 }
 
 func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
@@ -347,6 +408,7 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: lease requests only accepted from private VPN / LAN subnets", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req LeaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -672,6 +734,7 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: cancellation requests only accepted from private VPN / LAN subnets", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
@@ -793,12 +856,33 @@ func (s *Server) handleNotifyRelease(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: release notifications only accepted from private VPN / LAN subnets", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var req struct {
 		LeaseID    string `json:"lease_id"`
 		BorrowerID string `json:"borrower_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LeaseID == "" {
 		http.Error(w, "lease_id is required", http.StatusBadRequest)
+		return
+	}
+	if s.store == nil {
+		http.Error(w, "Forbidden: share store unavailable", http.StatusForbidden)
+		return
+	}
+	var granted *GrantedLease
+	for _, gl := range s.store.GetGrantedLeases() {
+		if gl.LeaseID == req.LeaseID {
+			cp := gl
+			granted = &cp
+			break
+		}
+	}
+	if granted == nil {
+		http.Error(w, "Forbidden: unknown lease", http.StatusForbidden)
+		return
+	}
+	if !callerMatchesGrantedBorrower(r.RemoteAddr, granted, req.BorrowerID) {
+		http.Error(w, "Forbidden: caller does not match lease borrower", http.StatusForbidden)
 		return
 	}
 
@@ -925,9 +1009,10 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := requireLocalAdmin(r); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
@@ -937,11 +1022,16 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := s.ApproveRequest(req.RequestID)
 	if err != nil {
-		if strings.Contains(err.Error(), "has status") || strings.Contains(err.Error(), "has expired") {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		switch {
+		case errors.Is(err, errRequestNotFound):
+			http.Error(w, "request not found", http.StatusNotFound)
+		case errors.Is(err, errRequestNotPending):
+			http.Error(w, "request is not pending", http.StatusConflict)
+		case errors.Is(err, errRequestExpired):
+			http.Error(w, "request has expired", http.StatusGone)
+		default:
+			http.Error(w, "failed to approve request", http.StatusBadRequest)
 		}
-		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -954,9 +1044,10 @@ func (s *Server) handleDeny(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := requireLocalAdmin(r); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
@@ -965,11 +1056,16 @@ func (s *Server) handleDeny(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.DenyRequest(req.RequestID); err != nil {
-		if strings.Contains(err.Error(), "has status") || strings.Contains(err.Error(), "has expired") {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		switch {
+		case errors.Is(err, errRequestNotFound):
+			http.Error(w, "request not found", http.StatusNotFound)
+		case errors.Is(err, errRequestNotPending):
+			http.Error(w, "request is not pending", http.StatusConflict)
+		case errors.Is(err, errRequestExpired):
+			http.Error(w, "request has expired", http.StatusGone)
+		default:
+			http.Error(w, "failed to deny request", http.StatusBadRequest)
 		}
-		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1013,10 +1109,14 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 	}
 	if s.deniedResults[reqID] {
 		s.pendingMu.Unlock()
-		return nil, fmt.Errorf("request %s was denied", reqID)
+		return nil, fmt.Errorf("%w: request %s was denied", errRequestNotPending, reqID)
 	}
 	pr, exists := s.pending[reqID]
 	s.pendingMu.Unlock()
+
+	if s.store == nil {
+		return nil, errors.New("share store not configured")
+	}
 
 	var (
 		profileName    string
@@ -1036,7 +1136,7 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 		// Look up in SQLite
 		rec, err := s.store.GetShareRequest(reqID)
 		if err != nil || rec == nil {
-			return nil, fmt.Errorf("request %s not found", reqID)
+			return nil, fmt.Errorf("%w: request %s", errRequestNotFound, reqID)
 		}
 		if rec.Status == "approved" && rec.LeaseID != "" {
 			leases := s.store.GetGrantedLeases()
@@ -1058,11 +1158,11 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 			}
 		}
 		if rec.Status != "pending" {
-			return nil, fmt.Errorf("request %s has status %s", reqID, rec.Status)
+			return nil, fmt.Errorf("%w: request %s has status %s", errRequestNotPending, reqID, rec.Status)
 		}
 		if time.Now().After(rec.ExpiresAt) {
 			_ = s.store.UpdateRequestStatus(reqID, "expired", "", "Request expired")
-			return nil, fmt.Errorf("request %s has expired", reqID)
+			return nil, fmt.Errorf("%w: request %s", errRequestExpired, reqID)
 		}
 
 		profileName = rec.ProfileName
@@ -1081,9 +1181,6 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 			duration = p.MaxLeaseTTL
 			break
 		}
-	}
-	if s.store == nil {
-		return nil, errors.New("share store not configured")
 	}
 
 	expiresAt := time.Now().Add(duration)
@@ -1162,9 +1259,9 @@ func (s *Server) ApproveRequest(reqID string) (*LeaseResponse, error) {
 			}
 		}
 		if rec != nil {
-			return nil, fmt.Errorf("cannot approve request %s: current status is %s", reqID, rec.Status)
+			return nil, fmt.Errorf("%w: cannot approve request %s (status %s)", errRequestNotPending, reqID, rec.Status)
 		}
-		return nil, fmt.Errorf("request %s was already decided or cancelled", reqID)
+		return nil, fmt.Errorf("%w: request %s was already decided or cancelled", errRequestNotPending, reqID)
 	}
 
 	s.pendingMu.Lock()
@@ -1191,10 +1288,14 @@ func (s *Server) DenyRequest(reqID string) error {
 	}
 	if _, ok := s.approvedResults[reqID]; ok {
 		s.pendingMu.Unlock()
-		return fmt.Errorf("request %s was already approved", reqID)
+		return fmt.Errorf("%w: request %s was already approved", errRequestNotPending, reqID)
 	}
 	pr, exists := s.pending[reqID]
 	s.pendingMu.Unlock()
+
+	if s.store == nil {
+		return errors.New("share store not configured")
+	}
 
 	var (
 		actor   = "unknown"
@@ -1208,7 +1309,7 @@ func (s *Server) DenyRequest(reqID string) error {
 	} else {
 		rec, err := s.store.GetShareRequest(reqID)
 		if err != nil || rec == nil {
-			return fmt.Errorf("request %s not found", reqID)
+			return fmt.Errorf("%w: request %s", errRequestNotFound, reqID)
 		}
 		actor = rec.PeerID
 		profile = rec.ProfileName
@@ -1222,9 +1323,9 @@ func (s *Server) DenyRequest(reqID string) error {
 	if !transitioned {
 		rec, _ := s.store.GetShareRequest(reqID)
 		if rec != nil {
-			return fmt.Errorf("request %s cannot be denied: status is %s", reqID, rec.Status)
+			return fmt.Errorf("%w: request %s status is %s", errRequestNotPending, reqID, rec.Status)
 		}
-		return fmt.Errorf("request %s was already decided", reqID)
+		return fmt.Errorf("%w: request %s was already decided", errRequestNotPending, reqID)
 	}
 
 	// Update cached memory state ONLY after database transition successfully commits

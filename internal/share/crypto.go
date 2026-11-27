@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
+
+	"github.com/aim-cli/aim/internal/merge"
 )
 
 // EnsureNodeKeypair loads or generates the Ed25519 node keypair in aimDir.
@@ -41,41 +42,11 @@ func EnsureNodeKeypair(aimDir string) (ed25519.PublicKey, ed25519.PrivateKey, er
 		return nil, nil, fmt.Errorf("failed to create aim directory: %w", err)
 	}
 
-	pid := os.Getpid()
-	tmpKey := fmt.Sprintf("%s.tmp.%d.%d", keyPath, pid, time.Now().UnixNano())
-	fKey, err := os.OpenFile(tmpKey, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return nil, nil, err
+	if err := merge.AtomicWrite(keyPath, priv, 0o600); err != nil {
+		return nil, nil, fmt.Errorf("write private key: %w", err)
 	}
-	if _, err := fKey.Write(priv); err != nil {
-		_ = fKey.Close()
-		_ = os.Remove(tmpKey)
-		return nil, nil, err
-	}
-	_ = fKey.Sync()
-	_ = fKey.Close()
-
-	if err := os.Rename(tmpKey, keyPath); err != nil {
-		_ = os.Remove(tmpKey)
-		return nil, nil, err
-	}
-
-	tmpPub := fmt.Sprintf("%s.tmp.%d.%d", pubPath, pid, time.Now().UnixNano())
-	fPub, err := os.OpenFile(tmpPub, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, err := fPub.Write(pub); err != nil {
-		_ = fPub.Close()
-		_ = os.Remove(tmpPub)
-		return nil, nil, err
-	}
-	_ = fPub.Sync()
-	_ = fPub.Close()
-
-	if err := os.Rename(tmpPub, pubPath); err != nil {
-		_ = os.Remove(tmpPub)
-		return nil, nil, err
+	if err := merge.AtomicWrite(pubPath, pub, 0o644); err != nil {
+		return nil, nil, fmt.Errorf("write public key: %w", err)
 	}
 
 	return pub, priv, nil
