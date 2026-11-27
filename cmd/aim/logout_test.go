@@ -104,10 +104,11 @@ func assertDeletedOnlyService(t *testing.T, deleted []string, want, forbiddenOth
 }
 
 func TestLogoutCmd_RejectsUnknownProfileAndInvalidArgs(t *testing.T) {
-	t.Setenv("AIM_HOME", t.TempDir())
+	baseDir := t.TempDir()
+	t.Setenv("AIM_HOME", baseDir)
 	reg := agents.NewRegistry()
 	reg.Register(codex.NewAdapter())
-	pm := profile.NewProfileManager(t.TempDir())
+	pm := profile.NewProfileManager(baseDir)
 
 	cmd := newRootCmd(reg, pm)
 	var out, errOut bytes.Buffer

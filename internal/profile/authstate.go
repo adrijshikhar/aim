@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -133,10 +134,46 @@ func PurgeLocalAgentCredentials(profileDir, agentName string) error {
 	}
 
 	var errs []error
+	if canonicalAuthAgent(agentName) == agentClaude {
+		if err := stripClaudeOAuthAccount(profileDir); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	for _, p := range targets {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func stripClaudeOAuthAccount(profileDir string) error {
+	claudeDir := filepath.Join(profileDir, ".claude")
+	root, err := os.OpenRoot(claudeDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
+	data, readErr := root.ReadFile(".claude.json")
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return nil
+		}
+		return readErr
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	out, delErr := merge.DeleteJSONKeyBytes(data, "oauthAccount")
+	if delErr != nil {
+		return delErr
+	}
+	if bytes.Equal(out, data) {
+		return nil
+	}
+	return merge.AtomicWrite(filepath.Join(claudeDir, ".claude.json"), out, 0o600)
 }

@@ -655,6 +655,27 @@ func TestRunTUINilProfileManager(t *testing.T) {
 	}
 }
 
+func TestResolveUITargetProfile_RejectsImplicitDefaultAndUsesConfigDefault(t *testing.T) {
+	baseDir := t.TempDir()
+	t.Setenv("AIM_HOME", baseDir)
+	pm := profile.NewProfileManager(baseDir)
+
+	if _, err := resolveUITargetProfile(pm, "<host>", "<host>", "claude", "sess1234"); err == nil {
+		t.Fatalf("expected error resolving <host> with no configured default profile")
+	}
+
+	_, _ = pm.EnsureProfile("work")
+	cfg := config.NewDefaultConfig()
+	cfg.DefaultProfile = "work"
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveUITargetProfile(pm, "<host>", "", "claude", "sess1234")
+	if err != nil || got != "work" {
+		t.Fatalf("expected configured default profile 'work', got %q (err=%v)", got, err)
+	}
+}
+
 func TestCLI_ExecuteRun_ContinueFlag(t *testing.T) {
 	tempBase := t.TempDir()
 	origBaseDir := os.Getenv("AIM_HOME")
@@ -715,6 +736,7 @@ func TestCLI_AgentAwareListFiltering(t *testing.T) {
 	reg := agents.NewRegistry()
 	reg.Register(agy.NewAdapter())
 	reg.Register(&mockAdapter{name: "mock"})
+	reg.Register(&mockAdapter{name: "other"})
 	pm := profile.NewProfileManager(tmpDir)
 
 	_, _ = pm.EnsureProfile("agy-prof")

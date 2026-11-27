@@ -27,8 +27,6 @@ var (
 	Commit = "none"
 	// Date is the build timestamp.
 	Date = "unknown"
-
-	debugFlag bool
 )
 
 // GetVersion returns the current version safely across goroutines.
@@ -129,10 +127,12 @@ func newRootCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Command
 	if reg == nil {
 		reg = defaultRegistry()
 	}
+	var debugFlag bool
+	ver := GetVersion()
 	rootCmd := &cobra.Command{
 		Use:   "aim [command] [agent] [profile] [flags] [-- args...]",
 		Short: "AIM (AI Multiplexer) - Isolated Profile Manager for AI Agents",
-		Long: `AIM (AI Multiplexer) v` + Version + `
+		Long: `AIM (AI Multiplexer) v` + ver + `
 Usage:
   aim [command] [agent] [profile] [flags] [-- args...]
 
@@ -159,7 +159,7 @@ Flags:
   -v, --version              Show AIM version
   -h, --help                 Show help documentation
       --debug                Enable verbose debug logging`,
-		Version:       Version,
+		Version:       ver,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
@@ -180,7 +180,7 @@ Flags:
 		},
 	}
 
-	rootCmd.SetVersionTemplate(fmt.Sprintf("aim version %s\n", Version))
+	rootCmd.SetVersionTemplate(fmt.Sprintf("aim version %s\n", ver))
 	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Enable verbose debug logging")
 
 	// Add subcommands
@@ -221,11 +221,12 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Show AIM version",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			ver := GetVersion()
 			if verbose {
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "aim version %s (commit: %s, built at: %s)\n", Version, Commit, Date)
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "aim version %s (commit: %s, built at: %s)\n", ver, Commit, Date)
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "aim version %s\n", Version)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "aim version %s\n", ver)
 			return err
 		},
 	}

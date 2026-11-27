@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,9 +8,11 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
+	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -47,10 +48,20 @@ func executeRemove(reg *agents.Registry, pm *profile.ProfileManager, args []stri
 }
 
 func executeRemoveTo(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, args []string) int {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errOut == nil {
+		errOut = os.Stderr
+	}
+	if reg == nil {
+		reg = defaultRegistry()
+	}
+
 	var agentName, profileName string
 	switch len(args) {
 	case 0:
-		_, _ = fmt.Fprintln(out, "Usage: aim remove [agent] <profile>")
+		_, _ = fmt.Fprintln(errOut, "Usage: aim remove [agent] <profile>")
 		return 1
 	case 1:
 		profileName = args[0]
@@ -59,32 +70,42 @@ func executeRemoveTo(out, errOut io.Writer, reg *agents.Registry, pm *profile.Pr
 		profileName = args[1]
 	}
 
-	if agentName != "" && reg != nil {
-		if adapter, err := reg.Get(agentName); err == nil {
-			agentName = adapter.Name()
-		}
+	errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
+	if pm == nil {
+		_, _ = fmt.Fprintf(errOut, "%s Error: profile manager not initialized\n", errBadge)
+		return 1
 	}
 
-	cfg, _ := config.LoadConfig()
-	if cfg == nil {
-		cfg = config.NewDefaultConfig()
+	if agentName != "" {
+		adapter, err := reg.Get(agentName)
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
+			return 1
+		}
+		agentName = adapter.Name()
+	}
+
+	cfg, err := loadOrRecoverConfig(errOut)
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "%s Error loading config: %v\n", errBadge, err)
+		return 1
 	}
 
 	okBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
 	cyan := lipgloss.NewStyle().Foreground(tui.AccentCyan)
 
 	if agentName != "" {
-		return executeRemoveAgent(out, errOut, reg, pm, cfg, agentName, profileName, okBadge, cyan)
+		return executeRemoveAgent(out, errOut, reg, pm, cfg, agentName, profileName, okBadge, errBadge, cyan)
 	}
-	return executeRemoveProfile(out, errOut, reg, pm, cfg, profileName, okBadge, cyan)
+	return executeRemoveProfile(out, errOut, reg, pm, cfg, profileName, okBadge, errBadge, cyan)
 }
 
-func executeRemoveAgent(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config, agentName, profileName, okBadge string, cyan lipgloss.Style) int {
+func executeRemoveAgent(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config, agentName, profileName, okBadge, errBadge string, cyan lipgloss.Style) int {
 	bold := lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright)
 	account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(profileName), agentName)
-	cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg)
+	purgers := collectAgentPurgers(reg, agentName)
+	cleanedUp, err := pm.RemoveAgent(profileName, agentName, cfg, purgers...)
 	if err != nil {
-		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
 		if strings.Contains(err.Error(), "not associated") {
 			_, _ = fmt.Fprintf(errOut, "%s Agent %q is not associated with profile %q\n", errBadge, agentName, profileName)
 		} else {
@@ -92,7 +113,7 @@ func executeRemoveAgent(out, errOut io.Writer, reg *agents.Registry, pm *profile
 		}
 		return 1
 	}
-	purgeRemovedAgent(reg, agentName, profileName, pm.ProfileDir(profileName))
+	clearRemovedStateStores(pm, profileName, agentName)
 	telemetry.CaptureAccountEvent(agentName, account, "agent_removed", map[string]any{
 		"profile_cleaned_up": cleanedUp,
 	})
@@ -104,40 +125,53 @@ func executeRemoveAgent(out, errOut io.Writer, reg *agents.Registry, pm *profile
 	return 0
 }
 
-func executeRemoveProfile(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config, profileName, okBadge string, cyan lipgloss.Style) int {
-	pDir := pm.ProfileDir(profileName)
-	if err := pm.DeleteProfile(profileName, cfg); err != nil {
-		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
+func executeRemoveProfile(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, cfg *config.Config, profileName, okBadge, errBadge string, cyan lipgloss.Style) int {
+	purgers := collectAllPurgers(reg)
+	if err := pm.DeleteProfile(profileName, cfg, purgers...); err != nil {
 		_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
 		return 1
 	}
-	purgeRemovedProfile(reg, profileName, pDir)
+	for _, ad := range reg.All() {
+		clearRemovedStateStores(pm, profileName, ad.Name())
+	}
 	_, _ = fmt.Fprintf(out, "%s Profile %s removed successfully.\n", okBadge, cyan.Render(profileName))
 	return 0
 }
 
-func purgeRemovedAgent(reg *agents.Registry, agentName, profileName, pDir string) {
+func collectAgentPurgers(reg *agents.Registry, agentName string) []agents.CredentialPurger {
 	if reg == nil {
-		return
+		return nil
 	}
 	ad, err := reg.Get(agentName)
 	if err != nil {
-		return
+		return nil
 	}
 	if purger, ok := ad.(agents.CredentialPurger); ok {
-		_ = purger.PurgeCredentials(context.Background(), profileName, pDir)
+		return []agents.CredentialPurger{purger}
 	}
+	return nil
 }
 
-func purgeRemovedProfile(reg *agents.Registry, profileName, pDir string) {
+func collectAllPurgers(reg *agents.Registry) []agents.CredentialPurger {
 	if reg == nil {
-		return
+		return nil
 	}
+	var purgers []agents.CredentialPurger
 	for _, ad := range reg.All() {
 		if purger, ok := ad.(agents.CredentialPurger); ok {
-			_ = purger.PurgeCredentials(context.Background(), profileName, pDir)
+			purgers = append(purgers, purger)
 		}
 	}
+	return purgers
+}
+
+func clearRemovedStateStores(pm *profile.ProfileManager, profileName, agentName string) {
+	baseDir := config.BaseDir()
+	if pm != nil && pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	_ = oauth.NewRefusalStore(baseDir).Clear(agentName, profileName)
+	usage.NewCacheStore(baseDir, usage.DefaultTTL).Delete(agentName, profileName)
 }
 
 func runRemove(reg *agents.Registry, pm *profile.ProfileManager, args []string) error {

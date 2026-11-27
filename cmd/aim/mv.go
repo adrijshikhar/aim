@@ -7,9 +7,11 @@ import (
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
+	"github.com/aim-cli/aim/internal/oauth"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/telemetry"
 	"github.com/aim-cli/aim/internal/tui"
+	"github.com/aim-cli/aim/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -60,23 +62,50 @@ func executeMv(reg *agents.Registry, pm *profile.ProfileManager, agentName, sour
 }
 
 func executeMvTo(out, errOut io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName, sourceProfile, targetProfile string, force bool) int {
-	cfg, _ := config.LoadConfig()
-	if cfg == nil {
-		cfg = config.NewDefaultConfig()
+	if out == nil {
+		out = os.Stdout
+	}
+	if errOut == nil {
+		errOut = os.Stderr
+	}
+	errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
+	if pm == nil {
+		_, _ = fmt.Fprintf(errOut, "%s Error: profile manager not initialized\n", errBadge)
+		return 1
+	}
+	if reg == nil {
+		reg = defaultRegistry()
 	}
 
-	if reg != nil {
-		if adapter, err := reg.Get(agentName); err == nil {
-			agentName = adapter.Name()
-		}
-	}
-	account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(sourceProfile), agentName)
-	err := pm.MoveAgent(agentName, sourceProfile, targetProfile, force, cfg, reg)
+	cfg, err := loadOrRecoverConfig(errOut)
 	if err != nil {
-		errBadge := lipgloss.NewStyle().Foreground(tui.StatusRed).Bold(true).Render("✖")
+		_, _ = fmt.Fprintf(errOut, "%s Error loading config: %v\n", errBadge, err)
+		return 1
+	}
+
+	adapter, err := reg.Get(agentName)
+	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
 		return 1
 	}
+	agentName = adapter.Name()
+
+	account := profile.GetProfileAccountInfoForAgent(pm.ProfileDir(sourceProfile), agentName)
+	if err := pm.MoveAgent(agentName, sourceProfile, targetProfile, force, cfg, reg); err != nil {
+		_, _ = fmt.Fprintf(errOut, "%s Error: %v\n", errBadge, err)
+		return 1
+	}
+
+	baseDir := config.BaseDir()
+	if pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	refStore := oauth.NewRefusalStore(baseDir)
+	_ = refStore.Clear(agentName, sourceProfile)
+	_ = refStore.Clear(agentName, targetProfile)
+	cacheStore := usage.NewCacheStore(baseDir, usage.DefaultTTL)
+	cacheStore.Delete(agentName, sourceProfile)
+	cacheStore.Delete(agentName, targetProfile)
 
 	okBadge := lipgloss.NewStyle().Foreground(tui.StatusGreen).Bold(true).Render("✔")
 	cyan := lipgloss.NewStyle().Foreground(tui.AccentCyan)

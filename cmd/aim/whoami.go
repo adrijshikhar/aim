@@ -1,19 +1,22 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/aim-cli/aim/internal/agents"
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/logger"
+	"github.com/aim-cli/aim/internal/presenter"
 	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/tui"
 	"github.com/aim-cli/aim/internal/usage"
@@ -27,19 +30,32 @@ func newWhoamiCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 		Aliases: []string{"current"},
 		Short:   "Show active profile, agent, session, and quota info",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			executeWhoamiTo(cmd.OutOrStdout(), reg, pm)
+			executeWhoamiWithContextTo(cmd.Context(), cmd.OutOrStdout(), reg, pm)
 			return nil
 		},
 	}
 }
 
 func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
-	executeWhoamiTo(os.Stdout, reg, pm)
+	executeWhoamiWithContextTo(context.Background(), os.Stdout, reg, pm)
 }
 
 func executeWhoamiTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager) {
+	executeWhoamiWithContextTo(context.Background(), out, reg, pm)
+}
+
+func executeWhoamiWithContextTo(ctx context.Context, out io.Writer, reg *agents.Registry, pm *profile.ProfileManager) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	baseDir := config.BaseDir()
 	profilesDir := filepath.Join(baseDir, "profiles")
+	if pm != nil {
+		if pm.BaseDir != "" {
+			baseDir = pm.BaseDir
+		}
+		profilesDir = pm.ProfilesRoot()
+	}
 	profileName, agentName := resolveWhoamiTarget(profilesDir)
 
 	cfg, _ := config.LoadConfig()
@@ -57,7 +73,7 @@ func executeWhoamiTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileMan
 		agentName = "agy" // default
 	}
 
-	renderWhoamiSession(out, reg, cfg, baseDir, profilesDir, profileName, agentName)
+	renderWhoamiSession(ctx, out, reg, cfg, baseDir, profilesDir, profileName, agentName)
 }
 
 func resolveWhoamiTarget(profilesDir string) (profileName, agentName string) {
@@ -94,6 +110,9 @@ func renderWhoamiNoSession(out io.Writer, pm *profile.ProfileManager, cfg *confi
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(tui.TextDim).
 		Padding(0, 1)
+	if width, ok := presenter.IsTerminal(out); ok && width > 4 {
+		cardStyle = cardStyle.MaxWidth(width)
+	}
 
 	var b strings.Builder
 	b.WriteString(bold.Render("No active AIM session in this shell.") + "\n")
@@ -122,17 +141,20 @@ func writeConfiguredProfiles(b *strings.Builder, pm *profile.ProfileManager, cfg
 	}
 }
 
-func renderWhoamiSession(out io.Writer, reg *agents.Registry, cfg *config.Config, baseDir, profilesDir, profileName, agentName string) {
+func renderWhoamiSession(ctx context.Context, out io.Writer, reg *agents.Registry, cfg *config.Config, baseDir, profilesDir, profileName, agentName string) {
 	_ = cfg
 	profileDir := filepath.Join(profilesDir, profileName)
 	convID := findActiveConversationID(profileDir)
-	chatTitle := getConversationTitle(profileDir, convID)
+	chatTitle := getConversationTitle(ctx, profileDir, convID)
 	quotaSummary := lookupWhoamiQuota(baseDir, reg, agentName, profileName, profileDir)
 
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(tui.AccentBlue).
 		Padding(0, 1)
+	if width, ok := presenter.IsTerminal(out); ok && width > 4 {
+		cardStyle = cardStyle.MaxWidth(width)
+	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue)
 	labelStyle := lipgloss.NewStyle().Foreground(tui.TextMuted).Width(15)
@@ -250,57 +272,49 @@ func isValidConversationID(id string) bool {
 	return true
 }
 
-var (
-	sqliteBinOnce   sync.Once
-	cachedSqliteBin string
-)
-
-func getSqliteBin() string {
-	sqliteBinOnce.Do(func() {
-		if bin, err := exec.LookPath("sqlite3"); err == nil {
-			cachedSqliteBin = bin
-		}
-	})
-	return cachedSqliteBin
-}
-
-func getConversationTitle(profileDir, convID string) string {
-	if !isValidConversationID(convID) {
-		return ""
-	}
+func findConversationSummariesDB(profileDir string) string {
 	dbPaths := [2]string{
 		filepath.Join(profileDir, ".gemini", "antigravity-cli", "conversation_summaries.db"),
 		filepath.Join(config.RealHomeDir(), ".gemini", "antigravity-cli", "conversation_summaries.db"),
 	}
-
-	var activeDB string
 	for _, db := range dbPaths {
 		if fi, err := os.Stat(db); err == nil && fi.Size() > 0 {
-			activeDB = db
-			break
+			return db
 		}
 	}
+	return ""
+}
+
+func getConversationTitle(ctx context.Context, profileDir, convID string) string {
+	if !isValidConversationID(convID) {
+		return ""
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	activeDB := findConversationSummariesDB(profileDir)
 	if activeDB == "" {
 		return ""
 	}
 
-	sqliteBin := getSqliteBin()
-	if sqliteBin == "" {
+	db, err := sql.Open("sqlite", activeDB)
+	if err != nil {
 		return ""
 	}
+	defer func() { _ = db.Close() }()
+	_, _ = db.ExecContext(ctx, "PRAGMA query_only = ON;")
 
-	cmd := exec.Command(sqliteBin, activeDB, fmt.Sprintf("SELECT title, preview FROM conversation_summaries WHERE conversation_id = '%s' LIMIT 1;", convID))
-	out, err := cmd.Output()
-	if err == nil && len(out) > 0 {
-		parts := strings.Split(strings.TrimSpace(string(out)), "|")
-		if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
-			return strings.TrimSpace(parts[0])
-		}
-		if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
-			preview := strings.TrimSpace(parts[1])
-			lines := strings.Split(preview, "\n")
-			return strings.TrimSpace(lines[0])
-		}
+	var title, preview sql.NullString
+	err = db.QueryRowContext(ctx, "SELECT title, preview FROM conversation_summaries WHERE conversation_id = ? LIMIT 1", convID).Scan(&title, &preview)
+	if err != nil {
+		return ""
+	}
+	if s := strings.TrimSpace(title.String); s != "" {
+		return s
+	}
+	if p := strings.TrimSpace(preview.String); p != "" {
+		line, _, _ := strings.Cut(p, "\n")
+		return strings.TrimSpace(line)
 	}
 	return ""
 }

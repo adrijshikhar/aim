@@ -127,10 +127,12 @@ Flags:
 			if len(args) > 0 {
 				targetAgent = args[0]
 			}
-			if sc.reg != nil && targetAgent != "" {
-				if ad, err := sc.reg.Get(targetAgent); err == nil {
-					targetAgent = ad.Name()
+			if sc.reg != nil && len(sc.reg.All()) > 0 && targetAgent != "" {
+				ad, err := sc.reg.Get(targetAgent)
+				if err != nil {
+					return err
 				}
+				targetAgent = ad.Name()
 			}
 
 			if jsonFlag {

@@ -2,13 +2,17 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aim-cli/aim/internal/agents"
+	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/feedback"
 	"github.com/aim-cli/aim/internal/profile"
 )
@@ -73,5 +77,69 @@ func TestFeedbackCmd_FallbackToGitHubURLWhenNoEndpoint(t *testing.T) {
 
 	if !strings.Contains(out, "github.com/adrijshikhar/aim/issues/new") {
 		t.Errorf("expected GitHub fallback issue URL in output, got:\n%s", out)
+	}
+}
+
+func TestFeedbackCmd_RespectsTelemetryDisabledAndSkipsDuplicatePostHogOnCustomEndpoint(t *testing.T) {
+	var posthogHits atomic.Int32
+	var bodyMu sync.Mutex
+	var bodies []string
+	posthogSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posthogHits.Add(1)
+		data, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		bodyMu.Lock()
+		bodies = append(bodies, string(data))
+		bodyMu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer posthogSrv.Close()
+
+	var customHits atomic.Int32
+	customSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		customHits.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer customSrv.Close()
+
+	tempBase := t.TempDir()
+	t.Setenv("AIM_HOME", tempBase)
+	t.Setenv("POSTHOG_HOST", posthogSrv.URL)
+	t.Setenv("POSTHOG_PROJECT_TOKEN", "phc_test_token")
+	t.Setenv("AIM_TELEMETRY_API_KEY", "phc_test_token")
+	t.Setenv("AIM_FEEDBACK_ENDPOINT", "")
+
+	cfg := config.NewDefaultConfig()
+	cfg.TelemetryDisabled = true
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	pm := profile.NewProfileManager(tempBase)
+	reg := agents.NewRegistry()
+	if code := dispatch([]string{"feedback", "--type", "feature", "--message", "No telemetry"}, reg, pm); code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if posthogHits.Load() != 0 {
+		t.Fatalf("expected 0 PostHog requests when telemetry_disabled=true, got %d", posthogHits.Load())
+	}
+
+	cfg.TelemetryDisabled = false
+	if err := config.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIM_FEEDBACK_ENDPOINT", customSrv.URL)
+	if code := dispatch([]string{"feedback", "--type", "bug", "--message", "Custom endpoint only"}, reg, pm); code != 0 {
+		t.Fatalf("expected exit 0 for custom endpoint, got %d", code)
+	}
+	if customHits.Load() != 1 {
+		t.Fatalf("expected 1 custom endpoint request, got %d", customHits.Load())
+	}
+	bodyMu.Lock()
+	defer bodyMu.Unlock()
+	for _, b := range bodies {
+		if strings.Contains(b, "feedback_submitted") {
+			t.Fatalf("expected no duplicate feedback_submitted telemetry when custom endpoint succeeded, got body: %s", b)
+		}
 	}
 }

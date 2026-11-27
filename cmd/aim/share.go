@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -31,7 +32,7 @@ func newShareCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 	cmd.AddCommand(
 		newShareEnableCmd(pm),
 		newShareDisableCmd(pm),
-		newShareModeCmd(),
+		newShareModeCmd(pm),
 		newShareStatusCmd(pm),
 		newShareListCmd(pm),
 		newShareRequestCmd(pm),
@@ -43,13 +44,32 @@ func newShareCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comman
 	return cmd
 }
 
-func newShareModeCmd() *cobra.Command {
+func shareBaseDir(pm *profile.ProfileManager) string {
+	if pm != nil && pm.BaseDir != "" {
+		return pm.BaseDir
+	}
+	return config.BaseDir()
+}
+
+func isFatalPollError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not found or expired") || strings.Contains(msg, "peer returned 4")
+}
+
+func newShareModeCmd(pm *profile.ProfileManager) *cobra.Command {
 	return &cobra.Command{
 		Use:   "mode [off|request|auto]",
 		Short: "Get or set global sharing mode",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			if len(args) == 0 {
 				mode := store.GetEffectiveGlobalMode()
 				fmt.Fprintf(cmd.OutOrStdout(), "Global sharing mode: %s\n", mode)
@@ -80,11 +100,15 @@ func newShareEnableCmd(pm *profile.ProfileManager) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			profName := args[0]
+			if err := profile.ValidateProfileName(profName); err != nil {
+				return err
+			}
 			ttl, err := time.ParseDuration(ttlStr)
 			if err != nil || ttl <= 0 {
 				ttl = 4 * time.Hour
 			}
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			if store.GetGlobalMode() == "off" {
 				_ = store.SetGlobalMode("request")
 				fmt.Fprintf(cmd.OutOrStdout(), "%s Global sharing mode set to 'request' (required to share profiles)\n",
@@ -114,7 +138,8 @@ func newShareDisableCmd(pm *profile.ProfileManager) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			profName := args[0]
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			if err := store.DisableProfile(profName); err != nil {
 				return err
 			}
@@ -141,7 +166,8 @@ func newShareStatusCmd(pm *profile.ProfileManager) *cobra.Command {
 					lipgloss.NewStyle().Foreground(tui.StatusYellow).Render("!"))
 			}
 
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			profs := store.GetSharedProfiles()
 			if len(profs) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No profiles currently shared.")
@@ -158,7 +184,8 @@ func newShareListCmd(pm *profile.ProfileManager) *cobra.Command {
 		Use:   "list",
 		Short: "Discover peers and available shared profiles",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			peers := store.GetPeers()
 			if len(peers) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No peers discovered yet. Use 'aim share peer add <vpn-ip>' or ensure teammates are on the VPN.")
@@ -179,6 +206,9 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 		Short: "Request a lease for a peer's profile",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if pm == nil {
+				return errors.New("profile manager not initialized")
+			}
 			var peer, profileName string
 			if len(args) == 2 {
 				peer = args[0]
@@ -197,7 +227,8 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 				return fmt.Errorf("requested hours must be between 1 and 72 (got %d)", hours)
 			}
 
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			targetHost := peer
 			for _, p := range store.GetPeers() {
 				shortHost := strings.TrimSuffix(strings.ToLower(p.HostName), ".local")
@@ -240,7 +271,13 @@ func newShareRequestCmd(pm *profile.ProfileManager) *cobra.Command {
 						return fmt.Errorf("approval timed out after 2 minutes")
 					case <-pollTicker.C:
 						pResp, pErr := client.PollLease(pollCtx, targetHost, resp.RequestID)
-						if pErr == nil && pResp != nil {
+						if pErr != nil {
+							if isFatalPollError(pErr) {
+								return fmt.Errorf("polling lease status failed: %w", pErr)
+							}
+							continue
+						}
+						if pResp != nil {
 							if pResp.Status == "approved" {
 								resp = pResp
 								approved = true
@@ -290,6 +327,9 @@ func newShareRenewCmd(pm *profile.ProfileManager) *cobra.Command {
 		Short: "Renew an existing leased profile in-place",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if pm == nil {
+				return errors.New("profile manager not initialized")
+			}
 			profArg := args[0]
 			var peer, profileName string
 
@@ -330,7 +370,7 @@ func newShareRenewCmd(pm *profile.ProfileManager) *cobra.Command {
 				return fmt.Errorf("requested hours must be between 1 and 72 (got %d)", hours)
 			}
 
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
 			defer func() {
 				_ = store.Close()
 			}()
@@ -377,7 +417,13 @@ func newShareRenewCmd(pm *profile.ProfileManager) *cobra.Command {
 						return fmt.Errorf("approval timed out after 2 minutes")
 					case <-pollTicker.C:
 						pResp, pErr := client.PollLease(pollCtx, targetHost, resp.RequestID)
-						if pErr == nil && pResp != nil {
+						if pErr != nil {
+							if isFatalPollError(pErr) {
+								return fmt.Errorf("polling lease renewal status failed: %w", pErr)
+							}
+							continue
+						}
+						if pResp != nil {
 							if pResp.Status == "approved" {
 								resp = pResp
 								approved = true
@@ -416,6 +462,9 @@ func newShareReleaseCmd(pm *profile.ProfileManager) *cobra.Command {
 		Short: "Release and remove a leased ephemeral profile early",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if pm == nil {
+				return errors.New("profile manager not initialized")
+			}
 			mgr := share.NewLeaseManager(pm.ProfilesRoot())
 			if err := mgr.ReleaseLease(args[0]); err != nil {
 				return err
@@ -440,7 +489,8 @@ func newSharePeerCmd(pm *profile.ProfileManager) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ip := args[0]
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			disc := share.NewDiscovery(store, 4319)
 
 			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
@@ -461,7 +511,8 @@ func newSharePeerCmd(pm *profile.ProfileManager) *cobra.Command {
 		Use:   "list",
 		Short: "List discovered and manually added peers",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			peers := store.GetPeers()
 			if len(peers) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No peers discovered yet.")
@@ -478,7 +529,8 @@ func newSharePeerCmd(pm *profile.ProfileManager) *cobra.Command {
 		Short:   "Remove a teammate's peer from known peers",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store := share.NewStore(config.BaseDir())
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			if err := store.DeletePeer(args[0]); err != nil {
 				return err
 			}
@@ -499,13 +551,17 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 		Short: "Start the P2P sharing server listener",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store := share.NewStore(config.BaseDir())
-			defer store.Close()
+			if pm == nil {
+				return errors.New("profile manager not initialized")
+			}
+			store := share.NewStore(shareBaseDir(pm))
+			defer func() { _ = store.Close() }()
 			host, _ := os.Hostname()
 			server := share.NewServer(store, pm.ProfilesRoot(), host, port)
 
 			addr := fmt.Sprintf("0.0.0.0:%d", port)
-			ln, err := net.Listen("tcp", addr)
+			var lc net.ListenConfig
+			ln, err := lc.Listen(cmd.Context(), "tcp", addr)
 			if err != nil {
 				return fmt.Errorf("failed to bind %s: %w", addr, err)
 			}
@@ -516,7 +572,7 @@ func newShareServeCmd(pm *profile.ProfileManager) *cobra.Command {
 
 			errCh := make(chan error, 1)
 			go func() {
-				if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+				if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 					errCh <- err
 				}
 			}()

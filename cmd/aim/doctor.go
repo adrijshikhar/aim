@@ -40,6 +40,13 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 				agent = args[0]
 			}
 			if purgeKeychain {
+				if agent != "" && reg != nil {
+					ad, err := reg.Get(agent)
+					if err != nil {
+						return err
+					}
+					agent = ad.Name()
+				}
 				var customServices []string
 				if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
 					customServices = cfg.CustomIgnoredKeychains
@@ -51,13 +58,25 @@ func newDoctorCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comma
 				return nil
 			}
 			if report {
+				if agent != "" && reg != nil {
+					ad, err := reg.Get(agent)
+					if err != nil {
+						return err
+					}
+					agent = ad.Name()
+				}
+				cfg, _ := config.LoadConfig()
+				baseDir := config.BaseDir()
+				if pm != nil && pm.BaseDir != "" {
+					baseDir = pm.BaseDir
+				}
 				fmt.Fprint(cmd.OutOrStdout(), generateDiagnosticReport(reg, pm, agent))
-				telClient := telemetry.NewClient(config.BaseDir(), config.CacheDir(), Version, nil)
+				telClient := telemetry.NewClient(baseDir, config.CacheDir(), GetVersion(), cfg)
 				telClient.Track(telemetry.EventDoctorReportGenerated, map[string]any{})
 				_ = telClient.Close()
 				return nil
 			}
-			ok := runDoctorWithFixTo(cmd.OutOrStdout(), reg, pm, agent, fix)
+			ok := runDoctorWithContextAndFixTo(cmd.Context(), cmd.OutOrStdout(), reg, pm, agent, fix)
 			if check && !ok {
 				return fmt.Errorf("doctor diagnostics reported failures")
 			}
@@ -86,6 +105,13 @@ func runDoctorTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager
 }
 
 func runDoctorWithFixTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName string, fix bool) bool {
+	return runDoctorWithContextAndFixTo(context.Background(), out, reg, pm, agentName, fix)
+}
+
+func runDoctorWithContextAndFixTo(ctx context.Context, out io.Writer, reg *agents.Registry, pm *profile.ProfileManager, agentName string, fix bool) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	logger.Debug("[doctor] Running diagnostics (agent=%q, fix=%t)", agentName, fix)
 	_, _ = fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.AccentBlue).Render("=== AIM Doctor Diagnostics ==="))
 	if reg == nil {
@@ -114,11 +140,12 @@ func runDoctorWithFixTo(out io.Writer, reg *agents.Registry, pm *profile.Profile
 			_, _ = fmt.Fprintf(out, "%s Unknown agent: %s\n", failBadge, agentName)
 			return false
 		}
-		ok := diagnoseAdapterTo(out, adapter, pm, cfg, reg, map[string]bool{})
-		diagnosePlatformTo(out, agentName, cfg)
-		diagnoseDaemonTo(out)
+		canonical := adapter.Name()
+		ok := diagnoseAdapterTo(ctx, out, adapter, pm, cfg, reg, map[string]bool{})
+		diagnosePlatformTo(out, canonical, cfg)
+		diagnoseDaemonForBaseTo(out, baseDir)
 		diagnoseVPNTo(out)
-		diagnoseUnclaimedTokensWithFixTo(out, baseDir, agentName, fix)
+		diagnoseUnclaimedTokensWithFixTo(out, baseDir, canonical, fix)
 		diagnoseBindingTo(out)
 		return ok
 	}
@@ -126,12 +153,12 @@ func runDoctorWithFixTo(out io.Writer, reg *agents.Registry, pm *profile.Profile
 	allOK := true
 	bridged := map[string]bool{}
 	for _, adapter := range reg.All() {
-		if !diagnoseAdapterTo(out, adapter, pm, cfg, reg, bridged) {
+		if !diagnoseAdapterTo(ctx, out, adapter, pm, cfg, reg, bridged) {
 			allOK = false
 		}
 	}
 	diagnosePlatformTo(out, "", cfg)
-	diagnoseDaemonTo(out)
+	diagnoseDaemonForBaseTo(out, baseDir)
 	diagnoseVPNTo(out)
 	diagnoseUnclaimedTokensWithFixTo(out, baseDir, "", fix)
 	diagnoseBindingTo(out)
@@ -139,13 +166,17 @@ func runDoctorWithFixTo(out io.Writer, reg *agents.Registry, pm *profile.Profile
 }
 
 func diagnoseDaemon() {
-	diagnoseDaemonTo(os.Stdout)
+	diagnoseDaemonForBaseTo(os.Stdout, config.BaseDir())
 }
 
 func diagnoseDaemonTo(out io.Writer) {
+	diagnoseDaemonForBaseTo(out, config.BaseDir())
+}
+
+func diagnoseDaemonForBaseTo(out io.Writer, baseDir string) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render("[Background Daemon]"))
-	info, err := daemon.Status(config.BaseDir())
+	info, err := daemon.Status(baseDir)
 	if err != nil || info == nil || !info.Installed {
 		infoBadge := lipgloss.NewStyle().Bold(true).Foreground(tui.TextMuted).Width(8).Render("[INFO]")
 		cat := lipgloss.NewStyle().Bold(true).Foreground(tui.TextPrimary).Render("Daemon:")
@@ -279,129 +310,175 @@ func diagnoseUnclaimedTokensWithFixTo(out io.Writer, baseDir, agentName string, 
 }
 
 func diagnoseAdapter(adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry, bridged map[string]bool) bool {
-	return diagnoseAdapterTo(os.Stdout, adapter, pm, cfg, reg, bridged)
+	return diagnoseAdapterTo(context.Background(), os.Stdout, adapter, pm, cfg, reg, bridged)
 }
 
-func diagnoseAdapterTo(out io.Writer, adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry, bridged map[string]bool) bool {
+func diagnoseAdapterTo(ctx context.Context, out io.Writer, adapter agents.AgentAdapter, pm *profile.ProfileManager, cfg *config.Config, reg *agents.Registry, bridged map[string]bool) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	allOK := true
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(tui.TextBright).Render(fmt.Sprintf("[%s (%s)]", adapter.DisplayName(), adapter.Name())))
+	if pm == nil {
+		_, _ = fmt.Fprintln(out, lipgloss.NewStyle().Foreground(tui.TextMuted).Render("  Profile manager not initialized."))
+		return true
+	}
 	profiles, _ := pm.ListProfilesForAgent(adapter.Name(), cfg, reg)
 	if len(profiles) == 0 {
-		fmt.Fprintln(out, lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("  No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
+		_, _ = fmt.Fprintln(out, lipgloss.NewStyle().Foreground(tui.TextMuted).Render(fmt.Sprintf("  No profiles configured for agent %q. Run: aim login %s <profile>", adapter.Name(), adapter.Name())))
 		return true
 	}
 	baseDir := config.BaseDir()
-	if pm != nil && pm.BaseDir != "" {
+	if pm.BaseDir != "" {
 		baseDir = pm.BaseDir
 	}
 	refStore := oauth.NewRefusalStore(baseDir)
 	usageCache := usage.NewCacheStore(baseDir, usage.DefaultTTL)
 
 	for _, p := range profiles {
-		fmt.Fprintln(out)
-		fmt.Fprintf(out, "Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(p))
-		var results []agents.DiagnosticResult
-		if diag, ok := adapter.(agents.Diagnostician); ok {
-			results = diag.Doctor(context.Background(), p, pm.ProfileDir(p))
-		}
-		if rec, ok := refStore.IsRefused(adapter.Name(), p); ok && rec != nil {
-			filtered := make([]agents.DiagnosticResult, 0, len(results))
-			for _, r := range results {
-				if (r.Category == "Auth" || r.Category == "Token") && r.Status == "OK" {
-					continue
-				}
-				filtered = append(filtered, r)
-			}
-			results = append(filtered, agents.DiagnosticResult{
-				Category: "Auth",
-				Status:   "FAIL",
-				Message:  fmt.Sprintf("Re-login Required (%s)\n         Remedy: Run 'aim login %s %s'", rec.Code, adapter.Name(), p),
-			})
-		} else {
-			profDir := ""
-			if pm != nil {
-				profDir = pm.ProfileDir(p)
-			}
-			target := usage.TargetProfile{
-				Agent:      adapter.Name(),
-				Profile:    p,
-				ProfileDir: profDir,
-			}
-			if cachedProv, ok := adapter.(agents.CachedUsageProvider); ok {
-				target.GetCachedUsageFn = cachedProv.GetCachedUsage
-			}
-			rep := usage.InspectProfile(context.Background(), target, usageCache)
-
-			authFound := false
-			hasAuthCategory := false
-			for i := range results {
-				if results[i].Category == "Auth" || results[i].Category == "Token" {
-					hasAuthCategory = true
-					if results[i].Status == "OK" {
-						if rep.Status != usage.StatusOK {
-							results[i].Message = "Credentials configured (Idle - will renew on next turn)"
-						}
-						authFound = true
-					}
-				}
-			}
-			if !authFound && !hasAuthCategory && rep.Status == usage.StatusIdle {
-				insertIdx := len(results)
-				for i, r := range results {
-					if r.Category == "Binary" {
-						insertIdx = i + 1
-						break
-					}
-				}
-				idleResult := agents.DiagnosticResult{
-					Category: "Auth",
-					Status:   "OK",
-					Message:  "Credentials configured (Idle - will renew on next turn)",
-				}
-				if insertIdx >= len(results) {
-					results = append(results, idleResult)
-				} else {
-					results = append(results, agents.DiagnosticResult{})
-					copy(results[insertIdx+1:], results[insertIdx:])
-					results[insertIdx] = idleResult
-				}
-			}
-		}
-		if !bridged[p] {
-			bridged[p] = true
-			extraPaths := profile.ProfileExtraPaths(cfg, p)
-			results = append(results, profile.BridgeDiagnostics(p, config.RealHomeDir(), pm.ProfileDir(p), extraPaths...)...)
-		}
-		if cfg != nil {
-			if env := cfg.GetProfileEnv(p); len(env) > 0 {
-				results = append(results, agents.DiagnosticResult{
-					Category: "Config",
-					Status:   "OK",
-					Message:  fmt.Sprintf("%d custom env var(s) configured", len(env)),
-				})
-			}
-			if args := cfg.GetProfileArgs(p); len(args) > 0 {
-				results = append(results, agents.DiagnosticResult{
-					Category: "Config",
-					Status:   "OK",
-					Message:  fmt.Sprintf("%d custom launch arg(s) configured", len(args)),
-				})
-			}
-		}
-		for _, r := range results {
-			if r.Status == "FAIL" {
-				allOK = false
-			}
-			badge, cat, msg := presenter.RenderDiagnosticResult(r)
-			fmt.Fprintf(out, "  %s %s %s\n", badge, cat, msg)
+		if !diagnoseProfileTo(ctx, out, adapter, pm, cfg, p, refStore, usageCache, bridged) {
+			allOK = false
 		}
 	}
 	return allOK
 }
 
+func diagnoseProfileTo(
+	ctx context.Context,
+	out io.Writer,
+	adapter agents.AgentAdapter,
+	pm *profile.ProfileManager,
+	cfg *config.Config,
+	profileName string,
+	refStore *oauth.RefusalStore,
+	usageCache *usage.CacheStore,
+	bridged map[string]bool,
+) bool {
+	allOK := true
+	profDir := pm.ProfileDir(profileName)
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintf(out, "Profile: %s\n", lipgloss.NewStyle().Bold(true).Foreground(tui.AccentCyan).Render(profileName))
+
+	var results []agents.DiagnosticResult
+	if diag, ok := adapter.(agents.Diagnostician); ok {
+		results = diag.Doctor(ctx, profileName, profDir)
+	}
+	results = appendProfileAuthDiagnostics(ctx, adapter, profileName, profDir, results, refStore, usageCache)
+
+	if !bridged[profileName] {
+		bridged[profileName] = true
+		extraPaths := profile.ProfileExtraPaths(cfg, profileName)
+		results = append(results, profile.BridgeDiagnostics(profileName, config.RealHomeDir(), profDir, extraPaths...)...)
+	}
+	if cfg != nil {
+		if env := cfg.GetProfileEnv(profileName); len(env) > 0 {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Config",
+				Status:   "OK",
+				Message:  fmt.Sprintf("%d custom env var(s) configured", len(env)),
+			})
+		}
+		if args := cfg.GetProfileArgs(profileName); len(args) > 0 {
+			results = append(results, agents.DiagnosticResult{
+				Category: "Config",
+				Status:   "OK",
+				Message:  fmt.Sprintf("%d custom launch arg(s) configured", len(args)),
+			})
+		}
+	}
+	for _, r := range results {
+		if r.Status == "FAIL" {
+			allOK = false
+		}
+		badge, cat, msg := presenter.RenderDiagnosticResult(r)
+		_, _ = fmt.Fprintf(out, "  %s %s %s\n", badge, cat, msg)
+	}
+	return allOK
+}
+
+const diagCatAuth = "Auth"
+
+func appendProfileAuthDiagnostics(
+	ctx context.Context,
+	adapter agents.AgentAdapter,
+	profileName, profDir string,
+	results []agents.DiagnosticResult,
+	refStore *oauth.RefusalStore,
+	usageCache *usage.CacheStore,
+) []agents.DiagnosticResult {
+	if rec, ok := refStore.IsRefused(adapter.Name(), profileName); ok && rec != nil {
+		filtered := make([]agents.DiagnosticResult, 0, len(results))
+		for _, r := range results {
+			if (r.Category == diagCatAuth || r.Category == "Token") && r.Status == "OK" {
+				continue
+			}
+			filtered = append(filtered, r)
+		}
+		return append(filtered, agents.DiagnosticResult{
+			Category: diagCatAuth,
+			Status:   "FAIL",
+			Message:  fmt.Sprintf("Re-login Required (%s)\n         Remedy: Run 'aim login %s %s'", rec.Code, adapter.Name(), profileName),
+		})
+	}
+
+	target := usage.TargetProfile{
+		Agent:      adapter.Name(),
+		Profile:    profileName,
+		ProfileDir: profDir,
+	}
+	if cachedProv, ok := adapter.(agents.CachedUsageProvider); ok {
+		target.GetCachedUsageFn = cachedProv.GetCachedUsage
+	}
+	rep := usage.InspectProfile(ctx, target, usageCache)
+	return applyUsageAuthStatus(results, rep.Status)
+}
+
+func applyUsageAuthStatus(results []agents.DiagnosticResult, status usage.Status) []agents.DiagnosticResult {
+	authFound := false
+	hasAuthCategory := false
+	for i := range results {
+		if results[i].Category != diagCatAuth && results[i].Category != "Token" {
+			continue
+		}
+		hasAuthCategory = true
+		if results[i].Status == "OK" {
+			if status != usage.StatusOK {
+				results[i].Message = "Credentials configured (Idle - will renew on next turn)"
+			}
+			authFound = true
+		}
+	}
+	if !authFound && !hasAuthCategory && status == usage.StatusIdle {
+		return insertIdleAuthResult(results)
+	}
+	return results
+}
+
+func insertIdleAuthResult(results []agents.DiagnosticResult) []agents.DiagnosticResult {
+	insertIdx := len(results)
+	for i, r := range results {
+		if r.Category == "Binary" {
+			insertIdx = i + 1
+			break
+		}
+	}
+	idleResult := agents.DiagnosticResult{
+		Category: diagCatAuth,
+		Status:   "OK",
+		Message:  "Credentials configured (Idle - will renew on next turn)",
+	}
+	if insertIdx >= len(results) {
+		return append(results, idleResult)
+	}
+	results = append(results, agents.DiagnosticResult{})
+	copy(results[insertIdx+1:], results[insertIdx:])
+	results[insertIdx] = idleResult
+	return results
+}
+
 func generateDiagnosticReport(reg *agents.Registry, pm *profile.ProfileManager, agentName string) string {
-	return diagnostics.GenerateReport(reg, pm, nil, agentName, Version, Commit)
+	return diagnostics.GenerateReport(reg, pm, nil, agentName, GetVersion(), Commit)
 }
 
 func diagnoseBindingTo(out io.Writer) {

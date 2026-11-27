@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -74,6 +75,11 @@ Flags:
 			agentName := cleanArgs[0]
 			profileName := cleanArgs[1]
 
+			if profileName != "" {
+				if err := profile.ValidateProfileName(profileName); err != nil {
+					return err
+				}
+			}
 			if pm != nil {
 				leaseMgr := share.NewLeaseManager(pm.ProfilesRoot())
 				if leaseMgr.HasLease(profileName) && leaseMgr.IsLeaseExpired(profileName) {
@@ -239,11 +245,14 @@ func executeCatalystResume(cmd *cobra.Command, reg *agents.Registry, pm *profile
 		ctx = context.Background()
 	}
 
+	if pm == nil {
+		return errors.New("profile manager not initialized")
+	}
 	mgr := getSessionManager(ctx)
 	workingDir := resolveSessionWorkingDir(ctx, mgr, sess)
 
-	repoRoot := getGitRepoRoot(workingDir)
-	branch := getGitBranch(repoRoot)
+	repoRoot := getGitRepoRootWithContext(ctx, workingDir)
+	branch := getGitBranch(ctx, repoRoot)
 
 	bridge := catalyst.NewBridge()
 	handoffPath, err := bridge.WriteHandoffBrief(repoRoot, branch, sess)
@@ -395,7 +404,14 @@ func executeExactResume(cmd *cobra.Command, reg *agents.Registry, pm *profile.Pr
 }
 
 func getGitRepoRoot(dir ...string) string {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	return getGitRepoRootWithContext(context.Background(), dir...)
+}
+
+func getGitRepoRootWithContext(ctx context.Context, dir ...string) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	if len(dir) > 0 && dir[0] != "" {
 		cmd.Dir = dir[0]
 	}
@@ -413,8 +429,11 @@ func getGitRepoRoot(dir ...string) string {
 	return "."
 }
 
-func getGitBranch(repoRoot string) string {
-	cmd := exec.Command("git", "branch", "--show-current")
+func getGitBranch(ctx context.Context, repoRoot string) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
 	if repoRoot != "" {
 		cmd.Dir = repoRoot
 	}

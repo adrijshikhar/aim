@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -100,13 +102,22 @@ func removeWebPID() error {
 	return err
 }
 
-func checkServerHealth(port int) bool {
-	client := http.Client{Timeout: 400 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/health", port))
+func checkServerHealth(ctx context.Context, port int) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/api/health", port), nil)
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	client := http.Client{Timeout: 400 * time.Millisecond}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode == http.StatusOK
 }
 
@@ -137,7 +148,7 @@ Examples:
 			if foreground {
 				return runWebForeground(cmd, reg, pm, port, devMode, noOpen)
 			}
-			return startWebBackground(port, devMode, noOpen)
+			return startWebBackground(cmd.Context(), cmd.OutOrStdout(), port, devMode, noOpen)
 		},
 	}
 
@@ -170,7 +181,7 @@ func newWebStartCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Com
 			if foreground {
 				return runWebForeground(cmd, reg, pm, port, devMode, noOpen)
 			}
-			return startWebBackground(port, devMode, noOpen)
+			return startWebBackground(cmd.Context(), cmd.OutOrStdout(), port, devMode, noOpen)
 		},
 	}
 
@@ -187,10 +198,18 @@ func newWebStopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the background AIM web dashboard server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
 			info, err := readWebPID()
-			if err != nil || !isProcessAlive(info.PID) {
+			if err != nil {
+				if os.IsNotExist(err) {
+					_, _ = fmt.Fprintln(out, "AIM Web Dashboard is not running.")
+					return nil
+				}
+				return fmt.Errorf("failed to read dashboard PID file: %w", err)
+			}
+			if !isProcessAlive(info.PID) {
 				_ = removeWebPID()
-				fmt.Println("AIM Web Dashboard is not running.")
+				_, _ = fmt.Fprintln(out, "AIM Web Dashboard is not running.")
 				return nil
 			}
 
@@ -198,7 +217,7 @@ func newWebStopCmd() *cobra.Command {
 				return fmt.Errorf("failed to terminate dashboard process (PID %d): %w", info.PID, err)
 			}
 			_ = removeWebPID()
-			fmt.Printf("🛑 AIM Web Dashboard stopped (PID %d)\n", info.PID)
+			_, _ = fmt.Fprintf(out, "AIM Web Dashboard stopped (PID %d)\n", info.PID)
 			return nil
 		},
 	}
@@ -209,23 +228,27 @@ func newWebStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Check the running status of the AIM web dashboard",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
 			info, err := readWebPID()
-			if err == nil && isProcessAlive(info.PID) && checkServerHealth(info.Port) {
-				fmt.Printf("● AIM Web Dashboard is running at http://localhost:%d (PID %d)\n", info.Port, info.PID)
+			if err == nil && isProcessAlive(info.PID) && checkServerHealth(cmd.Context(), info.Port) {
+				_, _ = fmt.Fprintf(out, "● AIM Web Dashboard is running at http://localhost:%d (PID %d)\n", info.Port, info.PID)
 				return nil
 			}
-			fmt.Println("○ AIM Web Dashboard is stopped.")
+			_, _ = fmt.Fprintln(out, "○ AIM Web Dashboard is stopped.")
 			return nil
 		},
 	}
 }
 
-func startWebBackground(port int, devMode, noOpen bool) error {
+func startWebBackground(ctx context.Context, out io.Writer, port int, devMode, noOpen bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	// 1. Check if already running and responsive
 	if info, err := readWebPID(); err == nil {
-		if isProcessAlive(info.PID) && checkServerHealth(info.Port) {
+		if isProcessAlive(info.PID) && checkServerHealth(ctx, info.Port) {
 			serverURL := fmt.Sprintf("http://localhost:%d", info.Port)
-			fmt.Printf("🚀 AIM Web Dashboard is already running at %s (PID %d)\n", serverURL, info.PID)
+			_, _ = fmt.Fprintf(out, "AIM Web Dashboard is already running at %s (PID %d)\n", serverURL, info.PID)
 			if !noOpen {
 				_ = openBrowserURL(serverURL)
 			}
@@ -246,20 +269,11 @@ func startWebBackground(port int, devMode, noOpen bool) error {
 		args = append(args, "--dev")
 	}
 
-	child := exec.Command(exe, args...)
+	child := exec.Command(exe, args...) //nolint:noctx,gosec // background web daemon re-executes current aim binary and must outlive parent CLI command
 	setSysProcAttr(child)
 
-	_ = os.MkdirAll(config.BaseDir(), 0755)
-	logPath := webLogPath()
-	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 5*1024*1024 {
-		_ = os.Rename(logPath, logPath+".1")
-	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err == nil {
-		child.Stdout = logFile
-		child.Stderr = logFile
-		defer logFile.Close()
-	}
+	closeLog := attachWebBackgroundLog(child)
+	defer closeLog()
 
 	if err := child.Start(); err != nil {
 		return fmt.Errorf("failed to spawn web dashboard process: %w", err)
@@ -270,15 +284,50 @@ func startWebBackground(port int, devMode, noOpen bool) error {
 		childErrChan <- child.Wait()
 	}()
 
-	// 3. Poll /api/health until server is ready (up to 4 seconds)
 	serverURL := fmt.Sprintf("http://localhost:%d", port)
-	deadline := time.Now().Add(4 * time.Second)
-	ready := false
+	if err := awaitWebBackgroundReady(ctx, port, serverURL, child, childErrChan); err != nil {
+		return err
+	}
 
+	_, _ = fmt.Fprintf(out, "AIM Web Dashboard started in background at %s (PID %d)\n", serverURL, child.Process.Pid)
+	_, _ = fmt.Fprintln(out, "To stop: aim web stop | Status: aim web status")
+
+	if !noOpen {
+		_ = openBrowserURL(serverURL)
+	}
+
+	return nil
+}
+
+func attachWebBackgroundLog(child *exec.Cmd) func() {
+	baseDir := config.BaseDir()
+	_ = os.MkdirAll(baseDir, 0o700)
+	logPath := webLogPath()
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 5*1024*1024 {
+		_ = os.Rename(logPath, logPath+".1")
+	}
+	root, err := os.OpenRoot(filepath.Dir(logPath))
+	if err != nil {
+		return func() {}
+	}
+	logFile, openErr := root.OpenFile(filepath.Base(logPath), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if openErr != nil {
+		_ = root.Close()
+		return func() {}
+	}
+	child.Stdout = logFile
+	child.Stderr = logFile
+	return func() {
+		_ = logFile.Close()
+		_ = root.Close()
+	}
+}
+
+func awaitWebBackgroundReady(ctx context.Context, port int, serverURL string, child *exec.Cmd, childErrChan <-chan error) error {
+	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
-		if checkServerHealth(port) {
-			ready = true
-			break
+		if checkServerHealth(ctx, port) {
+			return nil
 		}
 		select {
 		case err := <-childErrChan:
@@ -290,20 +339,8 @@ func startWebBackground(port int, devMode, noOpen bool) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-
-	if !ready {
-		_ = child.Process.Kill()
-		return fmt.Errorf("timed out waiting for web dashboard to start on %s (check logs at %s)", serverURL, webLogPath())
-	}
-
-	fmt.Printf("🚀 AIM Web Dashboard started in background at %s (PID %d)\n", serverURL, child.Process.Pid)
-	fmt.Println("To stop: aim web stop | Status: aim web status")
-
-	if !noOpen {
-		_ = openBrowserURL(serverURL)
-	}
-
-	return nil
+	_ = child.Process.Kill()
+	return fmt.Errorf("timed out waiting for web dashboard to start on %s (check logs at %s)", serverURL, webLogPath())
 }
 
 func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.ProfileManager, port int, devMode, noOpen bool) error {
@@ -313,6 +350,11 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 	if pm == nil {
 		pm = profile.NewProfileManager(config.BaseDir())
 	}
+	baseDir := config.BaseDir()
+	if pm.BaseDir != "" {
+		baseDir = pm.BaseDir
+	}
+	out := cmd.OutOrStdout()
 
 	sm := getSessionManager(cmd.Context())
 
@@ -320,11 +362,15 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 	profileSvc := service.NewProfileService(pm, reg)
 	sessionSvc := service.NewSessionServiceWithProfilesRoot(sm, pm.ProfilesRoot(), launcherSvc)
 	mcpSvc := service.NewMCPService(pm, reg)
-	daemonSvc := service.NewDaemonService(reg, pm, config.BaseDir())
+	daemonSvc := service.NewDaemonService(reg, pm, baseDir)
+
+	shareStore := share.NewStore(baseDir)
+	defer func() { _ = shareStore.Close() }()
 
 	srv := web.NewServer(profileSvc, sessionSvc, launcherSvc, port, devMode, mcpSvc)
+	srv.SetShareStore(shareStore)
 	srv.SetDaemonService(daemonSvc)
-	srv.SetVersion(Version)
+	srv.SetVersion(GetVersion())
 
 	if err := srv.Listen(); err != nil {
 		return fmt.Errorf("failed to listen on port %d: %w", port, err)
@@ -337,13 +383,15 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 	defer removeOwnWebPID()
 
 	// Start P2P Share Server listener on port 4319 in background if available
-	shareStore := share.NewStore(config.BaseDir())
 	host, _ := os.Hostname()
 	shareServer := share.NewServer(shareStore, pm.ProfilesRoot(), host, 4319)
-	shareLn, shareErr := net.Listen("tcp", "0.0.0.0:4319")
+	var lc net.ListenConfig
+	shareLn, shareErr := lc.Listen(cmd.Context(), "tcp", "0.0.0.0:4319")
 	if shareErr == nil {
 		go func() {
-			_ = shareServer.Serve(shareLn)
+			if err := shareServer.Serve(shareLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Debug("[web] P2P Share Server stopped with error: %v", err)
+			}
 		}()
 		defer func() {
 			_ = shareServer.Close()
@@ -355,11 +403,11 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 	}
 
 	serverURL := fmt.Sprintf("http://localhost:%d", actualPort)
-	fmt.Printf("🚀 AIM Web Dashboard running at %s (PID %d)\n", serverURL, os.Getpid())
+	_, _ = fmt.Fprintf(out, "AIM Web Dashboard running at %s (PID %d)\n", serverURL, os.Getpid())
 	if devMode {
-		fmt.Println("🛠️  Development mode enabled (CORS active, Vite proxy ready)")
+		_, _ = fmt.Fprintln(out, "Development mode enabled (CORS active, Vite proxy ready)")
 	}
-	fmt.Println("Press Ctrl+C to stop")
+	_, _ = fmt.Fprintln(out, "Press Ctrl+C to stop")
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -381,7 +429,7 @@ func runWebForeground(cmd *cobra.Command, reg *agents.Registry, pm *profile.Prof
 
 	select {
 	case <-ctx.Done():
-		fmt.Println("\nShutting down web dashboard...")
+		_, _ = fmt.Fprintln(out, "\nShutting down web dashboard...")
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer shutdownCancel()
 		return srv.Shutdown(shutdownCtx)

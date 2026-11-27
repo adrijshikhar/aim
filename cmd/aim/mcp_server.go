@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,7 +66,7 @@ func ResolveTargetScope(pm *profile.ProfileManager, profileFlag string, hostFlag
 		if pm == nil {
 			return nil, fmt.Errorf("profile manager not initialized")
 		}
-		profs, err := pm.ListProfiles()
+		profs, err := pm.ListConfiguredProfiles()
 		if err != nil {
 			return nil, err
 		}
@@ -106,38 +107,43 @@ func ResolveTargetScope(pm *profile.ProfileManager, profileFlag string, hostFlag
 	}
 
 	// Automatic active profile detection
-	if envProfile := strings.TrimSpace(os.Getenv("AIM_PROFILE")); envProfile != "" {
-		if pm != nil && pm.ProfileExists(envProfile) {
-			pDir := pm.ProfileDir(envProfile)
-
-			// Check interactive stdin
-			isInteractive := mcpIsInteractive(in)
-
-			if isInteractive {
-				fmt.Fprintf(out, "Detected active profile %q. Apply to profile %q? [Y/n/host]: ", envProfile, envProfile)
-				scanner := bufio.NewScanner(in)
-				var resp string
-				if scanner.Scan() {
-					resp = strings.TrimSpace(strings.ToLower(scanner.Text()))
-				}
-				switch resp {
-				case "", "y", "yes":
-					return []ProfileTarget{{Name: envProfile, Dir: pDir}}, nil
-				case "host", "h":
-					return nil, nil
-				case "n", "no":
-					return nil, fmt.Errorf("operation cancelled by user")
-				default:
-					return nil, fmt.Errorf("invalid response %q", resp)
-				}
-			}
-
-			// Non-interactive fallback: target active profile
-			return []ProfileTarget{{Name: envProfile, Dir: pDir}}, nil
-		}
+	if envProfile := strings.TrimSpace(os.Getenv("AIM_PROFILE")); envProfile != "" && pm != nil {
+		return resolveActiveEnvProfile(pm, envProfile, in, out)
 	}
 
 	return nil, nil // Host target
+}
+
+const confirmYesAnswer = "yes"
+
+func resolveActiveEnvProfile(pm *profile.ProfileManager, envProfile string, in io.Reader, out io.Writer) ([]ProfileTarget, error) {
+	pDir, err := pm.ResolveProfile(envProfile)
+	if err != nil {
+		return nil, fmt.Errorf("invalid AIM_PROFILE %q: %w", envProfile, err)
+	}
+	if !pm.ProfileExists(envProfile) {
+		return nil, nil
+	}
+	if !mcpIsInteractive(in) {
+		return []ProfileTarget{{Name: envProfile, Dir: pDir}}, nil
+	}
+
+	_, _ = fmt.Fprintf(out, "Detected active profile %q. Apply to profile %q? [Y/n/host]: ", envProfile, envProfile)
+	scanner := bufio.NewScanner(in)
+	var resp string
+	if scanner.Scan() {
+		resp = strings.TrimSpace(strings.ToLower(scanner.Text()))
+	}
+	switch resp {
+	case "", "y", confirmYesAnswer:
+		return []ProfileTarget{{Name: envProfile, Dir: pDir}}, nil
+	case "host", "h":
+		return nil, nil
+	case "n", "no":
+		return nil, errors.New("operation cancelled by user")
+	default:
+		return nil, fmt.Errorf("invalid response %q", resp)
+	}
 }
 
 func resolveProfileTargets(pm *profile.ProfileManager, profileFlag string, allFlag bool) ([]ProfileTarget, error) {
@@ -273,6 +279,9 @@ Guarantees strict read-only operation: no profile switching, creation, or deleti
 			}
 
 			baseDir := config.BaseDir()
+			if pm != nil && pm.BaseDir != "" {
+				baseDir = pm.BaseDir
+			}
 			srv := mcp.NewServer(reg, pm, baseDir)
 			srv.SetSessionManager(getSessionManager(cmd.Context()))
 			return srv.Serve(cmd.InOrStdin(), cmd.OutOrStdout())
@@ -303,13 +312,17 @@ Mounted automatically inside leased profiles to let AI agents request lease exte
 			}
 
 			profilesRoot := ""
+			baseDir := config.BaseDir()
 			if pm != nil {
 				profilesRoot = pm.ProfilesRoot()
+				if pm.BaseDir != "" {
+					baseDir = pm.BaseDir
+				}
 			} else {
-				profilesRoot = filepath.Join(config.BaseDir(), "profiles")
+				profilesRoot = filepath.Join(baseDir, "profiles")
 			}
 
-			srv := mcp.NewShareMCPServer(config.BaseDir(), profilesRoot, profName)
+			srv := mcp.NewShareMCPServer(baseDir, profilesRoot, profName)
 			return srv.ServeStdio(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
@@ -717,6 +730,7 @@ func newMCPListCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Comm
 	listCmd.Flags().StringVar(&clientFlag, "client", "", "Filter by client (e.g. 'claude', 'codex')")
 	listCmd.Flags().StringVar(&clientsFlag, "clients", "", "Filter by clients (e.g. 'claude', 'codex')")
 	listCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results in JSON format")
+	listCmd.MarkFlagsMutuallyExclusive("profile", "host")
 
 	return listCmd
 }
@@ -799,6 +813,11 @@ Examples:
 			ctx := cmd.Context()
 			out := cmd.OutOrStdout()
 
+			if allFlag && len(profileTargets) == 0 {
+				_, _ = fmt.Fprintln(out, "No profiles configured.")
+				return nil
+			}
+
 			if strings.HasPrefix(serverCommand, "http://") || strings.HasPrefix(serverCommand, "https://") {
 				cfg.URL = serverCommand
 				cfg.Headers = headers
@@ -807,31 +826,27 @@ Examples:
 				if loginFlag {
 					fmt.Fprintf(out, "Probing authentication for %s...\n", cfg.URL)
 					disc, err := mcp.DiscoverEndpointAuth(ctx, cfg.URL)
-					if err == nil && disc.AuthType == "oauth" {
+					if err != nil {
+						return fmt.Errorf("discovery failed: %w", err)
+					}
+					if disc.AuthType == "oauth" {
 						fmt.Fprintln(out, "Initiating OAuth authorization flow...")
 						tokens, authErr := mcp.AuthorizeMCPOAuth(ctx, disc, func(authURL string) {
 							fmt.Fprintf(out, "\nPlease visit the following URL to authenticate:\n  %s\n\nWaiting for authentication callback...\n", authURL)
 						})
-						if authErr == nil {
-							if saveErr := saveScopedMCPOAuthTokens(homeDir, profileTargets, cfg.URL, tokens); saveErr != nil {
-								_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to persist OAuth tokens: %v\n", saveErr)
-							} else {
-								_, _ = fmt.Fprintln(out, "OAuth authentication succeeded and tokens saved.")
-							}
-						} else {
-							fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OAuth handshake failed: %v\n", authErr)
+						if authErr != nil {
+							return fmt.Errorf("OAuth handshake failed: %w", authErr)
 						}
+						if saveErr := saveScopedMCPOAuthTokens(homeDir, profileTargets, cfg.URL, tokens); saveErr != nil {
+							return fmt.Errorf("persist OAuth tokens: %w", saveErr)
+						}
+						_, _ = fmt.Fprintln(out, "OAuth authentication succeeded and tokens saved.")
 					}
 				}
 			} else {
 				cfg.Command = serverCommand
 				cfg.Args = serverArgs
 				cfg.Env = envMap
-			}
-
-			if allFlag && len(profileTargets) == 0 {
-				fmt.Fprintln(out, "No profiles configured.")
-				return nil
 			}
 
 			for _, adapter := range targets {
@@ -868,6 +883,7 @@ Examples:
 	addCmd.Flags().StringVar(&bearerFlag, "bearer", "", "Shorthand for 'Authorization: Bearer <token>' header")
 	addCmd.Flags().StringArrayVarP(&envFlag, "env", "e", nil, "Environment variable in 'KEY=value' format (can be specified multiple times)")
 	addCmd.Flags().BoolVar(&loginFlag, "login", false, "Initiate OAuth login flow for remote endpoints requiring authentication")
+	addCmd.MarkFlagsMutuallyExclusive("profile", "host", "all")
 
 	return addCmd
 }
@@ -902,7 +918,7 @@ func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 			out := cmd.OutOrStdout()
 
 			if allFlag && len(profileTargets) == 0 {
-				fmt.Fprintln(out, "No profiles configured.")
+				_, _ = fmt.Fprintln(out, "No profiles configured.")
 				return nil
 			}
 
@@ -946,6 +962,7 @@ func newMCPRemoveCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 	removeCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles")
 	removeCmd.Flags().BoolVar(&hostFlag, "host", false, "Target global host configuration explicitly")
 	removeCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
+	removeCmd.MarkFlagsMutuallyExclusive("profile", "host", "all")
 
 	return removeCmd
 }
@@ -1018,6 +1035,7 @@ func newMCPEnableCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.Co
 	enableCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles")
 	enableCmd.Flags().BoolVar(&hostFlag, "host", false, "Target global host configuration explicitly")
 	enableCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
+	enableCmd.MarkFlagsMutuallyExclusive("profile", "host", "all")
 
 	return enableCmd
 }
@@ -1090,6 +1108,7 @@ func newMCPDisableCmd(reg *agents.Registry, pm *profile.ProfileManager) *cobra.C
 	disableCmd.Flags().StringVar(&profileFlag, "profile", "", "Comma-separated list of target profiles")
 	disableCmd.Flags().BoolVar(&hostFlag, "host", false, "Target global host configuration explicitly")
 	disableCmd.Flags().BoolVar(&allFlag, "all", false, "Apply to all configured profiles")
+	disableCmd.MarkFlagsMutuallyExclusive("profile", "host", "all")
 
 	return disableCmd
 }
@@ -1117,23 +1136,29 @@ Stores tokens in the unified shared credentials store.`,
 			if strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://") {
 				serverURL = arg
 			} else {
-				// Search configured servers by name
+				// Search configured servers by name across target scopes
 				ctx := cmd.Context()
-				var pDir string
-				var pName string
-				if len(profileTargets) > 0 {
-					pDir = profileTargets[0].Dir
-					pName = profileTargets[0].Name
+				targets, err := resolveTargetAdapters(reg, clientsFlag, homeDir)
+				if err != nil {
+					return err
 				}
-				targets, _ := resolveTargetAdapters(reg, clientsFlag, homeDir)
-				for _, adapter := range targets {
-					servers, err := adapter.ListMCPServers(ctx, pName, pDir)
-					if err == nil {
-						for _, s := range servers {
-							if s.Name == arg && (strings.HasPrefix(s.Target, "http://") || strings.HasPrefix(s.Target, "https://")) {
-								serverURL = s.Target
-								break
+				searchScopes := profileTargets
+				if len(searchScopes) == 0 {
+					searchScopes = []ProfileTarget{{}}
+				}
+				for _, pt := range searchScopes {
+					for _, adapter := range targets {
+						servers, err := adapter.ListMCPServers(ctx, pt.Name, pt.Dir)
+						if err == nil {
+							for _, s := range servers {
+								if s.Name == arg && (strings.HasPrefix(s.Target, "http://") || strings.HasPrefix(s.Target, "https://")) {
+									serverURL = s.Target
+									break
+								}
 							}
+						}
+						if serverURL != "" {
+							break
 						}
 					}
 					if serverURL != "" {
@@ -1183,6 +1208,7 @@ Stores tokens in the unified shared credentials store.`,
 	loginCmd.Flags().StringVar(&clientsFlag, "clients", "all", "Filter target clients or 'all'")
 	loginCmd.Flags().StringVar(&profileFlag, "profile", "", "Target profile")
 	loginCmd.Flags().BoolVar(&hostFlag, "host", false, "Target host explicitly")
+	loginCmd.MarkFlagsMutuallyExclusive("profile", "host")
 
 	return loginCmd
 }
@@ -1220,15 +1246,28 @@ func writeMCPOAuthTokenFile(tokensPath, serverURL string, tokens any) error {
 
 	dir := filepath.Dir(tokensPath)
 	base := filepath.Base(tokensPath)
+	if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write MCP OAuth tokens through symlinked directory %s", dir)
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("inspect mcp-auth directory: %w", err)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create mcp-auth directory: %w", err)
 	}
 	existing := make(map[string]any)
-	if root, err := os.OpenRoot(dir); err == nil {
-		defer func() { _ = root.Close() }()
-		if data, readErr := root.ReadFile(base); readErr == nil {
-			_ = json.Unmarshal(data, &existing)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open mcp-auth directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	if data, readErr := root.ReadFile(base); readErr == nil {
+		if len(bytes.TrimSpace(data)) > 0 {
+			if err := json.Unmarshal(data, &existing); err != nil {
+				return fmt.Errorf("corrupt existing MCP OAuth token store %s: %w", tokensPath, err)
+			}
 		}
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return fmt.Errorf("read existing MCP OAuth token store %s: %w", tokensPath, err)
 	}
 	existing[serverURL] = tokens
 	encoded, err := json.MarshalIndent(existing, "", "  ")
