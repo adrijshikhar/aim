@@ -37,6 +37,14 @@ func newFilteredTestModel(t *testing.T, query string) (Model, *doctorRecorder) {
 	m := NewModel(reg, pm, cfg)
 	m.filter.input.SetValue(query)
 	m.cursor = 0
+	t.Cleanup(func() {
+		m.cancelStream()
+		if m.usageStream != nil && m.usageStream.ch != nil {
+			for range m.usageStream.ch {
+			}
+			m.usageStream.ch = nil
+		}
+	})
 	return m, rec
 }
 
