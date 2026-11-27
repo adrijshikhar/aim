@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -134,7 +135,10 @@ func (s *Spooler) Flush(ctx context.Context) error {
 	flushPath := fmt.Sprintf("%s.%d.%d.flushing", s.SpoolPath, os.Getpid(), time.Now().UnixNano())
 	if err := os.Rename(s.SpoolPath, flushPath); err != nil {
 		s.mu.Unlock()
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	s.mu.Unlock()
 
@@ -143,7 +147,10 @@ func (s *Spooler) Flush(ctx context.Context) error {
 	}()
 
 	events, err := readEventsFromFile(flushPath)
-	if err != nil || len(events) == 0 {
+	if err != nil {
+		return err
+	}
+	if len(events) == 0 {
 		return nil
 	}
 
@@ -174,10 +181,12 @@ func (s *Spooler) Flush(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
 		return fmt.Errorf("telemetry endpoint returned status: %d", resp.StatusCode)
 	}
-	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	_ = resp.Body.Close()
 
 	return nil
 }

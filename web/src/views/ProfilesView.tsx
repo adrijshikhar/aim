@@ -735,6 +735,25 @@ export function ProfilesView({
     }
 
     if (!currentProfile) {
+      if (error) {
+        return (
+          <div className="py-12 max-w-md mx-auto space-y-4">
+            <div className="rounded-geist border border-status-warning-border bg-status-warning-bg px-4 py-3 text-xs text-status-warning font-sans flex items-center justify-between gap-3">
+              <span>Failed to load profiles: {error}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fetchProfiles(true)}
+                disabled={refreshing}
+                className="h-7 px-2.5 text-xs font-mono border-status-warning-border bg-[#161616] text-status-warning hover:bg-[#202020] rounded-geist cursor-pointer shrink-0"
+              >
+                Retry
+              </Button>
+            </div>
+          </div>
+        );
+      }
       return (
         <div className="py-16 text-center space-y-4">
           <div className="text-sm font-semibold text-[#ededed]">Profile "{selectedProfile}" Not Found</div>

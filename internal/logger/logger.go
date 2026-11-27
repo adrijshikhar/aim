@@ -5,12 +5,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/charmbracelet/lipgloss"
+)
+
+const maxLogFileBytes int64 = 5 * 1024 * 1024
+
+var (
+	bearerRedactPattern    = regexp.MustCompile(`(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}`)
+	jsonSecretFieldPattern = regexp.MustCompile(`(?i)("(?:access_token|refresh_token|id_token|client_secret|api_key|token|secret)"\s*:\s*")([^"]+)(")`)
+	urlParamSecretPattern  = regexp.MustCompile(`(?i)((?:access_token|refresh_token|code|token|api_key|secret)=)([^&\s]+)`)
 )
 
 var (
@@ -56,6 +65,15 @@ func Init(dir string) {
 	if !isDebugLocked() {
 		return
 	}
+	openLogFileLocked()
+}
+
+func openLogFileLocked() {
+	if logFilePath == "" {
+		logFilePath = filepath.Join(config.StateDir(), "aim-debug.log")
+	}
+	dir := filepath.Dir(logFilePath)
+	base := filepath.Base(logFilePath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
@@ -63,9 +81,13 @@ func Init(dir string) {
 	if err != nil {
 		return
 	}
-	f, err := root.OpenFile("aim-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	_ = root.Close()
-	if err == nil {
+	defer func() { _ = root.Close() }()
+
+	if fi, statErr := root.Stat(base); statErr == nil && fi.Size() >= maxLogFileBytes {
+		_ = root.Remove(base + ".1")
+		_ = os.Rename(filepath.Join(dir, base), filepath.Join(dir, base+".1"))
+	}
+	if f, openErr := root.OpenFile(base, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); openErr == nil {
 		logFile = f
 	}
 }
@@ -134,16 +156,23 @@ func IsDebug() bool {
 	return isDebugLocked()
 }
 
+func sanitizeLogMessage(msg string) string {
+	s := strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(msg)
+	s = bearerRedactPattern.ReplaceAllString(s, "$1 [REDACTED]")
+	s = jsonSecretFieldPattern.ReplaceAllString(s, `$1[REDACTED]$3`)
+	s = urlParamSecretPattern.ReplaceAllString(s, `$1[REDACTED]`)
+	return s
+}
+
 // Debug logs a debug-level message if debug mode is active.
 func Debug(format string, args ...any) {
-	if !IsDebug() {
-		return
-	}
-	msg := fmt.Sprintf(format, args...)
-	now := time.Now()
-
 	mu.Lock()
 	defer mu.Unlock()
+	if !isDebugLocked() {
+		return
+	}
+	msg := sanitizeLogMessage(fmt.Sprintf(format, args...))
+	now := time.Now()
 
 	// Console output to stderr
 	if consoleOutput {
@@ -158,22 +187,20 @@ func Debug(format string, args ...any) {
 // "aim: <msg>" on stderr (unless console output is off, as in the TUI), and
 // records it in the debug log when debug is on.
 func Warn(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	debug := IsDebug()
-
+	msg := sanitizeLogMessage(fmt.Sprintf(format, args...))
 	mu.Lock()
 	defer mu.Unlock()
 	if consoleOutput {
 		fmt.Fprintf(warnOut, "aim: %s\n", msg)
 	}
-	if debug {
+	if isDebugLocked() {
 		writeLogLocked(time.Now(), "WARN", msg)
 	}
 }
 
 // Error records an error-level message unconditionally in the debug log file.
 func Error(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
+	msg := sanitizeLogMessage(fmt.Sprintf(format, args...))
 	mu.Lock()
 	defer mu.Unlock()
 	writeLogLocked(time.Now(), "ERROR", msg)
@@ -181,15 +208,14 @@ func Error(format string, args ...any) {
 
 // writeLogLocked appends one line to aim-debug.log; mu must be held.
 func writeLogLocked(now time.Time, level, msg string) {
+	if logFile != nil {
+		if fi, err := logFile.Stat(); err == nil && fi.Size() >= maxLogFileBytes {
+			_ = logFile.Close()
+			logFile = nil
+		}
+	}
 	if logFile == nil {
-		if logFilePath == "" {
-			logFilePath = filepath.Join(config.StateDir(), "aim-debug.log")
-		}
-		_ = os.MkdirAll(filepath.Dir(logFilePath), 0755)
-		f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-		if err == nil {
-			logFile = f
-		}
+		openLogFileLocked()
 	}
 	if logFile != nil {
 		timeStr := now.Format("2006-01-02 15:04:05.000")

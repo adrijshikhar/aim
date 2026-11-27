@@ -178,3 +178,34 @@ func TestWarn_PrintsWithoutDebugAndHonoursConsoleOutput(t *testing.T) {
 		t.Fatalf("console output off must silence Warn on the console: %q", buf.String())
 	}
 }
+
+func TestLogger_RedactsSecretsAndSanitizesControlChars(t *testing.T) {
+	defer Reset()
+
+	dir := t.TempDir()
+	Init(dir)
+	SetDebug(true)
+	SetConsoleOutput(false)
+
+	Debug("auth header Bearer abcdef1234567890 body={\"access_token\":\"secret-tok\",\"refresh_token\":\"ref-tok\"}\n[ERROR] forged")
+	Close()
+
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile("aim-debug.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, leaked := range []string{"abcdef1234567890", "secret-tok", "ref-tok"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("log output leaked sensitive token %q: %s", leaked, got)
+		}
+	}
+	if strings.Contains(got, "\n[ERROR] forged") {
+		t.Fatalf("log injection via unescaped newline succeeded: %s", got)
+	}
+}

@@ -994,7 +994,11 @@ func wrapText(text string, maxWidth int, maxLines int) []string {
 		}
 
 		if currentRunes > 0 && len(lines) < maxLines {
-			lines = append(lines, current.String())
+			lastLine := current.String()
+			if len(lines) == maxLines-1 && pIdx < len(wordGroups)-1 {
+				lastLine = appendWrapEllipsis(lastLine, maxWidth)
+			}
+			lines = append(lines, lastLine)
 		}
 		if len(lines) >= maxLines {
 			break
@@ -1002,6 +1006,20 @@ func wrapText(text string, maxWidth int, maxLines int) []string {
 	}
 
 	return lines
+}
+
+func appendWrapEllipsis(line string, maxWidth int) string {
+	if strings.HasSuffix(line, "...") {
+		return line
+	}
+	if maxWidth <= 3 {
+		return truncateRunes(line, maxWidth)
+	}
+	runes := []rune(line)
+	if len(runes) > maxWidth-3 {
+		runes = runes[:maxWidth-3]
+	}
+	return strings.TrimRight(string(runes), " ") + "..."
 }
 
 func appendFinalWrapWord(w string, wLen int, hasMore bool, maxWidth int, current *strings.Builder, currentRunes *int) (string, bool) {

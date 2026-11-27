@@ -106,7 +106,7 @@ func TestTelemetry_ConcurrentInitCaptureLogClose_NoRaceOrLeak(t *testing.T) {
 			InitPostHog(cfg)
 			InitPostHogLogs(cfg)
 			IdentifyAccount("claude", acc)
-			CaptureAccountEvent("claude", acc, "profile_login", map[string]any{"ok": true})
+			CaptureAccountEvent("claude", acc, "agent_run_completed", map[string]any{"ok": true})
 			CaptureException("TestPanic", "synthetic")
 			LogPostHogInfo(context.Background(), "telemetry_check", map[string]any{"worker": 1})
 			_ = PostHogClient()

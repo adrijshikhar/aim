@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aim-cli/aim/internal/config"
 	"github.com/aim-cli/aim/internal/profile"
@@ -59,7 +60,10 @@ func InitPostHog(cfg *config.Config) {
 		return
 	}
 
-	client, err := posthog.NewWithConfig(projectToken, posthog.Config{Endpoint: host})
+	client, err := posthog.NewWithConfig(projectToken, posthog.Config{
+		Endpoint:        host,
+		ShutdownTimeout: 1500 * time.Millisecond,
+	})
 	if err != nil {
 		log.Printf("failed to create PostHog client: %v", err)
 		return
@@ -143,6 +147,8 @@ func CaptureAccountEvent(agentName string, account profile.AccountInfo, event st
 
 // CaptureException records a sanitized exception event using synchronized client access.
 func CaptureException(exceptionType, message string) {
+	machineID := AnonymousMachineID(config.BaseDir())
+
 	posthogMu.RLock()
 	defer posthogMu.RUnlock()
 	if posthogClient == nil {
@@ -151,7 +157,7 @@ func CaptureException(exceptionType, message string) {
 	_ = posthogClient.Enqueue(posthog.NewDefaultException(
 		// posthog.NewDefaultException uses current timestamp passed cleanly
 		nowUTC(),
-		AnonymousMachineID(config.BaseDir()),
+		machineID,
 		exceptionType,
 		message,
 	))

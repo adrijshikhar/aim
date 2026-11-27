@@ -128,4 +128,9 @@ func TestSessionsDrawer_SetSessionsClampsToFilteredAndSafeUTF8Wrap(t *testing.T)
 			}
 		}
 	}
+
+	paraLines := wrapText("line one\nline two\nline three", 40, 2)
+	if len(paraLines) != 2 || paraLines[0] != "line one" || paraLines[1] != "line two..." {
+		t.Fatalf("expected truncated second paragraph with ellipsis, got %#v", paraLines)
+	}
 }

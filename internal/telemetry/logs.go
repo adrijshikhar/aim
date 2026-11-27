@@ -95,11 +95,12 @@ func LogPostHogInfo(ctx context.Context, message string, attributes map[string]a
 	}
 
 	posthogLogMu.RLock()
-	defer posthogLogMu.RUnlock()
-	if posthogLogProvider == nil {
+	provider := posthogLogProvider
+	posthogLogMu.RUnlock()
+	if provider == nil {
 		return
 	}
-	posthogLogProvider.Logger("aim.posthog").Emit(ctx, record)
+	provider.Logger("aim.posthog").Emit(ctx, record)
 }
 
 // ClosePostHogLogs flushes integration-owned log records at process shutdown.
@@ -115,11 +116,11 @@ func ClosePostHogLogsWithContext(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	posthogLogMu.Lock()
-	defer posthogLogMu.Unlock()
-	if posthogLogProvider == nil {
+	provider := posthogLogProvider
+	posthogLogProvider = nil
+	posthogLogMu.Unlock()
+	if provider == nil {
 		return nil
 	}
-	err := posthogLogProvider.Shutdown(ctx)
-	posthogLogProvider = nil
-	return err
+	return provider.Shutdown(ctx)
 }
