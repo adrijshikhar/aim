@@ -40,10 +40,6 @@ func executeWhoami(reg *agents.Registry, pm *profile.ProfileManager) {
 	executeWhoamiWithContextTo(context.Background(), os.Stdout, reg, pm)
 }
 
-func executeWhoamiTo(out io.Writer, reg *agents.Registry, pm *profile.ProfileManager) {
-	executeWhoamiWithContextTo(context.Background(), out, reg, pm)
-}
-
 func executeWhoamiWithContextTo(ctx context.Context, out io.Writer, reg *agents.Registry, pm *profile.ProfileManager) {
 	if ctx == nil {
 		ctx = context.Background()
