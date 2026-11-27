@@ -169,7 +169,7 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 	realHome := config.RealHomeDir()
 	copyHostConfig(realHome, codexDir)
 	if err := ensureCodexFileStore(codexDir); err != nil {
-		logger.Debug("[codex] Failed to enforce file credential store: %v", err)
+		return agents.LaunchEnv{}, fmt.Errorf("enforce codex file credential store: %w", err)
 	}
 
 	// Probe and auto-start local sidecar proxy daemons (e.g. Caveman) if configured
@@ -338,17 +338,21 @@ func spliceTopLevelTOMLKey(text, key, value string) string {
 	lines := strings.Split(text, "\n")
 	replacement := fmt.Sprintf("%s = %q", key, value)
 	firstTableIdx := len(lines)
+	bracketDepth := 0
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
+		if bracketDepth == 0 && strings.HasPrefix(trimmed, "[") {
 			firstTableIdx = i
 			break
 		}
-		if name, _, ok := strings.Cut(trimmed, "="); ok && strings.TrimSpace(name) == key {
-			lines[i] = replacement
-			return strings.Join(lines, "\n")
+		if bracketDepth == 0 {
+			if name, _, ok := strings.Cut(trimmed, "="); ok && strings.TrimSpace(name) == key {
+				lines[i] = replacement
+				return strings.Join(lines, "\n")
+			}
 		}
+		bracketDepth = updateTOMLBracketDepth(line, bracketDepth)
 	}
 
 	if firstTableIdx < len(lines) {
@@ -364,6 +368,48 @@ func spliceTopLevelTOMLKey(text, key, value string) string {
 	}
 
 	return strings.TrimRight(text, "\n") + "\n" + replacement + "\n"
+}
+
+func updateTOMLBracketDepth(line string, depth int) int {
+	var inSingle, inDouble, escaped bool
+	for i := range len(line) {
+		c := line[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inDouble && c == '\\' {
+			escaped = true
+			continue
+		}
+		if !inSingle && !inDouble && c == '#' {
+			return depth
+		}
+		inSingle, inDouble, depth = stepTOMLState(c, inSingle, inDouble, depth)
+	}
+	return depth
+}
+
+func stepTOMLState(c byte, inSingle, inDouble bool, depth int) (bool, bool, int) {
+	switch c {
+	case '\'':
+		if !inDouble {
+			inSingle = !inSingle
+		}
+	case '"':
+		if !inSingle {
+			inDouble = !inDouble
+		}
+	case '[':
+		if !inSingle && !inDouble {
+			depth++
+		}
+	case ']':
+		if !inSingle && !inDouble && depth > 0 {
+			depth--
+		}
+	}
+	return inSingle, inDouble, depth
 }
 
 // stripTables removes whole top-level tables from TOML text with the merge
@@ -520,7 +566,7 @@ func bridgeCxStatusline(realHome, profileDir string) {
 	if fi, err := os.Stat(hostConfig); err == nil && fi.IsDir() {
 		lfi, err := os.Lstat(destConfig)
 		if os.IsNotExist(err) {
-			_ = os.MkdirAll(filepath.Dir(destConfig), 0755)
+			_ = os.MkdirAll(filepath.Dir(destConfig), 0o700)
 			_ = os.Symlink(hostConfig, destConfig)
 		} else if err == nil && lfi.IsDir() && (lfi.Mode()&os.ModeSymlink == 0) {
 			// If destConfig exists as a non-symlink directory, check if it only has an auto-generated settings.json or is empty.
@@ -610,7 +656,7 @@ func (a *Adapter) Doctor(ctx context.Context, profileName, profileDir string) []
 	if cfgData, err := os.ReadFile(cfgPath); err == nil {
 		cfgStr := string(cfgData)
 		if strings.Contains(cfgStr, "127.0.0.1:8787") || strings.Contains(cfgStr, "localhost:8787") || strings.Contains(cfgStr, "model_provider = \"caveman\"") {
-			conn, err := net.DialTimeout("tcp", "127.0.0.1:8787", 250*time.Millisecond)
+			conn, err := (&net.Dialer{Timeout: 250 * time.Millisecond}).DialContext(ctx, "tcp", "127.0.0.1:8787")
 			if err == nil {
 				conn.Close()
 				results = append(results, agents.DiagnosticResult{
@@ -937,27 +983,7 @@ func getAllLatestCodexRateLimits(profileName, profileDir string) []*codexRateLim
 		}
 	}
 
-	// 2. If fewer than 2 models found, and profile is eligible for seeding (e.g. primary profile),
-	// also check host ~/.codex/sessions
-	if len(collected) < 2 && profile.ShouldSeedCredentials(profileName) {
-		hostSessionsDir := filepath.Join(config.RealHomeDir(), ".codex", "sessions")
-		hostFiles := findRecentSessionFiles(hostSessionsDir)
-		hostLimit := maxCheck
-		if len(hostFiles) < hostLimit {
-			hostLimit = len(hostFiles)
-		}
-		for i := 0; i < hostLimit; i++ {
-			fileLimits := parseSessionFileAllRateLimits(hostFiles[i].path)
-			for k, rl := range fileLimits {
-				if _, exists := collected[k]; !exists {
-					collected[k] = rl
-				}
-			}
-			if len(collected) >= 2 {
-				break
-			}
-		}
-	}
+	// Strictly inspect profile-local sessions only (never mix host ~/.codex/sessions into profile quota).
 
 	var results []*codexRateLimits
 	// Guarantee stable ordering: "codex" (default) first, then Spark / others

@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -442,8 +443,20 @@ func (m *ProfileManager) RemoveProfile(name string) error {
 	return os.RemoveAll(pDir)
 }
 
+func purgeCredentialPurgers(profileName, pDir string, purgers []agents.CredentialPurger) []error {
+	var errs []error
+	for _, cp := range purgers {
+		if cp != nil {
+			if err := cp.PurgeCredentials(context.Background(), profileName, pDir); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errs
+}
+
 // DeleteProfile removes the profile directory on disk and cleans up its entry in config.
-func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) error {
+func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config, purgers ...agents.CredentialPurger) error {
 	if err := validateProfileName(profileName); err != nil {
 		return err
 	}
@@ -458,14 +471,9 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 		}
 	}
 	pDir := m.ProfileDir(profileName)
-	dirExists := false
-	if _, err := os.Stat(pDir); err == nil {
-		dirExists = true
-	}
-	cfgExists := false
-	if cfg.Profiles != nil {
-		_, cfgExists = cfg.Profiles[profileName]
-	}
+	_, statErr := os.Stat(pDir)
+	dirExists := statErr == nil
+	_, cfgExists := cfg.Profiles[profileName]
 	if !dirExists && !cfgExists {
 		return fmt.Errorf("profile '%s' does not exist", profileName)
 	}
@@ -475,6 +483,7 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 		if err := PurgeProfileKeychain("claude", pDir); err != nil {
 			cleanupErrs = append(cleanupErrs, err)
 		}
+		cleanupErrs = append(cleanupErrs, purgeCredentialPurgers(profileName, pDir, purgers)...)
 		if err := m.RemoveProfile(profileName); err != nil {
 			cleanupErrs = append(cleanupErrs, err)
 		}
@@ -489,10 +498,29 @@ func (m *ProfileManager) DeleteProfile(profileName string, cfg *config.Config) e
 	return errors.Join(cleanupErrs...)
 }
 
+func (m *ProfileManager) cleanupRemovedAgentDir(profileName, agentName, pDir string, dirExists, hasRemaining bool, purgers []agents.CredentialPurger) []error {
+	if !dirExists {
+		return nil
+	}
+	var errs []error
+	if err := PurgeProfileKeychain(agentName, pDir); err != nil {
+		errs = append(errs, err)
+	}
+	errs = append(errs, purgeCredentialPurgers(profileName, pDir, purgers)...)
+	if hasRemaining {
+		if err := PurgeLocalAgentCredentials(pDir, agentName); err != nil {
+			errs = append(errs, err)
+		}
+	} else if err := m.RemoveProfile(profileName); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
+}
+
 // RemoveAgent unlinks an agent from a profile in config.
 // If other agents remain associated with the profile, the directory is preserved and cleanedUp is false.
 // If no agents remain, the entire profile directory is deleted and cleanedUp is true.
-func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.Config) (bool, error) {
+func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.Config, purgers ...agents.CredentialPurger) (bool, error) {
 	if err := validateProfileName(profileName); err != nil {
 		return false, err
 	}
@@ -507,57 +535,30 @@ func (m *ProfileManager) RemoveAgent(profileName, agentName string, cfg *config.
 		}
 	}
 	pDir := m.ProfileDir(profileName)
-	dirExists := false
-	if _, err := os.Stat(pDir); err == nil {
-		dirExists = true
-	}
-	cfgExists := false
-	if cfg.Profiles != nil {
-		_, cfgExists = cfg.Profiles[profileName]
-	}
+	_, statErr := os.Stat(pDir)
+	dirExists := statErr == nil
+	_, cfgExists := cfg.Profiles[profileName]
 	if !dirExists && !cfgExists {
 		return false, fmt.Errorf("profile '%s' does not exist", profileName)
 	}
-
 	if !cfg.HasAgent(profileName, agentName) {
 		return false, fmt.Errorf("agent %q is not associated with profile %q", agentName, profileName)
 	}
 
 	cfg.RemoveProfileAgent(profileName, agentName)
 	remaining := cfg.GetProfileAgents(profileName)
-	if len(remaining) > 0 {
-		var cleanupErrs []error
-		if dirExists {
-			if err := PurgeProfileKeychain(agentName, pDir); err != nil {
-				cleanupErrs = append(cleanupErrs, err)
-			}
-			if err := PurgeLocalAgentCredentials(pDir, agentName); err != nil {
-				cleanupErrs = append(cleanupErrs, err)
-			}
-		}
-		if err := config.SaveConfig(cfg); err != nil {
-			cleanupErrs = append(cleanupErrs, err)
-		}
-		return false, errors.Join(cleanupErrs...)
-	}
+	cleanupErrs := m.cleanupRemovedAgentDir(profileName, agentName, pDir, dirExists, len(remaining) > 0, purgers)
 
-	var cleanupErrs []error
-	if dirExists {
-		if err := PurgeProfileKeychain(agentName, pDir); err != nil {
+	if len(remaining) == 0 {
+		cfg.DeleteProfile(profileName)
+		if err := m.MergeStateStore().Remove(profileName); err != nil {
 			cleanupErrs = append(cleanupErrs, err)
 		}
-		if err := m.RemoveProfile(profileName); err != nil {
-			cleanupErrs = append(cleanupErrs, err)
-		}
-	}
-	cfg.DeleteProfile(profileName)
-	if err := m.MergeStateStore().Remove(profileName); err != nil {
-		cleanupErrs = append(cleanupErrs, err)
 	}
 	if err := config.SaveConfig(cfg); err != nil {
 		cleanupErrs = append(cleanupErrs, err)
 	}
-	return true, errors.Join(cleanupErrs...)
+	return len(remaining) == 0, errors.Join(cleanupErrs...)
 }
 
 // ListProfilesForAgent returns profile names associated with the given agent.
@@ -599,9 +600,26 @@ func (m *ProfileManager) ListProfilesForAgent(agentName string, cfg *config.Conf
 	return matched, nil
 }
 
+const claudeJSONFileName = ".claude.json"
+
 func isSensitiveProfileFile(name string) bool {
 	lower := strings.ToLower(name)
-	return strings.Contains(lower, "token") || strings.Contains(lower, "credential") || strings.HasSuffix(lower, ".db")
+	if strings.Contains(lower, "token") || strings.Contains(lower, "credential") {
+		return true
+	}
+	if strings.HasSuffix(lower, ".db") || strings.HasSuffix(lower, ".db-wal") || strings.HasSuffix(lower, ".db-shm") ||
+		strings.HasSuffix(lower, ".vscdb") || strings.HasSuffix(lower, ".vscdb-wal") || strings.HasSuffix(lower, ".vscdb-shm") ||
+		strings.Contains(lower, "state.vscdb") {
+		return true
+	}
+	if strings.HasPrefix(lower, ".aim-logged-out") {
+		return true
+	}
+	switch lower {
+	case "auth.json", claudeJSONFileName, ".mcp-auth", "mcp_oauth_tokens.json", ".aim-lease.json":
+		return true
+	}
+	return false
 }
 
 // CloneProfile duplicates a profile's non-sensitive configuration and dotfile symlinks to a new profile.
@@ -654,6 +672,7 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 	// If source directory exists, copy non-sensitive files and symlinks
 	if srcDirExists {
 		if err := cloneDirectory(srcDir, dstDir); err != nil {
+			_ = os.RemoveAll(dstDir)
 			return fmt.Errorf("failed to clone profile files: %w", err)
 		}
 	}
@@ -704,7 +723,12 @@ func (m *ProfileManager) CloneProfile(sourceProfile, newProfile, agentName strin
 	cleanStatuslineSymlinksIfDisabled(dstDir, newProfile, cfg)
 	m.ensureMCPAuthIsolation(dstDir, newProfile)
 
-	return config.SaveConfig(cfg)
+	if err := config.SaveConfig(cfg); err != nil {
+		cfg.DeleteProfile(newProfile)
+		_ = os.RemoveAll(dstDir)
+		return err
+	}
+	return nil
 }
 
 // RenameProfile renames an existing profile to a new name.
@@ -766,6 +790,11 @@ func (m *ProfileManager) RenameProfile(oldName, newName string, cfg *config.Conf
 		return fmt.Errorf("failed to update config for renamed profile: %w", err)
 	}
 	if err := m.MergeStateStore().Rename(oldName, newName); err != nil {
+		cfg.RenameProfile(newName, oldName)
+		_ = config.SaveConfig(cfg)
+		if oldDirExists {
+			_ = os.Rename(newDir, oldDir)
+		}
 		return fmt.Errorf("failed to rename merge state: %w", err)
 	}
 	if oldDirExists {

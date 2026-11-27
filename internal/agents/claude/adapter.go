@@ -206,8 +206,10 @@ func (a *Adapter) PrepareEnv(ctx context.Context, profileName, profileDir string
 		return agents.LaunchEnv{}, fmt.Errorf("failed to create claude config dir: %w", err)
 	}
 
-	seedClaudeJSON(config.RealHomeDir(), profileDir)
 	isLeased := profile.IsLeased(profileName)
+	if !isLeased {
+		seedClaudeJSON(config.RealHomeDir(), profileDir)
+	}
 	if isLeased {
 		if err := agents.SetupLeasedProfileHooks("claude", profileName, profileDir); err != nil {
 			logger.Debug("[claude] Failed to setup leased profile hooks: %v", err)

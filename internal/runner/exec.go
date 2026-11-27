@@ -2,8 +2,10 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -39,7 +41,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 		}
 	}
 
-	args := append(launch.Args, extraArgs...)
+	args := slices.Concat(launch.Args, extraArgs)
 	logger.Debug("[runner] Executing binary %s with %d args (cwd: %s)", launch.BinaryPath, len(args), launch.WorkingDir)
 	logger.Debug("[runner] Environment: HOME=%s, AIM_PROFILE=%s, AIM_AGENT=%s", launch.Env["HOME"], launch.Env["AIM_PROFILE"], launch.Env["AIM_AGENT"])
 
@@ -108,7 +110,7 @@ func (r *Runner) Run(ctx context.Context, launch agents.LaunchEnv, extraArgs []s
 	err := cmd.Wait()
 	if err != nil {
 		logger.Debug("[runner] Process wait returned: %v", err)
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			if ws, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 				return 128 + int(ws.Signal()), nil
 			}

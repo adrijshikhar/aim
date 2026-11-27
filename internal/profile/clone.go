@@ -14,7 +14,13 @@ func copyFileFallback(src, dst string) error {
 	}
 	defer in.Close()
 
-	out, err := os.Create(dst)
+	root, err := os.OpenRoot(filepath.Dir(dst))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
+	out, err := root.OpenFile(filepath.Base(dst), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
@@ -59,7 +65,11 @@ func cloneDirectory(srcDir, dstDir string) error {
 		}
 
 		if entry.IsDir() {
-			if err := os.MkdirAll(dstPath, info.Mode().Perm()); err != nil {
+			dirPerm := (info.Mode().Perm() & 0o700)
+			if dirPerm == 0 {
+				dirPerm = 0o700
+			}
+			if err := os.MkdirAll(dstPath, dirPerm); err != nil {
 				return err
 			}
 			if err := cloneDirectory(srcPath, dstPath); err != nil {
@@ -74,7 +84,7 @@ func cloneDirectory(srcDir, dstDir string) error {
 		if err := cloneOrCopyFile(srcPath, dstPath); err != nil {
 			return fmt.Errorf("copying file from %s to %s: %w", srcPath, dstPath, err)
 		}
-		_ = os.Chmod(dstPath, info.Mode().Perm())
+		_ = os.Chmod(dstPath, info.Mode().Perm()&0o700)
 		_ = os.Chtimes(dstPath, info.ModTime(), info.ModTime())
 	}
 	return nil

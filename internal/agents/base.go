@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/aim-cli/aim/internal/config"
@@ -33,7 +34,9 @@ func NewBaseAdapter(name, displayName, binaryName string, aliases []string, extr
 func (b *BaseAdapter) Name() string        { return b.name }
 func (b *BaseAdapter) DisplayName() string { return b.displayName }
 func (b *BaseAdapter) BinaryName() string  { return b.binaryName }
-func (b *BaseAdapter) Aliases() []string   { return b.aliases }
+
+// Aliases returns a copy of the adapter's CLI aliases.
+func (b *BaseAdapter) Aliases() []string { return slices.Clone(b.aliases) }
 
 // ResolveBinary locates the agent's executable on the system, checking PATH first and falling back
 // to ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, and any adapter-specific extra paths.
@@ -91,12 +94,19 @@ var isolatedEnvKeys = map[string]struct{}{
 	"CLAUDE_CODE_OAUTH_TOKEN":         {},
 	"CLAUDE_CODE_OAUTH_REFRESH_TOKEN": {},
 	"ANTHROPIC_API_KEY":               {},
+	"ANTHROPIC_AUTH_TOKEN":            {},
 	"OPENAI_API_KEY":                  {},
 	"CODEX_API_KEY":                   {},
 	"GEMINI_API_KEY":                  {},
 	"GOOGLE_API_KEY":                  {},
+	"GOOGLE_APPLICATION_CREDENTIALS":  {},
+	"GOOGLE_OAUTH_ACCESS_TOKEN":       {},
 	"CURSOR_API_KEY":                  {},
 	"CURSOR_AUTH_TOKEN":               {},
+	"XDG_CONFIG_HOME":                 {},
+	"XDG_DATA_HOME":                   {},
+	"XDG_CACHE_HOME":                  {},
+	"XDG_STATE_HOME":                  {},
 }
 
 // BuildEnv constructs the execution environment by filtering out sensitive/managed variables

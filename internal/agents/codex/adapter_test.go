@@ -767,3 +767,43 @@ func TestCodexAdapter_SeedDefaultCredentials_NeverOverwritesOrLoggedOut(t *testi
 		}
 	})
 }
+
+func TestCodexAdapter_PrepareEnv_MultiLineArrayAndCorruptTOML(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	a := NewAdapter()
+
+	t.Run("multiline_array_preserves_toml", func(t *testing.T) {
+		profileDir := t.TempDir()
+		codexDir := filepath.Join(profileDir, ".codex")
+		if err := os.MkdirAll(codexDir, 0o700); err != nil {
+			t.Fatalf("mkdir codexDir: %v", err)
+		}
+		initial := "trusted = [\n  \"[not_a_table]\",\n]\n\n[features]\nshell_snapshot = true\n"
+		if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(initial), 0o600); err != nil {
+			t.Fatalf("write config.toml: %v", err)
+		}
+		if _, err := a.PrepareEnv(context.Background(), "work", profileDir); err != nil {
+			t.Fatalf("PrepareEnv failed on valid multiline array: %v", err)
+		}
+		root, err := os.OpenRoot(codexDir)
+		if err != nil {
+			t.Fatalf("open root: %v", err)
+		}
+		defer func() { _ = root.Close() }()
+		assertCodexFileStore(t, root)
+	})
+
+	t.Run("corrupt_toml_fails_closed", func(t *testing.T) {
+		profileDir := t.TempDir()
+		codexDir := filepath.Join(profileDir, ".codex")
+		if err := os.MkdirAll(codexDir, 0o700); err != nil {
+			t.Fatalf("mkdir codexDir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte("invalid = [unclosed\n"), 0o600); err != nil {
+			t.Fatalf("write config.toml: %v", err)
+		}
+		if _, err := a.PrepareEnv(context.Background(), "work", profileDir); err == nil {
+			t.Fatal("expected PrepareEnv to fail closed when config.toml cannot enforce file store")
+		}
+	})
+}

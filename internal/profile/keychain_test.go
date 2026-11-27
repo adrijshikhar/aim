@@ -53,26 +53,19 @@ func TestGetIgnoredKeychainEntries(t *testing.T) {
 }
 
 func TestPurgeIgnoredKeychains_NonDarwinOrMissing(t *testing.T) {
-	origDeleteGen := deleteGenericPasswordFn
-	origDeleteNet := deleteInternetPasswordFn
-	defer func() {
-		deleteGenericPasswordFn = origDeleteGen
-		deleteInternetPasswordFn = origDeleteNet
-	}()
-
 	var (
 		mu      sync.Mutex
 		deleted []string
 	)
-	deleteGenericPasswordFn = func(service, account string) error {
+	defer SetKeychainPasswordDeleterForTest(func(service, _ string) error {
 		mu.Lock()
 		deleted = append(deleted, service)
 		mu.Unlock()
 		return nil
-	}
-	deleteInternetPasswordFn = func(service, account string) error {
+	})()
+	defer SetKeychainInternetDeleterForTest(func(_, _ string) error {
 		return nil
-	}
+	})()
 
 	// Calling PurgeIgnoredKeychains should not error out even if items do not exist
 	err := PurgeIgnoredKeychains("non-existent-agent")
@@ -129,16 +122,14 @@ func TestDecodeKeychainPassword(t *testing.T) {
 
 func TestHarvestKeychainTokenToProfile(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
-	origFn := getGenericPasswordFn
-	defer func() { getGenericPasswordFn = origFn }()
 
 	mockTokenJSON := `{"token":{"access_token":"mock_harvested_token"}}`
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	defer SetKeychainPasswordGetterForTest(func(service, account string) (string, error) {
 		if service == "gemini" && account == "antigravity" {
 			return "go-keyring-base64:eyJ0b2tlbiI6eyJhY2Nlc3NfdG9rZW4iOiJtb2NrX2hhcnZlc3RlZF90b2tlbiJ9fQ==", nil
 		}
 		return "", fmt.Errorf("not found")
-	}
+	})()
 
 	// 1. Non-seed profile (e.g. "bby") should NOT harvest from macOS Keychain
 	nonSeedProfile := filepath.Join(t.TempDir(), "bby")
@@ -221,8 +212,6 @@ func TestHasClaudeCredentials(t *testing.T) {
 
 func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
-	origFn := getGenericPasswordFn
-	defer func() { getGenericPasswordFn = origFn }()
 
 	targetProfile := t.TempDir()
 	claudeDir := filepath.Join(targetProfile, ".claude")
@@ -230,12 +219,17 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	destFile := filepath.Join(claudeDir, ".credentials.json")
 
 	// 1. With only mcpOAuth in scoped keychain: should return false and NOT write file
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore := SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
 		if service == scopedService {
 			return `{"mcpOAuth":{"test":"token"}}`, nil
 		}
 		return "", fmt.Errorf("not found")
-	}
+	})
+	defer func() {
+		if restore != nil {
+			restore()
+		}
+	}()
 	if HarvestKeychainTokenToProfile("claude", targetProfile) {
 		t.Fatalf("expected HarvestKeychainTokenToProfile to return false when only mcpOAuth is in keychain")
 	}
@@ -245,12 +239,13 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 
 	// 2. With scoped service containing valid claudeAiOauth: should succeed and write file
 	validTokenJSON := `{"claudeAiOauth":{"accessToken":"sk-ant-access-123","refreshToken":"sk-ant-refresh-123","subscriptionType":"team"},"mcpOAuth":{"plugin":"ok"}}`
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore()
+	restore = SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
 		if service == scopedService {
 			return validTokenJSON, nil
 		}
 		return "", fmt.Errorf("not found")
-	}
+	})
 
 	if !HarvestKeychainTokenToProfile("claude", targetProfile) {
 		t.Fatalf("expected HarvestKeychainTokenToProfile to return true with scoped claudeAiOauth")
@@ -273,9 +268,10 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 	}
 
 	// 3. Re-harvesting when file already exists on disk should return true even if keychain is empty
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore()
+	restore = SetKeychainPasswordGetterForTest(func(_, _ string) (string, error) {
 		return "", fmt.Errorf("not found")
-	}
+	})
 	if !HarvestKeychainTokenToProfile("claude", targetProfile) {
 		t.Fatalf("expected HarvestKeychainTokenToProfile to return true from existing valid file")
 	}
@@ -283,20 +279,23 @@ func TestHarvestKeychainTokenToProfile_Claude(t *testing.T) {
 
 func TestReadScopedClaudeKeychainCredentials(t *testing.T) {
 	t.Setenv("AIM_MOCK_KEYCHAIN", "1")
-	origFn := getGenericPasswordFn
-	defer func() { getGenericPasswordFn = origFn }()
 
 	claudeDir := filepath.Join(t.TempDir(), ".claude")
 	scopedService := ClaudeScopedKeychainService(claudeDir)
 
 	validTokenJSON := `{"claudeAiOauth":{"accessToken":"sk-ant-test-456","refreshToken":"sk-ant-refresh-456"}}`
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore := SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
 		if service == scopedService {
 			return validTokenJSON, nil
 		}
 		// Return different token for any other service (e.g. host account)
 		return `{"claudeAiOauth":{"accessToken":"sk-ant-host-999"}}`, nil
-	}
+	})
+	defer func() {
+		if restore != nil {
+			restore()
+		}
+	}()
 
 	creds := ReadScopedClaudeKeychainCredentials(claudeDir)
 	if string(creds) != validTokenJSON {
@@ -305,12 +304,13 @@ func TestReadScopedClaudeKeychainCredentials(t *testing.T) {
 
 	// For a different directory whose scoped service is not in keychain:
 	otherDir := filepath.Join(t.TempDir(), ".claude")
-	getGenericPasswordFn = func(service, account string) (string, error) {
+	restore()
+	restore = SetKeychainPasswordGetterForTest(func(service, _ string) (string, error) {
 		if service == scopedService {
 			return validTokenJSON, nil
 		}
 		return "", fmt.Errorf("not found")
-	}
+	})
 	if otherCreds := ReadScopedClaudeKeychainCredentials(otherDir); otherCreds != nil {
 		t.Fatalf("expected nil for non-matching scoped service, got %s", string(otherCreds))
 	}

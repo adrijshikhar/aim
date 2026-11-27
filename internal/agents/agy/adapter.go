@@ -1046,8 +1046,7 @@ func ParseUsageTSV(raw string) []usage.LimitWindow {
 }
 
 func (a *Adapter) GetUsage(ctx context.Context, profileName, profileDir string) (*usage.Report, error) {
-	_ = a.SeedDefaultCredentials(profileName, profileDir)
-	acc := profile.GetProfileAccountInfo(profileDir)
+	acc := profile.GetProfileAccountInfoForAgent(profileDir, a.Name())
 	if !a.HasCredentials(profileDir) {
 		return &usage.Report{
 			Agent:        a.Name(),
