@@ -134,12 +134,20 @@ func isEphemeralProjectSlug(slug string) bool {
 
 // GetSession resolves a full ID or short ID prefix to a concrete Session.
 func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
+	idOrPrefix = strings.TrimSpace(idOrPrefix)
 	if idOrPrefix == "" {
 		return nil, nil
 	}
+	if strings.ContainsAny(idOrPrefix, `/\*?[]`) || strings.Contains(idOrPrefix, "..") {
+		return nil, fmt.Errorf("invalid session identifier %q", idOrPrefix)
+	}
 
-	claudeDir := filepath.Join(profileDir, ".claude")
-	projectsDir := filepath.Join(claudeDir, "projects")
+	var projectsDir string
+	if isHost {
+		projectsDir = filepath.Join(config.RealHomeDir(), ".claude", "projects")
+	} else {
+		projectsDir = filepath.Join(profileDir, ".claude", "projects")
+	}
 
 	pattern := filepath.Join(projectsDir, "*", idOrPrefix+"*.jsonl")
 	matches, err := filepath.Glob(pattern)
@@ -230,7 +238,7 @@ func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, des
 	}
 
 	destDir := filepath.Join(destProfileDir, ".claude", "projects", slug)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create destination project directory %s: %w", destDir, err)
 	}
 
@@ -349,6 +357,9 @@ func parseClaudeSessionFile(filePath, sessionUUID, slug, profileDir string, isHo
 			if ev.Type == "user" || ev.Type == "assistant" || isUserOrAssistantMessage(ev.Message) {
 				messageCount++
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("scan claude session %s: %w", filePath, err)
 		}
 	} else {
 		// Large file: fast O(1) head + tail seeking
@@ -557,9 +568,14 @@ func resolveSessionProfileDir(s *session.Session) string {
 		return config.RealHomeDir()
 	}
 	if s.StoragePath != "" {
+		cleanPath := filepath.Clean(s.StoragePath)
+		projectsMarker := string(filepath.Separator) + ".claude" + string(filepath.Separator) + "projects" + string(filepath.Separator)
+		if idx := strings.LastIndex(cleanPath, projectsMarker); idx > 0 {
+			return cleanPath[:idx]
+		}
 		marker := string(filepath.Separator) + ".claude" + string(filepath.Separator)
-		if idx := strings.Index(s.StoragePath, marker); idx > 0 {
-			return s.StoragePath[:idx]
+		if idx := strings.LastIndex(cleanPath, marker); idx > 0 {
+			return cleanPath[:idx]
 		}
 	}
 	if s.Profile != "" {
@@ -617,13 +633,19 @@ func copyFile(src, dst string) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to open source %s: %w", src, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	dstDir := filepath.Dir(dst)
+	if err := os.MkdirAll(dstDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create directory for destination %s: %w", dst, err)
 	}
+	dstRoot, err := os.OpenRoot(dstDir)
+	if err != nil {
+		return fmt.Errorf("failed to open destination root %s: %w", dstDir, err)
+	}
+	defer func() { _ = dstRoot.Close() }()
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	out, err := dstRoot.OpenFile(filepath.Base(dst), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to create destination %s: %w", dst, err)
 	}
@@ -644,13 +666,19 @@ func copyJSONLWithReplace(src, dst, oldUUID, newUUID string) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to open source %s: %w", src, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	dstDir := filepath.Dir(dst)
+	if err := os.MkdirAll(dstDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create directory for destination %s: %w", dst, err)
 	}
+	dstRoot, err := os.OpenRoot(dstDir)
+	if err != nil {
+		return fmt.Errorf("failed to open destination root %s: %w", dstDir, err)
+	}
+	defer func() { _ = dstRoot.Close() }()
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	out, err := dstRoot.OpenFile(filepath.Base(dst), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to create destination %s: %w", dst, err)
 	}

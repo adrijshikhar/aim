@@ -41,12 +41,29 @@ func parseAuthParams(header string) map[string]string {
 	return params
 }
 
+func validateHTTPURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
+		return nil, fmt.Errorf("unsupported URL scheme %q: must be http or https", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return nil, errors.New("URL missing host")
+	}
+	return parsed, nil
+}
+
 // DiscoverEndpointAuth probes an MCP HTTP/SSE endpoint to determine its authentication requirements.
 func DiscoverEndpointAuth(ctx context.Context, serverURL string) (*OAuthDiscovery, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	parsedURL, err := url.Parse(serverURL)
+	parsedURL, err := validateHTTPURL(serverURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid server URL: %w", err)
 	}
@@ -95,8 +112,9 @@ func DiscoverEndpointAuth(ctx context.Context, serverURL string) (*OAuthDiscover
 		origin+"/.well-known/openid-configuration",
 	)
 
+	visited := make(map[string]bool)
 	for _, cand := range candidateURLs {
-		disc, err := probeMetadataURL(reqCtx, client, cand)
+		disc, err := probeMetadataURL(reqCtx, client, cand, visited, 0)
 		if err == nil && disc != nil && disc.AuthURL != "" && disc.TokenURL != "" {
 			disc.AuthType = "oauth"
 			return disc, nil
@@ -111,8 +129,23 @@ func DiscoverEndpointAuth(ctx context.Context, serverURL string) (*OAuthDiscover
 	return &OAuthDiscovery{AuthType: "none"}, nil
 }
 
-func probeMetadataURL(ctx context.Context, client *http.Client, metaURL string) (*OAuthDiscovery, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)
+const maxOAuthMetadataProbeDepth = 3
+
+func probeMetadataURL(ctx context.Context, client *http.Client, metaURL string, visited map[string]bool, depth int) (*OAuthDiscovery, error) {
+	if depth > maxOAuthMetadataProbeDepth {
+		return nil, errors.New("metadata discovery exceeded max depth")
+	}
+	parsedMeta, err := validateHTTPURL(metaURL)
+	if err != nil {
+		return nil, err
+	}
+	normURL := parsedMeta.String()
+	if visited[normURL] {
+		return nil, fmt.Errorf("metadata URL already visited: %s", normURL)
+	}
+	visited[normURL] = true
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, normURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -129,10 +162,27 @@ func probeMetadataURL(ctx context.Context, client *http.Client, metaURL string) 
 	}
 
 	var data map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&data); err != nil {
 		return nil, err
 	}
 
+	disc := parseOAuthMetadataMap(data)
+
+	// If this was an oauth-protected-resource pointing to authorization_servers
+	if disc.AuthURL == "" {
+		if asURL := firstAuthServerURL(data); asURL != "" {
+			if _, err := validateHTTPURL(asURL); err != nil {
+				return nil, err
+			}
+			asCandidate := strings.TrimRight(asURL, "/") + "/.well-known/oauth-authorization-server"
+			return probeMetadataURL(ctx, client, asCandidate, visited, depth+1)
+		}
+	}
+
+	return disc, nil
+}
+
+func parseOAuthMetadataMap(data map[string]any) *OAuthDiscovery {
 	disc := &OAuthDiscovery{}
 	if auth, ok := data["authorization_endpoint"].(string); ok {
 		disc.AuthURL = auth
@@ -153,26 +203,36 @@ func probeMetadataURL(ctx context.Context, client *http.Client, metaURL string) 
 			}
 		}
 	}
+	return disc
+}
 
-	// If this was an oauth-protected-resource pointing to authorization_servers
-	if disc.AuthURL == "" {
-		if authServers, ok := data["authorization_servers"].([]any); ok && len(authServers) > 0 {
-			if asURL, ok := authServers[0].(string); ok && asURL != "" {
-				asURL = strings.TrimRight(asURL, "/")
-				// Probe the authorization server
-				asCandidate := asURL + "/.well-known/oauth-authorization-server"
-				return probeMetadataURL(ctx, client, asCandidate)
-			}
-		}
+func firstAuthServerURL(data map[string]any) string {
+	authServers, ok := data["authorization_servers"].([]any)
+	if !ok || len(authServers) == 0 {
+		return ""
 	}
-
-	return disc, nil
+	asURL, _ := authServers[0].(string)
+	return asURL
 }
 
 // AuthorizeMCPOAuth executes the RFC 8414/9207 PKCE OAuth loopback handshake.
 func AuthorizeMCPOAuth(ctx context.Context, disc *OAuthDiscovery, promptFn func(authURL string)) (map[string]any, error) {
 	if disc == nil || disc.AuthURL == "" || disc.TokenURL == "" {
 		return nil, errors.New("incomplete OAuth discovery: missing authorization or token endpoint")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, err := validateHTTPURL(disc.AuthURL); err != nil {
+		return nil, fmt.Errorf("invalid authorization endpoint: %w", err)
+	}
+	if _, err := validateHTTPURL(disc.TokenURL); err != nil {
+		return nil, fmt.Errorf("invalid token endpoint: %w", err)
+	}
+	if disc.RegistrationURL != "" {
+		if _, err := validateHTTPURL(disc.RegistrationURL); err != nil {
+			return nil, fmt.Errorf("invalid registration endpoint: %w", err)
+		}
 	}
 
 	handshakeCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
@@ -378,7 +438,7 @@ func AuthorizeMCPOAuth(ctx context.Context, disc *OAuthDiscovery, promptFn func(
 	}
 	defer func() { _ = tokenResp.Body.Close() }()
 
-	bodyBytes, err := io.ReadAll(tokenResp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(tokenResp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read token response: %w", err)
 	}
@@ -428,7 +488,7 @@ func registerDynamicClient(ctx context.Context, registrationURL, redirectURI str
 	var res struct {
 		ClientID string `json:"client_id"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&res); err != nil {
 		return "", err
 	}
 	return res.ClientID, nil

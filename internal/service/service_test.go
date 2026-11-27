@@ -1270,3 +1270,53 @@ func TestTranscript_BlocksEscapedStoragePathOutsideProfileRoot(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionService_RejectsDotSegmentsAndHostOutsideHome(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	aimHome := filepath.Join(tempDir, "aim-home")
+	realHome := filepath.Join(tempDir, "real-home")
+	t.Setenv("AIM_HOME", aimHome)
+	t.Setenv("AIM_REAL_HOME", realHome)
+	t.Setenv("HOME", realHome)
+	if err := os.MkdirAll(aimHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(realHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	outsideHostFile := filepath.Join(tempDir, "host-outside.jsonl")
+	mustWriteTranscriptFixture(t, outsideHostFile, `{"type":"user","message":{"role":"user","content":"HOST SECRET"}}`+"\n")
+
+	mgr := session.NewManager()
+	mgr.RegisterProvider(&mockSessionProvider{
+		agent: "claude",
+		sessions: []session.Session{
+			{ID: "44444444-4444-4444-4444-444444444444", ShortID: "44444444", Agent: "claude", IsHost: true, Profile: "<host>", StoragePath: outsideHostFile, LastActiveAt: time.Now()},
+		},
+	})
+	svc := service.NewSessionService(mgr, &mockLauncher{})
+
+	for _, bad := range []service.ResumeRequest{
+		{Agent: "..", SessionID: "44444444"},
+		{Agent: "claude", SessionID: "."},
+		{Agent: "claude", SessionID: "44444444", Profile: ".."},
+	} {
+		if err := svc.ResumeSessionInTerminal(ctx, bad); err == nil {
+			t.Fatalf("expected ResumeSessionInTerminal(%+v) to reject dot segment", bad)
+		}
+	}
+	if _, err := svc.GetSessionTranscript(ctx, "claude", ".."); err == nil {
+		t.Fatalf("expected GetSessionTranscript to reject '..' session ID")
+	}
+	tr, err := svc.GetSessionTranscript(ctx, "claude", "44444444")
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	for _, turn := range tr.Turns {
+		if strings.Contains(turn.Content, "HOST SECRET") {
+			t.Fatalf("SECURITY BREACH: host StoragePath outside real home was read: %+v", tr.Turns)
+		}
+	}
+}

@@ -529,7 +529,9 @@ func (s *Server) callGetSessions(id any, args json.RawMessage) JSONRPCResponse {
 
 	items := make([]sessionItem, 0)
 	if s.sessionMgr != nil {
-		all, err := s.sessionMgr.ListSessions(context.Background(), "", targetProfile, false)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		all, err := s.sessionMgr.ListSessions(ctx, "", targetProfile, false)
 		if err == nil {
 			var filtered []session.Session
 			normTargetCwd := filepath.ToSlash(strings.TrimRight(targetCwd, "/\\"))
@@ -627,7 +629,9 @@ func (s *Server) callGetSessionDetails(id any, args json.RawMessage) JSONRPCResp
 	}
 
 	targetID := strings.TrimSpace(p.SessionID)
-	sess, err := s.sessionMgr.ResolveSession(context.Background(), "", targetID)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sess, err := s.sessionMgr.ResolveSession(ctx, "", targetID)
 	if err != nil || sess == nil {
 		return JSONRPCResponse{
 			JSONRPC: "2.0",
@@ -677,7 +681,7 @@ func (s *Server) callGetSessionDetails(id any, args json.RawMessage) JSONRPCResp
 }
 
 func formatSessionResumeCmd(sess *session.Session) string {
-	if sess == nil {
+	if sess == nil || sess.ID == "" {
 		return ""
 	}
 	id := sess.ShortID
@@ -685,7 +689,26 @@ func formatSessionResumeCmd(sess *session.Session) string {
 		id = sess.ID
 	}
 	if sess.Profile != "" && sess.Profile != "<host>" {
-		return fmt.Sprintf("aim resume %s %s %s", sess.Agent, sess.Profile, id)
+		return fmt.Sprintf("aim resume %s %s %s", shellQuoteArg(sess.Agent), shellQuoteArg(sess.Profile), shellQuoteArg(id))
 	}
-	return fmt.Sprintf("aim resume %s %s", sess.Agent, id)
+	return fmt.Sprintf("aim resume %s %s", shellQuoteArg(sess.Agent), shellQuoteArg(id))
+}
+
+func shellQuoteArg(s string) string {
+	if s == "" {
+		return "''"
+	}
+	for i := range s {
+		if !isSafeShellByte(s[i]) {
+			return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+		}
+	}
+	return s
+}
+
+func isSafeShellByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') ||
+		c == '-' || c == '_' || c == '.' || c == ':' || c == '/'
 }

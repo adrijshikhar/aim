@@ -43,7 +43,10 @@ func (s *profileService) ListProfiles(ctx context.Context, agent string) ([]Prof
 	}
 
 	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	if cfg == nil {
 		cfg = config.NewDefaultConfig()
 	}
 
@@ -296,7 +299,10 @@ func (s *profileService) CreateProfile(ctx context.Context, req CreateProfileReq
 	}
 
 	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	if cfg == nil {
 		cfg = config.NewDefaultConfig()
 	}
 
@@ -325,7 +331,11 @@ func (s *profileService) CreateProfile(ctx context.Context, req CreateProfileReq
 		}
 	}
 
-	dto := s.buildProfileDTO(name, []string{canonicalAgent}, cfg)
+	agentNames := cfg.GetProfileAgents(name)
+	if len(agentNames) == 0 && canonicalAgent != "" {
+		agentNames = []string{canonicalAgent}
+	}
+	dto := s.buildProfileDTO(name, agentNames, cfg)
 	if dto.Account == nil && req.Email != "" {
 		dto.Account = &profile.AccountInfo{Email: req.Email}
 	}
@@ -338,15 +348,15 @@ func (s *profileService) RemoveProfile(ctx context.Context, agent, name string) 
 		return errors.New("profile manager is not configured")
 	}
 	name = strings.TrimSpace(name)
-	if name == "" {
-		return errors.New("profile name cannot be empty")
-	}
-	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") || filepath.Base(name) != name {
-		return fmt.Errorf("invalid profile name %q: path traversal not allowed", name)
+	if err := profile.ValidateProfileName(name); err != nil {
+		return err
 	}
 
 	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if cfg == nil {
 		cfg = config.NewDefaultConfig()
 	}
 
@@ -409,21 +419,18 @@ func (s *profileService) RenameProfile(ctx context.Context, agent, oldName, newN
 	}
 	oldName = strings.TrimSpace(oldName)
 	newName = strings.TrimSpace(newName)
-	if oldName == "" {
-		return errors.New("source profile name cannot be empty")
+	if err := profile.ValidateProfileName(oldName); err != nil {
+		return fmt.Errorf("invalid source profile name: %w", err)
 	}
-	if newName == "" {
-		return errors.New("target profile name cannot be empty")
-	}
-	if oldName == "." || oldName == ".." || strings.ContainsAny(oldName, "/\\") || filepath.Base(oldName) != oldName {
-		return fmt.Errorf("invalid source profile name %q: path traversal not allowed", oldName)
-	}
-	if newName == "." || newName == ".." || strings.ContainsAny(newName, "/\\") || filepath.Base(newName) != newName {
-		return fmt.Errorf("invalid target profile name %q: path traversal not allowed", newName)
+	if err := profile.ValidateProfileName(newName); err != nil {
+		return fmt.Errorf("invalid target profile name: %w", err)
 	}
 
 	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if cfg == nil {
 		cfg = config.NewDefaultConfig()
 	}
 
@@ -467,18 +474,18 @@ func (s *profileService) UpdateProfileConfig(ctx context.Context, name string, m
 		return errors.New("profile manager is not configured")
 	}
 	name = strings.TrimSpace(name)
-	if name == "" {
-		return errors.New("profile name cannot be empty")
-	}
-	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") || filepath.Base(name) != name {
-		return fmt.Errorf("invalid profile name %q: path traversal not allowed", name)
+	if err := profile.ValidateProfileName(name); err != nil {
+		return err
 	}
 	if !s.pm.ProfileExists(name) {
 		return fmt.Errorf("profile '%s' does not exist", name)
 	}
 
 	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if cfg == nil {
 		cfg = config.NewDefaultConfig()
 	}
 	if cfg.Profiles == nil {
@@ -529,7 +536,10 @@ func (s *profileService) RefreshUsage(ctx context.Context, agent, profileName st
 	}
 
 	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	if cfg == nil {
 		cfg = config.NewDefaultConfig()
 	}
 

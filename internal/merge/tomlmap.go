@@ -206,6 +206,11 @@ func ReadTOMLKey(path, key string) (Entries, bool, error) {
 	if err != nil {
 		return Entries{}, true, err
 	}
+	return ReadTOMLKeyFromBytes(data, key)
+}
+
+// ReadTOMLKeyFromBytes parses TOML bytes for the named table key.
+func ReadTOMLKeyFromBytes(data []byte, key string) (Entries, bool, error) {
 	vals, err := decodeKey(data, key)
 	if err != nil {
 		return Entries{}, true, err

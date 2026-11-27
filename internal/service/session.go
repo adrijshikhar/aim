@@ -10,14 +10,33 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aim-cli/aim/internal/profile"
 	"github.com/aim-cli/aim/internal/session"
 )
 
 var (
 	safeIdentifierPattern = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
+	safeProfilePattern    = regexp.MustCompile(`^[a-zA-Z0-9_\-\.:]+$`)
 	safeFlagPattern       = regexp.MustCompile(`^--?[a-zA-Z0-9_./=-]+$`)
 	safeArgPattern        = regexp.MustCompile(`^[a-zA-Z0-9_./=-]+$`)
 )
+
+func isSafeIdentifier(v string) bool {
+	return v != "" && v != "." && v != ".." && !strings.Contains(v, "..") && safeIdentifierPattern.MatchString(v)
+}
+
+func validateSessionProfile(profileName string) error {
+	if profileName == "" || profileName == hostProfileSentinel {
+		return nil
+	}
+	if err := profile.ValidateProfileName(profileName); err != nil {
+		return err
+	}
+	if !safeProfilePattern.MatchString(profileName) {
+		return fmt.Errorf("invalid profile %q: contains illegal characters", profileName)
+	}
+	return nil
+}
 
 type sessionService struct {
 	mgr          *session.Manager
@@ -172,7 +191,7 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 	if agent == "" {
 		return errors.New("agent is required to resume session")
 	}
-	if !safeIdentifierPattern.MatchString(agent) {
+	if !isSafeIdentifier(agent) {
 		return fmt.Errorf("invalid agent %q: contains illegal characters", agent)
 	}
 
@@ -180,7 +199,7 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 	if sessionID == "" {
 		return errors.New("session ID is required to resume session")
 	}
-	if !safeIdentifierPattern.MatchString(sessionID) {
+	if !isSafeIdentifier(sessionID) {
 		return fmt.Errorf("invalid session ID %q: contains illegal characters", sessionID)
 	}
 	if s.launcher == nil {
@@ -189,8 +208,8 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 
 	resolvedID := sessionID
 	resolvedProfile := strings.TrimSpace(req.Profile)
-	if resolvedProfile != "" && resolvedProfile != hostProfileSentinel && !safeIdentifierPattern.MatchString(resolvedProfile) {
-		return fmt.Errorf("invalid profile %q: contains illegal characters", resolvedProfile)
+	if err := validateSessionProfile(resolvedProfile); err != nil {
+		return fmt.Errorf("invalid profile %q: %w", resolvedProfile, err)
 	}
 
 	if s.mgr != nil {
@@ -206,10 +225,10 @@ func (s *sessionService) ResumeSessionInTerminal(ctx context.Context, req Resume
 		}
 	}
 
-	if resolvedProfile != "" && resolvedProfile != hostProfileSentinel && !safeIdentifierPattern.MatchString(resolvedProfile) {
-		return fmt.Errorf("invalid resolved profile %q: contains illegal characters", resolvedProfile)
+	if err := validateSessionProfile(resolvedProfile); err != nil {
+		return fmt.Errorf("invalid resolved profile %q: %w", resolvedProfile, err)
 	}
-	if !safeIdentifierPattern.MatchString(resolvedID) {
+	if !isSafeIdentifier(resolvedID) {
 		return fmt.Errorf("invalid resolved session ID %q: contains illegal characters", resolvedID)
 	}
 

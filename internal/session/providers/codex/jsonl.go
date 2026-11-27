@@ -113,19 +113,9 @@ func (p *Provider) getFromJSONL(indexPath, idOrPrefix, profileName string, isHos
 }
 
 func (p *Provider) findRolloutPath(ctx context.Context, codexDir, sessionID string) string {
-	if p.sqliteBin != "" {
-		dbPath := filepath.Join(codexDir, "state_5.sqlite")
-		if _, err := os.Stat(dbPath); err == nil {
-			query := fmt.Sprintf("SELECT rollout_path FROM threads WHERE id = '%s' LIMIT 1;\n", escapeSQL(sessionID))
-			if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, dbPath, query); err == nil {
-				path := strings.TrimSpace(string(out))
-				if path != "" {
-					if _, statErr := os.Stat(path); statErr == nil {
-						return path
-					}
-				}
-			}
-		}
+	dbPath := filepath.Join(codexDir, "state_5.sqlite")
+	if path := lookupRolloutPathSQLite(ctx, dbPath, sessionID); path != "" {
+		return path
 	}
 	// Fallback to globbing in sessions dir
 	sessionsDir := filepath.Join(codexDir, "sessions")
@@ -167,6 +157,29 @@ func (p *Provider) findBaseRolloutPath(ctx context.Context, codexDir, parentID, 
 		return nil
 	})
 	return fallbackMatch
+}
+
+func lookupRolloutPathSQLite(ctx context.Context, dbPath, sessionID string) string {
+	if _, err := os.Stat(dbPath); err != nil {
+		return ""
+	}
+	db, err := session.OpenReadOnlySQLite(ctx, dbPath)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = db.Close() }()
+	var rolloutPath string
+	if err := db.QueryRowContext(ctx, "SELECT rollout_path FROM threads WHERE id = ? LIMIT 1", sessionID).Scan(&rolloutPath); err != nil {
+		return ""
+	}
+	rolloutPath = strings.TrimSpace(rolloutPath)
+	if rolloutPath == "" {
+		return ""
+	}
+	if _, err := os.Stat(rolloutPath); err != nil {
+		return ""
+	}
+	return rolloutPath
 }
 
 func extractParentThreadID(rolloutPath string) string {

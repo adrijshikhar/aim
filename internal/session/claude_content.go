@@ -44,20 +44,42 @@ func ParseClaudeContent(raw json.RawMessage) ([]ClaudeContentBlock, string) {
 		return blocks, ""
 	}
 
-	var genericBlocks []map[string]any
-	if err := json.Unmarshal(raw, &genericBlocks); err == nil {
-		out := make([]ClaudeContentBlock, 0, len(genericBlocks))
-		firstText := ""
-		for _, gb := range genericBlocks {
-			typ, _ := gb["type"].(string)
-			txt, _ := gb["text"].(string)
-			out = append(out, ClaudeContentBlock{Type: typ, Text: txt})
-			if firstText == "" && strings.TrimSpace(txt) != "" {
-				firstText = strings.TrimSpace(txt)
-			}
-		}
-		return out, firstText
-	}
+	return parseClaudeContentArrayElements(raw)
+}
 
-	return nil, ""
+func parseClaudeContentArrayElements(raw json.RawMessage) ([]ClaudeContentBlock, string) {
+	var rawElems []json.RawMessage
+	if err := json.Unmarshal(raw, &rawElems); err != nil {
+		return nil, ""
+	}
+	out := make([]ClaudeContentBlock, 0, len(rawElems))
+	firstText := ""
+	for _, elem := range rawElems {
+		b, ok := decodeSingleClaudeBlock(elem)
+		if !ok {
+			continue
+		}
+		out = append(out, b)
+		if firstText == "" && strings.TrimSpace(b.Text) != "" {
+			firstText = strings.TrimSpace(b.Text)
+		}
+	}
+	if len(out) == 0 {
+		return nil, ""
+	}
+	return out, firstText
+}
+
+func decodeSingleClaudeBlock(elem json.RawMessage) (ClaudeContentBlock, bool) {
+	var b ClaudeContentBlock
+	if err := json.Unmarshal(elem, &b); err == nil {
+		return b, true
+	}
+	var gb map[string]any
+	if err := json.Unmarshal(elem, &gb); err == nil {
+		typ, _ := gb["type"].(string)
+		txt, _ := gb["text"].(string)
+		return ClaudeContentBlock{Type: typ, Text: txt}, true
+	}
+	return ClaudeContentBlock{}, false
 }

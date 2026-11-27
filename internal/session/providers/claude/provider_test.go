@@ -570,3 +570,52 @@ func TestResolveSessionProfileDir_ResolvesProfileDir(t *testing.T) {
 		t.Fatalf("resolveSessionProfileDir got %q, want %q", got, want)
 	}
 }
+
+func TestProvider_GetSession_RejectsTraversalAndHonorsIsHost(t *testing.T) {
+	realHome := t.TempDir()
+	t.Setenv("AIM_REAL_HOME", realHome)
+	t.Setenv("HOME", realHome)
+
+	profileDir := t.TempDir()
+	hostProj := filepath.Join(realHome, ".claude", "projects", "host-slug")
+	if err := os.MkdirAll(hostProj, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hostID := "99999999-1111-2222-3333-444444444444"
+	hostLine := `{"type":"user","timestamp":"2026-09-14T10:00:00Z","message":{"role":"user","content":"host prompt"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(hostProj, hostID+".jsonl"), []byte(hostLine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewProvider()
+	ctx := context.Background()
+
+	for _, bad := range []string{"../secret", "a/b", "a\\b", "*all*", "foo..bar"} {
+		if _, err := p.GetSession(ctx, bad, profileDir, false); err == nil {
+			t.Fatalf("expected invalid session identifier %q to fail", bad)
+		}
+	}
+
+	got, err := p.GetSession(ctx, "99999999", profileDir, true)
+	if err != nil {
+		t.Fatalf("GetSession(isHost=true): %v", err)
+	}
+	if got == nil || got.ID != hostID || !got.IsHost {
+		t.Fatalf("expected host session %q with IsHost=true, got %+v", hostID, got)
+	}
+}
+
+func TestResolveSessionProfileDir_NestedClaudeParentDir(t *testing.T) {
+	base := filepath.Join(t.TempDir(), ".claude", "aim-home")
+	customStorage := filepath.Join(base, "profiles", "work.claude", ".claude", "projects", "slug", "abc.jsonl")
+	got := resolveSessionProfileDir(&session.Session{
+		ID:          "abc",
+		Profile:     "work.claude",
+		IsHost:      false,
+		StoragePath: customStorage,
+	})
+	want := filepath.Join(base, "profiles", "work.claude")
+	if got != want {
+		t.Fatalf("resolveSessionProfileDir got %q, want %q", got, want)
+	}
+}

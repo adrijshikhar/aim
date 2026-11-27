@@ -24,14 +24,14 @@ func (s *sessionService) GetSessionTranscript(ctx context.Context, agent, sessio
 	if agent == "" {
 		return nil, errors.New("agent is required")
 	}
-	if !safeIdentifierPattern.MatchString(agent) {
+	if !isSafeIdentifier(agent) {
 		return nil, fmt.Errorf("invalid agent %q: contains illegal characters", agent)
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return nil, errors.New("session ID is required")
 	}
-	if !safeIdentifierPattern.MatchString(sessionID) {
+	if !isSafeIdentifier(sessionID) {
 		return nil, fmt.Errorf("invalid session ID %q: contains illegal characters", sessionID)
 	}
 
@@ -99,7 +99,7 @@ func (s *sessionService) GetSessionTranscript(ctx context.Context, agent, sessio
 			_ = err
 		}
 	case "agy":
-		turns, err := parseAgyTranscript(sess)
+		turns, err := parseAgyTranscript(sess, s.profilesRoot)
 		if len(turns) > 0 {
 			transcript.Turns = turns
 			return transcript, nil
@@ -167,8 +167,22 @@ func openDirectSessionFile(filePath, expectedExt string) (*os.File, bool) {
 	if filePath == "" || (expectedExt != "" && filepath.Ext(filePath) != expectedExt) {
 		return nil, false
 	}
-	//nolint:gosec // G304: host StoragePath validated from resolved host session object.
-	f, err := os.Open(filePath)
+	homeDir := strings.TrimSpace(config.RealHomeDir())
+	if homeDir == "" {
+		return nil, false
+	}
+	cleanHome := filepath.Clean(homeDir)
+	cleanPath := filepath.Clean(filePath)
+	rel, err := filepath.Rel(cleanHome, cleanPath)
+	if err != nil || !filepath.IsLocal(rel) || rel == "." {
+		return nil, false
+	}
+	root, err := os.OpenRoot(cleanHome)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.Open(rel)
 	return f, err == nil
 }
 
@@ -476,28 +490,76 @@ func parseCodexTranscript(sess *session.Session, profilesRoot string) ([]Session
 	return eventTurns, nil
 }
 
-func parseAgyTranscript(sess *session.Session) ([]SessionTurnDTO, error) {
+func openAgyTranscriptFile(sess *session.Session, profilesRoot string) (*os.File, error) {
+	if sess == nil || sess.StoragePath == "" {
+		return nil, os.ErrNotExist
+	}
 	logPath := sess.StoragePath
 	if !strings.HasSuffix(logPath, "transcript.jsonl") {
 		logPath = filepath.Join(logPath, ".system_generated", "logs", "transcript.jsonl")
 	}
-
-	f, err := os.Open(logPath)
+	allowedRoot, err := resolveAgyAllowedRoot(sess, profilesRoot)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	rel, relErr := filepath.Rel(filepath.Clean(allowedRoot), filepath.Clean(logPath))
+	if relErr != nil || !filepath.IsLocal(rel) || rel == "." {
+		return nil, os.ErrNotExist
+	}
+	root, openRootErr := os.OpenRoot(allowedRoot)
+	if openRootErr != nil {
+		return nil, openRootErr
+	}
+	defer func() { _ = root.Close() }()
+	return root.Open(rel)
+}
+
+func resolveAgyAllowedRoot(sess *session.Session, profilesRoot string) (string, error) {
+	if !sess.IsHost && sess.Profile != "" && sess.Profile != hostProfileSentinel {
+		if err := validateSessionProfile(sess.Profile); err != nil {
+			return "", os.ErrNotExist
+		}
+		return filepath.Join(resolveTranscriptProfilesRoot(profilesRoot), sess.Profile), nil
+	}
+	home := strings.TrimSpace(config.RealHomeDir())
+	if home == "" {
+		return "", os.ErrNotExist
+	}
+	return home, nil
+}
+
+func parseAgyTranscript(sess *session.Session, profilesRoot string) ([]SessionTurnDTO, error) {
+	f, err := openAgyTranscriptFile(sess, profilesRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
 
 	var turns []SessionTurnDTO
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
 
+	turnIdx := 1
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		if turn, ok := parseAgyStepLine(line, turnIdx); ok {
+			turns = append(turns, turn)
+			turnIdx++
+		}
+	}
+
+	return turns, scanner.Err()
+}
+
+func parseAgyStepLine(line []byte, turnIdx int) (SessionTurnDTO, bool) {
 	type rawAgyToolCall struct {
 		Name string                 `json:"name"`
 		Args map[string]interface{} `json:"args"`
 	}
-
 	type rawAgyStep struct {
 		StepIndex int              `json:"step_index"`
 		Source    string           `json:"source"`
@@ -508,66 +570,54 @@ func parseAgyTranscript(sess *session.Session) ([]SessionTurnDTO, error) {
 		ToolCalls []rawAgyToolCall `json:"tool_calls"`
 	}
 
-	turnIdx := 1
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-
-		var step rawAgyStep
-		if err := json.Unmarshal(line, &step); err != nil {
-			continue
-		}
-
-		var role string
-		switch {
-		case step.Source == "USER_EXPLICIT" || step.Type == "USER_INPUT" || step.Type == "SYSTEM_MESSAGE":
-			role = "user"
-		case step.Type == "PLANNER_RESPONSE" || step.Source == "MODEL":
-			role = "assistant"
-		default:
-			continue
-		}
-
-		var parsedTime time.Time
-		if step.CreatedAt != "" {
-			parsedTime, _ = time.Parse(time.RFC3339, step.CreatedAt)
-		}
-
-		var toolCalls []ToolCallDTO
-		for _, tc := range step.ToolCalls {
-			argsBytes, _ := json.Marshal(tc.Args)
-			toolCalls = append(toolCalls, ToolCallDTO{
-				ToolName:  tc.Name,
-				Arguments: string(argsBytes),
-				Status:    "ok",
-			})
-		}
-
-		content := strings.TrimSpace(step.Content)
-		if role == "user" {
-			content = cleanUserPrompt(content)
-		} else {
-			content = cleanAssistantResponse(content)
-		}
-
-		if content == "" && step.Thinking == "" && len(toolCalls) == 0 {
-			continue
-		}
-
-		turns = append(turns, SessionTurnDTO{
-			TurnIndex: turnIdx,
-			Role:      role,
-			Timestamp: parsedTime,
-			Content:   content,
-			Thinking:  step.Thinking,
-			ToolCalls: toolCalls,
-		})
-		turnIdx++
+	var step rawAgyStep
+	if err := json.Unmarshal(line, &step); err != nil {
+		return SessionTurnDTO{}, false
 	}
 
-	return turns, scanner.Err()
+	var role string
+	switch {
+	case step.Source == "USER_EXPLICIT" || step.Type == "USER_INPUT" || step.Type == "SYSTEM_MESSAGE":
+		role = roleUser
+	case step.Type == "PLANNER_RESPONSE" || step.Source == "MODEL":
+		role = roleAssistant
+	default:
+		return SessionTurnDTO{}, false
+	}
+
+	var parsedTime time.Time
+	if step.CreatedAt != "" {
+		parsedTime, _ = time.Parse(time.RFC3339, step.CreatedAt)
+	}
+
+	var toolCalls []ToolCallDTO
+	for _, tc := range step.ToolCalls {
+		argsBytes, _ := json.Marshal(tc.Args)
+		toolCalls = append(toolCalls, ToolCallDTO{
+			ToolName:  tc.Name,
+			Arguments: string(argsBytes),
+			Status:    "ok",
+		})
+	}
+
+	content := strings.TrimSpace(step.Content)
+	if role == roleUser {
+		content = cleanUserPrompt(content)
+	} else {
+		content = cleanAssistantResponse(content)
+	}
+	if content == "" && step.Thinking == "" && len(toolCalls) == 0 {
+		return SessionTurnDTO{}, false
+	}
+
+	return SessionTurnDTO{
+		TurnIndex: turnIdx,
+		Role:      role,
+		Timestamp: parsedTime,
+		Content:   content,
+		Thinking:  step.Thinking,
+		ToolCalls: toolCalls,
+	}, true
 }
 
 var (

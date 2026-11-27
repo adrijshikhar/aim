@@ -2,9 +2,37 @@ package session
 
 import (
 	"context"
+	"database/sql"
+	"net/url"
 	"os/exec"
+	"path/filepath"
 	"strings"
+
+	_ "modernc.org/sqlite" // Register pure-Go sqlite driver for read-only session queries.
 )
+
+// OpenReadOnlySQLite opens a SQLite database with query_only mode and a bounded busy timeout.
+func OpenReadOnlySQLite(ctx context.Context, dbPath string) (*sql.DB, error) {
+	absPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		absPath = filepath.Clean(dbPath)
+	}
+	dsn := (&url.URL{
+		Scheme:   "file",
+		Path:     filepath.ToSlash(absPath),
+		RawQuery: "mode=ro&_pragma=query_only(ON)&_pragma=busy_timeout(2000)",
+	}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
 
 var sqliteLimiter = make(chan struct{}, 6) // Max 6 concurrent sqlite subprocesses
 

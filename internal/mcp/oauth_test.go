@@ -316,3 +316,40 @@ func TestAuthorizeMCPOAuth_CancelAndDuplicateCallback_NoLeak(t *testing.T) {
 		t.Fatal("expected AuthorizeMCPOAuth to fail on wrong state / cancellation")
 	}
 }
+
+func TestDiscoverEndpointAuth_RejectsUnsafeSchemesAndLoop(t *testing.T) {
+	if _, err := DiscoverEndpointAuth(context.Background(), "ftp://example.com/mcp"); err == nil {
+		t.Fatal("expected non-http scheme to fail")
+	}
+
+	var selfURL string
+	var reqCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		if r.URL.Path == "/mcp" {
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/meta"`, selfURL))
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/meta" || r.URL.Path == "/.well-known/oauth-authorization-server" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"authorization_servers":[%q]}`, selfURL)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	selfURL = srv.URL
+
+	//nolint:staticcheck // SA1012: intentionally test nil context fallback
+	disc, err := DiscoverEndpointAuth(nil, srv.URL+"/mcp")
+	if err != nil {
+		t.Fatalf("expected graceful non-infinite discovery fallback, got err: %v", err)
+	}
+	if disc.AuthType == "oauth" {
+		t.Fatalf("expected self-referential metadata loop not to produce oauth discovery, got %+v", disc)
+	}
+	if reqCount > 15 {
+		t.Fatalf("expected bounded discovery requests, got %d", reqCount)
+	}
+}

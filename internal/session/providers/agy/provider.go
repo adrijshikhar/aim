@@ -2,14 +2,13 @@ package agy
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,22 +20,13 @@ import (
 // Ensure Provider implements session.SessionProvider.
 var _ session.SessionProvider = (*Provider)(nil)
 
+const untitledSessionTitle = "Untitled Session"
+
 // Provider implements session.SessionProvider for Antigravity CLI (agy).
-type Provider struct {
-	sqliteBin string
-}
+type Provider struct{}
 
 func NewProvider() *Provider {
-	bin, err := exec.LookPath("sqlite3")
-	if err != nil {
-		for _, fallback := range []string{"/usr/bin/sqlite3", "/opt/homebrew/bin/sqlite3", "/usr/local/bin/sqlite3"} {
-			if _, statErr := os.Stat(fallback); statErr == nil {
-				bin = fallback
-				break
-			}
-		}
-	}
-	return &Provider{sqliteBin: bin}
+	return &Provider{}
 }
 
 func (p *Provider) Agent() string {
@@ -50,30 +40,196 @@ func (p *Provider) dbPath(profileDir string, isHost bool) string {
 	return filepath.Join(profileDir, ".gemini", "antigravity-cli", "conversation_summaries.db")
 }
 
-func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost bool) ([]session.Session, error) {
-	if p.sqliteBin == "" {
-		return nil, nil
-	}
+type agyConvRow struct {
+	convID       string
+	title        string
+	preview      string
+	rawTime      any
+	rawWorkspace string
+	stepCount    int
+}
 
-	db := p.dbPath(profileDir, isHost)
-	if fi, err := os.Stat(db); err != nil || fi.Size() == 0 {
-		return nil, nil
-	}
-
-	query := "SELECT conversation_id, title, preview, last_modified_time, workspace_uris, step_count FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
-	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query, "-separator", "|||")
+func queryAgyConvRows(ctx context.Context, dbPath, idPrefix string) ([]agyConvRow, error) {
+	db, err := session.OpenReadOnlySQLite(ctx, dbPath)
 	if err != nil {
-		// Fallback for older schemas where step_count might not exist
-		fallback := "SELECT conversation_id, title, preview, last_modified_time, workspace_uris FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
-		out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallback, "-separator", "|||")
-		if err != nil {
-			fallbackLegacy := "SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC LIMIT 50;\n"
-			out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallbackLegacy, "-separator", "|||")
-			if err != nil {
-				logger.Debug("[session/agy] query error on %s: %v", db, err)
-				return nil, fmt.Errorf("failed to query sqlite db at %s: %w", db, err)
-			}
+		return nil, err
+	}
+	defer func() { _ = db.Close() }()
+
+	where := ""
+	limit := "LIMIT 50"
+	var args []any
+	if idPrefix != "" {
+		where = ` WHERE conversation_id LIKE ? ESCAPE '\'`
+		limit = "LIMIT 2"
+		args = append(args, strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(idPrefix)+"%")
+	}
+
+	queries := []struct {
+		sql          string
+		hasWorkspace bool
+		hasSteps     bool
+	}{
+		{"SELECT conversation_id, COALESCE(title,''), COALESCE(preview,''), last_modified_time, COALESCE(workspace_uris,''), COALESCE(step_count,0) FROM conversation_summaries" + where + " ORDER BY last_modified_time DESC " + limit, true, true},
+		{"SELECT conversation_id, COALESCE(title,''), COALESCE(preview,''), last_modified_time, COALESCE(workspace_uris,'') FROM conversation_summaries" + where + " ORDER BY last_modified_time DESC " + limit, true, false},
+		{"SELECT conversation_id, COALESCE(title,''), COALESCE(preview,''), last_modified_time FROM conversation_summaries" + where + " ORDER BY last_modified_time DESC " + limit, false, false},
+	}
+
+	var rows *sql.Rows
+	var chosenHasWorkspace, chosenHasSteps bool
+	var queryErr error
+	for _, q := range queries {
+		rows, queryErr = db.QueryContext(ctx, q.sql, args...)
+		if queryErr == nil {
+			chosenHasWorkspace = q.hasWorkspace
+			chosenHasSteps = q.hasSteps
+			break
 		}
+	}
+	if queryErr != nil {
+		return nil, queryErr
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []agyConvRow
+	for rows.Next() {
+		var r agyConvRow
+		var scanErr error
+		switch {
+		case chosenHasWorkspace && chosenHasSteps:
+			scanErr = rows.Scan(&r.convID, &r.title, &r.preview, &r.rawTime, &r.rawWorkspace, &r.stepCount)
+		case chosenHasWorkspace:
+			scanErr = rows.Scan(&r.convID, &r.title, &r.preview, &r.rawTime, &r.rawWorkspace)
+		default:
+			scanErr = rows.Scan(&r.convID, &r.title, &r.preview, &r.rawTime)
+		}
+		if scanErr != nil {
+			continue
+		}
+		r.convID = strings.TrimSpace(r.convID)
+		if r.convID != "" {
+			out = append(out, r)
+		}
+	}
+	return out, rows.Err()
+}
+
+func parseAgyModTime(raw any) time.Time {
+	switch v := raw.(type) {
+	case time.Time:
+		return v
+	case string:
+		return parseTimeString(strings.TrimSpace(v))
+	case []byte:
+		return parseTimeString(strings.TrimSpace(string(v)))
+	default:
+		return time.Time{}
+	}
+}
+
+func (p *Provider) buildAgySession(row agyConvRow, profileDir, profileName string, isHost, cleanTitle bool) session.Session {
+	convID := row.convID
+	title := strings.TrimSpace(row.title)
+	if cleanTitle {
+		title = session.CleanPromptText(title)
+	}
+	preview := strings.TrimSpace(row.preview)
+	brainDir := p.brainDir(profileDir, isHost, convID)
+	cwd := parseWorkspaceURIs(strings.TrimSpace(row.rawWorkspace))
+	if cwd == "" {
+		cwd = extractTranscriptCwd(brainDir)
+	}
+
+	modTime := parseAgyModTime(row.rawTime)
+	s := session.NewSession(convID, title, "agy", profileName, isHost, modTime)
+	s.StoragePath = brainDir
+	s.Cwd = cwd
+	s.Summary = preview
+	s.MessageCount = row.stepCount
+	if s.MessageCount == 0 && brainDir != "" {
+		s.MessageCount = countAgyBrainTurns(brainDir)
+	}
+	if s.MessageCount > 0 {
+		s.Progress = fmt.Sprintf("%d turns", s.MessageCount)
+	}
+	return s
+}
+
+func countAgyBrainTurns(brainDir string) int {
+	root, err := os.OpenRoot(brainDir)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.Open(filepath.Join(".system_generated", "logs", "transcript.jsonl"))
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = f.Close() }()
+	tc, err := session.ReadTurnCounts(f)
+	if err != nil || tc <= 0 {
+		return 0
+	}
+	return tc
+}
+
+func applyAgyResolvedSummary(s *session.Session, sum session.SessionSummary) {
+	s.Goal = sum.Goal
+	s.Progress = sum.Progress
+	s.Recent = sum.RecentActivity
+	if sum.Text() != "" {
+		s.Summary = sum.Text()
+	}
+	if s.Title != "" && s.Title != untitledSessionTitle {
+		return
+	}
+	if sum.Goal != "" {
+		s.Title = sum.Goal
+	} else if sum.RecentActivity != "" {
+		s.Title = sum.RecentActivity
+	}
+}
+
+func (p *Provider) applyAgySummaryAndTitle(ctx context.Context, s *session.Session, preview string, fallbackToGoalRecent bool) {
+	if sum, err := p.ResolveSummary(ctx, s); err == nil {
+		applyAgyResolvedSummary(s, sum)
+	}
+	if s.Title != "" && s.Title != untitledSessionTitle {
+		return
+	}
+	if preview != "" {
+		if cleanPrev := session.CleanPromptText(strings.Split(preview, "\n")[0]); cleanPrev != "" {
+			s.Title = cleanPrev
+			return
+		}
+	}
+	if fallbackToGoalRecent && s.Goal != "" {
+		s.Title = s.Goal
+		return
+	}
+	if fallbackToGoalRecent && s.Recent != "" {
+		s.Title = s.Recent
+		return
+	}
+	s.Title = untitledSessionTitle
+}
+
+func hasNonEmptyAgyDB(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Size() > 0
+}
+
+// ListSessions lists Antigravity sessions stored in conversation_summaries.db.
+func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost bool) ([]session.Session, error) {
+	db := p.dbPath(profileDir, isHost)
+	if !hasNonEmptyAgyDB(db) {
+		return nil, nil
+	}
+
+	convRows, err := queryAgyConvRows(ctx, db, "")
+	if err != nil {
+		logger.Debug("[session/agy] query error on %s: %v", db, err)
+		return nil, fmt.Errorf("failed to query sqlite db at %s: %w", db, err)
 	}
 
 	profileName := filepath.Base(profileDir)
@@ -81,90 +237,10 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 		profileName = "<host>"
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var sessions []session.Session
-
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		parts := strings.Split(line, "|||")
-		if len(parts) < 4 {
-			continue
-		}
-
-		convID := strings.TrimSpace(parts[0])
-		title := session.CleanPromptText(strings.TrimSpace(parts[1]))
-		preview := strings.TrimSpace(parts[2])
-		rawTime := strings.TrimSpace(parts[3])
-		rawWorkspace := ""
-		if len(parts) >= 5 {
-			rawWorkspace = strings.TrimSpace(parts[4])
-		}
-		var stepCount int
-		if len(parts) >= 6 {
-			stepCount, _ = strconv.Atoi(strings.TrimSpace(parts[5]))
-		}
-
-		brainDir := p.brainDir(profileDir, isHost, convID)
-		cwd := parseWorkspaceURIs(rawWorkspace)
-		if cwd == "" {
-			cwd = extractTranscriptCwd(brainDir)
-		}
-
-		modTime := parseTimeString(rawTime)
-		s := session.NewSession(convID, title, "agy", profileName, isHost, modTime)
-		s.StoragePath = brainDir
-		s.Cwd = cwd
-		s.Summary = preview
-		s.MessageCount = stepCount
-		if s.MessageCount == 0 && brainDir != "" {
-			tPath := filepath.Join(brainDir, ".system_generated", "logs", "transcript.jsonl")
-			if f, err := os.Open(tPath); err == nil {
-				if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
-					s.MessageCount = tc
-				}
-				_ = f.Close()
-			}
-		}
-		if s.MessageCount > 0 {
-			s.Progress = fmt.Sprintf("%d turns", s.MessageCount)
-		}
-
-		if sum, err := p.ResolveSummary(ctx, &s); err == nil {
-			s.Goal = sum.Goal
-			s.Progress = sum.Progress
-			s.Recent = sum.RecentActivity
-			if sum.Text() != "" {
-				s.Summary = sum.Text()
-			}
-			if s.Title == "" || s.Title == "Untitled Session" {
-				if sum.Goal != "" {
-					s.Title = sum.Goal
-				} else if sum.RecentActivity != "" {
-					s.Title = sum.RecentActivity
-				}
-			}
-		}
-
-		if s.Title == "" || s.Title == "Untitled Session" {
-			if preview != "" {
-				cleanPrev := session.CleanPromptText(strings.Split(preview, "\n")[0])
-				if cleanPrev != "" {
-					s.Title = cleanPrev
-				}
-			}
-			if s.Title == "" {
-				if s.Goal != "" {
-					s.Title = s.Goal
-				} else if s.Recent != "" {
-					s.Title = s.Recent
-				} else {
-					s.Title = "Untitled Session"
-				}
-			}
-		}
-
+	sessions := make([]session.Session, 0, len(convRows))
+	for _, row := range convRows {
+		s := p.buildAgySession(row, profileDir, profileName, isHost, true)
+		p.applyAgySummaryAndTitle(ctx, &s, strings.TrimSpace(row.preview), true)
 		sessions = append(sessions, s)
 	}
 
@@ -172,57 +248,30 @@ func (p *Provider) ListSessions(ctx context.Context, profileDir string, isHost b
 }
 
 func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir string, isHost bool) (*session.Session, error) {
-	if p.sqliteBin == "" || idOrPrefix == "" {
-		return nil, nil
-	}
-
-	if !isValidSessionID(idOrPrefix) {
+	if idOrPrefix == "" || !isValidSessionID(idOrPrefix) {
 		return nil, nil
 	}
 
 	db := p.dbPath(profileDir, isHost)
-	if fi, err := os.Stat(db); err != nil || fi.Size() == 0 {
+	if !hasNonEmptyAgyDB(db) {
 		return nil, nil
 	}
 
-	prefixLen := len(idOrPrefix)
-	query := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time, workspace_uris, step_count FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
-	out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query, "-separator", "|||")
+	convRows, err := queryAgyConvRows(ctx, db, idOrPrefix)
 	if err != nil {
-		// Fallback for older schemas where step_count might not exist
-		fallback := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time, workspace_uris FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
-		out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallback, "-separator", "|||")
-		if err != nil {
-			fallbackLegacy := fmt.Sprintf("SELECT conversation_id, title, preview, last_modified_time FROM conversation_summaries WHERE substr(conversation_id, 1, %d) = '%s' LIMIT 2;\n", prefixLen, idOrPrefix)
-			out, err = session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, fallbackLegacy, "-separator", "|||")
-			if err != nil {
-				return nil, fmt.Errorf("failed to query session %s from %s: %w", idOrPrefix, db, err)
-			}
-		}
+		return nil, fmt.Errorf("failed to query session %s from %s: %w", idOrPrefix, db, err)
 	}
-
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var validLines []string
-	for _, l := range lines {
-		if strings.TrimSpace(l) != "" {
-			validLines = append(validLines, l)
-		}
-	}
-	if len(validLines) == 0 {
+	if len(convRows) == 0 {
 		return nil, nil
 	}
-
-	if len(validLines) > 1 {
+	if len(convRows) > 1 {
 		var ids []string
-		for _, l := range validLines {
-			p := strings.Split(l, "|||")
-			if len(p) >= 1 {
-				id := strings.TrimSpace(p[0])
-				if len(id) >= 8 {
-					id = id[:8]
-				}
-				ids = append(ids, id)
+		for _, r := range convRows {
+			id := r.convID
+			if len(id) >= 8 {
+				id = id[:8]
 			}
+			ids = append(ids, id)
 		}
 		return nil, fmt.Errorf("ambiguous prefix %q matches multiple sessions in %s: %s", idOrPrefix, profileDir, strings.Join(ids, ", "))
 	}
@@ -232,48 +281,8 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 		profileName = "<host>"
 	}
 
-	parts := strings.Split(validLines[0], "|||")
-	if len(parts) < 4 {
-		return nil, nil
-	}
-
-	convID := strings.TrimSpace(parts[0])
-	title := strings.TrimSpace(parts[1])
-	preview := strings.TrimSpace(parts[2])
-	rawTime := strings.TrimSpace(parts[3])
-	rawWorkspace := ""
-	if len(parts) >= 5 {
-		rawWorkspace = strings.TrimSpace(parts[4])
-	}
-	var stepCount int
-	if len(parts) >= 6 {
-		stepCount, _ = strconv.Atoi(strings.TrimSpace(parts[5]))
-	}
-
-	brainDir := p.brainDir(profileDir, isHost, convID)
-	cwd := parseWorkspaceURIs(rawWorkspace)
-	if cwd == "" {
-		cwd = extractTranscriptCwd(brainDir)
-	}
-
-	modTime := parseTimeString(rawTime)
-	s := session.NewSession(convID, title, "agy", profileName, isHost, modTime)
-	s.StoragePath = brainDir
-	s.Cwd = cwd
-	s.Summary = preview
-	s.MessageCount = stepCount
-	if s.MessageCount == 0 && brainDir != "" {
-		tPath := filepath.Join(brainDir, ".system_generated", "logs", "transcript.jsonl")
-		if f, err := os.Open(tPath); err == nil {
-			if tc, err := session.ReadTurnCounts(f); err == nil && tc > 0 {
-				s.MessageCount = tc
-			}
-			_ = f.Close()
-		}
-	}
-	if s.MessageCount > 0 {
-		s.Progress = fmt.Sprintf("%d turns", s.MessageCount)
-	}
+	preview := strings.TrimSpace(convRows[0].preview)
+	s := p.buildAgySession(convRows[0], profileDir, profileName, isHost, false)
 
 	if sum, err := p.ResolveSummary(ctx, &s); err == nil {
 		s.Goal = sum.Goal
@@ -282,7 +291,7 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 		if sum.Text() != "" {
 			s.Summary = sum.Text()
 		}
-		if s.Title == "" || s.Title == "Untitled Session" {
+		if s.Title == "" || s.Title == untitledSessionTitle {
 			if sum.Goal != "" {
 				s.Title = sum.Goal
 			} else if sum.RecentActivity != "" {
@@ -296,7 +305,7 @@ func (p *Provider) GetSession(ctx context.Context, idOrPrefix string, profileDir
 			s.Title = session.CleanPromptText(strings.Split(preview, "\n")[0])
 		}
 		if s.Title == "" {
-			s.Title = "Untitled Session"
+			s.Title = untitledSessionTitle
 		}
 	}
 	return &s, nil
@@ -387,15 +396,10 @@ func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, 
 		profileDir = filepath.Join(config.BaseDir(), "profiles", s.Profile)
 	}
 
-	// 1. Check sqlite conversation_summaries.db
-	db := p.dbPath(profileDir, s.IsHost)
-	if p.sqliteBin != "" {
-		query := fmt.Sprintf("SELECT workspace_uris FROM conversation_summaries WHERE conversation_id = '%s' LIMIT 1;\n", escapeSQL(s.ID))
-		if out, err := session.RunBoundedSQLiteWithBin(ctx, p.sqliteBin, db, query); err == nil {
-			if cwd := parseWorkspaceURIs(string(out)); cwd != "" {
-				return cwd, nil
-			}
-		}
+	// 1. Check sqlite conversation_summaries.db via parameterized read-only query
+	dbPath := p.dbPath(profileDir, s.IsHost)
+	if cwd := lookupAgyWorkspaceCwd(ctx, dbPath, s.ID); cwd != "" {
+		return cwd, nil
 	}
 
 	// 2. Fallback to transcript.jsonl
@@ -408,6 +412,22 @@ func (p *Provider) ResolveCwd(ctx context.Context, s *session.Session) (string, 
 	}
 
 	return "", nil
+}
+
+func lookupAgyWorkspaceCwd(ctx context.Context, dbPath, convID string) string {
+	if _, err := os.Stat(dbPath); err != nil {
+		return ""
+	}
+	db, err := session.OpenReadOnlySQLite(ctx, dbPath)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = db.Close() }()
+	var wsURIs sql.NullString
+	if err := db.QueryRowContext(ctx, "SELECT workspace_uris FROM conversation_summaries WHERE conversation_id = ? LIMIT 1", convID).Scan(&wsURIs); err != nil {
+		return ""
+	}
+	return parseWorkspaceURIs(wsURIs.String)
 }
 
 // ResolveSummary resolves structured summary information (Goal, Progress, RecentActivity) for an Antigravity session.
@@ -570,11 +590,6 @@ func extractTranscriptCwd(brainDir string) string {
 		}
 	}
 	return ""
-}
-
-func escapeSQL(s string) string {
-	s = strings.ReplaceAll(s, "\x00", "")
-	return strings.ReplaceAll(s, "'", "''")
 }
 
 func (p *Provider) Hydrate(ctx context.Context, srcSession *session.Session, destProfileDir string, fork bool) (string, error) {
