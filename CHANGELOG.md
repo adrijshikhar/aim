@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.22.0](https://github.com/adrijshikhar/aim/compare/v0.21.0...v0.22.0) (2026-11-27)
+
+
+### Features
+
+* **agents:** add Cursor agent adapter and MCP client driver ([#119](https://github.com/adrijshikhar/aim/issues/119)) ([6813c1f](https://github.com/adrijshikhar/aim/commit/6813c1f6442e212e51eb235d15354f85fc65192f))
+* **mcp:** support RFC 7591 dynamic client registration for OAuth endpoints ([#118](https://github.com/adrijshikhar/aim/issues/118)) ([369fbc9](https://github.com/adrijshikhar/aim/commit/369fbc96ace15361226c3f1310734f391a2f2d42))
+
+
+### Bug Fixes
+
+* enforce profile credential isolation, add aim logout, and remediate bug-bounty findings ([#124](https://github.com/adrijshikhar/aim/issues/124)) ([ff02405](https://github.com/adrijshikhar/aim/commit/ff0240545f1c936a2c9b2cd02d099fec6d1f7db0))
+* isolate agy keychain harvesting, enable PKCE oauth, and fix profile identity resolution ([#122](https://github.com/adrijshikhar/aim/issues/122)) ([efcb74b](https://github.com/adrijshikhar/aim/commit/efcb74bf5eb827325c095d2a211aa263a4abb97e))
+* **mcp:** add symlink self-healing and skip disabled servers in doctor ([#116](https://github.com/adrijshikhar/aim/issues/116)) ([ec7cd89](https://github.com/adrijshikhar/aim/commit/ec7cd89892b0db57b0f61de0a5f45377e7d6acb4))
+
 ## [0.21.0](https://github.com/adrijshikhar/aim/compare/v0.20.1...v0.21.0) (2026-11-21)
 
 
